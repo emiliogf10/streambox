@@ -2,14 +2,12 @@ package com.emilio.streambox.controller;
 
 import com.emilio.streambox.dto.CreateUserRequest;
 import com.emilio.streambox.dto.UserResponse;
-import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.mapper.UserMapper;
 import com.emilio.streambox.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
