@@ -2,6 +2,7 @@ package com.emilio.streambox.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -90,7 +91,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
                     "/api/users/**",
-                    "/api/auth/**"
+                    "/api/users",
+                    "/api/auth/**",
+                    "/api/auth"
                 ).permitAll()
                 .anyRequest().authenticated()
             )
@@ -98,6 +101,8 @@ public class SecurityConfig {
                 jwtAuthenticationFilter,
                 UsernamePasswordAuthenticationFilter.class
             );
+
+            System.out.println(">>> SECURITY CONFIG CARGADA");
 
         return http.build();
     }

@@ -28,4 +28,24 @@ public interface UserRepository extends JpaRepository<User, Long> {
      *         vacío si no existe ningún usuario con ese correo electrónico
      */
     Optional<User> findByEmail(String email);
+
+    /**
+     * Comprueba si ya existe un usuario con el nombre de usuario indicado
+     * 
+     * @param username nombre de usuario que se desea comprobar
+     * @return {@code true} si ya existe un usuario con ese nombre de usuario,
+     *         {@code false} en caso contrario
+     */
+
+    boolean existsByUsername(String username);
+
+    /**
+     * Comprueba si ya existe un usuario con la dirección de correo electrónico indicada
+     * 
+     * @param email dirección de correo electrónico que se desea comprobar
+     * @return {@code true} si ya existe un usuario con ese correo electrónico,
+     *         {@code false} en caso contrario
+     */
+
+    boolean existsByEmail(String email);
 }
