@@ -11,8 +11,8 @@ import lombok.Setter;
  * DTO utilizado para representar una película en las respuestas
  * de la API de Streambox.
  *
- * <p>Este objeto evita exponer directamente la entidad JPA
- * {@link Movie} hacia el cliente.</p>
+ * <p>Permite controlar qué información de la entidad {@link Movie}
+ * se expone al cliente de la API.</p>
  */
 @Getter
 @Setter
@@ -34,12 +34,32 @@ public class MovieResponse {
     private String description;
 
     /**
-     * Fecha de lanzamiento de la película.
+     * Duración de la película expresada en minutos.
      */
-    private LocalDateTime releaseDate;
+    private Integer duration;
 
     /**
-     * Fecha en la que la película fue añadida a Streambox.
+     * Año en el que se estrenó la película.
+     */
+    private Integer releaseYear;
+
+    /**
+     * Género principal de la película.
+     */
+    private String genre;
+
+    /**
+     * URL de la imagen utilizada como portada de la película.
+     */
+    private String imageUrl;
+
+    /**
+     * URL desde la que se puede acceder al vídeo de la película.
+     */
+    private String videoUrl;
+
+    /**
+     * Fecha y hora en la que la película fue registrada en Streambox.
      */
     private LocalDateTime createdAt;
 }

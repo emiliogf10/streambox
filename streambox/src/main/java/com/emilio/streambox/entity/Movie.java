@@ -2,16 +2,26 @@ package com.emilio.streambox.entity;
 
 import java.time.LocalDateTime;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
 import lombok.Getter;
 import lombok.Setter;
 
 /**
- * Entidad que representa una película o contenido audiovisual
- * disponible en Streambox.
+ * Entidad que representa una película almacenada en Streambox.
  *
- * <p>La información de la película se almacena en la tabla
- * {@code movies} de la base de datos.</p>
+ * <p>La entidad se persiste en la tabla {@code movies} de la base de
+ * datos y contiene la información necesaria para identificar y
+ * reproducir una película.</p>
+ *
+ * <p>Las propiedades {@code imageUrl} y {@code videoUrl} almacenan
+ * las direcciones donde se encuentran, respectivamente, la imagen
+ * asociada a la película y el contenido de vídeo.</p>
  */
 @Entity
 @Table(name = "movies")
@@ -21,6 +31,8 @@ public class Movie {
 
     /**
      * Identificador único de la película.
+     *
+     * <p>Su valor es generado automáticamente por la base de datos.</p>
      */
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -39,12 +51,37 @@ public class Movie {
     private String description;
 
     /**
-     * Fecha de lanzamiento de la película.
+     * Duración de la película expresada en minutos.
      */
-    private LocalDateTime releaseDate;
+    @Column(nullable = false)
+    private Integer duration;
 
     /**
-     * Fecha en la que la película fue añadida a Streambox.
+     * Año en el que se estrenó la película.
+     */
+    @Column(nullable = false)
+    private Integer releaseYear;
+
+    /**
+     * Género principal de la película.
+     */
+    @Column(nullable = false, length = 50)
+    private String genre;
+
+    /**
+     * URL de la imagen utilizada como portada de la película.
+     */
+    @Column(nullable = false, length = 500)
+    private String imageUrl;
+
+    /**
+     * URL desde la que se puede acceder al vídeo de la película.
+     */
+    @Column(nullable = false, length = 500)
+    private String videoUrl;
+
+    /**
+     * Fecha y hora en la que la película fue registrada en Streambox.
      */
     @Column(nullable = false)
     private LocalDateTime createdAt;
