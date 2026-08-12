@@ -89,14 +89,39 @@ public class SecurityConfig {
         http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers(
-                    "/api/users/**",
-                    "/api/users",
-                    "/api/auth/**",
-                    "/api/auth"
-                ).permitAll()
-                .anyRequest().authenticated()
-            )
+
+    // Registro y login no requieren autenticación.
+    .requestMatchers(
+        "/api/users/**",
+        "/api/auth/**"
+    ).permitAll()
+
+    // Cualquier usuario autenticado puede consultar películas.
+    .requestMatchers(
+        HttpMethod.GET,
+        "/api/movies/**"
+    ).authenticated()
+
+    // Solo los administradores pueden crear películas.
+    .requestMatchers(
+        HttpMethod.POST,
+        "/api/movies/**"
+    ).hasRole("ADMIN")
+
+    // Solo los administradores pueden modificar películas.
+    .requestMatchers(
+        HttpMethod.PUT,
+        "/api/movies/**"
+    ).hasRole("ADMIN")
+
+    // Solo los administradores pueden eliminar películas.
+    .requestMatchers(
+        HttpMethod.DELETE,
+        "/api/movies/**"
+    ).hasRole("ADMIN")
+
+    .anyRequest().authenticated()
+)
             .addFilterBefore(
                 jwtAuthenticationFilter,
                 UsernamePasswordAuthenticationFilter.class
