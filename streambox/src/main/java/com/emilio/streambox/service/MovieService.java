@@ -1,12 +1,16 @@
 package com.emilio.streambox.service;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
+import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.exception.MovieNotFoundException;
+import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
 
 /**
@@ -24,14 +28,17 @@ public class MovieService {
 
     private final MovieRepository movieRepository;
 
+    private final GenreRepository genreRepository;
+
     /**
      * Crea una instancia del servicio de películas.
      *
      * @param movieRepository repositorio utilizado para acceder
      *                        a las películas almacenadas
      */
-    public MovieService(MovieRepository movieRepository) {
+    public MovieService(MovieRepository movieRepository, GenreRepository genreRepository) {
         this.movieRepository = movieRepository;
+        this.genreRepository = genreRepository;
     }
 
     /**
@@ -57,20 +64,29 @@ public class MovieService {
     }
 
     /**
-     * Guarda una nueva película en la base de datos.
+     * Guarda una nueva película y asocia los géneros indicados.
      *
-     * <p>
-     * La fecha de creación se establece automáticamente en el
-     * momento en el que se registra la película.
-     * </p>
-     *
-     * @param movie película que se desea guardar
-     * @return película almacenada, incluyendo los datos generados
-     *         por la base de datos
+     * @param movie    película que se desea guardar
+     * @param genreIds identificadores de los géneros asociados
+     * @return película almacenada con sus géneros
+     * @throws RuntimeException si alguno de los géneros indicados no existe
      */
-    public Movie saveMovie(Movie movie) {
+    public Movie saveMovie(Movie movie, Set<Long> genreIds) {
 
         movie.setCreatedAt(LocalDateTime.now());
+
+        Set<Genre> genres = new HashSet<>();
+
+        for (Long genreId : genreIds) {
+
+            Genre genre = genreRepository.findById(genreId)
+                    .orElseThrow(() -> new RuntimeException(
+                            "Género no encontrado: " + genreId));
+
+            genres.add(genre);
+        }
+
+        movie.setGenres(genres);
 
         return movieRepository.save(movie);
     }

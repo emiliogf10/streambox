@@ -2,6 +2,7 @@ package com.emilio.streambox.controller;
 
 import java.util.List;
 
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,9 +21,11 @@ import jakarta.validation.Valid;
  * Controlador REST encargado de gestionar las operaciones relacionadas
  * con los usuarios de Streambox.
  *
- * <p>Expone los endpoints disponibles bajo la ruta
+ * <p>
+ * Expone los endpoints disponibles bajo la ruta
  * {@code /api/users} y delega la lógica de negocio en
- * {@link UserService}.</p>
+ * {@link UserService}.
+ * </p>
  */
 @RestController
 @RequestMapping("/api/users")
@@ -41,11 +44,34 @@ public class UserController {
     }
 
     /**
+     * Obtiene los datos del usuario actualmente autenticado.
+     *
+     * <p>
+     * Spring Security proporciona la información del usuario autenticado
+     * mediante el objeto {@link Authentication}. El {@code principal}
+     * contiene la entidad {@link User} establecida por
+     * {@link com.emilio.streambox.security.JwtAuthenticationFilter}.
+     * </p>
+     *
+     * @param authentication información de autenticación de la petición actual
+     * @return datos del usuario autenticado
+     */
+    @GetMapping("/me")
+    public UserResponse getCurrentUser(Authentication authentication) {
+
+        User user = (User) authentication.getPrincipal();
+
+        return UserMapper.toResponse(user);
+    }
+
+    /**
      * Obtiene todos los usuarios registrados.
      *
-     * <p>Las entidades {@link User} obtenidas desde el servicio se
+     * <p>
+     * Las entidades {@link User} obtenidas desde el servicio se
      * convierten en {@link UserResponse} antes de devolverlas al cliente,
-     * evitando exponer directamente las entidades JPA.</p>
+     * evitando exponer directamente las entidades JPA.
+     * </p>
      *
      * @return lista de usuarios representados mediante {@link UserResponse}
      */
@@ -57,10 +83,12 @@ public class UserController {
     /**
      * Crea un nuevo usuario.
      *
-     * <p>El cuerpo de la petición se valida mediante {@link Valid}.
+     * <p>
+     * El cuerpo de la petición se valida mediante {@link Valid}.
      * Posteriormente, el {@link UserMapper} convierte el DTO recibido
      * en una entidad {@link User}, que es procesada y almacenada por
-     * {@link UserService}.</p>
+     * {@link UserService}.
+     * </p>
      *
      * @param request datos necesarios para crear el usuario
      * @return información del usuario creado

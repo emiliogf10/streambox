@@ -88,7 +88,7 @@ public class MovieController {
 
         Movie movie = MovieMapper.toEntity(request);
 
-        Movie savedMovie = movieService.saveMovie(movie);
+        Movie savedMovie = movieService.saveMovie(movie, request.getGenreIds());
 
         return MovieMapper.toResponse(savedMovie);
     }

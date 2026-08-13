@@ -1,6 +1,7 @@
 package com.emilio.streambox.dto;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 
 import com.emilio.streambox.entity.Movie;
 
@@ -11,8 +12,10 @@ import lombok.Setter;
  * DTO utilizado para representar una película en las respuestas
  * de la API de Streambox.
  *
- * <p>Permite controlar qué información de la entidad {@link Movie}
- * se expone al cliente de la API.</p>
+ * <p>
+ * Permite controlar qué información de la entidad {@link Movie}
+ * se expone al cliente de la API.
+ * </p>
  */
 @Getter
 @Setter
@@ -44,11 +47,6 @@ public class MovieResponse {
     private Integer releaseYear;
 
     /**
-     * Género principal de la película.
-     */
-    private String genre;
-
-    /**
      * URL de la imagen utilizada como portada de la película.
      */
     private String imageUrl;
@@ -62,4 +60,9 @@ public class MovieResponse {
      * Fecha y hora en la que la película fue registrada en Streambox.
      */
     private LocalDateTime createdAt;
+
+    /**
+     * Géneros asociados a la película.
+     */
+    private Set<GenreResponse> genres;
 }

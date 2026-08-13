@@ -1,8 +1,11 @@
 package com.emilio.streambox.dto;
 
+import java.util.Set;
+
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
@@ -11,8 +14,10 @@ import lombok.Setter;
  * DTO utilizado para recibir los datos necesarios para crear
  * una nueva película en Streambox.
  *
- * <p>No contiene información generada internamente por la aplicación,
- * como el identificador o la fecha de creación.</p>
+ * <p>
+ * No contiene información generada internamente por la aplicación,
+ * como el identificador o la fecha de creación.
+ * </p>
  */
 @Getter
 @Setter
@@ -46,12 +51,6 @@ public class CreateMovieRequest {
     private Integer releaseYear;
 
     /**
-     * Género principal de la película.
-     */
-    @NotBlank
-    private String genre;
-
-    /**
      * URL de la imagen utilizada como portada de la película.
      */
     @NotBlank
@@ -62,4 +61,14 @@ public class CreateMovieRequest {
      */
     @NotBlank
     private String videoUrl;
+
+    /**
+     * Identificadores de los géneros asociados a la película.
+     *
+     * <p>
+     * Una película debe tener al menos un género.
+     * </p>
+     */
+    @NotEmpty
+    private Set<Long> genreIds;
 }
