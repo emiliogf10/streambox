@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.emilio.streambox.dto.CreateMovieRequest;
 import com.emilio.streambox.dto.MovieResponse;
+import com.emilio.streambox.dto.UpdateMovieRequest;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.exception.MovieNotFoundException;
 import com.emilio.streambox.mapper.MovieMapper;
@@ -125,12 +126,11 @@ public class MovieController {
     @PutMapping("/{id}")
     public MovieResponse updateMovie(
             @PathVariable Long id,
-            @Valid @RequestBody CreateMovieRequest request) {
+            @Valid @RequestBody UpdateMovieRequest request) {
 
-        Movie movie = MovieMapper.toEntity(request);
-
-        Movie updatedMovie = movieService.updateMovie(id, movie);
+        Movie updatedMovie = movieService.updateMovie(id, request);
 
         return MovieMapper.toResponse(updatedMovie);
     }
+
 }

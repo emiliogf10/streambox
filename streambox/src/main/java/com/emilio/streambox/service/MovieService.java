@@ -12,6 +12,8 @@ import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.exception.MovieNotFoundException;
 import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
+import com.emilio.streambox.dto.UpdateMovieRequest;
+import com.emilio.streambox.exception.GenreNotFoundException;
 
 /**
  * Servicio encargado de gestionar la lógica de negocio relacionada
@@ -80,7 +82,7 @@ public class MovieService {
         for (Long genreId : genreIds) {
 
             Genre genre = genreRepository.findById(genreId)
-                    .orElseThrow(() -> new RuntimeException(
+                    .orElseThrow(() -> new GenreNotFoundException(
                             "Género no encontrado: " + genreId));
 
             genres.add(genre);
@@ -92,26 +94,46 @@ public class MovieService {
     }
 
     /**
-     * Modifica los datos de una película existente.
+     * Modifica los datos de una película existente y actualiza
+     * sus géneros asociados.
      *
      * <p>
-     * Primero se comprueba que la película exista. Si existe, se actualizan
-     * sus datos y se conserva la fecha original de creación.
+     * Primero se comprueba que la película exista. Después se actualizan
+     * sus datos y se sustituyen los géneros actuales por los indicados
+     * en la petición.
      * </p>
      *
-     * @param id    identificador de la película que se desea modificar
-     * @param movie datos actualizados de la película
+     * @param id      identificador de la película que se desea modificar
+     * @param request datos actualizados de la película
      * @return película modificada y almacenada en la base de datos
      * @throws MovieNotFoundException si no existe una película con el ID indicado
+     * @throws RuntimeException       si alguno de los géneros indicados no existe
      */
-    public Movie updateMovie(Long id, Movie movie) {
+    public Movie updateMovie(Long id, UpdateMovieRequest request) {
 
         Movie existingMovie = movieRepository.findById(id)
-                .orElseThrow(() -> new MovieNotFoundException("Película no encontrada"));
+                .orElseThrow(() -> new MovieNotFoundException(
+                        "Película no encontrada"));
 
-        existingMovie.setTitle(movie.getTitle());
-        existingMovie.setDescription(movie.getDescription());
-        existingMovie.setReleaseYear(movie.getReleaseYear());
+        existingMovie.setTitle(request.getTitle());
+        existingMovie.setDescription(request.getDescription());
+        existingMovie.setDuration(request.getDuration());
+        existingMovie.setReleaseYear(request.getReleaseYear());
+        existingMovie.setImageUrl(request.getImageUrl());
+        existingMovie.setVideoUrl(request.getVideoUrl());
+
+        Set<Genre> genres = new HashSet<>();
+
+        for (Long genreId : request.getGenreIds()) {
+
+            Genre genre = genreRepository.findById(genreId)
+                    .orElseThrow(() -> new GenreNotFoundException(
+                            "Género no encontrado: " + genreId));
+
+            genres.add(genre);
+        }
+
+        existingMovie.setGenres(genres);
 
         return movieRepository.save(existingMovie);
     }
