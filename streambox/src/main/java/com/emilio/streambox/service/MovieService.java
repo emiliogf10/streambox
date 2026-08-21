@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
 import com.emilio.streambox.entity.Genre;
@@ -12,6 +13,7 @@ import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.exception.MovieNotFoundException;
 import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
+import com.emilio.streambox.specification.MovieSpecification;
 import com.emilio.streambox.dto.UpdateMovieRequest;
 import com.emilio.streambox.exception.GenreNotFoundException;
 
@@ -159,5 +161,58 @@ public class MovieService {
         }
 
         movieRepository.deleteById(id);
+    }
+
+    /**
+     * Busca películas cuyo título contenga el texto indicado,
+     * ignorando diferencias entre mayúsculas y minúsculas.
+     *
+     * @param title texto que se desea buscar en el título
+     * @return lista de películas cuyo título coincide con la búsqueda
+     */
+    public List<Movie> searchMoviesByTitle(String title) {
+
+        return movieRepository.findByTitleContainingIgnoreCase(title);
+    }
+
+    /**
+     * Busca películas aplicando opcionalmente diferentes filtros.
+     *
+     * <p>
+     * Los filtros que tengan valor se combinan mediante una condición
+     * {@code AND}. Los filtros que no se proporcionen no se aplican.
+     * </p>
+     *
+     * @param title       título o parte del título que se desea buscar
+     * @param genreId     identificador del género
+     * @param releaseYear año de lanzamiento
+     * @return lista de películas que cumplen los filtros indicados
+     */
+    public List<Movie> searchMovies(
+            String title,
+            Long genreId,
+            Integer releaseYear) {
+
+        Specification<Movie> specification = MovieSpecification.fetchGenres();
+
+        if (title != null && !title.isBlank()) {
+
+            specification = specification.and(
+                    MovieSpecification.hasTitle(title));
+        }
+
+        if (genreId != null) {
+
+            specification = specification.and(
+                    MovieSpecification.hasGenre(genreId));
+        }
+
+        if (releaseYear != null) {
+
+            specification = specification.and(
+                    MovieSpecification.hasReleaseYear(releaseYear));
+        }
+
+        return movieRepository.findAll(specification);
     }
 }

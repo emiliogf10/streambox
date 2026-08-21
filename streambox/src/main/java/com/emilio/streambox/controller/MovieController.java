@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.emilio.streambox.dto.CreateMovieRequest;
@@ -131,6 +132,33 @@ public class MovieController {
         Movie updatedMovie = movieService.updateMovie(id, request);
 
         return MovieMapper.toResponse(updatedMovie);
+    }
+
+    /**
+     * Busca películas utilizando filtros opcionales.
+     *
+     * <p>
+     * Se pueden combinar los filtros de título, género y año
+     * de lanzamiento. Los parámetros que no se proporcionen
+     * no se utilizan como criterio de búsqueda.
+     * </p>
+     *
+     * @param title       texto que debe contener el título
+     * @param genreId     identificador del género
+     * @param releaseYear año de lanzamiento
+     * @return lista de películas que cumplen los filtros
+     */
+    @GetMapping("/search")
+    public List<MovieResponse> searchMovies(
+            @RequestParam(required = false) String title,
+            @RequestParam(required = false) Long genreId,
+            @RequestParam(required = false) Integer releaseYear) {
+
+        return MovieMapper.toResponseList(
+                movieService.searchMovies(
+                        title,
+                        genreId,
+                        releaseYear));
     }
 
 }
