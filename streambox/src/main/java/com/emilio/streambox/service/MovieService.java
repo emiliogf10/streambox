@@ -5,6 +5,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
@@ -176,7 +178,8 @@ public class MovieService {
     }
 
     /**
-     * Busca películas aplicando opcionalmente diferentes filtros.
+     * Busca películas aplicando opcionalmente diferentes filtros y
+     * devuelve los resultados de forma paginada.
      *
      * <p>
      * Los filtros que tengan valor se combinan mediante una condición
@@ -186,33 +189,58 @@ public class MovieService {
      * @param title       título o parte del título que se desea buscar
      * @param genreId     identificador del género
      * @param releaseYear año de lanzamiento
-     * @return lista de películas que cumplen los filtros indicados
+     * @param pageable    configuración de paginación y ordenación
+     * @return página de películas que cumplen los filtros indicados
      */
-    public List<Movie> searchMovies(
+    public Page<Movie> searchMovies(
             String title,
             Long genreId,
-            Integer releaseYear) {
+            Integer releaseYear,
+            Pageable pageable) {
 
-        Specification<Movie> specification = MovieSpecification.fetchGenres();
+        Specification<Movie> specification = null;
 
         if (title != null && !title.isBlank()) {
 
-            specification = specification.and(
-                    MovieSpecification.hasTitle(title));
+            specification = MovieSpecification.hasTitle(title);
         }
 
         if (genreId != null) {
 
-            specification = specification.and(
-                    MovieSpecification.hasGenre(genreId));
+            Specification<Movie> genreSpecification = MovieSpecification.hasGenre(genreId);
+
+            specification = specification == null
+                    ? genreSpecification
+                    : specification.and(genreSpecification);
         }
 
         if (releaseYear != null) {
 
-            specification = specification.and(
-                    MovieSpecification.hasReleaseYear(releaseYear));
+            Specification<Movie> yearSpecification = MovieSpecification.hasReleaseYear(releaseYear);
+
+            specification = specification == null
+                    ? yearSpecification
+                    : specification.and(yearSpecification);
         }
 
-        return movieRepository.findAll(specification);
+        /*
+         * Si no hay filtros, utilizamos el findAll(Pageable)
+         * del repositorio, que ya tiene @EntityGraph.
+         */
+        if (specification == null) {
+
+            return movieRepository.findAll(pageable);
+        }
+
+        /*
+         * Las consultas realizadas mediante JpaSpecificationExecutor
+         * necesitan forzar la carga de los géneros.
+         */
+        specification = specification.and(
+                MovieSpecification.fetchGenres());
+
+        return movieRepository.findAll(
+                specification,
+                pageable);
     }
 }

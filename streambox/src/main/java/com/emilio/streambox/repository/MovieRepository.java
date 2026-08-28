@@ -3,6 +3,9 @@ package com.emilio.streambox.repository;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -49,4 +52,22 @@ public interface MovieRepository
      */
     @EntityGraph(attributePaths = { "genres" })
     List<Movie> findByTitleContainingIgnoreCase(String title);
+
+    /**
+     * Busca películas aplicando una especificación y devuelve los resultados
+     * de forma paginada.
+     *
+     * <p>
+     * Los géneros asociados se cargan explícitamente para evitar problemas
+     * de inicialización diferida al convertir las películas en DTOs.
+     * </p>
+     *
+     * @param specification criterios dinámicos de búsqueda
+     * @param pageable      configuración de paginación y ordenación
+     * @return página de películas que cumplen los criterios indicados
+     */
+    @EntityGraph(attributePaths = { "genres" })
+    Page<Movie> findAll(
+            Specification<Movie> specification,
+            Pageable pageable);
 }

@@ -2,6 +2,10 @@ package com.emilio.streambox.controller;
 
 import java.util.List;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -13,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.emilio.streambox.dto.CreateMovieRequest;
+import com.emilio.streambox.dto.MoviePageResponse;
 import com.emilio.streambox.dto.MovieResponse;
 import com.emilio.streambox.dto.UpdateMovieRequest;
 import com.emilio.streambox.entity.Movie;
@@ -20,6 +25,10 @@ import com.emilio.streambox.exception.MovieNotFoundException;
 import com.emilio.streambox.mapper.MovieMapper;
 import com.emilio.streambox.service.MovieService;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 
 /**
@@ -31,6 +40,7 @@ import jakarta.validation.Valid;
  * la lógica de negocio en {@link MovieService}.
  * </p>
  */
+@SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/movies")
 public class MovieController {
@@ -66,6 +76,13 @@ public class MovieController {
      * @return película correspondiente al identificador proporcionado
      */
     @GetMapping("/{id}")
+    @Operation(summary = "Obtiene una película por ID", description = "Devuelve la información completa de una película "
+            + "incluyendo los géneros asociados.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Película encontrada"),
+            @ApiResponse(responseCode = "404", description = "Película no encontrada"),
+            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado")
+    })
     public MovieResponse getMovieById(@PathVariable Long id) {
 
         Movie movie = movieService.getMovieById(id);
@@ -135,7 +152,8 @@ public class MovieController {
     }
 
     /**
-     * Busca películas utilizando filtros opcionales.
+     * Busca películas utilizando filtros opcionales y devuelve
+     * los resultados de forma paginada.
      *
      * <p>
      * Se pueden combinar los filtros de título, género y año
@@ -146,19 +164,32 @@ public class MovieController {
      * @param title       texto que debe contener el título
      * @param genreId     identificador del género
      * @param releaseYear año de lanzamiento
-     * @return lista de películas que cumplen los filtros
+     * @param page        número de página, comenzando desde 0
+     * @param size        número máximo de películas por página
+     * @param sort        campo utilizado para ordenar los resultados
+     * @return respuesta paginada con las películas encontradas
      */
     @GetMapping("/search")
-    public List<MovieResponse> searchMovies(
+    public MoviePageResponse searchMovies(
             @RequestParam(required = false) String title,
             @RequestParam(required = false) Long genreId,
-            @RequestParam(required = false) Integer releaseYear) {
+            @RequestParam(required = false) Integer releaseYear,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "title") String sort) {
 
-        return MovieMapper.toResponseList(
-                movieService.searchMovies(
-                        title,
-                        genreId,
-                        releaseYear));
+        Pageable pageable = PageRequest.of(
+                page,
+                size,
+                Sort.by(sort).ascending());
+
+        Page<Movie> moviePage = movieService.searchMovies(
+                title,
+                genreId,
+                releaseYear,
+                pageable);
+
+        return MoviePageResponse.from(moviePage);
     }
 
 }
