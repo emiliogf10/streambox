@@ -10,14 +10,14 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
+import com.emilio.streambox.dto.UpdateMovieRequest;
 import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Movie;
+import com.emilio.streambox.exception.GenreNotFoundException;
 import com.emilio.streambox.exception.MovieNotFoundException;
 import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
 import com.emilio.streambox.specification.MovieSpecification;
-import com.emilio.streambox.dto.UpdateMovieRequest;
-import com.emilio.streambox.exception.GenreNotFoundException;
 
 /**
  * Servicio encargado de gestionar la lógica de negocio relacionada
@@ -26,7 +26,12 @@ import com.emilio.streambox.exception.GenreNotFoundException;
  * <p>
  * Centraliza las operaciones relacionadas con las películas,
  * evitando que los controladores tengan que acceder directamente
- * al repositorio.
+ * a los repositorios.
+ * </p>
+ *
+ * <p>
+ * También se encarga de gestionar la asociación entre películas
+ * y géneros, así como las búsquedas mediante filtros y paginación.
  * </p>
  */
 @Service
@@ -41,8 +46,13 @@ public class MovieService {
      *
      * @param movieRepository repositorio utilizado para acceder
      *                        a las películas almacenadas
+     * @param genreRepository repositorio utilizado para consultar
+     *                        los géneros asociados a las películas
      */
-    public MovieService(MovieRepository movieRepository, GenreRepository genreRepository) {
+    public MovieService(
+            MovieRepository movieRepository,
+            GenreRepository genreRepository) {
+
         this.movieRepository = movieRepository;
         this.genreRepository = genreRepository;
     }
@@ -50,9 +60,16 @@ public class MovieService {
     /**
      * Obtiene todas las películas almacenadas en Streambox.
      *
-     * @return lista de todas las películas
+     * <p>
+     * El repositorio utiliza un {@code @EntityGraph} para cargar
+     * los géneros asociados a las películas y evitar problemas
+     * de inicialización diferida.
+     * </p>
+     *
+     * @return lista de todas las películas con sus géneros cargados
      */
     public List<Movie> getAllMovies() {
+
         return movieRepository.findAll();
     }
 
@@ -61,21 +78,35 @@ public class MovieService {
      *
      * @param id identificador de la película que se desea obtener
      * @return película correspondiente al identificador proporcionado
-     * @throws RuntimeException si no existe ninguna película con el ID indicado
+     * @throws MovieNotFoundException si no existe una película
+     *                                con el ID indicado
      */
     public Movie getMovieById(Long id) {
 
         return movieRepository.findById(id)
-                .orElseThrow(() -> new MovieNotFoundException("Película no encontrada"));
+                .orElseThrow(() -> new MovieNotFoundException(
+                        "Película no encontrada"));
     }
 
     /**
      * Guarda una nueva película y asocia los géneros indicados.
      *
+     * <p>
+     * Para cada identificador recibido se comprueba que el género
+     * exista antes de establecer la relación con la película.
+     * </p>
+     *
+     * <p>
+     * La fecha de creación se establece automáticamente en el momento
+     * de guardar la película.
+     * </p>
+     *
      * @param movie    película que se desea guardar
-     * @param genreIds identificadores de los géneros asociados
-     * @return película almacenada con sus géneros
-     * @throws RuntimeException si alguno de los géneros indicados no existe
+     * @param genreIds identificadores de los géneros que se asociarán
+     *                 a la película
+     * @return película almacenada con sus géneros asociados
+     * @throws GenreNotFoundException si alguno de los identificadores
+     *                                de género no existe
      */
     public Movie saveMovie(Movie movie, Set<Long> genreIds) {
 
@@ -103,15 +134,22 @@ public class MovieService {
      *
      * <p>
      * Primero se comprueba que la película exista. Después se actualizan
-     * sus datos y se sustituyen los géneros actuales por los indicados
-     * en la petición.
+     * sus datos básicos y se sustituyen los géneros actuales por los
+     * indicados en la petición.
+     * </p>
+     *
+     * <p>
+     * Los géneros recibidos se validan individualmente antes de
+     * establecer las nuevas asociaciones.
      * </p>
      *
      * @param id      identificador de la película que se desea modificar
      * @param request datos actualizados de la película
      * @return película modificada y almacenada en la base de datos
-     * @throws MovieNotFoundException si no existe una película con el ID indicado
-     * @throws RuntimeException       si alguno de los géneros indicados no existe
+     * @throws MovieNotFoundException si no existe una película
+     *                                con el ID indicado
+     * @throws GenreNotFoundException si alguno de los géneros indicados
+     *                                no existe
      */
     public Movie updateMovie(Long id, UpdateMovieRequest request) {
 
@@ -146,10 +184,10 @@ public class MovieService {
      * Elimina una película existente mediante su identificador.
      *
      * <p>
-     * Antes de eliminar la película se comprueba que exista. De esta
-     * forma, si se solicita eliminar un identificador inexistente, se
-     * lanza {@link MovieNotFoundException} y la API puede devolver
-     * correctamente un {@code 404 Not Found}.
+     * Antes de eliminar la película se comprueba que exista.
+     * De esta forma, si se solicita eliminar un identificador
+     * inexistente, se lanza {@link MovieNotFoundException} y la API
+     * puede devolver correctamente un {@code 404 Not Found}.
      * </p>
      *
      * @param id identificador de la película que se desea eliminar
@@ -159,7 +197,8 @@ public class MovieService {
     public void deleteMovie(Long id) {
 
         if (!movieRepository.existsById(id)) {
-            throw new MovieNotFoundException("Película no encontrada");
+            throw new MovieNotFoundException(
+                    "Película no encontrada");
         }
 
         movieRepository.deleteById(id);
@@ -168,6 +207,11 @@ public class MovieService {
     /**
      * Busca películas cuyo título contenga el texto indicado,
      * ignorando diferencias entre mayúsculas y minúsculas.
+     *
+     * <p>
+     * Esta operación se utiliza para realizar búsquedas directas
+     * por título sin aplicar otros filtros.
+     * </p>
      *
      * @param title texto que se desea buscar en el título
      * @return lista de películas cuyo título coincide con la búsqueda
@@ -186,9 +230,21 @@ public class MovieService {
      * {@code AND}. Los filtros que no se proporcionen no se aplican.
      * </p>
      *
+     * <p>
+     * Cuando no se proporciona ningún filtro se utiliza directamente
+     * {@code findAll(Pageable)}. Cuando existen filtros, se construye
+     * una {@link Specification} dinámica y se añade la especificación
+     * encargada de cargar los géneros asociados.
+     * </p>
+     *
+     * <p>
+     * La paginación y el orden de los resultados se controlan mediante
+     * el objeto {@link Pageable} recibido como parámetro.
+     * </p>
+     *
      * @param title       título o parte del título que se desea buscar
-     * @param genreId     identificador del género
-     * @param releaseYear año de lanzamiento
+     * @param genreId     identificador del género por el que filtrar
+     * @param releaseYear año de lanzamiento por el que filtrar
      * @param pageable    configuración de paginación y ordenación
      * @return página de películas que cumplen los filtros indicados
      */
