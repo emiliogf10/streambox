@@ -164,8 +164,6 @@ public class SecurityConfig {
                                                 jwtAuthenticationFilter,
                                                 UsernamePasswordAuthenticationFilter.class);
 
-                System.out.println(">>> SECURITY CONFIG CARGADA");
-
                 return http.build();
         }
 }

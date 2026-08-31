@@ -4,6 +4,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import com.emilio.streambox.entity.User;
+import com.emilio.streambox.exception.InvalidCredentialsException;
 import com.emilio.streambox.repository.UserRepository;
 
 /**
@@ -63,13 +64,14 @@ public class AuthenticationService {
     public User authenticate(String email, String password) {
 
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException(
+                .orElseThrow(() -> new InvalidCredentialsException(
                         "Email o contraseña incorrectos"));
 
         if (!passwordEncoder.matches(password, user.getPassword())) {
 
-            throw new RuntimeException(
+            throw new InvalidCredentialsException(
                     "Email o contraseña incorrectos");
+
         }
 
         return user;

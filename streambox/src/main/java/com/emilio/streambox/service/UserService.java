@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
+import com.emilio.streambox.exception.UserAlreadyExistsException;
 import com.emilio.streambox.repository.UserRepository;
 
 /**
@@ -85,13 +86,13 @@ public class UserService {
 
         if (userRepository.existsByUsername(user.getUsername())) {
 
-            throw new IllegalArgumentException(
+            throw new UserAlreadyExistsException(
                     "El nombre de usuario ya está en uso");
         }
 
         if (userRepository.existsByEmail(user.getEmail())) {
 
-            throw new IllegalArgumentException(
+            throw new UserAlreadyExistsException(
                     "El correo electrónico ya está en uso");
         }
 
