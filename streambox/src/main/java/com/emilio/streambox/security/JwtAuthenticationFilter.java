@@ -3,6 +3,8 @@ package com.emilio.streambox.security;
 import java.io.IOException;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -41,6 +43,8 @@ import jakarta.servlet.http.HttpServletResponse;
  * </p>
  */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
     private final JwtService jwtService;
     private final UserRepository userRepository;
@@ -84,9 +88,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * </p>
      *
      * <p>
-     * Si el token no es válido o se produce cualquier error durante
-     * su procesamiento, la excepción se captura y la petición continúa
-     * sin establecer una autenticación.
+     * Si el token no es válido o ha expirado, la excepción se registra
+     * como aviso ({@code WARN}) y la petición continúa sin autenticación.
+     * Spring Security rechazará la petición si el endpoint lo requiere.
      * </p>
      *
      * @param request     petición HTTP recibida
@@ -138,7 +142,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         } catch (Exception e) {
 
-            System.out.println("JWT inválido: " + e.getMessage());
+            // Token inválido o expirado: se registra como aviso y la petición
+            // continúa sin autenticación. Spring Security rechazará el acceso
+            // a los endpoints protegidos a través del AuthenticationEntryPoint.
+            LOGGER.warn("Token JWT inválido o expirado en {}: {}",
+                    request.getRequestURI(), e.getMessage());
         }
 
         filterChain.doFilter(request, response);

@@ -6,6 +6,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -91,68 +92,55 @@ public class SecurityConfig {
         @Bean
         public SecurityFilterChain securityFilterChain(
                         HttpSecurity http,
-                        JwtAuthenticationFilter jwtAuthenticationFilter)
-                        throws Exception {
+                        JwtAuthenticationFilter jwtAuthenticationFilter,
+                        JwtAuthenticationEntryPoint authenticationEntryPoint,
+                        JwtAccessDeniedHandler accessDeniedHandler) throws Exception {
 
                 http
                                 .csrf(csrf -> csrf.disable())
+
+                                // La API es stateless: cada peticion se autentica con el token JWT.
+                                // Spring Security no creara ni consultara sesiones HTTP.
+                                .sessionManagement(session -> session
+                                                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+                                // Respuestas JSON uniformes en lugar de las paginas HTML por defecto.
+                                .exceptionHandling(ex -> ex
+                                                .authenticationEntryPoint(authenticationEntryPoint)
+                                                .accessDeniedHandler(accessDeniedHandler))
+
                                 .authorizeHttpRequests(auth -> auth
-
-                                                // Los usuarios pueden registrarse sin estar autenticados.
-                                                .requestMatchers(
-                                                                HttpMethod.POST,
-                                                                "/api/users")
+                                                // Registro y autenticacion son publicos.
+                                                .requestMatchers(HttpMethod.POST,
+                                                                "/api/users",
+                                                                "/api/auth/login")
                                                 .permitAll()
 
-                                                // Registro y login no requieren autenticación.
-                                                .requestMatchers(
-                                                                "/api/auth/**")
-                                                .permitAll()
-
-                                                // Solo los administradores pueden consultar la lista completa de
-                                                // usuarios.
-                                                .requestMatchers(
-                                                                HttpMethod.GET,
-                                                                "/api/users")
+                                                // Solo ADMIN puede listar todos los usuarios.
+                                                .requestMatchers(HttpMethod.GET, "/api/users")
                                                 .hasRole("ADMIN")
 
-                                                // Cualquier usuario autenticado puede consultar películas.
-                                                .requestMatchers(
-                                                                HttpMethod.GET,
-                                                                "/api/movies/**")
+                                                // Cualquier usuario autenticado puede consultar peliculas.
+                                                .requestMatchers(HttpMethod.GET, "/api/movies/**")
                                                 .authenticated()
 
-                                                // Solo los administradores pueden crear películas.
-                                                .requestMatchers(
-                                                                HttpMethod.POST,
-                                                                "/api/movies/**")
+                                                // Solo ADMIN puede crear, modificar o eliminar peliculas.
+                                                .requestMatchers(HttpMethod.POST, "/api/movies/**")
+                                                .hasRole("ADMIN")
+                                                .requestMatchers(HttpMethod.PUT, "/api/movies/**")
+                                                .hasRole("ADMIN")
+                                                .requestMatchers(HttpMethod.DELETE, "/api/movies/**")
                                                 .hasRole("ADMIN")
 
-                                                // Solo los administradores pueden modificar películas.
-                                                .requestMatchers(
-                                                                HttpMethod.PUT,
-                                                                "/api/movies/**")
-                                                .hasRole("ADMIN")
-
-                                                // Solo los administradores pueden eliminar películas.
-                                                .requestMatchers(
-                                                                HttpMethod.DELETE,
-                                                                "/api/movies/**")
-                                                .hasRole("ADMIN")
-
-                                                // Cualquier usuario autenticado puede consultar los géneros.
-                                                .requestMatchers(
-                                                                HttpMethod.GET,
-                                                                "/api/genres/**")
+                                                // Cualquier usuario autenticado puede consultar generos.
+                                                .requestMatchers(HttpMethod.GET, "/api/genres/**")
                                                 .authenticated()
 
-                                                // Solo los administradores pueden crear géneros.
-                                                .requestMatchers(
-                                                                HttpMethod.POST,
-                                                                "/api/genres/**")
+                                                // Solo ADMIN puede crear generos.
+                                                .requestMatchers(HttpMethod.POST, "/api/genres/**")
                                                 .hasRole("ADMIN")
-                                                // Permite acceder a la documentación OpenAPI y Swagger UI sin
-                                                // autenticación.
+
+                                                // Documentacion OpenAPI y Swagger UI sin autenticacion.
                                                 .requestMatchers(
                                                                 "/v3/api-docs/**",
                                                                 "/swagger-ui/**",
@@ -160,6 +148,7 @@ public class SecurityConfig {
                                                 .permitAll()
 
                                                 .anyRequest().authenticated())
+
                                 .addFilterBefore(
                                                 jwtAuthenticationFilter,
                                                 UsernamePasswordAuthenticationFilter.class);

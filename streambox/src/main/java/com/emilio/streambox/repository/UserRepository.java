@@ -34,6 +34,27 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmail(String email);
 
     /**
+     * Busca un usuario junto con sus películas favoritas y los géneros de
+     * cada película.
+     *
+     * <p>
+     * El grafo de entidades evita excepciones de carga diferida al convertir
+     * la lista de favoritos en una respuesta de la API.
+     * </p>
+     *
+     * Esta sobreescritura de {@link JpaRepository#findById(Object)} aplica el
+     * grafo de entidades a la consulta estándar por identificador.
+     *
+     * @param id identificador del usuario que se desea buscar
+     * @return {@link Optional} que contiene el usuario con sus favoritos, o
+     *         vacío si no existe
+     */
+    @org.springframework.data.jpa.repository.EntityGraph(
+            attributePaths = { "favoriteMovies", "favoriteMovies.genres" })
+    @Override
+    Optional<User> findById(Long id);
+
+    /**
      * Comprueba si ya existe un usuario con el nombre de usuario indicado.
      *
      * <p>

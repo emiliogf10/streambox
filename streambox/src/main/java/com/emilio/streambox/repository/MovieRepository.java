@@ -80,6 +80,22 @@ public interface MovieRepository
         List<Movie> findByTitleContainingIgnoreCase(String title);
 
         /**
+         * Busca una película cuyo título coincida exactamente con el texto
+         * indicado, sin distinguir entre mayúsculas y minúsculas.
+         *
+         * <p>
+         * Este método se utiliza para gestionar favoritos mediante el título
+         * de la película, por lo que no realiza búsquedas parciales.
+         * </p>
+         *
+         * @param title título exacto de la película que se desea buscar
+         * @return {@link Optional} con la película y sus géneros, o vacío si
+         *         no existe una coincidencia
+         */
+        @EntityGraph(attributePaths = { "genres" })
+        Optional<Movie> findFirstByTitleIgnoreCase(String title);
+
+        /**
          * Busca películas aplicando una especificación y devuelve los resultados
          * de forma paginada.
          *
