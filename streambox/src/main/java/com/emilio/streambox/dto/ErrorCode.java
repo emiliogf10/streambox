@@ -30,5 +30,11 @@ public enum ErrorCode {
     DATA_INTEGRITY_VIOLATION,
 
     /** Se produjo un error no controlado en el servidor. */
-    INTERNAL_ERROR
+    INTERNAL_ERROR,
+
+    /** Existe más de una película con el mismo título; usar el ID para la operación. */
+    AMBIGUOUS_TITLE,
+
+    /** El usuario está autenticado pero no tiene permisos para acceder al recurso. */
+    ACCESS_DENIED
 }

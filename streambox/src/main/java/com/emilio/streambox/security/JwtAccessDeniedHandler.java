@@ -59,7 +59,7 @@ public class JwtAccessDeniedHandler implements AccessDeniedHandler {
                 LocalDateTime.now(),
                 HttpStatus.FORBIDDEN.value(),
                 HttpStatus.FORBIDDEN.getReasonPhrase(),
-                ErrorCode.INVALID_CREDENTIALS,
+                ErrorCode.ACCESS_DENIED,
                 "No tienes permisos suficientes para acceder a este recurso.",
                 request.getRequestURI());
 

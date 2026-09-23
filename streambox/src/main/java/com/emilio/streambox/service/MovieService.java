@@ -9,6 +9,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.emilio.streambox.dto.UpdateMovieRequest;
 import com.emilio.streambox.entity.Genre;
@@ -108,6 +109,7 @@ public class MovieService {
      * @throws GenreNotFoundException si alguno de los identificadores
      *                                de género no existe
      */
+    @Transactional
     public Movie saveMovie(Movie movie, Set<Long> genreIds) {
 
         movie.setCreatedAt(LocalDateTime.now());
@@ -151,6 +153,7 @@ public class MovieService {
      * @throws GenreNotFoundException si alguno de los géneros indicados
      *                                no existe
      */
+    @Transactional
     public Movie updateMovie(Long id, UpdateMovieRequest request) {
 
         Movie existingMovie = movieRepository.findById(id)
@@ -194,6 +197,7 @@ public class MovieService {
      * @throws MovieNotFoundException si no existe ninguna película
      *                                con el ID indicado
      */
+    @org.springframework.transaction.annotation.Transactional
     public void deleteMovie(Long id) {
 
         if (!movieRepository.existsById(id)) {
@@ -201,6 +205,7 @@ public class MovieService {
                     "Película no encontrada");
         }
 
+        movieRepository.deleteFromAllFavorites(id);
         movieRepository.deleteById(id);
     }
 

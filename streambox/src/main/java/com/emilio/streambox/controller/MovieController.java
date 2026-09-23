@@ -30,6 +30,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 
 /**
  * Controlador REST encargado de gestionar las operaciones relacionadas
@@ -42,6 +44,7 @@ import jakarta.validation.Valid;
  */
 @SecurityRequirement(name = "bearerAuth")
 @RestController
+@org.springframework.validation.annotation.Validated
 @RequestMapping("/api/movies")
 public class MovieController {
 
@@ -58,21 +61,32 @@ public class MovieController {
     }
 
     /**
-     * Obtiene todas las películas almacenadas en Streambox.
+     * Obtiene todas las películas almacenadas en Streambox de forma paginada.
      *
-     * @return lista de películas representadas mediante {@link MovieResponse}
+     * @param page número de página, comenzando desde 0
+     * @param size número máximo de películas por página
+     * @param sort campo utilizado para ordenar los resultados
+     * @return respuesta paginada con todas las películas
      */
     @GetMapping
-    @Operation(summary = "Obtiene todas las películas", description = "Devuelve una lista con todas las películas almacenadas "
+    @Operation(summary = "Obtiene todas las películas", description = "Devuelve de forma paginada todas las películas almacenadas "
             + "en Streambox.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Películas obtenidas correctamente"),
+            @ApiResponse(responseCode = "400", description = "Parámetros de paginación inválidos"),
             @ApiResponse(responseCode = "403", description = "El usuario no está autenticado")
     })
-    public List<MovieResponse> getMovies() {
+    public MoviePageResponse getMovies(
+            @RequestParam(defaultValue = "0")  @Min(value = 0,   message = "La página no puede ser negativa") int page,
+            @RequestParam(defaultValue = "10") @Min(value = 1,   message = "El tamaño mínimo de página es 1")
+                                               @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
+            @RequestParam(defaultValue = "title") String sort) {
 
-        return MovieMapper.toResponseList(
-                movieService.getAllMovies());
+        Pageable pageable = PageRequest.of(page, size, Sort.by(sort).ascending());
+
+        Page<Movie> moviePage = movieService.searchMovies(null, null, null, pageable);
+
+        return MoviePageResponse.from(moviePage);
     }
 
     /**
@@ -108,13 +122,15 @@ public class MovieController {
      * @return película creada
      */
     @PostMapping
-    @Operation(summary = "Crea una película", description = "Crea una nueva película y la asocia con los géneros "
-            + "indicados en la petición.")
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.CREATED)
+    @Operation(summary = "Crea una película", description = "Crea una nueva película en Streambox, asociándola a "
+            + "los géneros indicados. Este endpoint requiere permisos de administrador.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Película creada correctamente"),
+            @ApiResponse(responseCode = "201", description = "Película creada correctamente"),
             @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
-            @ApiResponse(responseCode = "404", description = "Uno de los géneros indicados no existe")
+            @ApiResponse(responseCode = "404", description = "Uno o más géneros no existen")
     })
     public MovieResponse createMovie(
             @Valid @RequestBody CreateMovieRequest request) {
@@ -137,10 +153,12 @@ public class MovieController {
      * @param id identificador de la película que se desea eliminar
      */
     @DeleteMapping("/{id}")
-    @Operation(summary = "Elimina una película", description = "Elimina de forma permanente una película existente "
-            + "mediante su identificador.")
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    @Operation(summary = "Elimina una película", description = "Elimina de Streambox la película correspondiente "
+            + "al ID indicado. La película se retira automáticamente de todos los favoritos. Requiere rol ADMIN.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Película eliminada correctamente"),
+            @ApiResponse(responseCode = "204", description = "Película eliminada correctamente"),
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
             @ApiResponse(responseCode = "404", description = "Película no encontrada")
     })
@@ -204,14 +222,16 @@ public class MovieController {
             + "Los resultados se devuelven de forma paginada y ordenada.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Búsqueda realizada correctamente"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado")
+            @ApiResponse(responseCode = "400", description = "Parámetros de paginación u ordenación inválidos"),
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado")
     })
     public MoviePageResponse searchMovies(
             @RequestParam(required = false) String title,
             @RequestParam(required = false) Long genreId,
             @RequestParam(required = false) Integer releaseYear,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "0")  @Min(value = 0,   message = "La página no puede ser negativa") int page,
+            @RequestParam(defaultValue = "10") @Min(value = 1,   message = "El tamaño mínimo de página es 1")
+                                               @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
             @RequestParam(defaultValue = "title") String sort) {
 
         Pageable pageable = PageRequest.of(

@@ -93,7 +93,7 @@ public interface MovieRepository
          *         no existe una coincidencia
          */
         @EntityGraph(attributePaths = { "genres" })
-        Optional<Movie> findFirstByTitleIgnoreCase(String title);
+        List<Movie> findAllByTitleIgnoreCase(String title);
 
         /**
          * Busca películas aplicando una especificación y devuelve los resultados
@@ -120,4 +120,10 @@ public interface MovieRepository
         Page<Movie> findAll(
                         Specification<Movie> specification,
                         Pageable pageable);
+
+        @org.springframework.transaction.annotation.Transactional
+        @org.springframework.data.jpa.repository.Modifying
+        @org.springframework.data.jpa.repository.Query(value = "DELETE FROM user_favorite_movies WHERE movie_id = :movieId", nativeQuery = true)
+        void deleteFromAllFavorites(@org.springframework.data.repository.query.Param("movieId") Long movieId);
 }
+
