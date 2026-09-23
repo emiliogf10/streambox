@@ -289,9 +289,10 @@ public class UserController {
     @Operation(summary = "Registra un nuevo usuario", description = "Crea una nueva cuenta de usuario en Streambox. "
             + "No requiere autenticación.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Usuario creado correctamente"),
+            @ApiResponse(responseCode = "201", description = "Usuario creado correctamente"),
             @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos")
     })
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.CREATED)
     public UserResponse createUser(
             @Valid @RequestBody CreateUserRequest request) {
 

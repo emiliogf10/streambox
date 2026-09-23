@@ -96,10 +96,11 @@ public class GenreController {
     @Operation(summary = "Crea un género", description = "Crea un nuevo género cinematográfico. "
             + "Este endpoint requiere permisos de administrador.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Género creado correctamente"),
+            @ApiResponse(responseCode = "201", description = "Género creado correctamente"),
             @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador")
     })
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.CREATED)
     public GenreResponse createGenre(
             @Valid @RequestBody CreateGenreRequest request) {
 
