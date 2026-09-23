@@ -46,14 +46,22 @@ public class GenreService {
      * Guarda un nuevo género en la base de datos.
      *
      * <p>
-     * La persistencia del género se delega en
-     * {@link GenreRepository}.
+     * El nombre del género se normaliza antes de persistirlo:
+     * se eliminan los espacios al inicio y al final, y se capitaliza
+     * la primera letra para garantizar consistencia en el almacenamiento.
      * </p>
      *
      * @param genre género que se desea guardar
      * @return género almacenado en la base de datos
      */
     public Genre saveGenre(Genre genre) {
+
+        String normalized = genre.getName().trim();
+        if (!normalized.isEmpty()) {
+            normalized = Character.toUpperCase(normalized.charAt(0))
+                    + normalized.substring(1).toLowerCase(java.util.Locale.ROOT);
+        }
+        genre.setName(normalized);
 
         return genreRepository.save(genre);
     }

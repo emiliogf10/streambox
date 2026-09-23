@@ -88,4 +88,16 @@ class GlobalExceptionHandlerTest {
         assertEquals("/api/users", response.getBody().getPath());
         assertNotNull(response.getBody().getTimestamp());
     }
+
+    @Test
+    void invalidSortOrDataAccessExceptionReturnsBadRequest() {
+        IllegalArgumentException exception = new IllegalArgumentException("Invalid sort field");
+                
+        ResponseEntity<ErrorResponse> response = handler.handleInvalidUsageException(exception, request);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(ErrorCode.VALIDATION_ERROR, response.getBody().getCode());
+        assertEquals("El campo de ordenacion especificado no es valido o la solicitud es incorrecta", response.getBody().getMessage());
+    }
 }

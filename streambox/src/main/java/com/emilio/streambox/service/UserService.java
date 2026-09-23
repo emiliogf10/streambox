@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
+import com.emilio.streambox.exception.AmbiguousTitleException;
 import com.emilio.streambox.exception.MovieAlreadyInFavoritesException;
 import com.emilio.streambox.exception.MovieNotFoundException;
 import com.emilio.streambox.exception.MovieNotInFavoritesException;
@@ -99,6 +100,13 @@ public class UserService {
      *                                  ya está en uso
      */
     public User saveUser(User user) {
+
+        if (user.getEmail() != null) {
+            user.setEmail(user.getEmail().trim().toLowerCase(java.util.Locale.ROOT));
+        }
+        if (user.getUsername() != null) {
+            user.setUsername(user.getUsername().trim());
+        }
 
         if (userRepository.existsByUsername(user.getUsername())) {
 
@@ -263,9 +271,19 @@ public class UserService {
      */
     private Movie getMovieByTitle(String title) {
 
-        return movieRepository.findFirstByTitleIgnoreCase(title)
-                .orElseThrow(() -> new MovieNotFoundException(
-                        "No existe ninguna película con el título indicado"));
+        List<Movie> movies = movieRepository.findAllByTitleIgnoreCase(title);
+        
+        if (movies.isEmpty()) {
+            throw new MovieNotFoundException(
+                    "No existe ninguna película con el título indicado");
+        }
+        
+        if (movies.size() > 1) {
+            throw new AmbiguousTitleException(
+                    "Existe más de una película con el título indicado. Utiliza el ID.");
+        }
+        
+        return movies.get(0);
     }
 
     /**
