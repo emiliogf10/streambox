@@ -7,6 +7,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.emilio.streambox.dto.CreateUserRequest;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
@@ -66,9 +67,62 @@ public class UserService {
      *
      * @return lista con todos los usuarios almacenados en la base de datos
      */
+    @Transactional(readOnly = true)
     public List<User> getAllUsers() {
-
         return userRepository.findAll();
+    }
+
+    /**
+     * Obtiene un usuario mediante su identificador.
+     *
+     * @param id identificador del usuario
+     * @return usuario encontrado
+     * @throws UserNotFoundException si no existe el usuario indicado
+     */
+    @Transactional(readOnly = true)
+    public User getUserById(Long id) {
+        return userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado"));
+    }
+
+    /**
+     * Guarda un nuevo usuario en la base de datos.
+     *
+     * <p>
+     * Recibe un {@link CreateUserRequest} del controlador y construye
+     * la entidad JPA internamente. Se valida que el nombre de usuario 
+     * y el correo electrónico no estén en uso.
+     * </p>
+     *
+     * @param request datos del usuario que se desea crear
+     * @return usuario guardado con id generado, rol y fecha asignados
+     * @throws UserAlreadyExistsException si el nombre o email ya están en uso
+     */
+    public User saveUser(CreateUserRequest request) {
+        User user = new User();
+        
+        if (request.getEmail() != null) {
+            user.setEmail(request.getEmail().trim().toLowerCase(java.util.Locale.ROOT));
+        }
+        if (request.getUsername() != null) {
+            user.setUsername(request.getUsername().trim());
+        }
+        if (request.getPassword() != null) {
+            user.setPassword(request.getPassword());
+        }
+
+        if (userRepository.existsByUsername(user.getUsername())) {
+            throw new UserAlreadyExistsException("El nombre de usuario ya está en uso");
+        }
+        if (userRepository.existsByEmail(user.getEmail())) {
+            throw new UserAlreadyExistsException("El correo electrónico ya está en uso");
+        }
+
+        user.setRole(Role.USER);
+        user.setCreatedAt(LocalDateTime.now());
+        user.setPassword(passwordEncoder.encode(user.getPassword()));
+
+        return userRepository.save(user);
     }
 
     /**

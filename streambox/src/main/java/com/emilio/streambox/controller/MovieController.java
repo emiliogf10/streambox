@@ -84,7 +84,7 @@ public class MovieController {
 
         Pageable pageable = PageRequest.of(page, size, Sort.by(sort).ascending());
 
-        Page<Movie> moviePage = movieService.searchMovies(null, null, null, pageable);
+        Page<Movie> moviePage = movieService.getMovies(pageable);
 
         return MoviePageResponse.from(moviePage);
     }

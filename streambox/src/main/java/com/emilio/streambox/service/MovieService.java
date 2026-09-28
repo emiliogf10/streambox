@@ -2,7 +2,6 @@ package com.emilio.streambox.service;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 import org.springframework.data.domain.Page;
@@ -59,7 +58,7 @@ public class MovieService {
     }
 
     /**
-     * Obtiene todas las películas almacenadas en Streambox.
+     * Obtiene una página de películas almacenadas en Streambox.
      *
      * <p>
      * El repositorio utiliza un {@code @EntityGraph} para cargar
@@ -67,11 +66,13 @@ public class MovieService {
      * de inicialización diferida.
      * </p>
      *
-     * @return lista de todas las películas con sus géneros cargados
+     * @param pageable configuración de paginación y ordenación
+     * @return página de películas con sus géneros cargados
      */
-    public List<Movie> getAllMovies() {
+    @Transactional(readOnly = true)
+    public Page<Movie> getMovies(Pageable pageable) {
 
-        return movieRepository.findAll();
+        return movieRepository.findAll(pageable);
     }
 
     /**
@@ -197,7 +198,7 @@ public class MovieService {
      * @throws MovieNotFoundException si no existe ninguna película
      *                                con el ID indicado
      */
-    @org.springframework.transaction.annotation.Transactional
+    @Transactional
     public void deleteMovie(Long id) {
 
         if (!movieRepository.existsById(id)) {
@@ -221,7 +222,8 @@ public class MovieService {
      * @param title texto que se desea buscar en el título
      * @return lista de películas cuyo título coincide con la búsqueda
      */
-    public List<Movie> searchMoviesByTitle(String title) {
+    @Transactional(readOnly = true)
+    public java.util.List<Movie> searchMoviesByTitle(String title) {
 
         return movieRepository.findByTitleContainingIgnoreCase(title);
     }
@@ -253,6 +255,7 @@ public class MovieService {
      * @param pageable    configuración de paginación y ordenación
      * @return página de películas que cumplen los filtros indicados
      */
+    @Transactional(readOnly = true)
     public Page<Movie> searchMovies(
             String title,
             Long genreId,

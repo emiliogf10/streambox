@@ -31,10 +31,11 @@ import jakarta.servlet.http.HttpServletResponse;
  *
  * <p>
  * Posteriormente se busca el usuario en la base de datos y, si existe,
- * se crea una autenticación de Spring Security que se almacena en el
- * {@link SecurityContextHolder}. Esto permite que Spring Security conozca
- * el usuario autenticado y sus permisos durante el procesamiento de la
- * petición.
+ * se construye un {@link AuthenticatedUser} ligero que se almacena como
+ * principal en el {@link SecurityContextHolder}. Al no contener la
+ * contraseña ni colecciones JPA con carga diferida, se evita tanto la
+ * exposición de datos sensibles como posibles
+ * {@code LazyInitializationException} fuera de sesión Hibernate.
  * </p>
  *
  * <p>
@@ -77,14 +78,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * <p>
      * Cuando existe un token, se extrae el correo electrónico mediante
      * {@link JwtService}, se busca el usuario correspondiente y se crea
-     * una instancia de {@link UsernamePasswordAuthenticationToken} con
-     * el rol del usuario.
-     * </p>
-     *
-     * <p>
-     * La autenticación se almacena en {@link SecurityContextHolder}
-     * para que Spring Security pueda utilizarla durante el resto de
-     * la petición.
+     * un {@link AuthenticatedUser} que actúa como principal. Esto evita
+     * almacenar la entidad JPA completa en el contexto de seguridad.
      * </p>
      *
      * <p>
@@ -126,12 +121,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             if (user != null) {
 
+                AuthenticatedUser principal = AuthenticatedUser.from(user);
+
                 var authorities = List.of(
                         new SimpleGrantedAuthority(
-                                "ROLE_" + user.getRole().name()));
+                                "ROLE_" + principal.role().name()));
 
                 var authentication = new UsernamePasswordAuthenticationToken(
-                        user,
+                        principal,
                         null,
                         authorities);
 

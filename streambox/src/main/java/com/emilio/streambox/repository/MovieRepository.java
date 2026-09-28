@@ -64,6 +64,23 @@ public interface MovieRepository
         List<Movie> findAll();
 
         /**
+         * Obtiene todas las películas de forma paginada junto con sus géneros asociados.
+         *
+         * <p>
+         * La anotación {@link EntityGraph} fuerza la carga de la relación
+         * {@code genres} durante la consulta para evitar problemas de
+         * inicialización diferida al serializar las películas fuera del
+         * contexto de persistencia.
+         * </p>
+         *
+         * @param pageable configuración de paginación y ordenación
+         * @return página de películas con sus géneros cargados
+         */
+        @Override
+        @EntityGraph(attributePaths = { "genres" })
+        Page<Movie> findAll(Pageable pageable);
+
+        /**
          * Busca películas cuyo título contenga el texto indicado,
          * ignorando diferencias entre mayúsculas y minúsculas.
          *

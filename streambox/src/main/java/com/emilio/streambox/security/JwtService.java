@@ -45,12 +45,26 @@ public class JwtService {
     private String secret;
 
     /**
+     * Tiempo de vida del token JWT expresado en horas.
+     *
+     * <p>
+     * El valor se obtiene de la propiedad {@code jwt.expiration-hours}.
+     * Si la propiedad no está definida, se usa 24 horas como valor
+     * por defecto, lo que evita que la aplicación no arranque por una
+     * propiedad ausente en entornos sin configuración explícita.
+     * </p>
+     */
+    @Value("${jwt.expiration-hours:24}")
+    private long expirationHours;
+
+    /**
      * Genera un token JWT para un usuario autenticado.
      *
      * <p>
      * El correo electrónico del usuario se almacena como
      * {@code subject} del token. El token incluye también la fecha
-     * de emisión y una fecha de expiración una hora posterior.
+     * de emisión y una fecha de expiración calculada a partir de
+     * {@code jwt.expiration-hours}.
      * </p>
      *
      * <p>
@@ -64,11 +78,12 @@ public class JwtService {
      */
     public String generateToken(User user) {
 
+        long expirationMillis = expirationHours * 60L * 60L * 1000L;
+
         return Jwts.builder()
                 .subject(user.getEmail())
                 .issuedAt(new Date())
-                .expiration(new Date(
-                        System.currentTimeMillis() + 1000 * 60 * 60))
+                .expiration(new Date(System.currentTimeMillis() + expirationMillis))
                 .signWith(getSigningKey())
                 .compact();
     }

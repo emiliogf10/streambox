@@ -15,9 +15,9 @@ import org.springframework.web.bind.annotation.RestController;
 import com.emilio.streambox.dto.CreateUserRequest;
 import com.emilio.streambox.dto.MovieResponse;
 import com.emilio.streambox.dto.UserResponse;
-import com.emilio.streambox.entity.User;
 import com.emilio.streambox.mapper.MovieMapper;
 import com.emilio.streambox.mapper.UserMapper;
+import com.emilio.streambox.security.AuthenticatedUser;
 import com.emilio.streambox.service.UserService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -86,9 +86,9 @@ public class UserController {
     })
     public UserResponse getCurrentUser(Authentication authentication) {
 
-        User user = (User) authentication.getPrincipal();
+        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
 
-        return UserMapper.toResponse(user);
+        return UserMapper.toResponse(userService.getUserById(principal.id()));
     }
 
     /**
@@ -106,9 +106,9 @@ public class UserController {
     })
     public List<MovieResponse> getFavoriteMovies(Authentication authentication) {
 
-        User user = (User) authentication.getPrincipal();
+        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
 
-        return MovieMapper.toResponseList(userService.getFavoriteMovies(user.getId()));
+        return MovieMapper.toResponseList(userService.getFavoriteMovies(principal.id()));
     }
 
     /**
@@ -130,8 +130,8 @@ public class UserController {
             @PathVariable Long movieId,
             Authentication authentication) {
 
-        User user = (User) authentication.getPrincipal();
-        userService.addMovieToFavorites(user.getId(), movieId);
+        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
+        userService.addMovieToFavorites(principal.id(), movieId);
     }
 
     /**
@@ -160,8 +160,8 @@ public class UserController {
             @RequestParam String title,
             Authentication authentication) {
 
-        User user = (User) authentication.getPrincipal();
-        userService.addMovieToFavoritesByTitle(user.getId(), title);
+        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
+        userService.addMovieToFavoritesByTitle(principal.id(), title);
     }
 
     /**
@@ -183,8 +183,8 @@ public class UserController {
             @PathVariable Long movieId,
             Authentication authentication) {
 
-        User user = (User) authentication.getPrincipal();
-        userService.removeMovieFromFavorites(user.getId(), movieId);
+        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
+        userService.removeMovieFromFavorites(principal.id(), movieId);
     }
 
     /**
@@ -210,8 +210,8 @@ public class UserController {
             @RequestParam String title,
             Authentication authentication) {
 
-        User user = (User) authentication.getPrincipal();
-        userService.removeMovieFromFavoritesByTitle(user.getId(), title);
+        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
+        userService.removeMovieFromFavoritesByTitle(principal.id(), title);
     }
 
     /**
@@ -233,8 +233,8 @@ public class UserController {
     @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
     public void clearFavoriteMovies(Authentication authentication) {
 
-        User user = (User) authentication.getPrincipal();
-        userService.clearFavoriteMovies(user.getId());
+        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
+        userService.clearFavoriteMovies(principal.id());
     }
 
     /**
@@ -271,10 +271,9 @@ public class UserController {
      * Crea un nuevo usuario en Streambox.
      *
      * <p>
-     * El cuerpo de la petición se valida mediante {@link Valid}.
-     * Posteriormente, el {@link UserMapper} convierte el DTO recibido
-     * en una entidad {@link User}, que es procesada y almacenada por
-     * {@link UserService}.
+     * El cuerpo de la petición se valida mediante {@link Valid} y se pasa
+     * directamente al servicio, que es el responsable de construir la entidad
+     * JPA, cifrar la contraseña y asignar el rol y la fecha de creación.
      * </p>
      *
      * <p>
@@ -296,10 +295,7 @@ public class UserController {
     public UserResponse createUser(
             @Valid @RequestBody CreateUserRequest request) {
 
-        User user = UserMapper.toEntity(request);
-
-        User savedUser = userService.saveUser(user);
-
-        return UserMapper.toResponse(savedUser);
+        return UserMapper.toResponse(
+                userService.saveUser(request));
     }
 }
