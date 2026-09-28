@@ -1,0 +1,20 @@
+# ===================================================================
+# Plantilla de Configuración Local de StreamBox
+# ===================================================================
+# Copia este archivo como "application-local.properties" en esta misma
+# carpeta (streambox/src/main/resources/) y ajusta tus credenciales.
+#
+# NOTA: "application-local.properties" está ignorado en Git para
+# garantizar que tus credenciales locales nunca se hagan públicas.
+# ===================================================================
+
+# Credenciales de acceso a PostgreSQL local
+spring.datasource.username=postgres
+spring.datasource.password=tu_contraseña_aqui
+
+# Opcional: Sobrescribir puerto o URL si difiere de localhost:5432
+# spring.datasource.url=jdbc:postgresql://localhost:5432/streambox
+
+# Opcional: Secreto JWT para desarrollo local (mínimo 256 bits)
+# jwt.secret=tu_clave_secreta_jwt_en_base64_aqui
+# jwt.expiration-hours=24

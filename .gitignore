@@ -1,0 +1,68 @@
+# ==========================================
+# StreamBox - Root .gitignore
+# ==========================================
+
+# Compilación y artefactos de Maven / Gradle
+target/
+**/target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+build/
+**/build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+.mvn/wrapper/maven-wrapper.jar
+**/mvn/wrapper/maven-wrapper.jar
+
+# Archivos de configuración local y secretos (NUNCA SUBIR)
+*.local
+.env
+.env.*
+application-local.properties
+**/application-local.properties
+
+# Logs
+*.log
+logs/
+**/logs/
+
+# IDE: VS Code
+.vscode/
+*.code-workspace
+
+# IDE: IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# IDE: Eclipse / STS
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache
+
+# IDE: NetBeans
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# Archivos del Sistema Operativo
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Futuro Frontend (Node / React / Vue / Angular)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.next/
