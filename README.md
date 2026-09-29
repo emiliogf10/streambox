@@ -1,4 +1,4 @@
-# 🎬 StreamBox — Backend API
+﻿# 🎬 StreamBox — Backend API
 
 [![Java 21](https://img.shields.io/badge/Java-21-orange.svg?logo=openjdk)](https://www.oracle.com/java/)
 [![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1.0-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
@@ -29,6 +29,10 @@
   - Controlador global de excepciones (`GlobalExceptionHandler`) que transforma errores de validación, reglas de negocio y fallos 404/409 en respuestas JSON uniformes.
 - **📖 Documentación Interactiva OpenAPI/Swagger**:
   - Swagger UI interactivo generado con `springdoc-openapi` completamente documentado en español.
+- **🍿 Cliente Frontend Integrado (SPA OTT)**:
+  - Interfaz web inmersiva tipo Netflix (Hero banner, carruseles, modales).
+  - Autenticación JWT y sistema de rutas protegido mediante React Router.
+  - Llamadas a la API intermediadas mediante Proxy Vite para prevenir CORS.
 
 ---
 
@@ -36,7 +40,8 @@
 
 | Componente | Tecnología |
 | :--- | :--- |
-| **Lenguaje** | Java 21 LTS |
+| **Frontend** | React 19, Vite, TypeScript, Tailwind CSS v4 |
+| **Lenguaje Backend** | Java 21 LTS |
 | **Framework** | Spring Boot 4.1.0 |
 | **Módulos Spring** | Spring WebMVC, Spring Data JPA, Spring Security, Spring Validation |
 | **Persistencia** | PostgreSQL (producción/local), Hibernate ORM |
@@ -54,8 +59,10 @@ El backend sigue una arquitectura limpia orientada por capas bajo el paquete bas
 
 ```
 streambox/
-├── controller/        # Controladores REST (/api/...) y contratos HTTP
-├── dto/               # Objetos de transferencia de datos (Requests y Responses)
+├── frontend/          # SPA React + Vite + Tailwind CSS (Interfaz OTT)
+└── streambox/         # Backend Spring Boot
+    ├── controller/    # Controladores REST (/api/...) y contratos HTTP
+    ├── dto/           # Objetos de transferencia de datos (Requests y Responses)
 ├── mapper/            # Mapeadores manuales puros con métodos estáticos
 ├── service/           # Lógica de negocio y transaccionalidad (@Transactional)
 ├── repository/        # Repositorios JPA y JpaSpecificationExecutor
@@ -161,6 +168,16 @@ Iniciar el servidor de desarrollo:
 
 Una vez levantada la aplicación, la API estará disponible en `http://localhost:8080`.
 
+### Ejecución del Frontend (React + Vite)
+En una nueva terminal, sitúate en el directorio `frontend/`:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+La aplicación web estará disponible en `http://localhost:5173`.
+
+
 ### Documentación Interactiva (Swagger UI)
 Accede a la interfaz interactiva para explorar y probar los endpoints:
 - **Swagger UI**: [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
@@ -186,5 +203,7 @@ El desarrollo del proyecto está respaldado por un equipo de **Custom Agents** c
 - **`backend`**: Implementación de controladores, servicios, DTOs y mappers.
 - **`database`**: Modelado relacional, entidades JPA, índices y optimizaciones SQL.
 - **`security`**: Blindaje de rutas, filtros JWT, autenticación y prevención de vulnerabilidades.
-- **`frontend`**: Futura aplicación cliente SPA/SSR (UI/UX, componentes y consumo de la API).
+- **`frontend`**: Aplicaci.n cliente SPA en React, Vite y Tailwind CSS (implementada) (UI/UX, componentes y consumo de la API).
 - **`qa`**: Diseño y ejecución de baterías de pruebas, aseguramiento de contratos y reporte de incidencias.
+
+
