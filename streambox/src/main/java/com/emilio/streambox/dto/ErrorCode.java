@@ -36,5 +36,17 @@ public enum ErrorCode {
     AMBIGUOUS_TITLE,
 
     /** El usuario está autenticado pero no tiene permisos para acceder al recurso. */
-    ACCESS_DENIED
+    ACCESS_DENIED,
+
+    /** El cuerpo de la petición no se puede interpretar (JSON mal formado, tipos incorrectos). */
+    MALFORMED_REQUEST,
+
+    /** El método HTTP no está soportado por el endpoint. */
+    METHOD_NOT_ALLOWED,
+
+    /** El tipo de contenido de la petición no está soportado. */
+    UNSUPPORTED_MEDIA_TYPE,
+
+    /** Se ha superado el límite de intentos o de peticiones permitido. */
+    RATE_LIMIT_EXCEEDED
 }

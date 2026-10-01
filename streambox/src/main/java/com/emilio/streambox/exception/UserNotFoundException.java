@@ -4,7 +4,7 @@ package com.emilio.streambox.exception;
  * Excepción utilizada cuando no se encuentra un usuario con el
  * identificador solicitado.
  */
-public class UserNotFoundException extends RuntimeException {
+public class UserNotFoundException extends ResourceNotFoundException {
 
     /**
      * Crea una excepción indicando que el usuario no ha sido encontrado.

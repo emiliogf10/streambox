@@ -1,4 +1,4 @@
-﻿# 🎬 StreamBox — Backend API
+# 🎬 StreamBox — Backend API
 
 [![Java 21](https://img.shields.io/badge/Java-21-orange.svg?logo=openjdk)](https://www.oracle.com/java/)
 [![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1.0-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
@@ -126,10 +126,39 @@ Configura las siguientes variables de entorno en tu sistema o en tu IDE:
 
 | Variable | Descripción | Valor por Defecto / Ejemplo |
 | :--- | :--- | :--- |
-| `JWT_SECRET` | Clave secreta para firmar y validar tokens JWT (**Obligatoria**) | Clave segura de al menos 256 bits en Base64 |
+| `JWT_SECRET` | Clave secreta para firmar los tokens JWT (**obligatoria**). Texto de **al menos 32 caracteres**; la aplicación no arranca si es más corta. Genera una con `openssl rand -base64 48` | — |
 | `JWT_EXPIRATION_HOURS` | Tiempo de vida del token en horas | `24` |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Opcionales. Si ambas están definidas, al arrancar se crea el primer administrador (si no existe ya). La contraseña debe tener al menos 12 caracteres | — |
+| `ADMIN_USERNAME` | Opcional. Nombre de usuario del administrador inicial | `admin` |
+| `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | Solo perfil `prod`: conexión a PostgreSQL | — |
+
+### Perfiles de Spring
+
+| Perfil | Cuándo | Qué hace |
+| :--- | :--- | :--- |
+| `dev` (por defecto) | Desarrollo local | `ddl-auto=update`, SQL visible en el log, Swagger activado |
+| `prod` | Producción (`SPRING_PROFILES_ACTIVE=prod`) | `ddl-auto=validate`, sin SQL en logs, Swagger desactivado, errores sin detalles. Requiere `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` y `JWT_SECRET` |
+| `test` | Lo activan los tests (`@ActiveProfiles("test")`) | H2 en memoria y un secreto JWT fijo de pruebas: **no necesitas definir `JWT_SECRET` para ejecutar los tests** |
 
 > Alternativamente, puedes crear un archivo `application-local.properties` dentro de `streambox/src/main/resources/` (ignorado en Git) para sobreescribir las credenciales locales de la base de datos o el secreto JWT.
+
+### Base de datos y migraciones
+
+El esquema lo gestiona **Flyway** (`streambox/src/main/resources/db/migration`). Al arrancar se aplican las migraciones pendientes y Hibernate solo **valida** que las entidades coinciden con las tablas (`ddl-auto=validate`).
+
+- Para cambiar el modelo: modifica la entidad **y** añade una migración nueva (`V2__descripcion.sql`). Nunca edites una migración ya aplicada: Flyway lo detecta y no arranca.
+- Una base de datos creada antes de Flyway (con `ddl-auto=update`) se adopta automáticamente: `V1` es idempotente.
+- Para crear el primer administrador define `ADMIN_EMAIL` y `ADMIN_PASSWORD` (el registro público siempre crea usuarios `USER`).
+
+### Protección contra abuso
+
+| Protección | Valor por defecto | Respuesta |
+| :--- | :--- | :--- |
+| Intentos de login por IP | 10 por minuto | `429` + `Retry-After` |
+| Registros por IP | 5 por hora | `429` + `Retry-After` |
+| Cuenta bloqueada tras logins fallidos | 5 fallos en 15 min | `429` + `Retry-After` |
+
+Configurable en `streambox.security.rate-limit.*` (`application.properties`). Los contadores están en memoria: con varias réplicas de la aplicación cada una lleva su propia cuenta. Detrás de un proxy inverso el perfil `prod` activa `server.forward-headers-strategy=native` para ver la IP real del cliente.
 
 ### Ejecución en Local
 

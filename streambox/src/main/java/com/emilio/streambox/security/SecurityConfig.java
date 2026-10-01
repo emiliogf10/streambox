@@ -1,5 +1,7 @@
 package com.emilio.streambox.security;
 
+import java.time.Clock;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -11,6 +13,8 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.security.ratelimit.RateLimitProperties;
+import com.emilio.streambox.security.ratelimit.RateLimitingFilter;
 
 /**
  * Configuración de seguridad de la aplicación Streambox.
@@ -39,6 +43,34 @@ public class SecurityConfig {
         @Bean
         public PasswordEncoder passwordEncoder() {
                 return new BCryptPasswordEncoder();
+        }
+
+        /**
+         * Reloj de la aplicación. Se declara como bean para poder
+         * sustituirlo en las pruebas de los límites de intentos.
+         *
+         * @return reloj UTC del sistema
+         */
+        @Bean
+        public Clock clock() {
+                return Clock.systemUTC();
+        }
+
+        /**
+         * Crea el filtro que limita por IP los intentos de login y registro.
+         *
+         * @param properties  límites configurados
+         * @param clock       reloj de la aplicación
+         * @param errorWriter escritor de errores JSON de seguridad
+         * @return filtro de limitación de peticiones
+         */
+        @Bean
+        public RateLimitingFilter rateLimitingFilter(
+                        RateLimitProperties properties,
+                        Clock clock,
+                        SecurityErrorResponseWriter errorWriter) {
+
+                return new RateLimitingFilter(properties, clock, errorWriter);
         }
 
         /**
@@ -86,6 +118,8 @@ public class SecurityConfig {
          *                                HTTP
          * @param jwtAuthenticationFilter filtro encargado de procesar
          *                                los tokens JWT
+         * @param rateLimitingFilter      filtro que limita los intentos de
+         *                                login y registro por IP
          * @return cadena de filtros de seguridad configurada
          * @throws Exception si se produce un error durante la configuración
          */
@@ -93,6 +127,7 @@ public class SecurityConfig {
         public SecurityFilterChain securityFilterChain(
                         HttpSecurity http,
                         JwtAuthenticationFilter jwtAuthenticationFilter,
+                        RateLimitingFilter rateLimitingFilter,
                         JwtAuthenticationEntryPoint authenticationEntryPoint,
                         JwtAccessDeniedHandler accessDeniedHandler) throws Exception {
 
@@ -151,7 +186,13 @@ public class SecurityConfig {
 
                                 .addFilterBefore(
                                                 jwtAuthenticationFilter,
-                                                UsernamePasswordAuthenticationFilter.class);
+                                                UsernamePasswordAuthenticationFilter.class)
+
+                                // El límite por IP se evalúa antes que nada, incluso
+                                // antes de validar el token.
+                                .addFilterBefore(
+                                                rateLimitingFilter,
+                                                JwtAuthenticationFilter.class);
 
                 return http.build();
         }

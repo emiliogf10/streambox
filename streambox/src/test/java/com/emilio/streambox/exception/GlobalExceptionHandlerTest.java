@@ -7,10 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 
@@ -59,11 +61,15 @@ class GlobalExceptionHandlerTest {
         bindingResult.addError(new FieldError("request", "email", "Debe tener un formato válido"));
         MethodArgumentNotValidException exception = new MethodArgumentNotValidException(null, bindingResult);
 
-        ResponseEntity<ErrorResponse> response = handler.handleValidationErrors(exception, request);
+        ResponseEntity<Object> response = handler.handleMethodArgumentNotValid(
+                exception, new HttpHeaders(), HttpStatus.BAD_REQUEST, new ServletWebRequest(request));
 
-        assertError(response, HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR,
-                "Los datos proporcionados no son válidos");
-        assertEquals("Debe tener un formato válido", response.getBody().getValidationErrors().get("email"));
+        ErrorResponse body = (ErrorResponse) response.getBody();
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(ErrorCode.VALIDATION_ERROR, body.getCode());
+        assertEquals("Los datos proporcionados no son válidos", body.getMessage());
+        assertEquals("/api/users", body.getPath());
+        assertEquals("Debe tener un formato válido", body.getValidationErrors().get("email"));
     }
 
     @Test
@@ -90,14 +96,50 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void invalidSortOrDataAccessExceptionReturnsBadRequest() {
-        IllegalArgumentException exception = new IllegalArgumentException("Invalid sort field");
-                
-        ResponseEntity<ErrorResponse> response = handler.handleInvalidUsageException(exception, request);
+    void movieAlreadyInFavoritesReturnsConflictWithSpecificCode() {
+        ResponseEntity<ErrorResponse> response = handler.handleMovieAlreadyInFavorites(
+                new MovieAlreadyInFavoritesException("Ya está en favoritos"), request);
 
-        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
-        assertNotNull(response.getBody());
-        assertEquals(ErrorCode.VALIDATION_ERROR, response.getBody().getCode());
-        assertEquals("El campo de ordenacion especificado no es valido o la solicitud es incorrecta", response.getBody().getMessage());
+        assertError(response, HttpStatus.CONFLICT, ErrorCode.MOVIE_ALREADY_IN_FAVORITES,
+                "Ya está en favoritos");
+    }
+
+    @Test
+    void movieNotInFavoritesReturnsNotFoundWithSpecificCode() {
+        ResponseEntity<ErrorResponse> response = handler.handleMovieNotInFavorites(
+                new MovieNotInFavoritesException("No está en favoritos"), request);
+
+        assertError(response, HttpStatus.NOT_FOUND, ErrorCode.MOVIE_NOT_IN_FAVORITES,
+                "No está en favoritos");
+    }
+
+    @Test
+    void anyResourceNotFoundSubclassReturnsNotFound() {
+        ResponseEntity<ErrorResponse> response = handler.handleResourceNotFound(
+                new GenreNotFoundException("Género no encontrado: 9"), request);
+
+        assertError(response, HttpStatus.NOT_FOUND, ErrorCode.RESOURCE_NOT_FOUND,
+                "Género no encontrado: 9");
+    }
+
+    @Test
+    void invalidParameterReportsTheOffendingParameter() {
+        ResponseEntity<ErrorResponse> response = handler.handleInvalidParameter(
+                new InvalidParameterException("sort", "Campo no permitido"), request);
+
+        assertError(response, HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR,
+                "Los datos proporcionados no son válidos");
+        assertEquals("Campo no permitido", response.getBody().getValidationErrors().get("sort"));
+    }
+
+    @Test
+    void illegalArgumentExceptionIsNoLongerHiddenAsBadRequest() {
+        // Un IllegalArgumentException inesperado es un bug nuestro: debe ser
+        // un 500 registrado en logs, no un 400 que lo oculte.
+        ResponseEntity<ErrorResponse> response = handler.handleUnexpectedException(
+                new IllegalArgumentException("bug"), request);
+
+        assertError(response, HttpStatus.INTERNAL_SERVER_ERROR, ErrorCode.INTERNAL_ERROR,
+                "Se ha producido un error interno. Inténtalo de nuevo más tarde");
     }
 }

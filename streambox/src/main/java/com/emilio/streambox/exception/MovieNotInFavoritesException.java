@@ -4,7 +4,7 @@ package com.emilio.streambox.exception;
  * Excepción utilizada cuando se intenta eliminar de favoritos una película
  * que no pertenece a la lista del usuario.
  */
-public class MovieNotInFavoritesException extends RuntimeException {
+public class MovieNotInFavoritesException extends ResourceNotFoundException {
 
     /**
      * Crea una excepción con información sobre la película ausente de la lista.

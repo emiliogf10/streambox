@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.InvalidCredentialsException;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 
 /**
  * Servicio encargado de gestionar la lógica de autenticación de usuarios.
@@ -23,19 +24,32 @@ public class AuthenticationService {
 
     private final PasswordEncoder passwordEncoder;
 
+    private final LoginAttemptService loginAttemptService;
+
+    /**
+     * Hash válido que se comprueba cuando el email no existe, para que el
+     * tiempo de respuesta no delate si la cuenta está registrada.
+     */
+    private final String dummyPasswordHash;
+
     /**
      * Crea una instancia del servicio de autenticación.
      *
      * @param userRepository  repositorio utilizado para buscar los usuarios
      * @param passwordEncoder componente utilizado para comprobar
      *                        las contraseñas cifradas
+     * @param loginAttemptService servicio que bloquea temporalmente las
+     *                            cuentas con demasiados intentos fallidos
      */
     public AuthenticationService(
             UserRepository userRepository,
-            PasswordEncoder passwordEncoder) {
+            PasswordEncoder passwordEncoder,
+            LoginAttemptService loginAttemptService) {
 
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.loginAttemptService = loginAttemptService;
+        this.dummyPasswordHash = passwordEncoder.encode("contraseña-que-nadie-usa");
     }
 
     /**
@@ -63,16 +77,33 @@ public class AuthenticationService {
      */
     public User authenticate(String email, String password) {
 
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new InvalidCredentialsException(
-                        "Email o contraseña incorrectos"));
+        // El registro guarda el email normalizado (trim + minúsculas); el login
+        // debe normalizarlo igual o el usuario no podría entrar escribiéndolo
+        // con otras mayúsculas.
+        String normalizedEmail = email.trim().toLowerCase(java.util.Locale.ROOT);
 
-        if (!passwordEncoder.matches(password, user.getPassword())) {
+        // Se comprueba antes que nada: una cuenta bloqueada rechaza el login
+        // aunque la contraseña sea correcta.
+        loginAttemptService.checkNotLocked(normalizedEmail);
+
+        // Se cuentan los fallos tanto si el usuario existe como si no, para que
+        // el bloqueo no revele qué emails están registrados.
+        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
+
+        // Con usuario inexistente se compara contra un hash falso para que el
+        // coste (BCrypt) y, por tanto, el tiempo de respuesta sean parecidos.
+        String hashToCheck = user != null ? user.getPassword() : dummyPasswordHash;
+        boolean passwordMatches = passwordEncoder.matches(password, hashToCheck);
+
+        if (user == null || !passwordMatches) {
+
+            loginAttemptService.recordFailure(normalizedEmail);
 
             throw new InvalidCredentialsException(
                     "Email o contraseña incorrectos");
-
         }
+
+        loginAttemptService.recordSuccess(normalizedEmail);
 
         return user;
     }

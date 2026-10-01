@@ -7,7 +7,7 @@ package com.emilio.streambox.exception;
  * <p>Esta excepción se utiliza para diferenciar la ausencia de
  * una película de otros errores internos de la aplicación.</p>
  */
-public class MovieNotFoundException extends RuntimeException {
+public class MovieNotFoundException extends ResourceNotFoundException {
 
     /**
      * Crea una excepción indicando que una película no ha sido encontrada.

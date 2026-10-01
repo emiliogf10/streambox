@@ -4,7 +4,7 @@ package com.emilio.streambox.exception;
  * Excepción lanzada cuando no se encuentra un género
  * mediante el identificador solicitado.
  */
-public class GenreNotFoundException extends RuntimeException {
+public class GenreNotFoundException extends ResourceNotFoundException {
 
     /**
      * Crea una excepción indicando que el género no existe.

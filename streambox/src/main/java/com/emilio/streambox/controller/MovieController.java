@@ -1,6 +1,8 @@
 package com.emilio.streambox.controller;
 
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -21,6 +23,7 @@ import com.emilio.streambox.dto.MoviePageResponse;
 import com.emilio.streambox.dto.MovieResponse;
 import com.emilio.streambox.dto.UpdateMovieRequest;
 import com.emilio.streambox.entity.Movie;
+import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.exception.MovieNotFoundException;
 import com.emilio.streambox.mapper.MovieMapper;
 import com.emilio.streambox.service.MovieService;
@@ -47,6 +50,14 @@ import jakarta.validation.constraints.Min;
 @org.springframework.validation.annotation.Validated
 @RequestMapping("/api/movies")
 public class MovieController {
+
+    /**
+     * Campos por los que se permite ordenar el catálogo. Se limita a una
+     * lista blanca para que el cliente no pueda ordenar por relaciones
+     * (como {@code genres}) ni por propiedades internas de la entidad.
+     */
+    private static final Set<String> SORTABLE_FIELDS =
+            Set.of("id", "title", "releaseYear", "duration", "createdAt");
 
     private final MovieService movieService;
 
@@ -82,7 +93,7 @@ public class MovieController {
                                                @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
             @RequestParam(defaultValue = "title") String sort) {
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by(sort).ascending());
+        Pageable pageable = buildPageable(page, size, sort);
 
         Page<Movie> moviePage = movieService.getMovies(pageable);
 
@@ -234,10 +245,7 @@ public class MovieController {
                                                @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
             @RequestParam(defaultValue = "title") String sort) {
 
-        Pageable pageable = PageRequest.of(
-                page,
-                size,
-                Sort.by(sort).ascending());
+        Pageable pageable = buildPageable(page, size, sort);
 
         Page<Movie> moviePage = movieService.searchMovies(
                 title,
@@ -246,6 +254,27 @@ public class MovieController {
                 pageable);
 
         return MoviePageResponse.from(moviePage);
+    }
+
+    /**
+     * Construye la paginación validando el campo de ordenación.
+     *
+     * @param page número de página
+     * @param size tamaño de página
+     * @param sort campo de ordenación solicitado por el cliente
+     * @return paginación ordenada de forma ascendente por el campo indicado
+     * @throws InvalidParameterException si el campo no está permitido
+     */
+    private static Pageable buildPageable(int page, int size, String sort) {
+
+        if (!SORTABLE_FIELDS.contains(sort)) {
+            throw new InvalidParameterException(
+                    "sort",
+                    "Campo de ordenación no permitido. Valores válidos: "
+                            + String.join(", ", new TreeSet<>(SORTABLE_FIELDS)));
+        }
+
+        return PageRequest.of(page, size, Sort.by(sort).ascending());
     }
 
 }

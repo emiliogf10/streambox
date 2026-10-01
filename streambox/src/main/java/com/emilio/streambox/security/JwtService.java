@@ -1,11 +1,11 @@
 package com.emilio.streambox.security;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Date;
 
 import javax.crypto.SecretKey;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.emilio.streambox.entity.User;
@@ -18,73 +18,55 @@ import io.jsonwebtoken.security.Keys;
  * utilizados para autenticar a los usuarios de Streambox.
  *
  * <p>
- * Los tokens generados por este servicio contienen el correo electrónico
- * del usuario como {@code subject} y están firmados mediante una clave
- * secreta utilizando un algoritmo HMAC.
+ * Los tokens contienen el correo electrónico del usuario como
+ * {@code subject}, identifican a Streambox como emisor ({@code iss}) y están
+ * firmados con una clave HMAC derivada de {@code jwt.secret}.
  * </p>
  *
  * <p>
- * La clave secreta utilizada para las operaciones criptográficas se
- * obtiene desde la configuración de la aplicación y no se almacena
- * directamente en el código fuente.
+ * La configuración llega ya validada mediante {@link JwtProperties}, y la
+ * clave de firma se construye una sola vez al crear el servicio en lugar de
+ * recalcularse en cada petición.
  * </p>
  */
 @Service
 public class JwtService {
 
-    /**
-     * Clave secreta utilizada para firmar y verificar los tokens JWT.
-     *
-     * <p>
-     * El valor se obtiene de la configuración de Spring mediante la
-     * propiedad {@code jwt.secret}. La clave debe mantenerse fuera
-     * del código fuente para evitar exponer información sensible.
-     * </p>
-     */
-    @Value("${jwt.secret}")
-    private String secret;
+    /** Valor del claim {@code iss} de los tokens emitidos y aceptados. */
+    public static final String ISSUER = "streambox";
+
+    private final SecretKey signingKey;
+
+    private final Duration expiration;
 
     /**
-     * Tiempo de vida del token JWT expresado en horas.
+     * Crea el servicio a partir de la configuración validada.
      *
-     * <p>
-     * El valor se obtiene de la propiedad {@code jwt.expiration-hours}.
-     * Si la propiedad no está definida, se usa 24 horas como valor
-     * por defecto, lo que evita que la aplicación no arranque por una
-     * propiedad ausente en entornos sin configuración explícita.
-     * </p>
+     * @param properties propiedades {@code jwt.*} de la aplicación
      */
-    @Value("${jwt.expiration-hours:24}")
-    private long expirationHours;
+    public JwtService(JwtProperties properties) {
+
+        this.signingKey = Keys.hmacShaKeyFor(
+                properties.secret().getBytes(StandardCharsets.UTF_8));
+        this.expiration = Duration.ofHours(properties.expirationHours());
+    }
 
     /**
      * Genera un token JWT para un usuario autenticado.
-     *
-     * <p>
-     * El correo electrónico del usuario se almacena como
-     * {@code subject} del token. El token incluye también la fecha
-     * de emisión y una fecha de expiración calculada a partir de
-     * {@code jwt.expiration-hours}.
-     * </p>
-     *
-     * <p>
-     * El token se firma utilizando la clave secreta obtenida mediante
-     * {@link #getSigningKey()}, garantizando que pueda verificarse
-     * posteriormente que el token no ha sido alterado.
-     * </p>
      *
      * @param user usuario autenticado para el que se generará el token
      * @return token JWT firmado
      */
     public String generateToken(User user) {
 
-        long expirationMillis = expirationHours * 60L * 60L * 1000L;
+        Date now = new Date();
 
         return Jwts.builder()
+                .issuer(ISSUER)
                 .subject(user.getEmail())
-                .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + expirationMillis))
-                .signWith(getSigningKey())
+                .issuedAt(now)
+                .expiration(new Date(now.getTime() + expiration.toMillis()))
+                .signWith(signingKey)
                 .compact();
     }
 
@@ -93,15 +75,9 @@ public class JwtService {
      * dentro de un token JWT.
      *
      * <p>
-     * Durante el proceso se verifica la firma del token utilizando
-     * la clave secreta de la aplicación. Si el token ha sido manipulado,
-     * ha expirado, no es válido o no puede verificarse su firma,
-     * la librería JWT producirá una excepción.
-     * </p>
-     *
-     * <p>
-     * El método solo devuelve el correo electrónico después de que
-     * el token haya superado el proceso de análisis y verificación.
+     * Se verifica la firma, la fecha de expiración y que el emisor sea
+     * Streambox. Si el token está manipulado, ha expirado o fue emitido por
+     * otro sistema, la librería JWT lanza una excepción.
      * </p>
      *
      * @param token token JWT del que se desea obtener el correo electrónico
@@ -110,34 +86,11 @@ public class JwtService {
     public String extractEmail(String token) {
 
         return Jwts.parser()
-                .verifyWith(getSigningKey())
+                .verifyWith(signingKey)
+                .requireIssuer(ISSUER)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload()
                 .getSubject();
-    }
-
-    /**
-     * Obtiene la clave utilizada para firmar y verificar los tokens JWT.
-     *
-     * <p>
-     * La clave se construye a partir del secreto configurado en
-     * {@code jwt.secret}, convirtiendo el texto a bytes mediante
-     * {@link StandardCharsets#UTF_8} y creando una clave HMAC mediante
-     * {@link Keys#hmacShaKeyFor(byte[])}.
-     * </p>
-     *
-     * <p>
-     * El secreto configurado debe tener una longitud suficiente para
-     * cumplir los requisitos de seguridad del algoritmo HMAC utilizado
-     * por JJWT.
-     * </p>
-     *
-     * @return clave secreta utilizada para las operaciones criptográficas
-     */
-    private SecretKey getSigningKey() {
-
-        return Keys.hmacShaKeyFor(
-                secret.getBytes(StandardCharsets.UTF_8));
     }
 }
