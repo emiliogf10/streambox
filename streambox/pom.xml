@@ -104,6 +104,28 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
 <artifactId>h2</artifactId>
 <scope>test</scope>
 </dependency>
+<!--
+  Tests contra PostgreSQL real (tarea 22). Versiones gestionadas por el BOM de
+  Spring Boot (Testcontainers 2.x). Solo scope test: no entran en el JAR final.
+  spring-boot-testcontainers aporta @ServiceConnection (conecta el contenedor a
+  la aplicacion sin propiedades manuales); los otros dos, la integracion con
+  JUnit 5 (@Testcontainers, disabledWithoutDocker) y el modulo de PostgreSQL.
+-->
+<dependency>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-testcontainers</artifactId>
+<scope>test</scope>
+</dependency>
+<dependency>
+<groupId>org.testcontainers</groupId>
+<artifactId>testcontainers-junit-jupiter</artifactId>
+<scope>test</scope>
+</dependency>
+<dependency>
+<groupId>org.testcontainers</groupId>
+<artifactId>testcontainers-postgresql</artifactId>
+<scope>test</scope>
+</dependency>
 </dependencies>
 <build>
 <plugins>

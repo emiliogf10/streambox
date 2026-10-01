@@ -10,7 +10,7 @@ Eres el especialista en el frontend de la plataforma de streaming. Lee primero `
 
 ## Stack y comandos (desde `frontend/`)
 
-React 19, Vite, TypeScript, Tailwind CSS v4 (`@tailwindcss/postcss`), `react-router-dom` 7, `lucide-react`. Sin framework de tests todavía.
+React 19, Vite, TypeScript, Tailwind CSS v4 (`@tailwindcss/postcss`), `react-router-dom` 7, `lucide-react`. Tests con Vitest, Testing Library y Playwright.
 
 ```
 npm run dev      # http://localhost:5173 ; el proxy de Vite envía /api a http://localhost:8080
@@ -24,7 +24,7 @@ Si la app del backend no está en marcha en el puerto 8080, díselo al principal
 
 La Fase 3 del plan está hecha. Estructura: `src/pages/` (Home, Login, Register, MyList), `src/components/` (Navbar, SearchBar, Modal, ConfirmDialog, MoviePoster, Toast, botones, estados cargando/vacío/error...), `src/context/` (`AuthContext`, `ToastContext`, `FavoritesContext`), `src/hooks/` (`useCatalog`, `useModalDialog`...), `src/lib/` (`api.ts`, `types.ts`, `utils.ts`, `catalog.ts`, `validation.ts`). **Reutiliza lo que ya existe antes de crear algo nuevo.**
 
-Reglas ya vigentes que no debes romper: todas las llamadas pasan por `apiFetch`/`ApiError` (`lib/api.ts`), el token solo lo toca `AuthContext`, cero `style={{}}` (clases de Tailwind y tokens `@theme` de `index.css`), foco visible con `focus-ring`, imágenes siempre desde `movie.imageUrl` con `MoviePoster`, URLs de la API validadas con `getSafeVideoUrl`, y el catálogo se pide con `sort=createdAt&direction=desc`. Pendiente conocido: sin tests de frontend (tarea 24) y scripts sueltos en la raíz de `frontend/` que hacen fallar `npm run lint` completo (tarea 25): usa `npx oxlint src`.
+Reglas ya vigentes que no debes romper: todas las llamadas pasan por `apiFetch`/`ApiError` (`lib/api.ts`), el token solo lo toca `AuthContext`, cero `style={{}}` (clases de Tailwind y tokens `@theme` de `index.css`), foco visible con `focus-ring`, imágenes siempre desde `movie.imageUrl` con `MoviePoster`, URLs de la API validadas con `getSafeVideoUrl`, y el catálogo se pide con `sort=createdAt&direction=desc`. Tests: Vitest + Testing Library (`npm run test`, `*.test.ts(x)` junto al código, utilidades en `src/test/`) y Playwright (`npm run test:e2e`, en `e2e/`, con backend propio en el 8099 y Vite en el 5199: nunca uses el 8080/5173 del usuario). Todo cambio de comportamiento lleva test y se verifica con `npm run build`, `npx oxlint src` y `npm run test`. Pendiente conocido: scripts sueltos en la raíz de `frontend/` que hacen fallar `npm run lint` completo (tarea 25): usa `npx oxlint src`.
 
 ## Contrato de la API (verifícalo en los controladores o en Swagger `/swagger-ui.html`)
 

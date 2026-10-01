@@ -29,6 +29,7 @@ Los informes quedan en `streambox/target/surefire-reports/`. Informa siempre del
 - Rate limiting: los límites están altísimos en `application-test.properties`; los tests de límites los bajan con `@TestPropertySource` y usan **IPs y emails únicos por test** porque los contadores viven en memoria durante todo el contexto.
 - Parámetros con caracteres especiales (`%`, `\`) en MockMvc: pásalos con `.param(...)`, no en la URL (se codifican dos veces).
 - Los tokens se generan con `JwtService.generateToken(user)`. Los tests de JWT que fabrican tokens usan `JwtProperties.secret()` y `JwtService.ISSUER`.
+- **PostgreSQL real:** lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia) va en `src/test/.../postgres/` extendiendo `PostgresIntegrationTestSupport` (Testcontainers; se omite solo sin Docker). H2 puede ocultar bugs reales: ya ocultó uno de búsqueda.
 - Tests unitarios con Mockito para lógica aislada (p. ej. condiciones de carrera). Cada bug corregido debe tener un test que **falle sin el arreglo**: compruébalo.
 - Los tests llevan Javadoc en español explicando qué comportamiento protegen.
 
@@ -56,4 +57,4 @@ Los informes quedan en `streambox/target/surefire-reports/`. Informa siempre del
 
 Al terminar sin fallos: resumen con nº de tests (nuevos y totales), tiempo y estado del build, y los riesgos o huecos de cobertura que sigas viendo.
 
-Cada incidencia indica qué agente debe corregirla (`backend`, `database`, `security` o `frontend`); tú no los lanzas, lo hace el orquestador. Si el cambio revisado es solo de frontend, di que no puedes ejecutarlo (no hay framework de tests de frontend todavía; plan nº 24) y limítate a revisar el código y el contrato con la API.
+Cada incidencia indica qué agente debe corregirla (`backend`, `database`, `security` o `frontend`); tú no los lanzas, lo hace el orquestador. Si el cambio revisado es solo de frontend, tu zona de escritura sigue siendo `streambox/src/test/`: revisa el código y el contrato con la API, ejecuta (sin editar) `npm run test` y `npm run build` desde `frontend/` para informar del resultado y reporta las incidencias al agente `frontend`.

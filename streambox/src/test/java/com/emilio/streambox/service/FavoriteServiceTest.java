@@ -1,5 +1,6 @@
 package com.emilio.streambox.service;
 
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doThrow;
@@ -8,11 +9,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.sql.SQLException;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.exception.AmbiguousTitleException;
@@ -62,11 +65,79 @@ class FavoriteServiceTest {
         // Ambas peticiones comprueban "no está" a la vez; la segunda inserción
         // choca con la clave primaria de la tabla de unión.
         when(userRepository.isFavorite(USER, MOVIE)).thenReturn(false);
-        doThrow(new DataIntegrityViolationException("duplicate key"))
+        doThrow(violation("23505"))
                 .when(userRepository).addFavorite(USER, MOVIE);
 
         assertThrows(MovieAlreadyInFavoritesException.class,
                 () -> service.addFavorite(USER, MOVIE));
+    }
+
+    @Test
+    void laUnicidadSeReconoceTambienPorDuplicateKeyException() {
+        when(userRepository.isFavorite(USER, MOVIE)).thenReturn(false);
+        doThrow(new DuplicateKeyException("duplicate key"))
+                .when(userRepository).addFavorite(USER, MOVIE);
+
+        assertThrows(MovieAlreadyInFavoritesException.class,
+                () -> service.addFavorite(USER, MOVIE));
+    }
+
+    @Test
+    void siLaPeliculaSeBorraEntreLaComprobacionYElInsertDa404NoConflicto() {
+        // existsById dijo "sí", pero el INSERT choca con la clave foránea:
+        // no es un duplicado, la película ya no existe.
+        when(userRepository.isFavorite(USER, MOVIE)).thenReturn(false);
+        doThrow(violation("23503")).when(userRepository).addFavorite(USER, MOVIE);
+
+        assertThrows(MovieNotFoundException.class, () -> service.addFavorite(USER, MOVIE));
+    }
+
+    @Test
+    void laClaveForaneaDeH2EnElRegistroPadreTambienDa404() {
+        when(userRepository.isFavorite(USER, MOVIE)).thenReturn(false);
+        doThrow(violation("23506")).when(userRepository).addFavorite(USER, MOVIE);
+
+        assertThrows(MovieNotFoundException.class, () -> service.addFavorite(USER, MOVIE));
+    }
+
+    @Test
+    void laClaveForaneaTambienSeTraduceAlAnadirPorTitulo() {
+        when(movieRepository.findAllByTitleIgnoreCase("dune")).thenReturn(List.of(movie(MOVIE, "Dune")));
+        when(userRepository.isFavorite(USER, MOVIE)).thenReturn(false);
+        doThrow(violation("23503")).when(userRepository).addFavorite(USER, MOVIE);
+
+        assertThrows(MovieNotFoundException.class, () -> service.addFavoriteByTitle(USER, "dune"));
+    }
+
+    @Test
+    void otraViolacionDeIntegridadNoSeDisfrazaDeConflictoSeRelanza() {
+        when(userRepository.isFavorite(USER, MOVIE)).thenReturn(false);
+        DataIntegrityViolationException notNull = violation("23502");
+        doThrow(notNull).when(userRepository).addFavorite(USER, MOVIE);
+
+        DataIntegrityViolationException thrown = assertThrows(DataIntegrityViolationException.class,
+                () -> service.addFavorite(USER, MOVIE));
+
+        assertSame(notNull, thrown);
+    }
+
+    @Test
+    void unaViolacionSinSqlStateSeRelanza() {
+        when(userRepository.isFavorite(USER, MOVIE)).thenReturn(false);
+        doThrow(new DataIntegrityViolationException("sin causa"))
+                .when(userRepository).addFavorite(USER, MOVIE);
+
+        assertThrows(DataIntegrityViolationException.class, () -> service.addFavorite(USER, MOVIE));
+    }
+
+    /**
+     * Reproduce la forma real de la excepción: Spring envuelve a Hibernate y este
+     * al {@link SQLException} del driver, que es quien lleva el SQLSTATE.
+     */
+    private static DataIntegrityViolationException violation(String sqlState) {
+        SQLException driver = new SQLException("violación de integridad", sqlState);
+        return new DataIntegrityViolationException("could not execute statement",
+                new RuntimeException("hibernate", driver));
     }
 
     @Test

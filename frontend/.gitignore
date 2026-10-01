@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Vitest: caché local
+.vitest/
+
+# Playwright (E2E): informes, trazas, capturas y cachés generados
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/

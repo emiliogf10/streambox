@@ -83,7 +83,7 @@ public class MovieController {
     /**
      * Obtiene el catálogo completo de forma paginada.
      *
-     * @param page número de página, comenzando desde 0
+     * @param page número de página, comenzando desde 0 ({@code page × size} debe ser menor que 2.147.483.647)
      * @param size número de películas por página (1 a 100)
      * @param sort campo de ordenación (ver {@link #SORTABLE_FIELDS})
      * @param direction dirección de ordenación: {@code asc} (por defecto) o {@code desc}
@@ -203,7 +203,7 @@ public class MovieController {
      * @param title       texto que debe contener el título
      * @param genreId     identificador del género
      * @param releaseYear año de lanzamiento
-     * @param page        número de página, comenzando desde 0
+     * @param page        número de página, comenzando desde 0 ({@code page × size} debe ser menor que 2.147.483.647)
      * @param size        número de películas por página (1 a 100)
      * @param sort        campo de ordenación (ver {@link #SORTABLE_FIELDS})
      * @param direction   dirección de ordenación: {@code asc} (por defecto) o {@code desc}
@@ -254,15 +254,22 @@ public class MovieController {
      * recientes primero").
      * </p>
      *
+     * <p>
+     * También se valida que el desplazamiento ({@code page × size}) quepa en
+     * un {@code int}; ver {@link #requireOffsetWithinIntRange(int, int)}.
+     * </p>
+     *
      * @param page      número de página
      * @param size      tamaño de página
      * @param sort      campo de ordenación solicitado por el cliente
      * @param direction dirección solicitada ({@code asc} o {@code desc}, sin
      *                  distinguir mayúsculas); ver {@link #parseDirection(String)}
      * @return paginación ordenada por el campo indicado en la dirección pedida
-     * @throws InvalidParameterException si el campo o la dirección no están permitidos
+     * @throws InvalidParameterException si el campo, la dirección o la página no están permitidos
      */
     private static Pageable buildPageable(int page, int size, String sort, String direction) {
+
+        requireOffsetWithinIntRange(page, size);
 
         if (!SORTABLE_FIELDS.contains(sort)) {
             throw new InvalidParameterException(
@@ -279,6 +286,45 @@ public class MovieController {
         }
 
         return PageRequest.of(page, size, ordering);
+    }
+
+    /**
+     * Rechaza las páginas cuyo desplazamiento no cabe en un {@code int}.
+     *
+     * <p>
+     * Spring Data JPA calcula el desplazamiento de la consulta
+     * ({@code page × size}) como {@code int}. Si no cabe lanza
+     * {@code InvalidDataAccessApiUsageException} (que acabaría en un 500 por
+     * un error que es del cliente y ensuciaría los logs con un ERROR), y
+     * además {@code page + 1} desborda con {@code page=Integer.MAX_VALUE} y
+     * {@code hasNext} salía {@code true} en una página vacía. Se valida aquí,
+     * antes de llegar a la capa de datos, para responder 400 con el mismo
+     * formato que un {@code sort} o {@code direction} no permitidos.
+     * </p>
+     *
+     * <p>
+     * Límite elegido: el desplazamiento (calculado con {@code long} para que
+     * la propia comprobación no desborde) debe ser <b>estrictamente menor</b>
+     * que {@code Integer.MAX_VALUE}. Es la regla más simple que cubre los dos
+     * problemas: con {@code offset < Integer.MAX_VALUE} y {@code size >= 1}
+     * se cumple {@code page <= offset}, así que {@code page + 1} nunca
+     * desborda. Perder el offset exacto {@code 2147483647} es irrelevante
+     * (ningún catálogo tiene tantas películas). Una página muy grande pero
+     * dentro del límite, posterior a la última, sigue siendo una consulta
+     * válida y responde 200 con {@code content} vacío.
+     * </p>
+     *
+     * @param page número de página (ya validado como no negativo)
+     * @param size tamaño de página (ya validado entre 1 y 100)
+     * @throws InvalidParameterException si {@code page × size} no es menor que {@code Integer.MAX_VALUE}
+     */
+    private static void requireOffsetWithinIntRange(int page, int size) {
+
+        if ((long) page * size >= Integer.MAX_VALUE) {
+            throw new InvalidParameterException(
+                    "page",
+                    "La página solicitada es demasiado grande para el tamaño de página indicado");
+        }
     }
 
     /**

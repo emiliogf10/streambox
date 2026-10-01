@@ -54,7 +54,11 @@ export function MoviePoster({
   const showFallback = !src || failedSrc === src;
 
   return (
-    <div className={`relative overflow-hidden bg-surface-raised ${className}`}>
+    // Sin `relative` a propósito: quien lo usa como fondo pasa `absolute inset-0`, y si el contenedor
+    // llevara también `relative`, Tailwind (que ordena `relative` DESPUÉS de `absolute` en la hoja de estilos)
+    // lo dejaría en `position: relative` y la imagen saldría a su tamaño de 600 px en lugar de cubrir el banner.
+    // Nada dentro necesita un contexto de posicionamiento propio (la imagen y el hueco son `size-full`).
+    <div className={`overflow-hidden bg-surface-raised ${className}`}>
       {showFallback ? (
         <div
           // Si hay `alt` el hueco se comporta como imagen con ese nombre; si no, es decorativo.

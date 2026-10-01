@@ -1,5 +1,10 @@
 package com.emilio.streambox.controller;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.AdditionalAnswers.delegatesTo;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -18,15 +23,20 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
+import com.emilio.streambox.exception.MovieAlreadyInFavoritesException;
+import com.emilio.streambox.exception.MovieNotFoundException;
 import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.JwtService;
+import com.emilio.streambox.service.FavoriteService;
 
 /**
  * Tests de integración de "Mi lista" ({@code /api/users/me/favorites}).
@@ -51,6 +61,7 @@ class FavoritesControllerIntegrationTest {
     @Autowired private GenreRepository genreRepository;
     @Autowired private JwtService jwtService;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private PlatformTransactionManager transactionManager;
 
     private String aliceToken;
     private String bobToken;
@@ -129,6 +140,48 @@ class FavoritesControllerIntegrationTest {
         mockMvc.perform(post(FAVORITES + "/999999").header("Authorization", aliceToken))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+    }
+
+    // --- Carreras entre la comprobación previa y el INSERT (SQLSTATE reales de H2) ---
+
+    /**
+     * Confirma con H2 real los SQLSTATE en los que se apoya
+     * {@code FavoriteService.insertFavorite}: la película "desaparece" tras
+     * {@code existsById} (repositorio simulado con dato obsoleto) y el INSERT
+     * real falla por clave foránea. Debe salir 404 de dominio, no 409.
+     */
+    @Test
+    void siLaPeliculaDesapareceEntreLaComprobacionYElInsertSeTraduceA404() {
+        Long aliceId = userRepository.findAll().stream()
+                .filter(u -> "alice".equals(u.getUsername())).findFirst().orElseThrow().getId();
+        MovieRepository staleMovies = mock(MovieRepository.class);
+        when(staleMovies.existsById(987654L)).thenReturn(true);
+        FavoriteService service = new FavoriteService(userRepository, staleMovies);
+
+        assertThrows(MovieNotFoundException.class,
+                () -> new TransactionTemplate(transactionManager)
+                        .executeWithoutResult(s -> service.addFavorite(aliceId, 987654L)));
+    }
+
+    /**
+     * Duplicado real en H2 cuando la comprobación {@code isFavorite} falla en
+     * detectarlo (dos peticiones simultáneas): la clave primaria da 23505 y se
+     * traduce a 409 de dominio.
+     */
+    @Test
+    void siDosAltasSeCruzanLaClavePrimariaDeH2DaConflicto() {
+        Long aliceId = userRepository.findAll().stream()
+                .filter(u -> "alice".equals(u.getUsername())).findFirst().orElseThrow().getId();
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.executeWithoutResult(s -> userRepository.addFavorite(aliceId, dune.getId()));
+
+        // Repositorio que delega en el real pero "no ve" el favorito ya insertado
+        UserRepository blindRepository = mock(UserRepository.class, delegatesTo(userRepository));
+        doReturn(false).when(blindRepository).isFavorite(aliceId, dune.getId());
+        FavoriteService service = new FavoriteService(blindRepository, movieRepository);
+
+        assertThrows(MovieAlreadyInFavoritesException.class,
+                () -> tx.executeWithoutResult(s -> service.addFavorite(aliceId, dune.getId())));
     }
 
     // --- Eliminar ---

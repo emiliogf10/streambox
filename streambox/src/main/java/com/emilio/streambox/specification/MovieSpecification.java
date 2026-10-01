@@ -1,7 +1,5 @@
 package com.emilio.streambox.specification;
 
-import java.util.Locale;
-
 import org.springframework.data.jpa.domain.Specification;
 
 import com.emilio.streambox.entity.Genre;
@@ -39,16 +37,34 @@ public final class MovieSpecification {
      * títulos que contienen exactamente {@code 100%}, no cualquier título.
      * </p>
      *
+     * <p>
+     * <b>Por qué se minusculizan los dos lados en la base de datos.</b> El texto
+     * buscado NO se pasa por {@code String.toLowerCase} de Java: la comparación
+     * la hace la base de datos y la función {@code lower()} de PostgreSQL no
+     * coincide con la de Java en algunos casos ({@code İ}, que Java convierte en
+     * {@code i} + U+0307 y PostgreSQL en {@code i}, y la sigma mayúscula final de
+     * palabra, que Java convierte en {@code ς} y PostgreSQL en {@code σ}). Si cada
+     * lado se minusculizase con un motor distinto, un título con esas letras no se
+     * encontraría buscándolo entero. Aplicando {@code lower()} a ambos lados en el
+     * mismo motor la semántica coincide siempre.
+     * </p>
+     *
+     * <p>
+     * {@code lower()} no altera la barra de escape ni los comodines
+     * ({@code \}, {@code %}, {@code _} no tienen mayúsculas), así que el escapado
+     * de {@link #escapeLike(String)} se mantiene intacto.
+     * </p>
+     *
      * @param title texto que debe contener el título
      * @return especificación de filtro por título
      */
     public static Specification<Movie> hasTitle(String title) {
 
-        String pattern = "%" + escapeLike(title.toLowerCase(Locale.ROOT)) + "%";
+        String pattern = "%" + escapeLike(title) + "%";
 
         return (root, query, criteriaBuilder) -> criteriaBuilder.like(
                 criteriaBuilder.lower(root.get("title")),
-                pattern,
+                criteriaBuilder.lower(criteriaBuilder.literal(pattern)),
                 LIKE_ESCAPE);
     }
 

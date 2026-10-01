@@ -29,7 +29,9 @@ Backend (desde `streambox/`; en PowerShell `.\mvnw.cmd`, en bash `./mvnw`):
 .\mvnw.cmd spring-boot:run              # perfil dev: necesita PostgreSQL local + JWT_SECRET + application-local.properties
 ```
 
-Frontend (desde `frontend/`): `npm run dev` (puerto 5173, proxy de `/api` a `localhost:8080`), `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint).
+Frontend (desde `frontend/`): `npm run dev` (puerto 5173, proxy de `/api` a `localhost:8080`), `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint), `npm run test` (Vitest, ~15 s) y `npm run test:e2e` (Playwright, ~60 s; levanta su propio backend en el 8099 y Vite en el 5199, aislados de la BD y los puertos del usuario).
+
+**Maven y Docker:** los tests del paquete `postgres` usan Testcontainers (`postgres:16`) y **se omiten solos si Docker no está en marcha**. Solo ellos: `.\mvnw.cmd test "-Dtest=Postgres*"`; sin ellos: `"-Dtest=!Postgres*"`. Dos procesos de Maven a la vez en `streambox/` se pisan (`target/`): un solo agente con Maven cada vez.
 
 ## Reglas de trabajo
 
@@ -75,7 +77,9 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 - Estilo: integración con `@SpringBootTest` + `@ActiveProfiles("test")` + MockMvc; unitarios con Mockito para lógica aislada. Perfil `test`: H2 + Flyway.
 - Suites que modifican datos con commit real (favoritos, catálogo) **no** usan `@Transactional` y limpian la BD en `@BeforeEach`/`@AfterEach`; el resto usa `@Transactional` (rollback).
 - Cada bug corregido deja un test que falla sin el arreglo.
-- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real.
+- Lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia real) se prueba también contra PostgreSQL real en `src/test/.../postgres/` (extiende `PostgresIntegrationTestSupport`); H2 puede ocultar diferencias (ya ocultó un bug de búsqueda).
+- Frontend: lógica y componentes con Vitest + Testing Library (`*.test.ts(x)` junto al código, utilidades en `src/test/`); flujos completos con Playwright en `frontend/e2e/`. Localiza por rol/etiqueta, no con `data-testid`.
+- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: 469 de backend, 236 de Vitest y 48 E2E).
 
 ## Frontend: estado actual
 
@@ -89,7 +93,7 @@ SPA en `frontend/src/` organizada en `pages/`, `components/`, `context/`, `hooks
 - Las URLs que vienen de la API (`videoUrl`) se validan con `getSafeVideoUrl` (solo http/https, sin credenciales).
 - El catálogo se pide ordenado por el servidor: `GET /api/movies?sort=createdAt&direction=desc` (`direction` = `asc`|`desc`, por defecto `asc`).
 
-Pendiente: sin tests de frontend (tarea 24), scripts sueltos en la raíz de `frontend/` que hacen fallar `npm run lint` completo (tarea 25) y revisión visual manual (nadie ha visto la UI). Al tocar el frontend verifica con `npm run build` y `npx oxlint src` (`npm run lint` fallará por esos scripts hasta la tarea 25).
+Pendiente: scripts sueltos en la raíz de `frontend/` que hacen fallar `npm run lint` completo (tarea 25) y la revisión visual humana. Al tocar el frontend verifica con `npm run build`, `npx oxlint src`, `npm run test` y, si afecta a flujos o a la maquetación, `npm run test:e2e` (`npm run lint` fallará por esos scripts hasta la tarea 25).
 
 ## Agentes (`.claude/agents/`)
 

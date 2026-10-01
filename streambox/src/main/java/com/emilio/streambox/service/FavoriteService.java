@@ -1,8 +1,10 @@
 package com.emilio.streambox.service;
 
+import java.sql.SQLException;
 import java.util.List;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +42,13 @@ public class FavoriteService {
             "La película ya está incluida en tu lista de favoritos";
     private static final String NOT_IN_FAVORITES =
             "La película no está incluida en tu lista de favoritos";
+
+    /** {@code SQLSTATE} estándar de violación de unicidad (PostgreSQL y H2). */
+    private static final String UNIQUE_VIOLATION = "23505";
+    /** {@code SQLSTATE} estándar de violación de clave foránea (PostgreSQL). */
+    private static final String FOREIGN_KEY_VIOLATION = "23503";
+    /** H2 usa este código cuando el registro padre de la clave foránea no existe. */
+    private static final String H2_FOREIGN_KEY_PARENT_MISSING = "23506";
 
     private final UserRepository userRepository;
     private final MovieRepository movieRepository;
@@ -162,10 +171,65 @@ public class FavoriteService {
         try {
             userRepository.addFavorite(userId, movieId);
         } catch (DataIntegrityViolationException e) {
-            // Dos peticiones simultáneas pasaron la comprobación anterior: la
-            // clave primaria de la tabla de unión impide el duplicado.
-            throw new MovieAlreadyInFavoritesException(ALREADY_IN_FAVORITES);
+            throw translateInsertViolation(e);
         }
+    }
+
+    /**
+     * Traduce una violación de integridad del {@code INSERT} a la excepción de
+     * dominio que corresponde, mirando el {@code SQLSTATE} y no el texto del
+     * mensaje (que cambia con el motor y con el idioma).
+     *
+     * <ul>
+     *   <li>Unicidad ({@code 23505}): dos peticiones simultáneas pasaron la
+     *       comprobación {@code isFavorite} y la clave primaria de la tabla de
+     *       unión impide el duplicado: 409.</li>
+     *   <li>Clave foránea ({@code 23503}; {@code 23506} en H2 cuando falta el
+     *       registro padre): la película (o el usuario) se borró entre la
+     *       comprobación de existencia y el {@code INSERT}. No es un duplicado,
+     *       sino un recurso inexistente: 404. Devolver 409 "ya está en favoritos"
+     *       sería un mensaje falso.</li>
+     *   <li>Cualquier otra violación (nulos, longitudes...) no se disfraza: se
+     *       relanza tal cual para que acabe en un 500 genérico y quede en el
+     *       log, porque indicaría un fallo de programación.</li>
+     * </ul>
+     *
+     * @param error excepción lanzada por el repositorio
+     * @return la excepción de dominio a lanzar; si no es reconocida, el propio {@code error}
+     */
+    private RuntimeException translateInsertViolation(DataIntegrityViolationException error) {
+
+        String sqlState = findSqlState(error);
+
+        if (error instanceof DuplicateKeyException || UNIQUE_VIOLATION.equals(sqlState)) {
+            return new MovieAlreadyInFavoritesException(ALREADY_IN_FAVORITES);
+        }
+        if (FOREIGN_KEY_VIOLATION.equals(sqlState) || H2_FOREIGN_KEY_PARENT_MISSING.equals(sqlState)) {
+            return new MovieNotFoundException("Película no encontrada");
+        }
+        return error;
+    }
+
+    /**
+     * Recorre la cadena de causas y devuelve el primer {@code SQLSTATE} que
+     * encuentre. Hibernate envuelve el {@link SQLException} del driver en su
+     * {@code ConstraintViolationException} y Spring lo envuelve a su vez, por lo
+     * que el código no está en la excepción de arriba.
+     *
+     * @param error excepción de la que partir
+     * @return el {@code SQLSTATE}, o {@code null} si ninguna causa lo tiene
+     */
+    private static String findSqlState(Throwable error) {
+
+        Throwable current = error;
+        // El límite protege de ciclos raros en la cadena de causas.
+        for (int depth = 0; current != null && depth < 20; depth++) {
+            if (current instanceof SQLException sql && sql.getSQLState() != null) {
+                return sql.getSQLState();
+            }
+            current = current.getCause() == current ? null : current.getCause();
+        }
+        return null;
     }
 
     private void deleteFavorite(Long userId, Long movieId) {

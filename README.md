@@ -204,6 +204,22 @@ Ejecutar la batería de tests automatizados (utiliza base de datos H2 en memoria
 ./mvnw test
 ```
 
+Además de H2, hay tests contra **PostgreSQL real** (paquete `com.emilio.streambox.postgres`: migraciones de Flyway, adopción de una base existente, favoritos con concurrencia real y diferencias de orden/búsqueda del catálogo). Usan Testcontainers (imagen `postgres:16`, un único contenedor compartido):
+
+- **Con Docker en marcha** se ejecutan en el mismo `mvnw test` (la primera vez descarga la imagen; después añaden unos 25 s).
+- **Sin Docker se omiten** (aparecen como *skipped*) y la suite termina igualmente en `BUILD SUCCESS`: no hace falta Docker para desarrollar.
+- Solo los de PostgreSQL: `.\mvnw.cmd test "-Dtest=Postgres*"`. Sin ellos: `.\mvnw.cmd test "-Dtest=!Postgres*"`.
+
+**Tests del frontend** (desde `frontend/`):
+```bash
+npm run test       # Vitest + Testing Library: lógica (cliente de API, validación, catálogo) y componentes; unos 15 s
+npm run test:e2e   # Playwright: flujos completos en un navegador real (Chromium); unos 60 s
+```
+- Los E2E levantan **su propio backend** (puerto 8099, base de datos H2 en memoria, perfil aislado) y su propio Vite (puerto 5199), siembran 25 películas por la API y lo cierran todo al terminar. **No usan** tu base de datos ni los puertos 8080 y 5173, así que puedes tenerlos abiertos.
+- La primera vez hay que descargar el navegador: `npx playwright install chromium` (unos 325 MB comprimidos, se instala fuera del repositorio).
+- Para generar capturas de pantalla (375, 768 y 1280 px) y revisarlas a ojo: `E2E_SCREENSHOTS_DIR=<carpeta> npx playwright test capturas` (en PowerShell: `$env:E2E_SCREENSHOTS_DIR='C:\temp\screens'; npx playwright test capturas`).
+- Nota técnica: `spring-boot:run -Dspring-boot.run.useTestClasspath=true` añade las dependencias de test (H2) pero **no** carga `application-test.properties`; por eso el E2E configura todo por variables de entorno.
+
 Iniciar el servidor de desarrollo:
 ```bash
 # Windows
@@ -241,6 +257,8 @@ El proyecto cuenta con suites de pruebas de integración (`*IntegrationTest`) qu
 - Control de acceso RBAC (rechazo 403 a usuarios convencionales en rutas de administración).
 - Comportamiento de validación Bean Validation y mapeo de excepciones en `GlobalExceptionHandler`.
 - Operaciones idempotentes y casos límite en listas de favoritos.
+- Paginación y búsqueda con casos límite (página fuera de rango, comodines, acentos y `ñ`, parámetros inválidos que nunca acaban en 500).
+- Comportamiento real de PostgreSQL (Testcontainers) y flujos completos del frontend (Vitest y Playwright), descritos arriba.
 
 ---
 
