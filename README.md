@@ -30,8 +30,11 @@
 - **📖 Documentación Interactiva OpenAPI/Swagger**:
   - Swagger UI interactivo generado con `springdoc-openapi` completamente documentado en español.
 - **🍿 Cliente Frontend Integrado (SPA OTT)**:
-  - Interfaz web inmersiva tipo Netflix (Hero banner, carruseles, modales).
-  - Autenticación JWT y sistema de rutas protegido mediante React Router.
+  - Interfaz web inmersiva tipo Netflix (Hero banner con la película más reciente, carruseles por género, "Cargar más", modales).
+  - Registro e inicio de sesión (JWT), rutas protegidas con React Router y "Mi lista" de favoritos con actualización optimista.
+  - Navegación con las secciones "Películas" y "Series" ya reservadas en el menú (marcadas como "próximamente" hasta que existan sus páginas).
+  - Cliente HTTP único (`apiFetch`) con manejo uniforme de 401, 403 y 429 (cuenta atrás con `Retry-After`) y avisos (toasts) en cada acción.
+  - Accesible (teclado, foco visible, modales con `<dialog>`, buscador tipo combobox, contrastes WCAG AA) y responsive (móvil, tablet y escritorio) con Tailwind v4.
   - Llamadas a la API intermediadas mediante Proxy Vite para prevenir CORS.
 
 ---
@@ -100,9 +103,9 @@ La base de todos los endpoints es `/api`.
 ### 3. Catálogo de Películas
 | Método | Endpoint | Acceso | Descripción |
 | :--- | :--- | :---: | :--- |
-| `GET` | `/api/movies` | `USER`, `ADMIN` | Catálogo paginado (`page`, `size`, `sort`) |
+| `GET` | `/api/movies` | `USER`, `ADMIN` | Catálogo paginado (`page`, `size`, `sort`, `direction=asc\|desc`; por defecto `title` ascendente) |
 | `GET` | `/api/movies/{id}` | `USER`, `ADMIN` | Detalle completo de una película y sus géneros |
-| `GET` | `/api/movies/search` | `USER`, `ADMIN` | Búsqueda filtrada (`title`, `genreId`, `releaseYear`) paginada |
+| `GET` | `/api/movies/search` | `USER`, `ADMIN` | Búsqueda filtrada (`title`, `genreId`, `releaseYear`) paginada, con `sort` y `direction` como el catálogo |
 | `POST` | `/api/movies` | `ADMIN` | Alta de nueva película con asignación de géneros |
 | `PUT` | `/api/movies/{id}` | `ADMIN` | Modificación de datos y géneros de una película |
 | `DELETE` | `/api/movies/{id}` | `ADMIN` | Eliminación de película (desvincula automáticamente de favoritos) |
@@ -219,7 +222,9 @@ cd frontend
 npm install
 npm run dev
 ```
-La aplicación web estará disponible en `http://localhost:5173`.
+La aplicación web estará disponible en `http://localhost:5173` (con el backend en el 8080). Otros comandos: `npm run build` (comprobación de tipos + empaquetado) y `npx oxlint src` (lint).
+
+Estructura de `frontend/src/`: `pages/` (Home, Login, Registro, Mi lista), `components/`, `context/` (sesión, avisos, favoritos), `hooks/`, `lib/` (cliente de API, tipos, utilidades). Las portadas de ejemplo están en `public/covers/`; para que las películas de tu base de datos las usen, ejecuta a mano el script opcional `docs/portadas-locales.sql` (explicado en su cabecera).
 
 
 ### Documentación Interactiva (Swagger UI)

@@ -212,6 +212,103 @@ class CatalogIntegrationTest {
         assertEquals(25, ids.size());
     }
 
+    // --- Dirección de ordenación (parámetro direction) ---
+
+    @Test
+    void sinDireccionElOrdenSigueSiendoAscendente() throws Exception {
+        saveMovie("B", 2005, drama);
+        saveMovie("A", 1999, drama);
+        saveMovie("C", 2020, drama);
+
+        assertEquals(List.of(1999, 2005, 2020), years(list("sort=releaseYear")));
+        assertEquals(List.of(1999, 2005, 2020), years(search("sort=releaseYear")));
+        assertEquals(List.of(1999, 2005, 2020), years(list("sort=releaseYear&direction=asc")));
+    }
+
+    @Test
+    void ordenarDescendentePorAnioDeEstreno() throws Exception {
+        saveMovie("B", 2005, drama);
+        saveMovie("A", 1999, drama);
+        saveMovie("C", 2020, drama);
+
+        assertEquals(List.of(2020, 2005, 1999), years(list("sort=releaseYear&direction=desc")));
+        assertEquals(List.of(2020, 2005, 1999), years(search("sort=releaseYear&direction=desc")));
+    }
+
+    @Test
+    void ordenarDescendentePorFechaDeCreacionDevuelveLasMasRecientesPrimero() throws Exception {
+        List<Long> insertionOrder = new java.util.ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            insertionOrder.add(saveMovie("Reciente " + i, 2000, drama).getId());
+        }
+        List<Long> newestFirst = new java.util.ArrayList<>(insertionOrder);
+        java.util.Collections.reverse(newestFirst);
+
+        assertEquals(newestFirst, ids(list("sort=createdAt&direction=desc")));
+        assertEquals(newestFirst, ids(search("sort=createdAt&direction=desc")));
+        // Sin dirección: ascendente, es decir, el orden de inserción
+        assertEquals(insertionOrder, ids(list("sort=createdAt")));
+    }
+
+    @Test
+    void laDireccionNoDistingueMayusculas() throws Exception {
+        saveMovie("B", 2005, drama);
+        saveMovie("A", 1999, drama);
+
+        assertEquals(List.of(2005, 1999), years(list("sort=releaseYear&direction=DESC")));
+        assertEquals(List.of(2005, 1999), years(search("sort=releaseYear&direction=Desc")));
+        assertEquals(List.of(1999, 2005), years(list("sort=releaseYear&direction=ASC")));
+    }
+
+    @Test
+    void ordenDescendenteConEmpatesNoRepiteNiPierdePeliculasEntrePaginas() throws Exception {
+        for (int i = 0; i < 25; i++) {
+            saveMovie("Misma fecha " + i, 2020, drama); // todas con el mismo año
+        }
+
+        for (String endpoint : new String[] { "list", "search" }) {
+            List<Long> seen = new java.util.ArrayList<>();
+            for (int p = 0; p < 4; p++) {
+                String query = "sort=releaseYear&direction=desc&size=7&page=" + p;
+                var page = "list".equals(endpoint) ? list(query) : search(query);
+                seen.addAll(ids(page));
+            }
+            assertEquals(25, new HashSet<>(seen).size(), "hay repetidas o faltan películas en " + endpoint);
+            // El desempate sigue la dirección: con el año empatado, id descendente
+            List<Long> expected = new java.util.ArrayList<>(seen);
+            expected.sort(java.util.Comparator.reverseOrder());
+            assertEquals(expected, seen, "el desempate por id debe ser descendente en " + endpoint);
+        }
+    }
+
+    @Test
+    void ordenarPorIdDescendenteFunciona() throws Exception {
+        Long first = saveMovie("Primera", 2000, drama).getId();
+        Long second = saveMovie("Segunda", 2000, drama).getId();
+
+        assertEquals(List.of(second, first), ids(list("sort=id&direction=desc")));
+    }
+
+    @Test
+    void elOrdenDescendenteTampocoEjecutaUnaConsultaPorPelicula() throws Exception {
+        for (int i = 0; i < 30; i++) {
+            saveMovie(String.format("Desc %02d", i), 2000 + i, action, scifi, drama);
+        }
+        statistics();
+
+        long small = statementsFor(() -> movieService.getMovies(
+                PageRequest.of(0, 5, Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id")))));
+        long large = statementsFor(() -> movieService.getMovies(
+                PageRequest.of(0, 25, Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id")))));
+        assertEquals(small, large, "el número de consultas no debe depender del tamaño de página");
+
+        // Y a través del endpoint, con el mismo coste para 5 que para 25 películas
+        long viaEndpointSmall = statementsFor(() -> callQuietly(() -> list("sort=createdAt&direction=desc&size=5")));
+        long viaEndpointLarge = statementsFor(() -> callQuietly(() -> list("sort=createdAt&direction=desc&size=25")));
+        assertEquals(viaEndpointSmall, viaEndpointLarge);
+        assertTrue(viaEndpointSmall <= 12, "consultas del endpoint (incluye autenticación): " + viaEndpointSmall);
+    }
+
     // --- Formato de la respuesta ---
 
     @Test
@@ -299,6 +396,41 @@ class CatalogIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         return objectMapper.readValue(json, MoviePageResponse.class);
+    }
+
+    /** Igual que {@link #search(String)} pero sobre {@code /api/movies}. */
+    private MoviePageResponse list(String query) throws Exception {
+        var request = get("/api/movies").header("Authorization", userToken);
+        for (String pair : query.split("&")) {
+            int separator = pair.indexOf('=');
+            request.param(pair.substring(0, separator), pair.substring(separator + 1));
+        }
+        String json = mockMvc.perform(request)
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readValue(json, MoviePageResponse.class);
+    }
+
+    private static List<Long> ids(MoviePageResponse page) {
+        return page.content().stream().map(MovieResponse::id).toList();
+    }
+
+    private static List<Integer> years(MoviePageResponse page) {
+        return page.content().stream().map(MovieResponse::releaseYear).toList();
+    }
+
+    /** Ejecuta una llamada que lanza excepciones comprobadas dentro de un {@link Runnable}. */
+    private static void callQuietly(ThrowingCall call) {
+        try {
+            call.run();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingCall {
+        void run() throws Exception;
     }
 
     private static PageRequest page(int page, int size) {

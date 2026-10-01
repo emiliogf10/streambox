@@ -26,6 +26,7 @@ import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.service.MovieService;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -52,10 +53,21 @@ public class MovieController {
     /**
      * Campos por los que se permite ordenar el catálogo. Se limita a una
      * lista blanca para que el cliente no pueda ordenar por relaciones
-     * (como {@code genres}) ni por propiedades internas de la entidad.
+     * (como {@code genres}) ni por propiedades internas de la entidad. La
+     * dirección (parámetro {@code direction}) se aplica a cualquiera de ellos.
      */
     private static final Set<String> SORTABLE_FIELDS =
             Set.of("id", "title", "releaseYear", "duration", "createdAt");
+
+    /** Texto OpenAPI del parámetro {@code sort} (constante porque lo comparten dos endpoints). */
+    private static final String SORT_DESCRIPTION =
+            "Campo de ordenación: id, title, releaseYear, duration o createdAt";
+
+    /** Texto OpenAPI del parámetro {@code direction} (compartido por dos endpoints). */
+    private static final String DIRECTION_DESCRIPTION =
+            "Dirección de ordenación: asc (ascendente, por defecto) o desc (descendente), sin distinguir "
+                    + "mayúsculas. El desempate por id sigue la misma dirección. Por ejemplo, "
+                    + "sort=createdAt&direction=desc devuelve primero las películas más recientes";
 
     private final MovieService movieService;
 
@@ -74,6 +86,7 @@ public class MovieController {
      * @param page número de página, comenzando desde 0
      * @param size número de películas por página (1 a 100)
      * @param sort campo de ordenación (ver {@link #SORTABLE_FIELDS})
+     * @param direction dirección de ordenación: {@code asc} (por defecto) o {@code desc}
      * @return página de películas
      */
     @GetMapping
@@ -88,10 +101,11 @@ public class MovieController {
             @RequestParam(defaultValue = "0") @Min(value = 0, message = "La página no puede ser negativa") int page,
             @RequestParam(defaultValue = "10") @Min(value = 1, message = "El tamaño mínimo de página es 1")
             @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
-            @RequestParam(defaultValue = "title") String sort) {
+            @RequestParam(defaultValue = "title") @Parameter(description = SORT_DESCRIPTION) String sort,
+            @RequestParam(defaultValue = "asc") @Parameter(description = DIRECTION_DESCRIPTION) String direction) {
 
         return MoviePageResponse.from(
-                movieService.getMovies(buildPageable(page, size, sort)));
+                movieService.getMovies(buildPageable(page, size, sort, direction)));
     }
 
     /**
@@ -192,6 +206,7 @@ public class MovieController {
      * @param page        número de página, comenzando desde 0
      * @param size        número de películas por página (1 a 100)
      * @param sort        campo de ordenación (ver {@link #SORTABLE_FIELDS})
+     * @param direction   dirección de ordenación: {@code asc} (por defecto) o {@code desc}
      * @return página de películas encontradas
      */
     @GetMapping("/search")
@@ -210,14 +225,15 @@ public class MovieController {
             @RequestParam(defaultValue = "0") @Min(value = 0, message = "La página no puede ser negativa") int page,
             @RequestParam(defaultValue = "10") @Min(value = 1, message = "El tamaño mínimo de página es 1")
             @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
-            @RequestParam(defaultValue = "title") String sort) {
+            @RequestParam(defaultValue = "title") @Parameter(description = SORT_DESCRIPTION) String sort,
+            @RequestParam(defaultValue = "asc") @Parameter(description = DIRECTION_DESCRIPTION) String direction) {
 
         return MoviePageResponse.from(
-                movieService.searchMovies(title, genreId, releaseYear, buildPageable(page, size, sort)));
+                movieService.searchMovies(title, genreId, releaseYear, buildPageable(page, size, sort, direction)));
     }
 
     /**
-     * Construye la paginación validando el campo de ordenación.
+     * Construye la paginación validando el campo y la dirección de ordenación.
      *
      * <p>
      * Se añade el {@code id} como criterio secundario: si varias películas
@@ -227,13 +243,26 @@ public class MovieController {
      * determinista.
      * </p>
      *
-     * @param page número de página
-     * @param size tamaño de página
-     * @param sort campo de ordenación solicitado por el cliente
-     * @return paginación ordenada de forma ascendente por el campo indicado
-     * @throws InvalidParameterException si el campo no está permitido
+     * <p>
+     * El desempate usa la <b>misma dirección</b> que el campo principal: así,
+     * con {@code sort=createdAt&direction=desc} las películas con la misma
+     * fecha salen también de la más nueva (id mayor) a la más antigua y el
+     * resultado es exactamente el inverso del orden ascendente. Si el
+     * desempate fuese siempre ascendente, el orden seguiría siendo estable
+     * pero incoherente (por ejemplo, la "última" película añadida con un
+     * mismo valor saldría detrás de las anteriores en un listado "más
+     * recientes primero").
+     * </p>
+     *
+     * @param page      número de página
+     * @param size      tamaño de página
+     * @param sort      campo de ordenación solicitado por el cliente
+     * @param direction dirección solicitada ({@code asc} o {@code desc}, sin
+     *                  distinguir mayúsculas); ver {@link #parseDirection(String)}
+     * @return paginación ordenada por el campo indicado en la dirección pedida
+     * @throws InvalidParameterException si el campo o la dirección no están permitidos
      */
-    private static Pageable buildPageable(int page, int size, String sort) {
+    private static Pageable buildPageable(int page, int size, String sort, String direction) {
 
         if (!SORTABLE_FIELDS.contains(sort)) {
             throw new InvalidParameterException(
@@ -242,11 +271,40 @@ public class MovieController {
                             + String.join(", ", new TreeSet<>(SORTABLE_FIELDS)));
         }
 
-        Sort ordering = Sort.by(sort).ascending();
+        Sort.Direction order = parseDirection(direction);
+
+        Sort ordering = Sort.by(order, sort);
         if (!"id".equals(sort)) {
-            ordering = ordering.and(Sort.by("id").ascending());
+            ordering = ordering.and(Sort.by(order, "id"));
         }
 
         return PageRequest.of(page, size, ordering);
+    }
+
+    /**
+     * Interpreta la dirección de ordenación recibida.
+     *
+     * <p>
+     * Se hace a mano en lugar de usar {@code Sort.Direction.fromString}: esta
+     * última lanza una excepción con un mensaje en inglés del framework, que
+     * no debe llegar al cliente, y {@code fromOptionalString} trata un valor
+     * vacío como "no indicado" en lugar de rechazarlo.
+     * </p>
+     *
+     * @param direction valor del parámetro {@code direction}
+     * @return la dirección correspondiente
+     * @throws InvalidParameterException si no es {@code asc} ni {@code desc}
+     */
+    private static Sort.Direction parseDirection(String direction) {
+
+        if ("asc".equalsIgnoreCase(direction)) {
+            return Sort.Direction.ASC;
+        }
+        if ("desc".equalsIgnoreCase(direction)) {
+            return Sort.Direction.DESC;
+        }
+        throw new InvalidParameterException(
+                "direction",
+                "Dirección de ordenación no permitida. Valores válidos: asc, desc");
     }
 }

@@ -15,14 +15,16 @@ React 19, Vite, TypeScript, Tailwind CSS v4 (`@tailwindcss/postcss`), `react-rou
 ```
 npm run dev      # http://localhost:5173 ; el proxy de Vite envía /api a http://localhost:8080
 npm run build    # tsc -b && vite build  (debe pasar sin errores)
-npm run lint     # oxlint
+npm run lint     # oxlint (hoy falla por scripts sueltos de la raíz; usa `npx oxlint src`)
 ```
 
 Si la app del backend no está en marcha en el puerto 8080, díselo al principal en lugar de intentar arrancar o tocar su base de datos.
 
 ## Estado actual del código (verifícalo en `frontend/src/`)
 
-Todos los componentes están en `src/` sin carpetas: `App`, `AppShell`, `Navbar`, `SearchBar`, `HomePage`, `HeroBanner`, `HeroInfoPanels`, `MovieRow`, `MovieCard`, `MovieDetailsModal`, `MyListPage`, `LoginPage`, más `api.ts`, `types.ts` y `utils.ts`. El token JWT va en `localStorage` y las llamadas usan `fetch` con `authHeader()`. Problemas conocidos (no los "descubras" de nuevo, resuélvelos cuando toque): sin cliente de API central ni manejo uniforme de 401/403/429, sin registro, solo se carga la primera página del catálogo, estilos en línea casi en todas partes, modales sin accesibilidad, imágenes locales asignadas por título en `utils.ts`.
+La Fase 3 del plan está hecha. Estructura: `src/pages/` (Home, Login, Register, MyList), `src/components/` (Navbar, SearchBar, Modal, ConfirmDialog, MoviePoster, Toast, botones, estados cargando/vacío/error...), `src/context/` (`AuthContext`, `ToastContext`, `FavoritesContext`), `src/hooks/` (`useCatalog`, `useModalDialog`...), `src/lib/` (`api.ts`, `types.ts`, `utils.ts`, `catalog.ts`, `validation.ts`). **Reutiliza lo que ya existe antes de crear algo nuevo.**
+
+Reglas ya vigentes que no debes romper: todas las llamadas pasan por `apiFetch`/`ApiError` (`lib/api.ts`), el token solo lo toca `AuthContext`, cero `style={{}}` (clases de Tailwind y tokens `@theme` de `index.css`), foco visible con `focus-ring`, imágenes siempre desde `movie.imageUrl` con `MoviePoster`, URLs de la API validadas con `getSafeVideoUrl`, y el catálogo se pide con `sort=createdAt&direction=desc`. Pendiente conocido: sin tests de frontend (tarea 24) y scripts sueltos en la raíz de `frontend/` que hacen fallar `npm run lint` completo (tarea 25): usa `npx oxlint src`.
 
 ## Contrato de la API (verifícalo en los controladores o en Swagger `/swagger-ui.html`)
 

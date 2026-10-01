@@ -141,6 +141,20 @@ class ApiErrorHandlingIntegrationTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = { "/api/movies", "/api/movies/search" })
+    void direccionDeOrdenacionNoPermitidaRetorna400(String endpoint) throws Exception {
+        // Nota: un valor vacío ("") no se prueba aquí porque Spring lo trata como
+        // "parámetro ausente" y aplica el valor por defecto (igual que con sort).
+        for (String direction : new String[] { "up", "descendente", " ", "asc;drop", "1" }) {
+            mockMvc.perform(get(endpoint).param("direction", direction).header("Authorization", userToken))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                    .andExpect(jsonPath("$.validationErrors.direction")
+                            .value("Dirección de ordenación no permitida. Valores válidos: asc, desc"));
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = { "id", "title", "releaseYear", "duration", "createdAt" })
     void ordenarPorCamposPermitidosFunciona(String field) throws Exception {
         mockMvc.perform(get("/api/movies").param("sort", field).header("Authorization", userToken))

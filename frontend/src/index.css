@@ -1,18 +1,87 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
+
+/*
+ * Tokens de diseño. Tailwind genera utilidades a partir de ellos
+ * (`bg-canvas`, `bg-surface`, `text-muted`, `bg-accent`, `border-line`...).
+ * El código usa estos nombres en lugar de colores hexadecimales sueltos.
+ *
+ * Contraste WCAG 2.2 AA (mínimo 4.5:1 para texto normal), calculado con la
+ * fórmula de luminancia relativa del estándar:
+ *   muted  sobre canvas 6.02 · sobre surface 5.49 · sobre surface-raised 5.14
+ *   negro  sobre accent 9.48 (el texto de los botones primarios es negro: el
+ *          blanco sobre accent solo llega a 2.22 y NO cumple)
+ *   accent sobre canvas 8.53 · sobre surface 7.77
+ *   danger sobre canvas 6.83 · sobre surface 6.22
+ * Todos los pares usados cumplen, así que no hizo falta cambiar ningún token.
+ */
+@theme {
+  --color-canvas: #0e1117;
+  --color-surface: #161b27;
+  --color-surface-raised: #1a2035;
+  --color-accent: #e8a020;
+  --color-muted: #8892a4;
+  --color-line: rgb(255 255 255 / 0.1);
+  --color-danger: #f87171;
+  --color-success: #4ade80;
+}
 
 @layer base {
-  html, body {
-    background-color: #0e1117;
+  html {
+    /* Controles nativos (scrollbars, botón de borrar del input de búsqueda) en oscuro. */
+    color-scheme: dark;
+    /* Reserva el hueco de la barra de scroll: al bloquear el scroll con un modal la página no "salta". */
+    scrollbar-gutter: stable;
+    background-color: var(--color-canvas);
+  }
+
+  /* Lo añade `useModalDialog` mientras hay un diálogo abierto: el fondo no debe desplazarse. */
+  html.scroll-locked {
+    overflow: hidden;
+  }
+
+  body {
+    background-color: var(--color-canvas);
     color: #ffffff;
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     min-height: 100vh;
   }
-  * { box-sizing: border-box; }
 }
 
-@layer utilities {
-  .scrollbar-hide::-webkit-scrollbar { display: none; }
-  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+/*
+ * Respeta `prefers-reduced-motion`: quien lo activa en su sistema (mareos,
+ * trastornos vestibulares) no ve transiciones ni animaciones decorativas. Se
+ * dejan a ~0 ms en lugar de quitarlas del todo para que los eventos
+ * `transitionend`/`animationend` sigan disparándose.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/** Oculta la barra de desplazamiento sin quitar el scroll (filas horizontales de películas). */
+@utility scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/*
+ * Anillo de foco visible y reutilizable: solo aparece al navegar con teclado
+ * (`:focus-visible`), así que no molesta con el ratón pero nunca se pierde.
+ */
+@utility focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
 }

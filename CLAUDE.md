@@ -23,7 +23,7 @@ Paquete base del backend: `com.emilio.streambox` en `streambox/src/main/java/...
 Backend (desde `streambox/`; en PowerShell `.\mvnw.cmd`, en bash `./mvnw`):
 
 ```
-.\mvnw.cmd test                         # toda la suite (H2 en memoria, no necesita PostgreSQL ni JWT_SECRET)
+.\mvnw.cmd test                         # toda la suite (H2 en memoria, no necesita PostgreSQL ni JWT_SECRET; si la variable existe en tu shell debe tener ≥32 caracteres)
 .\mvnw.cmd test -Dtest=NombreDeTest     # un test concreto
 .\mvnw.cmd -q compile                   # solo compilar
 .\mvnw.cmd spring-boot:run              # perfil dev: necesita PostgreSQL local + JWT_SECRET + application-local.properties
@@ -79,7 +79,17 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 
 ## Frontend: estado actual
 
-SPA en `frontend/src/` (sin carpetas por ahora). El token JWT está en `localStorage`; las llamadas usan `fetch` con `authHeader()` de `api.ts`. Problemas conocidos y planificados (tareas 15–21 del plan): sin `apiFetch` central ni manejo de 401/403/429, sin página de registro, solo carga la primera página del catálogo, estilos en línea en casi todo, sin responsive ni accesibilidad en modales, imágenes locales en `src/assets` por título. Al tocar el frontend verifica con `npm run build` y `npm run lint`.
+SPA en `frontend/src/` organizada en `pages/`, `components/`, `context/`, `hooks/` y `lib/` (la Fase 3 del plan está hecha). Reglas que ya se cumplen y no deben romperse:
+
+- **Todas las llamadas a la API pasan por `lib/api.ts` (`apiFetch`/`ApiError`)**: nada de `fetch` suelto. Maneja 401 (cierra sesión una vez; el 401 de login/registro no), 403 (no cierra sesión), 429 (`Retry-After`), 204 y red caída. Se decide por `status`/`code`, no por el texto.
+- **El token JWT (`localStorage`, clave `token`) solo lo toca `context/AuthContext.tsx`** (y el puente `configureAuth` de `api.ts`). Moverlo a cookie HttpOnly es la tarea 29.
+- Estilos con **clases de Tailwind y tokens `@theme`** de `index.css` (`canvas`, `surface`, `accent`, `muted`...), cero `style={{}}`. Foco visible con `focus-ring`. Contrastes WCAG AA ya calculados: si cambias un token, recalcula.
+- Modales con `components/Modal` (`<dialog>` + `useModalDialog`); avisos con `useToast()`; favoritos con `FavoritesContext` (optimista, 409/404 = estado ya correcto).
+- Las imágenes salen **siempre de `movie.imageUrl`** vía `components/MoviePoster` (lazy, con respaldo). Portadas locales de ejemplo en `public/covers/*.webp` (+ script opcional `docs/portadas-locales.sql`).
+- Las URLs que vienen de la API (`videoUrl`) se validan con `getSafeVideoUrl` (solo http/https, sin credenciales).
+- El catálogo se pide ordenado por el servidor: `GET /api/movies?sort=createdAt&direction=desc` (`direction` = `asc`|`desc`, por defecto `asc`).
+
+Pendiente: sin tests de frontend (tarea 24), scripts sueltos en la raíz de `frontend/` que hacen fallar `npm run lint` completo (tarea 25) y revisión visual manual (nadie ha visto la UI). Al tocar el frontend verifica con `npm run build` y `npx oxlint src` (`npm run lint` fallará por esos scripts hasta la tarea 25).
 
 ## Agentes (`.claude/agents/`)
 
