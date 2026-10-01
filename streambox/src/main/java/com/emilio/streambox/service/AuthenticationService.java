@@ -3,9 +3,11 @@ package com.emilio.streambox.service;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import com.emilio.streambox.dto.LoginResponse;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.InvalidCredentialsException;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.security.JwtService;
 import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 
 /**
@@ -26,6 +28,8 @@ public class AuthenticationService {
 
     private final LoginAttemptService loginAttemptService;
 
+    private final JwtService jwtService;
+
     /**
      * Hash válido que se comprueba cuando el email no existe, para que el
      * tiempo de respuesta no delate si la cuenta está registrada.
@@ -40,16 +44,36 @@ public class AuthenticationService {
      *                        las contraseñas cifradas
      * @param loginAttemptService servicio que bloquea temporalmente las
      *                            cuentas con demasiados intentos fallidos
+     * @param jwtService          servicio que genera el token del usuario
+     *                            autenticado
      */
     public AuthenticationService(
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
-            LoginAttemptService loginAttemptService) {
+            LoginAttemptService loginAttemptService,
+            JwtService jwtService) {
 
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.loginAttemptService = loginAttemptService;
+        this.jwtService = jwtService;
         this.dummyPasswordHash = passwordEncoder.encode("contraseña-que-nadie-usa");
+    }
+
+    /**
+     * Inicia sesión: comprueba las credenciales y genera el token JWT.
+     *
+     * @param email    correo electrónico del usuario
+     * @param password contraseña en texto plano
+     * @return respuesta con el token JWT
+     * @throws InvalidCredentialsException si el email no existe o la contraseña es incorrecta
+     * @throws com.emilio.streambox.exception.TooManyRequestsException si la cuenta está bloqueada
+     *         temporalmente por demasiados intentos fallidos
+     */
+    public LoginResponse login(String email, String password) {
+
+        return new LoginResponse(
+                jwtService.generateToken(authenticate(email, password)));
     }
 
     /**
@@ -75,7 +99,7 @@ public class AuthenticationService {
      * @throws RuntimeException si el correo electrónico no existe o
      *                          la contraseña proporcionada es incorrecta
      */
-    public User authenticate(String email, String password) {
+    private User authenticate(String email, String password) {
 
         // El registro guarda el email normalizado (trim + minúsculas); el login
         // debe normalizarlo igual o el usuario no podría entrar escribiéndolo

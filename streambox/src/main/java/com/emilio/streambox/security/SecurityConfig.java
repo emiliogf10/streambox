@@ -108,7 +108,8 @@ public class SecurityConfig {
          * <li>Desactiva CSRF, ya que la API utiliza autenticación
          * mediante tokens JWT.</li>
          * <li>Permite el acceso sin autenticación a los endpoints
-         * de usuarios y autenticación.</li>
+         * de usuarios y autenticación, a las comprobaciones de salud
+         * ({@code /actuator/health}) y a la documentación OpenAPI.</li>
          * <li>Exige autenticación para cualquier otro endpoint.</li>
          * <li>Registra {@link JwtAuthenticationFilter} antes del filtro
          * estándar {@link UsernamePasswordAuthenticationFilter}.</li>
@@ -174,6 +175,15 @@ public class SecurityConfig {
                                                 // Solo ADMIN puede crear generos.
                                                 .requestMatchers(HttpMethod.POST, "/api/genres/**")
                                                 .hasRole("ADMIN")
+
+                                                // Comprobaciones de salud (Actuator) para balanceadores,
+                                                // Docker y Kubernetes: publicas pero sin detalles (solo
+                                                // UP/DOWN). El resto de endpoints de Actuator no se
+                                                // exponen (ver application.properties).
+                                                .requestMatchers(
+                                                                "/actuator/health",
+                                                                "/actuator/health/**")
+                                                .permitAll()
 
                                                 // Documentacion OpenAPI y Swagger UI sin autenticacion.
                                                 .requestMatchers(

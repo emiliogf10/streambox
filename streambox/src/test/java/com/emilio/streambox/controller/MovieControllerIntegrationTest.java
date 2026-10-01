@@ -22,7 +22,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 
@@ -64,7 +64,7 @@ class MovieControllerIntegrationTest {
         admin.setEmail("adminmovie@test.com");
         admin.setPassword(passwordEncoder.encode("adminpass1"));
         admin.setRole(Role.ADMIN);
-        admin.setCreatedAt(LocalDateTime.now());
+        admin.setCreatedAt(Instant.now());
         adminToken = "Bearer " + jwtService.generateToken(userRepository.save(admin));
 
         User user = new User();
@@ -72,7 +72,7 @@ class MovieControllerIntegrationTest {
         user.setEmail("usermovie@test.com");
         user.setPassword(passwordEncoder.encode("userpass1"));
         user.setRole(Role.USER);
-        user.setCreatedAt(LocalDateTime.now());
+        user.setCreatedAt(Instant.now());
         userToken = "Bearer " + jwtService.generateToken(userRepository.save(user));
 
         Genre genre = new Genre();
@@ -230,7 +230,7 @@ class MovieControllerIntegrationTest {
         movie.setReleaseYear(2000);
         movie.setImageUrl("https://cdn.example.com/" + title.toLowerCase() + ".jpg");
         movie.setVideoUrl("https://cdn.example.com/" + title.toLowerCase() + ".mp4");
-        movie.setCreatedAt(LocalDateTime.now());
+        movie.setCreatedAt(Instant.now());
         movie.setGenres(Set.of(genre));
         return movie;
     }

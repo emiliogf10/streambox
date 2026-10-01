@@ -6,7 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -67,7 +67,7 @@ class RateLimitingIntegrationTest {
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode("correct-password"));
         user.setRole(Role.USER);
-        user.setCreatedAt(LocalDateTime.now());
+        user.setCreatedAt(Instant.now());
         userRepository.save(user);
     }
 
@@ -196,7 +196,7 @@ class RateLimitingIntegrationTest {
         other.setEmail("other@test.com");
         other.setPassword(passwordEncoder.encode("other-password"));
         other.setRole(Role.USER);
-        other.setCreatedAt(LocalDateTime.now());
+        other.setCreatedAt(Instant.now());
         userRepository.save(other);
 
         login("user9@test.com", "mal", "10.10.0.1");

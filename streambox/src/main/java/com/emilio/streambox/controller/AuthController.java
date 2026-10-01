@@ -7,8 +7,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.emilio.streambox.dto.LoginRequest;
 import com.emilio.streambox.dto.LoginResponse;
-import com.emilio.streambox.entity.User;
-import com.emilio.streambox.security.JwtService;
 import com.emilio.streambox.service.AuthenticationService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -17,23 +15,12 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.validation.Valid;
 
 /**
- * Controlador REST encargado de gestionar la autenticación de los usuarios.
+ * Controlador REST de la autenticación ({@code /api/auth}).
  *
  * <p>
- * Expone los endpoints relacionados con el inicio de sesión bajo
- * la ruta {@code /api/auth}.
- * </p>
- *
- * <p>
- * El proceso de autenticación se delega en {@link AuthenticationService}.
- * Una vez autenticado el usuario, {@link JwtService} genera un token JWT
- * que se devuelve al cliente.
- * </p>
- *
- * <p>
- * Los endpoints de este controlador son públicos y no requieren
- * autenticación previa, ya que permiten a los usuarios iniciar sesión
- * para obtener un token JWT.
+ * Es público: no requiere token, porque su función es precisamente
+ * entregarlo. La lógica (comprobar credenciales, bloquear cuentas con
+ * demasiados fallos y generar el token) está en {@link AuthenticationService}.
  * </p>
  */
 @RestController
@@ -42,46 +29,20 @@ public class AuthController {
 
     private final AuthenticationService authenticationService;
 
-    private final JwtService jwtService;
-
     /**
-     * Crea una instancia del controlador de autenticación.
+     * Crea el controlador de autenticación.
      *
-     * @param authenticationService servicio encargado de validar
-     *                              las credenciales del usuario
-     * @param jwtService            servicio encargado de generar tokens JWT
+     * @param authenticationService servicio que valida las credenciales y genera el token
      */
-    public AuthController(
-            AuthenticationService authenticationService,
-            JwtService jwtService) {
-
+    public AuthController(AuthenticationService authenticationService) {
         this.authenticationService = authenticationService;
-        this.jwtService = jwtService;
     }
 
     /**
-     * Autentica un usuario y genera un token JWT.
+     * Inicia sesión y devuelve un token JWT.
      *
-     * <p>
-     * El proceso consiste en:
-     * </p>
-     *
-     * <ol>
-     * <li>Validar los datos recibidos.</li>
-     * <li>Comprobar las credenciales mediante
-     * {@link AuthenticationService}.</li>
-     * <li>Generar un token JWT para el usuario autenticado.</li>
-     * <li>Devolver el token al cliente.</li>
-     * </ol>
-     *
-     * <p>
-     * Este endpoint no requiere autenticación, ya que su finalidad
-     * es precisamente proporcionar el token necesario para acceder
-     * posteriormente a los endpoints protegidos.
-     * </p>
-     *
-     * @param request datos de acceso proporcionados por el usuario
-     * @return respuesta que contiene el token JWT generado
+     * @param request correo electrónico y contraseña
+     * @return respuesta con el token JWT
      */
     @PostMapping("/login")
     @Operation(summary = "Inicia sesión", description = "Autentica un usuario mediante su correo electrónico "
@@ -89,17 +50,12 @@ public class AuthController {
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Autenticación realizada correctamente"),
             @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
-            @ApiResponse(responseCode = "401", description = "Credenciales incorrectas")
+            @ApiResponse(responseCode = "401", description = "Credenciales incorrectas"),
+            @ApiResponse(responseCode = "429", description = "Demasiados intentos desde esta IP o para esta cuenta; "
+                    + "ver cabecera Retry-After")
     })
-    public LoginResponse login(
-            @Valid @RequestBody LoginRequest request) {
+    public LoginResponse login(@Valid @RequestBody LoginRequest request) {
 
-        User user = authenticationService.authenticate(
-                request.getEmail(),
-                request.getPassword());
-
-        String token = jwtService.generateToken(user);
-
-        return new LoginResponse(token);
+        return authenticationService.login(request.getEmail(), request.getPassword());
     }
 }

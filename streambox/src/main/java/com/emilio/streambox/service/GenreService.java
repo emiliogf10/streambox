@@ -1,20 +1,22 @@
 package com.emilio.streambox.service;
 
 import java.util.List;
+import java.util.Locale;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import com.emilio.streambox.entity.Genre;
+import com.emilio.streambox.dto.CreateGenreRequest;
+import com.emilio.streambox.dto.GenreResponse;
+import com.emilio.streambox.mapper.GenreMapper;
 import com.emilio.streambox.repository.GenreRepository;
 
 /**
- * Servicio encargado de gestionar la lógica de negocio relacionada
- * con los géneros cinematográficos de Streambox.
+ * Servicio con la lógica de negocio de los géneros cinematográficos.
  *
  * <p>
- * Centraliza las operaciones relacionadas con los géneros,
- * evitando que los controladores tengan que acceder directamente
- * al repositorio.
+ * Devuelve {@link GenreResponse} y no la entidad, igual que el resto de
+ * servicios.
  * </p>
  */
 @Service
@@ -23,46 +25,51 @@ public class GenreService {
     private final GenreRepository genreRepository;
 
     /**
-     * Crea una instancia del servicio de géneros.
+     * Crea el servicio de géneros.
      *
-     * @param genreRepository repositorio utilizado para acceder
-     *                        a los géneros almacenados
+     * @param genreRepository repositorio de géneros
      */
     public GenreService(GenreRepository genreRepository) {
         this.genreRepository = genreRepository;
     }
 
     /**
-     * Obtiene todos los géneros almacenados en Streambox.
+     * Obtiene todos los géneros.
      *
-     * @return lista de todos los géneros almacenados
+     * @return lista de géneros
      */
-    public List<Genre> getAllGenres() {
+    @Transactional(readOnly = true)
+    public List<GenreResponse> getAllGenres() {
 
-        return genreRepository.findAll();
+        return GenreMapper.toResponseList(genreRepository.findAll());
     }
 
     /**
-     * Guarda un nuevo género en la base de datos.
+     * Crea un género.
      *
      * <p>
-     * El nombre del género se normaliza antes de persistirlo:
-     * se eliminan los espacios al inicio y al final, y se capitaliza
-     * la primera letra para garantizar consistencia en el almacenamiento.
+     * El nombre se normaliza antes de guardarlo: se eliminan los espacios
+     * exteriores y se deja la primera letra en mayúscula y el resto en
+     * minúsculas, para que {@code "ACCION"} y {@code "accion"} no sean dos
+     * géneros distintos. Si el nombre ya existe, la restricción
+     * {@code UNIQUE} de la base de datos lo impide y la API responde 409.
      * </p>
      *
-     * @param genre género que se desea guardar
-     * @return género almacenado en la base de datos
+     * @param request datos del género (ya validados)
+     * @return el género creado
      */
-    public Genre saveGenre(Genre genre) {
+    @Transactional
+    public GenreResponse createGenre(CreateGenreRequest request) {
 
-        String normalized = genre.getName().trim();
+        String normalized = request.getName().trim();
         if (!normalized.isEmpty()) {
             normalized = Character.toUpperCase(normalized.charAt(0))
-                    + normalized.substring(1).toLowerCase(java.util.Locale.ROOT);
+                    + normalized.substring(1).toLowerCase(Locale.ROOT);
         }
+
+        var genre = GenreMapper.toEntity(request);
         genre.setName(normalized);
 
-        return genreRepository.save(genre);
+        return GenreMapper.toResponse(genreRepository.save(genre));
     }
 }

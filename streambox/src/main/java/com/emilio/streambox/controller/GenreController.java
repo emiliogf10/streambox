@@ -2,16 +2,16 @@ package com.emilio.streambox.controller;
 
 import java.util.List;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.emilio.streambox.dto.CreateGenreRequest;
 import com.emilio.streambox.dto.GenreResponse;
-import com.emilio.streambox.entity.Genre;
-import com.emilio.streambox.mapper.GenreMapper;
 import com.emilio.streambox.service.GenreService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,19 +21,11 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 
 /**
- * Controlador REST encargado de gestionar las operaciones relacionadas
- * con los géneros cinematográficos de Streambox.
+ * Controlador REST de los géneros cinematográficos ({@code /api/genres}).
  *
  * <p>
- * Recibe las peticiones HTTP relacionadas con los géneros y delega
- * la lógica de negocio en {@link GenreService}.
- * </p>
- *
- * <p>
- * Los endpoints de este controlador requieren autenticación mediante
- * un token JWT. La consulta de géneros está disponible para cualquier
- * usuario autenticado, mientras que la creación de géneros está
- * restringida a usuarios con rol {@code ADMIN}.
+ * Consultar los géneros está permitido a cualquier usuario autenticado;
+ * crearlos, solo a administradores (regla definida en {@code SecurityConfig}).
  * </p>
  */
 @SecurityRequirement(name = "bearerAuth")
@@ -44,70 +36,50 @@ public class GenreController {
     private final GenreService genreService;
 
     /**
-     * Crea una instancia del controlador de géneros.
+     * Crea el controlador de géneros.
      *
-     * @param genreService servicio encargado de gestionar
-     *                     la lógica de negocio de los géneros
+     * @param genreService servicio con la lógica de los géneros
      */
     public GenreController(GenreService genreService) {
         this.genreService = genreService;
     }
 
     /**
-     * Obtiene todos los géneros almacenados en Streambox.
+     * Obtiene todos los géneros.
      *
-     * <p>
-     * Este endpoint puede ser utilizado por cualquier usuario
-     * autenticado.
-     * </p>
-     *
-     * @return lista de géneros representados mediante {@link GenreResponse}
+     * @return lista de géneros
      */
     @GetMapping
     @Operation(summary = "Obtiene todos los géneros", description = "Devuelve la lista completa de géneros "
             + "cinematográficos disponibles en Streambox.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Géneros obtenidos correctamente"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado")
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado")
     })
     public List<GenreResponse> getGenres() {
 
-        return GenreMapper.toResponseList(
-                genreService.getAllGenres());
+        return genreService.getAllGenres();
     }
 
     /**
-     * Crea un nuevo género en Streambox.
+     * Crea un género (solo administradores).
      *
-     * <p>
-     * Los datos recibidos mediante la petición se convierten
-     * en una entidad {@link Genre} antes de ser almacenados.
-     * </p>
-     *
-     * <p>
-     * Este endpoint está restringido a usuarios con rol
-     * {@code ADMIN}.
-     * </p>
-     *
-     * @param request datos del género que se desea crear
+     * @param request datos del género
      * @return género creado
      */
     @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Crea un género", description = "Crea un nuevo género cinematográfico. "
             + "Este endpoint requiere permisos de administrador.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Género creado correctamente"),
             @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
-            @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador")
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
+            @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
+            @ApiResponse(responseCode = "409", description = "Ya existe un género con ese nombre")
     })
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.CREATED)
-    public GenreResponse createGenre(
-            @Valid @RequestBody CreateGenreRequest request) {
+    public GenreResponse createGenre(@Valid @RequestBody CreateGenreRequest request) {
 
-        Genre genre = GenreMapper.toEntity(request);
-
-        Genre savedGenre = genreService.saveGenre(genre);
-
-        return GenreMapper.toResponse(savedGenre);
+        return genreService.createGenre(request);
     }
 }

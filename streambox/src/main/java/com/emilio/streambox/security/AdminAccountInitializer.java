@@ -1,6 +1,5 @@
 package com.emilio.streambox.security;
 
-import java.time.LocalDateTime;
 import java.util.Locale;
 
 import org.slf4j.Logger;
@@ -94,7 +93,6 @@ public class AdminAccountInitializer implements ApplicationRunner {
         admin.setUsername(username);
         admin.setPassword(passwordEncoder.encode(properties.password()));
         admin.setRole(Role.ADMIN);
-        admin.setCreatedAt(LocalDateTime.now());
         userRepository.save(admin);
 
         LOGGER.info("Administrador inicial creado: {}", email);

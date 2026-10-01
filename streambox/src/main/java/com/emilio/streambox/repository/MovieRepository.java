@@ -3,144 +3,71 @@ package com.emilio.streambox.repository;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.emilio.streambox.entity.Movie;
 
 /**
- * Repositorio encargado de proporcionar acceso a los datos de las películas
- * almacenadas en la base de datos.
+ * Repositorio de acceso a datos de la entidad {@link Movie}.
  *
  * <p>
- * Extiende {@link JpaRepository} para disponer de las operaciones CRUD
- * proporcionadas por Spring Data JPA y {@link JpaSpecificationExecutor}
- * para permitir búsquedas mediante especificaciones dinámicas.
+ * Hereda de {@link JpaSpecificationExecutor} para poder aplicar filtros
+ * dinámicos mediante {@code Specification} (ver
+ * {@link com.emilio.streambox.specification.MovieSpecification}).
  * </p>
  *
  * <p>
- * Algunos métodos utilizan {@link EntityGraph} para cargar explícitamente
- * los géneros asociados a las películas y evitar problemas relacionados
- * con la carga diferida de la colección {@code genres}.
+ * <strong>Carga de géneros:</strong> solo {@link #findById(Long)} trae los
+ * géneros con un {@code JOIN FETCH}, porque devuelve una única película. Las
+ * consultas que devuelven varias películas (y sobre todo las paginadas) NO
+ * hacen fetch de la colección: Hibernate no puede aplicar {@code LIMIT} sobre
+ * un join de colección y paginaría en memoria, cargando todo el catálogo.
+ * En su lugar los géneros se cargan de forma diferida y por lotes
+ * ({@code hibernate.default_batch_fetch_size}), con una consulta extra por
+ * página en lugar de una por película.
  * </p>
  */
 public interface MovieRepository
-                extends JpaRepository<Movie, Long>, JpaSpecificationExecutor<Movie> {
+        extends JpaRepository<Movie, Long>, JpaSpecificationExecutor<Movie> {
 
-        /**
-         * Obtiene una película mediante su identificador junto con sus
-         * géneros asociados.
-         *
-         * <p>
-         * La anotación {@link EntityGraph} fuerza la carga de la relación
-         * {@code genres} durante la consulta.
-         * </p>
-         *
-         * @param id identificador de la película que se desea obtener
-         * @return {@link Optional} que contiene la película encontrada junto
-         *         con sus géneros, o vacío si no existe
-         */
-        @Override
-        @EntityGraph(attributePaths = { "genres" })
-        Optional<Movie> findById(Long id);
+    /**
+     * Busca una película por su identificador cargando también sus géneros.
+     *
+     * @param id identificador de la película
+     * @return la película con sus géneros, o vacío si no existe
+     */
+    @Override
+    @EntityGraph(attributePaths = { "genres" })
+    Optional<Movie> findById(Long id);
 
-        /**
-         * Obtiene todas las películas almacenadas junto con sus géneros asociados.
-         *
-         * <p>
-         * La relación {@code genres} se carga explícitamente mediante
-         * {@link EntityGraph} para que pueda utilizarse posteriormente
-         * fuera del contexto de persistencia.
-         * </p>
-         *
-         * @return lista de películas con sus géneros cargados
-         */
-        @Override
-        @EntityGraph(attributePaths = { "genres" })
-        List<Movie> findAll();
+    /**
+     * Busca todas las películas cuyo título coincide exactamente, sin
+     * distinguir mayúsculas de minúsculas.
+     *
+     * @param title título buscado
+     * @return películas con ese título (puede haber más de una)
+     */
+    List<Movie> findAllByTitleIgnoreCase(String title);
 
-        /**
-         * Obtiene todas las películas de forma paginada junto con sus géneros asociados.
-         *
-         * <p>
-         * La anotación {@link EntityGraph} fuerza la carga de la relación
-         * {@code genres} durante la consulta para evitar problemas de
-         * inicialización diferida al serializar las películas fuera del
-         * contexto de persistencia.
-         * </p>
-         *
-         * @param pageable configuración de paginación y ordenación
-         * @return página de películas con sus géneros cargados
-         */
-        @Override
-        @EntityGraph(attributePaths = { "genres" })
-        Page<Movie> findAll(Pageable pageable);
-
-        /**
-         * Busca películas cuyo título contenga el texto indicado,
-         * ignorando diferencias entre mayúsculas y minúsculas.
-         *
-         * <p>
-         * Los géneros asociados a las películas encontradas se cargan
-         * explícitamente mediante {@link EntityGraph}.
-         * </p>
-         *
-         * @param title texto que debe estar contenido en el título
-         * @return lista de películas cuyo título coincide con el criterio
-         *         de búsqueda
-         */
-        @EntityGraph(attributePaths = { "genres" })
-        List<Movie> findByTitleContainingIgnoreCase(String title);
-
-        /**
-         * Busca una película cuyo título coincida exactamente con el texto
-         * indicado, sin distinguir entre mayúsculas y minúsculas.
-         *
-         * <p>
-         * Este método se utiliza para gestionar favoritos mediante el título
-         * de la película, por lo que no realiza búsquedas parciales.
-         * </p>
-         *
-         * @param title título exacto de la película que se desea buscar
-         * @return {@link Optional} con la película y sus géneros, o vacío si
-         *         no existe una coincidencia
-         */
-        @EntityGraph(attributePaths = { "genres" })
-        List<Movie> findAllByTitleIgnoreCase(String title);
-
-        /**
-         * Busca películas aplicando una especificación y devuelve los resultados
-         * de forma paginada.
-         *
-         * <p>
-         * La especificación permite construir consultas dinámicas combinando
-         * diferentes criterios de búsqueda. La paginación y ordenación se
-         * controlan mediante el objeto {@link Pageable}.
-         * </p>
-         *
-         * <p>
-         * Los géneros asociados se cargan explícitamente mediante
-         * {@link EntityGraph} para evitar problemas de inicialización diferida
-         * al convertir las películas en objetos DTO.
-         * </p>
-         *
-         * @param specification criterios dinámicos utilizados para filtrar
-         *                      las películas
-         * @param pageable      configuración de paginación y ordenación
-         * @return página de películas que cumplen los criterios indicados
-         */
-        @EntityGraph(attributePaths = { "genres" })
-        Page<Movie> findAll(
-                        Specification<Movie> specification,
-                        Pageable pageable);
-
-        @org.springframework.transaction.annotation.Transactional
-        @org.springframework.data.jpa.repository.Modifying
-        @org.springframework.data.jpa.repository.Query(value = "DELETE FROM user_favorite_movies WHERE movie_id = :movieId", nativeQuery = true)
-        void deleteFromAllFavorites(@org.springframework.data.repository.query.Param("movieId") Long movieId);
+    /**
+     * Elimina una película de las listas de favoritos de todos los usuarios.
+     *
+     * <p>
+     * Las bases de datos creadas antes de Flyway conservan claves foráneas
+     * sin {@code ON DELETE CASCADE}, por lo que antes de borrar una película
+     * hay que limpiar esta tabla a mano. En bases nuevas el borrado en cascada
+     * lo haría la propia base de datos, y esta consulta simplemente no
+     * encuentra filas.
+     * </p>
+     *
+     * @param movieId identificador de la película
+     */
+    @Modifying
+    @Query(value = "DELETE FROM user_favorite_movies WHERE movie_id = :movieId", nativeQuery = true)
+    void deleteFromAllFavorites(@Param("movieId") Long movieId);
 }
-

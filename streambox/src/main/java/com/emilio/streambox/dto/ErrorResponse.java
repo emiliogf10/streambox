@@ -1,6 +1,6 @@
 package com.emilio.streambox.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -15,7 +15,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ErrorResponse {
 
-    private final LocalDateTime timestamp;
+    private final Instant timestamp;
     private final int status;
     private final String error;
     private final ErrorCode code;
@@ -34,7 +34,7 @@ public class ErrorResponse {
      * @param path ruta de la petición que produjo el error
      */
     public ErrorResponse(
-            LocalDateTime timestamp,
+            Instant timestamp,
             int status,
             String error,
             ErrorCode code,
@@ -50,7 +50,7 @@ public class ErrorResponse {
      * @param validationErrors errores de validación agrupados por campo
      */
     public ErrorResponse(
-            LocalDateTime timestamp,
+            Instant timestamp,
             int status,
             String error,
             ErrorCode code,
@@ -67,7 +67,7 @@ public class ErrorResponse {
         this.validationErrors = validationErrors;
     }
 
-    public LocalDateTime getTimestamp() { return timestamp; }
+    public Instant getTimestamp() { return timestamp; }
     public int getStatus() { return status; }
     public String getError() { return error; }
     public ErrorCode getCode() { return code; }

@@ -1,67 +1,92 @@
 package com.emilio.streambox.specification;
 
+import java.util.Locale;
+
 import org.springframework.data.jpa.domain.Specification;
 
+import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Movie;
 
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
+
 /**
- * Clase encargada de construir las especificaciones utilizadas
- * para realizar búsquedas dinámicas de películas.
+ * Filtros dinámicos reutilizables para consultar películas.
  *
  * <p>
- * Permite combinar diferentes filtros de forma opcional,
- * evitando tener que crear un método de repositorio para
- * cada combinación posible de criterios de búsqueda.
+ * Cada método devuelve una {@link Specification} que representa una
+ * condición. El servicio las combina con {@code and} según los filtros
+ * que el cliente haya indicado.
  * </p>
  */
-public class MovieSpecification {
+public final class MovieSpecification {
 
-    /**
-     * Constructor privado para evitar la creación de instancias.
-     */
+    /** Carácter de escape usado en las búsquedas {@code LIKE}. */
+    private static final char LIKE_ESCAPE = '\\';
+
     private MovieSpecification() {
-        // Evita instanciar la clase
+        // Clase de utilidad: no se instancia
     }
 
     /**
-     * Crea una especificación para buscar películas cuyo título
-     * contenga el texto indicado, ignorando mayúsculas y minúsculas.
+     * Películas cuyo título contiene el texto indicado, sin distinguir
+     * mayúsculas de minúsculas.
      *
-     * @param title texto que debe contener el título de la película
-     * @return especificación para filtrar por título
+     * <p>
+     * Los comodines de {@code LIKE} ({@code %} y {@code _}) que escriba el
+     * usuario se tratan como texto literal: buscar {@code "100%"} encuentra
+     * títulos que contienen exactamente {@code 100%}, no cualquier título.
+     * </p>
+     *
+     * @param title texto que debe contener el título
+     * @return especificación de filtro por título
      */
     public static Specification<Movie> hasTitle(String title) {
 
+        String pattern = "%" + escapeLike(title.toLowerCase(Locale.ROOT)) + "%";
+
         return (root, query, criteriaBuilder) -> criteriaBuilder.like(
                 criteriaBuilder.lower(root.get("title")),
-                "%" + title.toLowerCase() + "%");
+                pattern,
+                LIKE_ESCAPE);
     }
 
     /**
-     * Crea una especificación para buscar películas asociadas
-     * a un género determinado.
+     * Películas que pertenecen al género indicado.
+     *
+     * <p>
+     * Se implementa con una subconsulta {@code EXISTS} en lugar de un
+     * {@code JOIN}: así la consulta principal no duplica filas (no hace falta
+     * {@code DISTINCT}), no interfiere con la carga de géneros de la película
+     * y la paginación se resuelve en la base de datos.
+     * </p>
      *
      * @param genreId identificador del género
-     * @return especificación para filtrar por género
+     * @return especificación de filtro por género
      */
     public static Specification<Movie> hasGenre(Long genreId) {
 
         return (root, query, criteriaBuilder) -> {
 
-            query.distinct(true);
+            Subquery<Long> subquery = query.subquery(Long.class);
+            Root<Movie> movie = subquery.from(Movie.class);
+            Join<Movie, Genre> genre = movie.join("genres");
 
-            return criteriaBuilder.equal(
-                    root.join("genres").get("id"),
-                    genreId);
+            subquery.select(movie.get("id"))
+                    .where(
+                            criteriaBuilder.equal(movie.get("id"), root.get("id")),
+                            criteriaBuilder.equal(genre.get("id"), genreId));
+
+            return criteriaBuilder.exists(subquery);
         };
     }
 
     /**
-     * Crea una especificación para buscar películas estrenadas
-     * en un año determinado.
+     * Películas estrenadas en el año indicado.
      *
-     * @param releaseYear año de lanzamiento
-     * @return especificación para filtrar por año
+     * @param releaseYear año de estreno
+     * @return especificación de filtro por año
      */
     public static Specification<Movie> hasReleaseYear(Integer releaseYear) {
 
@@ -71,35 +96,16 @@ public class MovieSpecification {
     }
 
     /**
-     * Especificación que fuerza la carga de los géneros asociados
-     * a cada película.
+     * Escapa los caracteres con significado especial en {@code LIKE}.
      *
-     * <p>
-     * Es necesaria para las consultas realizadas mediante
-     * {@link org.springframework.data.jpa.repository.JpaSpecificationExecutor},
-     * ya que dichas consultas no utilizan automáticamente el
-     * {@code @EntityGraph} definido en los métodos estándar
-     * del repositorio.
-     * </p>
-     *
-     * @return especificación que realiza un fetch de los géneros
+     * @param text texto introducido por el usuario
+     * @return texto con {@code \}, {@code %} y {@code _} escapados
      */
-    public static Specification<Movie> fetchGenres() {
+    private static String escapeLike(String text) {
 
-        return (root, query, criteriaBuilder) -> {
-
-            /*
-             * Evitamos realizar el fetch cuando Hibernate está
-             * construyendo una consulta de conteo.
-             */
-            if (query.getResultType() != Long.class
-                    && query.getResultType() != long.class) {
-
-                root.fetch("genres");
-                query.distinct(true);
-            }
-
-            return criteriaBuilder.conjunction();
-        };
+        return text
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
     }
 }

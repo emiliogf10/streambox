@@ -1,108 +1,115 @@
 package com.emilio.streambox.mapper;
 
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import com.emilio.streambox.dto.CreateMovieRequest;
 import com.emilio.streambox.dto.GenreResponse;
+import com.emilio.streambox.dto.MovieRequest;
 import com.emilio.streambox.dto.MovieResponse;
 import com.emilio.streambox.entity.Movie;
 
 /**
- * Clase encargada de realizar las conversiones entre la entidad
- * {@link Movie} y los DTO utilizados por la API.
+ * Convierte entre la entidad {@link Movie} y los DTO de la API.
  *
  * <p>
- * Centraliza la transformación de los datos que se reciben
- * y devuelven mediante la API REST, evitando realizar estas
- * conversiones directamente en los controladores.
+ * Se invoca desde los servicios, <strong>dentro de la transacción</strong>:
+ * {@link #toResponse(Movie)} recorre los géneros de la película, que se cargan
+ * de forma diferida, y eso solo es posible mientras la sesión de Hibernate
+ * sigue abierta. Por eso los controladores nunca reciben entidades.
  * </p>
  */
-public class MovieMapper {
+public final class MovieMapper {
 
-    /**
-     * Constructor privado para evitar la creación de instancias
-     * de esta clase.
-     *
-     * <p>
-     * Todos los métodos de esta clase son estáticos, por lo que
-     * no es necesario crear una instancia.
-     * </p>
-     */
     private MovieMapper() {
-        // Evita instanciar la clase
+        // Clase de utilidad: no se instancia
     }
 
     /**
-     * Convierte una petición de creación de película en una entidad
-     * {@link Movie}.
+     * Crea una entidad nueva a partir de los datos recibidos.
      *
      * <p>
-     * Los campos gestionados automáticamente por la aplicación,
-     * como el identificador y la fecha de creación, no se establecen
-     * en este método.
+     * No asigna los géneros (el servicio los resuelve contra la base de
+     * datos) ni la fecha de creación (la asigna Hibernate al guardar).
      * </p>
      *
-     * @param request datos recibidos desde la API para crear la película
-     * @return entidad {@link Movie} creada a partir de los datos recibidos
+     * @param request datos de la película recibidos del cliente
+     * @return entidad {@link Movie} sin guardar y sin géneros
      */
-    public static Movie toEntity(CreateMovieRequest request) {
+    public static Movie toEntity(MovieRequest request) {
 
         Movie movie = new Movie();
-
-        movie.setTitle(request.getTitle());
-        movie.setDescription(request.getDescription());
-        movie.setDuration(request.getDuration());
-        movie.setReleaseYear(request.getReleaseYear());
-        movie.setImageUrl(request.getImageUrl());
-        movie.setVideoUrl(request.getVideoUrl());
-
+        copyFields(request, movie);
         return movie;
     }
 
     /**
-     * Convierte una entidad {@link Movie} en un {@link MovieResponse}
-     * para devolverla mediante la API.
+     * Copia sobre una película existente los campos editables del DTO.
      *
-     * @param movie entidad de película que se desea convertir
-     * @return DTO con los datos de la película que pueden exponerse
-     *         mediante la API
+     * <p>
+     * No modifica el identificador, la fecha de creación ni los géneros.
+     * </p>
+     *
+     * @param request datos nuevos recibidos del cliente
+     * @param movie   película que se actualiza
      */
-    public static MovieResponse toResponse(Movie movie) {
+    public static void updateEntity(MovieRequest request, Movie movie) {
 
-        MovieResponse response = new MovieResponse();
-
-        response.setId(movie.getId());
-        response.setTitle(movie.getTitle());
-        response.setDescription(movie.getDescription());
-        response.setDuration(movie.getDuration());
-        response.setReleaseYear(movie.getReleaseYear());
-        response.setImageUrl(movie.getImageUrl());
-        response.setVideoUrl(movie.getVideoUrl());
-        response.setCreatedAt(movie.getCreatedAt());
-
-        Set<GenreResponse> genres = movie.getGenres()
-                .stream()
-                .map(GenreMapper::toResponse)
-                .collect(Collectors.toSet());
-
-        response.setGenres(genres);
-
-        return response;
+        copyFields(request, movie);
     }
 
     /**
-     * Convierte una lista de entidades {@link Movie} en una lista
-     * de {@link MovieResponse}.
+     * Convierte una película en el DTO que se devuelve al cliente.
      *
-     * @param movies lista de entidades de películas
-     * @return lista de DTOs correspondientes a las películas
+     * <p>
+     * Los géneros se devuelven ordenados por nombre para que la respuesta sea
+     * estable entre llamadas.
+     * </p>
+     *
+     * @param movie entidad a convertir (con sesión de Hibernate abierta)
+     * @return DTO con los datos de la película y sus géneros
+     */
+    public static MovieResponse toResponse(Movie movie) {
+
+        Set<GenreResponse> genres = movie.getGenres().stream()
+                .map(GenreMapper::toResponse)
+                .sorted(Comparator.comparing(GenreResponse::name))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        return new MovieResponse(
+                movie.getId(),
+                movie.getTitle(),
+                movie.getDescription(),
+                movie.getDuration(),
+                movie.getReleaseYear(),
+                movie.getImageUrl(),
+                movie.getVideoUrl(),
+                movie.getCreatedAt(),
+                genres);
+    }
+
+    /**
+     * Convierte una lista de películas en una lista de DTO.
+     *
+     * @param movies películas a convertir (con sesión de Hibernate abierta)
+     * @return lista de DTO en el mismo orden
      */
     public static List<MovieResponse> toResponseList(List<Movie> movies) {
 
         return movies.stream()
                 .map(MovieMapper::toResponse)
                 .toList();
+    }
+
+    private static void copyFields(MovieRequest request, Movie movie) {
+
+        movie.setTitle(request.title());
+        movie.setDescription(request.description());
+        movie.setDuration(request.duration());
+        movie.setReleaseYear(request.releaseYear());
+        movie.setImageUrl(request.imageUrl());
+        movie.setVideoUrl(request.videoUrl());
     }
 }

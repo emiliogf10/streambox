@@ -113,6 +113,11 @@ La base de todos los endpoints es `/api`.
 | `GET` | `/api/genres` | `USER`, `ADMIN` | Lista completa de géneros disponibles |
 | `POST` | `/api/genres` | `ADMIN` | Alta de nuevo género cinematográfico |
 
+### 5. Operación
+| Método | Endpoint | Acceso | Descripción |
+| :--- | :--- | :---: | :--- |
+| `GET` | `/actuator/health` | Público | Estado de la aplicación y de la base de datos |
+
 ---
 
 ## ⚙️ Configuración y Ejecución
@@ -137,7 +142,7 @@ Configura las siguientes variables de entorno en tu sistema o en tu IDE:
 | Perfil | Cuándo | Qué hace |
 | :--- | :--- | :--- |
 | `dev` (por defecto) | Desarrollo local | `ddl-auto=update`, SQL visible en el log, Swagger activado |
-| `prod` | Producción (`SPRING_PROFILES_ACTIVE=prod`) | `ddl-auto=validate`, sin SQL en logs, Swagger desactivado, errores sin detalles. Requiere `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` y `JWT_SECRET` |
+| `prod` | Producción (`SPRING_PROFILES_ACTIVE=prod`) | logs en formato JSON (ECS), sin SQL en logs, Swagger desactivado, errores sin detalles. Requiere `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` y `JWT_SECRET` |
 | `test` | Lo activan los tests (`@ActiveProfiles("test")`) | H2 en memoria y un secreto JWT fijo de pruebas: **no necesitas definir `JWT_SECRET` para ejecutar los tests** |
 
 > Alternativamente, puedes crear un archivo `application-local.properties` dentro de `streambox/src/main/resources/` (ignorado en Git) para sobreescribir las credenciales locales de la base de datos o el secreto JWT.
@@ -149,6 +154,16 @@ El esquema lo gestiona **Flyway** (`streambox/src/main/resources/db/migration`).
 - Para cambiar el modelo: modifica la entidad **y** añade una migración nueva (`V2__descripcion.sql`). Nunca edites una migración ya aplicada: Flyway lo detecta y no arranca.
 - Una base de datos creada antes de Flyway (con `ddl-auto=update`) se adopta automáticamente: `V1` es idempotente.
 - Para crear el primer administrador define `ADMIN_EMAIL` y `ADMIN_PASSWORD` (el registro público siempre crea usuarios `USER`).
+
+### Comprobaciones de salud (Actuator)
+
+| Endpoint | Acceso | Para qué sirve |
+| :--- | :---: | :--- |
+| `GET /actuator/health` | Público | Estado general (`UP` / `DOWN`), incluye la conexión a la base de datos |
+| `GET /actuator/health/liveness` | Público | El proceso está vivo (para reiniciarlo si deja de responder) |
+| `GET /actuator/health/readiness` | Público | Listo para recibir tráfico (para balanceadores y orquestadores) |
+
+Solo se exponen `health` e `info`; el resto de endpoints de Actuator (`env`, `beans`, `heapdump`...) no existen. La salud nunca muestra detalles (solo el estado), para no revelar la infraestructura. `/actuator/info` requiere token.
 
 ### Protección contra abuso
 
@@ -224,15 +239,20 @@ El proyecto cuenta con suites de pruebas de integración (`*IntegrationTest`) qu
 
 ---
 
-## 🤖 Sistema de Agentes Especializados (Antigravity)
+## 🤖 Desarrollo asistido con Claude Code
 
-El desarrollo del proyecto está respaldado por un equipo de **Custom Agents** configurados exclusivamente a nivel de workspace en `.agents/agents/`:
+El proyecto está preparado para trabajar con [Claude Code](https://claude.com/claude-code):
 
-- **`orchestrator`**: Coordinador general y arquitecto de la solución.
-- **`backend`**: Implementación de controladores, servicios, DTOs y mappers.
-- **`database`**: Modelado relacional, entidades JPA, índices y optimizaciones SQL.
-- **`security`**: Blindaje de rutas, filtros JWT, autenticación y prevención de vulnerabilidades.
-- **`frontend`**: Aplicaci.n cliente SPA en React, Vite y Tailwind CSS (implementada) (UI/UX, componentes y consumo de la API).
-- **`qa`**: Diseño y ejecución de baterías de pruebas, aseguramiento de contratos y reporte de incidencias.
+- **`CLAUDE.md`** (raíz): contexto y reglas del proyecto que Claude lee al empezar: arquitectura, convenciones, comandos, reglas de Flyway y de seguridad, cómo ejecutar los tests y dónde está el plan de acción.
+- **`.claude/agents/`**: un equipo de agentes con un **orquestador** como sesión principal (se activa con `.claude/settings.json`). El orquestador divide cada petición en subtareas y delega en el especialista adecuado; una tarea de una sola área (por ejemplo, solo frontend) va directa a su agente:
 
+| Agente | Función |
+| :--- | :--- |
+| `orchestrator` | Principal: divide la petición, delega, ordena dependencias, verifica los resultados y actualiza el plan |
+| `backend` | Controladores, servicios, DTOs, mappers, excepciones y sus tests |
+| `database` | Entidades JPA, migraciones Flyway, índices, restricciones y rendimiento de consultas |
+| `security` | JWT, roles, rate limiting, ownership de recursos y configuración segura |
+| `qa` | Revisión independiente y tests; solo escribe en `streambox/src/test/` |
+| `frontend` | React, Vite y Tailwind: UI/UX, accesibilidad y consumo de la API |
 
+Un subagente no puede lanzar a otros, por eso el orquestador se ejecuta como sesión principal y los demás son sus especialistas. Para trabajar sin delegar basta con pedirlo ("hazlo tú directamente") o quitar `agent` de `.claude/settings.json`.

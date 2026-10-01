@@ -1,7 +1,7 @@
 package com.emilio.streambox.security;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -46,7 +46,7 @@ public class SecurityErrorResponseWriter {
             String message) throws IOException {
 
         ErrorResponse error = new ErrorResponse(
-                LocalDateTime.now(),
+                Instant.now(),
                 status.value(),
                 status.getReasonPhrase(),
                 code,

@@ -6,7 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
@@ -311,7 +311,7 @@ class FavoritesControllerIntegrationTest {
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode("password123"));
         user.setRole(role);
-        user.setCreatedAt(LocalDateTime.now());
+        user.setCreatedAt(Instant.now());
         return userRepository.save(user);
     }
 
@@ -327,7 +327,7 @@ class FavoritesControllerIntegrationTest {
         movie.setReleaseYear(2000);
         movie.setImageUrl("https://example.com/image.jpg");
         movie.setVideoUrl("https://example.com/video.mp4");
-        movie.setCreatedAt(LocalDateTime.now());
+        movie.setCreatedAt(Instant.now());
         movie.setGenres(Set.of(genre));
         return movieRepository.save(movie);
     }

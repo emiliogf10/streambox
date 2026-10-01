@@ -2,21 +2,17 @@ package com.emilio.streambox.controller;
 
 import java.util.List;
 
-import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.emilio.streambox.dto.CreateUserRequest;
-import com.emilio.streambox.dto.MovieResponse;
 import com.emilio.streambox.dto.UserResponse;
-import com.emilio.streambox.mapper.MovieMapper;
-import com.emilio.streambox.mapper.UserMapper;
 import com.emilio.streambox.security.AuthenticatedUser;
 import com.emilio.streambox.service.UserService;
 
@@ -27,19 +23,12 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 
 /**
- * Controlador REST encargado de gestionar las operaciones relacionadas
- * con los usuarios de Streambox.
+ * Controlador REST de las cuentas de usuario ({@code /api/users}).
  *
  * <p>
- * Expone los endpoints disponibles bajo la ruta
- * {@code /api/users} y delega la lógica de negocio en
- * {@link UserService}.
- * </p>
- *
- * <p>
- * El registro de nuevos usuarios no requiere autenticación. El resto
- * de operaciones están protegidas mediante autenticación JWT y,
- * dependiendo del endpoint, pueden requerir permisos de administrador.
+ * El registro de nuevos usuarios es público; consultar el propio perfil
+ * requiere estar autenticado y listar todos los usuarios, ser administrador.
+ * La lista de favoritos está en {@link FavoriteController}.
  * </p>
  */
 @RestController
@@ -49,32 +38,24 @@ public class UserController {
     private final UserService userService;
 
     /**
-     * Crea una instancia del controlador de usuarios.
+     * Crea el controlador de usuarios.
      *
-     * @param userService servicio encargado de gestionar la lógica
-     *                    relacionada con los usuarios
+     * @param userService servicio con la lógica de las cuentas
      */
     public UserController(UserService userService) {
         this.userService = userService;
     }
 
     /**
-     * Obtiene los datos del usuario actualmente autenticado.
+     * Obtiene los datos del usuario autenticado.
      *
      * <p>
-     * Spring Security proporciona la información del usuario autenticado
-     * mediante el objeto {@link Authentication}. El {@code principal}
-     * contiene la entidad {@link User} establecida por
-     * {@link com.emilio.streambox.security.JwtAuthenticationFilter}.
+     * El usuario se identifica por el token JWT: Spring Security entrega el
+     * {@link AuthenticatedUser} que estableció el filtro de autenticación.
      * </p>
      *
-     * <p>
-     * Este endpoint requiere que el usuario esté autenticado mediante
-     * un token JWT válido.
-     * </p>
-     *
-     * @param authentication información de autenticación de la petición actual
-     * @return datos del usuario autenticado
+     * @param principal usuario autenticado de la petición actual
+     * @return datos del usuario
      */
     @GetMapping("/me")
     @SecurityRequirement(name = "bearerAuth")
@@ -82,176 +63,17 @@ public class UserController {
             + "al token JWT utilizado en la petición.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Usuario obtenido correctamente"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado")
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado")
     })
-    public UserResponse getCurrentUser(Authentication authentication) {
+    public UserResponse getCurrentUser(@AuthenticationPrincipal AuthenticatedUser principal) {
 
-        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
-
-        return UserMapper.toResponse(userService.getUserById(principal.id()));
+        return userService.getUserById(principal.id());
     }
 
     /**
-     * Obtiene las películas incluidas en la lista del usuario autenticado.
+     * Lista todos los usuarios registrados (solo administradores).
      *
-     * @param authentication información de autenticación de la petición actual
-     * @return lista de películas favoritas del usuario autenticado
-     */
-    @GetMapping("/me/favorites")
-    @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Obtiene mi lista", description = "Devuelve las películas favoritas del usuario autenticado.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Lista obtenida correctamente"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado")
-    })
-    public List<MovieResponse> getFavoriteMovies(Authentication authentication) {
-
-        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
-
-        return MovieMapper.toResponseList(userService.getFavoriteMovies(principal.id()));
-    }
-
-    /**
-     * Añade una película a la lista del usuario autenticado.
-     *
-     * @param movieId identificador de la película que se desea añadir
-     * @param authentication información de autenticación de la petición actual
-     */
-    @PostMapping("/me/favorites/{movieId}")
-    @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Añade una película a mi lista", description = "Añade una película a los favoritos del usuario autenticado.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "204", description = "Película añadida correctamente"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado"),
-            @ApiResponse(responseCode = "404", description = "Película no encontrada")
-    })
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
-    public void addMovieToFavorites(
-            @PathVariable Long movieId,
-            Authentication authentication) {
-
-        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
-        userService.addMovieToFavorites(principal.id(), movieId);
-    }
-
-    /**
-     * Añade a la lista una película mediante su título exacto.
-     *
-     * <p>
-     * La coincidencia del título no distingue entre mayúsculas y minúsculas.
-     * El título se recibe como parámetro de consulta para preservar los espacios
-     * y caracteres especiales sin incorporarlos a la ruta.
-     * </p>
-     *
-     * @param title          título exacto de la película que se desea añadir
-     * @param authentication información de autenticación de la petición actual
-     */
-    @PostMapping("/me/favorites/by-title")
-    @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Añade una película a mi lista por título", description = "Añade a favoritos una película cuyo título coincide exactamente con el parámetro title, sin distinguir mayúsculas.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "204", description = "Película añadida correctamente"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado"),
-            @ApiResponse(responseCode = "404", description = "No existe una película con el título indicado"),
-            @ApiResponse(responseCode = "409", description = "La película ya está incluida en mi lista")
-    })
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
-    public void addMovieToFavoritesByTitle(
-            @RequestParam String title,
-            Authentication authentication) {
-
-        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
-        userService.addMovieToFavoritesByTitle(principal.id(), title);
-    }
-
-    /**
-     * Elimina una película de la lista del usuario autenticado.
-     *
-     * @param movieId identificador de la película que se desea eliminar
-     * @param authentication información de autenticación de la petición actual
-     */
-    @DeleteMapping("/me/favorites/{movieId}")
-    @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Elimina una película de mi lista", description = "Elimina una película de los favoritos del usuario autenticado.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "204", description = "Película eliminada correctamente"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado"),
-            @ApiResponse(responseCode = "404", description = "Película no encontrada")
-    })
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
-    public void removeMovieFromFavorites(
-            @PathVariable Long movieId,
-            Authentication authentication) {
-
-        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
-        userService.removeMovieFromFavorites(principal.id(), movieId);
-    }
-
-    /**
-     * Elimina de la lista una película mediante su título exacto.
-     *
-     * <p>
-     * La coincidencia del título no distingue entre mayúsculas y minúsculas.
-     * </p>
-     *
-     * @param title          título exacto de la película que se desea eliminar
-     * @param authentication información de autenticación de la petición actual
-     */
-    @DeleteMapping("/me/favorites/by-title")
-    @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Elimina una película de mi lista por título", description = "Elimina de favoritos una película cuyo título coincide exactamente con el parámetro title, sin distinguir mayúsculas.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "204", description = "Película eliminada correctamente"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado"),
-            @ApiResponse(responseCode = "404", description = "La película no existe o no está incluida en mi lista")
-    })
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
-    public void removeMovieFromFavoritesByTitle(
-            @RequestParam String title,
-            Authentication authentication) {
-
-        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
-        userService.removeMovieFromFavoritesByTitle(principal.id(), title);
-    }
-
-    /**
-     * Elimina todas las películas de la lista del usuario autenticado.
-     *
-     * <p>
-     * La operación se completa correctamente aunque la lista ya esté vacía.
-     * </p>
-     *
-     * @param authentication información de autenticación de la petición actual
-     */
-    @DeleteMapping("/me/favorites")
-    @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Vacía mi lista", description = "Elimina de una vez todas las películas favoritas del usuario autenticado.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "204", description = "Lista vaciada correctamente"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado")
-    })
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
-    public void clearFavoriteMovies(Authentication authentication) {
-
-        AuthenticatedUser principal = (AuthenticatedUser) authentication.getPrincipal();
-        userService.clearFavoriteMovies(principal.id());
-    }
-
-    /**
-     * Obtiene todos los usuarios registrados en Streambox.
-     *
-     * <p>
-     * Las entidades {@link User} obtenidas desde el servicio se
-     * convierten en {@link UserResponse} antes de devolverlas al cliente,
-     * evitando exponer directamente las entidades JPA.
-     * </p>
-     *
-     * <p>
-     * Este endpoint está restringido a usuarios con rol
-     * {@code ADMIN}.
-     * </p>
-     *
-     * @return lista de usuarios representados mediante {@link UserResponse}
+     * @return usuarios registrados
      */
     @GetMapping
     @SecurityRequirement(name = "bearerAuth")
@@ -259,43 +81,33 @@ public class UserController {
             + "Este endpoint requiere permisos de administrador.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Usuarios obtenidos correctamente"),
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador")
     })
     public List<UserResponse> getUsers() {
 
-        return UserMapper.toResponseList(
-                userService.getAllUsers());
+        return userService.getAllUsers();
     }
 
     /**
-     * Crea un nuevo usuario en Streambox.
+     * Registra un usuario nuevo (público). Siempre se crea con rol {@code USER}.
      *
-     * <p>
-     * El cuerpo de la petición se valida mediante {@link Valid} y se pasa
-     * directamente al servicio, que es el responsable de construir la entidad
-     * JPA, cifrar la contraseña y asignar el rol y la fecha de creación.
-     * </p>
-     *
-     * <p>
-     * Este endpoint no requiere autenticación, ya que permite a nuevos
-     * usuarios registrarse en la plataforma.
-     * </p>
-     *
-     * @param request datos necesarios para crear el usuario
-     * @return información del usuario creado
+     * @param request datos de registro
+     * @return la cuenta creada
      */
     @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Registra un nuevo usuario", description = "Crea una nueva cuenta de usuario en Streambox. "
             + "No requiere autenticación.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Usuario creado correctamente"),
-            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos")
+            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
+            @ApiResponse(responseCode = "409", description = "El nombre de usuario o el correo ya están en uso"),
+            @ApiResponse(responseCode = "429", description = "Demasiados registros desde esta IP; "
+                    + "ver cabecera Retry-After")
     })
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.CREATED)
-    public UserResponse createUser(
-            @Valid @RequestBody CreateUserRequest request) {
+    public UserResponse createUser(@Valid @RequestBody CreateUserRequest request) {
 
-        return UserMapper.toResponse(
-                userService.saveUser(request));
+        return userService.registerUser(request);
     }
 }

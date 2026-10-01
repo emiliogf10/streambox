@@ -4,80 +4,47 @@ import java.util.List;
 
 import org.springframework.data.domain.Page;
 
-import com.emilio.streambox.entity.Movie;
-import com.emilio.streambox.mapper.MovieMapper;
-
-import lombok.Getter;
-import lombok.Setter;
-
 /**
- * DTO utilizado para representar una respuesta paginada de películas.
+ * DTO con una página de películas y los datos necesarios para paginar.
  *
  * <p>
- * Contiene las películas de la página actual junto con la información
- * necesaria para conocer el estado de la paginación.
+ * Se usa en lugar de serializar directamente un {@link Page} de Spring Data
+ * para controlar el formato del contrato JSON de la API.
  * </p>
+ *
+ * @param content       películas de la página actual
+ * @param page          número de la página actual (empieza en 0)
+ * @param size          tamaño de página solicitado
+ * @param totalElements número total de películas que cumplen la búsqueda
+ * @param totalPages    número total de páginas
+ * @param hasNext       {@code true} si existe una página siguiente
+ * @param hasPrevious   {@code true} si existe una página anterior
  */
-@Getter
-@Setter
-public class MoviePageResponse {
+public record MoviePageResponse(
+        List<MovieResponse> content,
+        int page,
+        int size,
+        long totalElements,
+        int totalPages,
+        boolean hasNext,
+        boolean hasPrevious) {
 
     /**
-     * Películas correspondientes a la página actual.
-     */
-    private List<MovieResponse> content;
-
-    /**
-     * Número de la página actual.
-     */
-    private int page;
-
-    /**
-     * Número de elementos solicitados por página.
-     */
-    private int size;
-
-    /**
-     * Número total de películas que cumplen los filtros.
-     */
-    private long totalElements;
-
-    /**
-     * Número total de páginas disponibles.
-     */
-    private int totalPages;
-
-    /**
-     * Indica si existe una página posterior a la actual.
-     */
-    private boolean hasNext;
-
-    /**
-     * Indica si existe una página anterior a la actual.
-     */
-    private boolean hasPrevious;
-
-    /**
-     * Convierte una página de entidades {@link Movie} en una respuesta
-     * paginada de películas.
+     * Construye la respuesta a partir de una página de Spring Data ya
+     * convertida a DTOs.
      *
-     * @param moviePage página de películas obtenida desde el repositorio
-     * @return DTO con las películas y la información de paginación
+     * @param moviePage página de películas ya transformadas a {@link MovieResponse}
+     * @return respuesta paginada lista para devolver al cliente
      */
-    public static MoviePageResponse from(Page<Movie> moviePage) {
+    public static MoviePageResponse from(Page<MovieResponse> moviePage) {
 
-        MoviePageResponse response = new MoviePageResponse();
-
-        response.setContent(
-                MovieMapper.toResponseList(moviePage.getContent()));
-
-        response.setPage(moviePage.getNumber());
-        response.setSize(moviePage.getSize());
-        response.setTotalElements(moviePage.getTotalElements());
-        response.setTotalPages(moviePage.getTotalPages());
-        response.setHasNext(moviePage.hasNext());
-        response.setHasPrevious(moviePage.hasPrevious());
-
-        return response;
+        return new MoviePageResponse(
+                moviePage.getContent(),
+                moviePage.getNumber(),
+                moviePage.getSize(),
+                moviePage.getTotalElements(),
+                moviePage.getTotalPages(),
+                moviePage.hasNext(),
+                moviePage.hasPrevious());
     }
 }

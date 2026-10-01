@@ -1,68 +1,35 @@
 package com.emilio.streambox.dto;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Set;
 
-import com.emilio.streambox.entity.Movie;
-
-import lombok.Getter;
-import lombok.Setter;
-
 /**
- * DTO utilizado para representar una película en las respuestas
- * de la API de Streambox.
+ * DTO con los datos de una película que se devuelven al cliente.
  *
  * <p>
- * Permite controlar qué información de la entidad {@link Movie}
- * se expone al cliente de la API.
+ * Es un {@code record}: inmutable y sin código repetitivo. Se construye
+ * dentro de los servicios, mientras la transacción sigue abierta, con
+ * {@link com.emilio.streambox.mapper.MovieMapper#toResponse}.
  * </p>
+ *
+ * @param id          identificador de la película
+ * @param title       título
+ * @param description sinopsis
+ * @param duration    duración en minutos
+ * @param releaseYear año de estreno
+ * @param imageUrl    URL de la portada
+ * @param videoUrl    URL del vídeo
+ * @param createdAt   instante en el que se registró la película
+ * @param genres      géneros de la película, ordenados por nombre
  */
-@Getter
-@Setter
-public class MovieResponse {
-
-    /**
-     * Identificador único de la película.
-     */
-    private Long id;
-
-    /**
-     * Título de la película.
-     */
-    private String title;
-
-    /**
-     * Descripción o sinopsis de la película.
-     */
-    private String description;
-
-    /**
-     * Duración de la película expresada en minutos.
-     */
-    private Integer duration;
-
-    /**
-     * Año en el que se estrenó la película.
-     */
-    private Integer releaseYear;
-
-    /**
-     * URL de la imagen utilizada como portada de la película.
-     */
-    private String imageUrl;
-
-    /**
-     * URL desde la que se puede acceder al vídeo de la película.
-     */
-    private String videoUrl;
-
-    /**
-     * Fecha y hora en la que la película fue registrada en Streambox.
-     */
-    private LocalDateTime createdAt;
-
-    /**
-     * Géneros asociados a la película.
-     */
-    private Set<GenreResponse> genres;
+public record MovieResponse(
+        Long id,
+        String title,
+        String description,
+        Integer duration,
+        Integer releaseYear,
+        String imageUrl,
+        String videoUrl,
+        Instant createdAt,
+        Set<GenreResponse> genres) {
 }

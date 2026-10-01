@@ -18,7 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -54,7 +54,7 @@ class GenreControllerIntegrationTest {
         admin.setEmail("admingenre@test.com");
         admin.setPassword(passwordEncoder.encode("adminpass1"));
         admin.setRole(Role.ADMIN);
-        admin.setCreatedAt(LocalDateTime.now());
+        admin.setCreatedAt(Instant.now());
         adminToken = "Bearer " + jwtService.generateToken(userRepository.save(admin));
 
         User user = new User();
@@ -62,7 +62,7 @@ class GenreControllerIntegrationTest {
         user.setEmail("usergenre@test.com");
         user.setPassword(passwordEncoder.encode("userpass1"));
         user.setRole(Role.USER);
-        user.setCreatedAt(LocalDateTime.now());
+        user.setCreatedAt(Instant.now());
         userToken = "Bearer " + jwtService.generateToken(userRepository.save(user));
     }
 

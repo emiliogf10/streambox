@@ -7,56 +7,43 @@ import com.emilio.streambox.dto.GenreResponse;
 import com.emilio.streambox.entity.Genre;
 
 /**
- * Clase encargada de realizar las conversiones entre la entidad
- * {@link Genre} y los DTO utilizados por la API.
+ * Convierte entre la entidad {@link Genre} y los DTO de la API.
  */
-public class GenreMapper {
+public final class GenreMapper {
 
-    /**
-     * Constructor privado para evitar la creación de instancias.
-     */
     private GenreMapper() {
-        // Evita instanciar la clase
+        // Clase de utilidad: no se instancia
     }
 
     /**
-     * Convierte una petición de creación de género en una entidad
-     * {@link Genre}.
+     * Crea una entidad nueva a partir de los datos recibidos.
      *
-     * @param request datos recibidos desde la API
-     * @return entidad Genre creada a partir de los datos recibidos
+     * @param request datos del género recibidos del cliente
+     * @return entidad {@link Genre} sin guardar
      */
     public static Genre toEntity(CreateGenreRequest request) {
 
         Genre genre = new Genre();
-
         genre.setName(request.getName());
-
         return genre;
     }
 
     /**
-     * Convierte una entidad {@link Genre} en un {@link GenreResponse}.
+     * Convierte un género en el DTO que se devuelve al cliente.
      *
-     * @param genre entidad que se desea convertir
-     * @return DTO con los datos del género
+     * @param genre entidad a convertir
+     * @return DTO con el identificador y el nombre del género
      */
     public static GenreResponse toResponse(Genre genre) {
 
-        GenreResponse response = new GenreResponse();
-
-        response.setId(genre.getId());
-        response.setName(genre.getName());
-
-        return response;
+        return new GenreResponse(genre.getId(), genre.getName());
     }
 
     /**
-     * Convierte una lista de entidades Genre en una lista
-     * de {@link GenreResponse}.
+     * Convierte una lista de géneros en una lista de DTO.
      *
-     * @param genres lista de géneros
-     * @return lista de DTOs correspondientes a los géneros
+     * @param genres géneros a convertir
+     * @return lista de DTO en el mismo orden
      */
     public static List<GenreResponse> toResponseList(List<Genre> genres) {
 

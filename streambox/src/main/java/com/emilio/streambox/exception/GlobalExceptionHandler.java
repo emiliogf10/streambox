@@ -1,6 +1,6 @@
 package com.emilio.streambox.exception;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -272,7 +272,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpStatus status, ErrorCode code, String message,
             HttpServletRequest request, Map<String, String> validationErrors) {
         ErrorResponse error = new ErrorResponse(
-                LocalDateTime.now(), status.value(), status.getReasonPhrase(),
+                Instant.now(), status.value(), status.getReasonPhrase(),
                 code, message, request.getRequestURI(), validationErrors);
         return ResponseEntity.status(status).body(error);
     }
@@ -282,7 +282,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpStatus status, ErrorCode code, String message, WebRequest request,
             HttpHeaders headers, Map<String, String> validationErrors) {
         ErrorResponse error = new ErrorResponse(
-                LocalDateTime.now(), status.value(), status.getReasonPhrase(),
+                Instant.now(), status.value(), status.getReasonPhrase(),
                 code, message, path(request), validationErrors);
         return ResponseEntity.status(status).headers(headers).body(error);
     }

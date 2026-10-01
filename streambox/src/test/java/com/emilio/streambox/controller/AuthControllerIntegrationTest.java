@@ -5,7 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -45,7 +45,7 @@ class AuthControllerIntegrationTest {
         user.setEmail("loginuser@test.com");
         user.setPassword(passwordEncoder.encode("correct-password"));
         user.setRole(Role.USER);
-        user.setCreatedAt(LocalDateTime.now());
+        user.setCreatedAt(Instant.now());
         userRepository.save(user);
     }
 

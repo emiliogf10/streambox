@@ -1,13 +1,13 @@
 package com.emilio.streambox.controller;
 
-import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,16 +16,13 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.emilio.streambox.dto.CreateMovieRequest;
 import com.emilio.streambox.dto.MoviePageResponse;
+import com.emilio.streambox.dto.MovieRequest;
 import com.emilio.streambox.dto.MovieResponse;
-import com.emilio.streambox.dto.UpdateMovieRequest;
-import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.exception.InvalidParameterException;
-import com.emilio.streambox.exception.MovieNotFoundException;
-import com.emilio.streambox.mapper.MovieMapper;
 import com.emilio.streambox.service.MovieService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -37,17 +34,18 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
 /**
- * Controlador REST encargado de gestionar las operaciones relacionadas
- * con las películas de Streambox.
+ * Controlador REST del catálogo de películas ({@code /api/movies}).
  *
  * <p>
- * Recibe las peticiones HTTP relacionadas con las películas y delega
- * la lógica de negocio en {@link MovieService}.
+ * Consultar el catálogo está permitido a cualquier usuario autenticado;
+ * crear, modificar o borrar películas, solo a administradores (regla definida
+ * en {@code SecurityConfig}). Recibe y devuelve únicamente DTOs: la lógica y
+ * el acceso a datos están en {@link MovieService}.
  * </p>
  */
 @SecurityRequirement(name = "bearerAuth")
 @RestController
-@org.springframework.validation.annotation.Validated
+@Validated
 @RequestMapping("/api/movies")
 public class MovieController {
 
@@ -62,78 +60,67 @@ public class MovieController {
     private final MovieService movieService;
 
     /**
-     * Crea una instancia del controlador de películas.
+     * Crea el controlador de películas.
      *
-     * @param movieService servicio encargado de gestionar la lógica
-     *                     de negocio de las películas
+     * @param movieService servicio con la lógica del catálogo
      */
     public MovieController(MovieService movieService) {
         this.movieService = movieService;
     }
 
     /**
-     * Obtiene todas las películas almacenadas en Streambox de forma paginada.
+     * Obtiene el catálogo completo de forma paginada.
      *
      * @param page número de página, comenzando desde 0
-     * @param size número máximo de películas por página
-     * @param sort campo utilizado para ordenar los resultados
-     * @return respuesta paginada con todas las películas
+     * @param size número de películas por página (1 a 100)
+     * @param sort campo de ordenación (ver {@link #SORTABLE_FIELDS})
+     * @return página de películas
      */
     @GetMapping
     @Operation(summary = "Obtiene todas las películas", description = "Devuelve de forma paginada todas las películas almacenadas "
             + "en Streambox.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Películas obtenidas correctamente"),
-            @ApiResponse(responseCode = "400", description = "Parámetros de paginación inválidos"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado")
+            @ApiResponse(responseCode = "400", description = "Parámetros de paginación u ordenación inválidos"),
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado")
     })
     public MoviePageResponse getMovies(
-            @RequestParam(defaultValue = "0")  @Min(value = 0,   message = "La página no puede ser negativa") int page,
-            @RequestParam(defaultValue = "10") @Min(value = 1,   message = "El tamaño mínimo de página es 1")
-                                               @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
+            @RequestParam(defaultValue = "0") @Min(value = 0, message = "La página no puede ser negativa") int page,
+            @RequestParam(defaultValue = "10") @Min(value = 1, message = "El tamaño mínimo de página es 1")
+            @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
             @RequestParam(defaultValue = "title") String sort) {
 
-        Pageable pageable = buildPageable(page, size, sort);
-
-        Page<Movie> moviePage = movieService.getMovies(pageable);
-
-        return MoviePageResponse.from(moviePage);
+        return MoviePageResponse.from(
+                movieService.getMovies(buildPageable(page, size, sort)));
     }
 
     /**
-     * Obtiene una película mediante su identificador.
+     * Obtiene una película por su identificador.
      *
-     * @param id identificador de la película que se desea consultar
-     * @return película correspondiente al identificador proporcionado
+     * @param id identificador de la película
+     * @return la película con sus géneros
      */
     @GetMapping("/{id}")
     @Operation(summary = "Obtiene una película por ID", description = "Devuelve la información completa de una película "
             + "incluyendo los géneros asociados.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Película encontrada"),
-            @ApiResponse(responseCode = "404", description = "Película no encontrada"),
-            @ApiResponse(responseCode = "403", description = "El usuario no está autenticado")
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
+            @ApiResponse(responseCode = "404", description = "Película no encontrada")
     })
     public MovieResponse getMovieById(@PathVariable Long id) {
 
-        Movie movie = movieService.getMovieById(id);
-
-        return MovieMapper.toResponse(movie);
+        return movieService.getMovieById(id);
     }
 
     /**
-     * Crea una nueva película en Streambox.
+     * Crea una película (solo administradores).
      *
-     * <p>
-     * Los datos recibidos mediante la petición se convierten
-     * en una entidad {@link Movie} antes de ser almacenados.
-     * </p>
-     *
-     * @param request datos de la película que se desea crear
+     * @param request datos de la película y de sus géneros
      * @return película creada
      */
     @PostMapping
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.CREATED)
+    @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Crea una película", description = "Crea una nueva película en Streambox, asociándola a "
             + "los géneros indicados. Este endpoint requiere permisos de administrador.")
     @ApiResponses({
@@ -143,28 +130,42 @@ public class MovieController {
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
             @ApiResponse(responseCode = "404", description = "Uno o más géneros no existen")
     })
-    public MovieResponse createMovie(
-            @Valid @RequestBody CreateMovieRequest request) {
+    public MovieResponse createMovie(@Valid @RequestBody MovieRequest request) {
 
-        Movie movie = MovieMapper.toEntity(request);
-
-        Movie savedMovie = movieService.saveMovie(movie, request.getGenreIds());
-
-        return MovieMapper.toResponse(savedMovie);
+        return movieService.createMovie(request);
     }
 
     /**
-     * Elimina una película existente.
+     * Modifica una película existente (solo administradores).
      *
-     * <p>
-     * La eliminación se realiza mediante el identificador proporcionado
-     * en la URL.
-     * </p>
+     * @param id      identificador de la película
+     * @param request datos nuevos (sustituyen a los anteriores)
+     * @return película modificada
+     */
+    @PutMapping("/{id}")
+    @Operation(summary = "Modifica una película", description = "Actualiza los datos de una película existente "
+            + "y sus géneros asociados. Requiere rol ADMIN.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Película modificada correctamente"),
+            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
+            @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
+            @ApiResponse(responseCode = "404", description = "Película o género no encontrado")
+    })
+    public MovieResponse updateMovie(
+            @PathVariable Long id,
+            @Valid @RequestBody MovieRequest request) {
+
+        return movieService.updateMovie(id, request);
+    }
+
+    /**
+     * Elimina una película (solo administradores).
      *
-     * @param id identificador de la película que se desea eliminar
+     * @param id identificador de la película
      */
     @DeleteMapping("/{id}")
-    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "Elimina una película", description = "Elimina de Streambox la película correspondiente "
             + "al ID indicado. La película se retira automáticamente de todos los favoritos. Requiere rol ADMIN.")
     @ApiResponses({
@@ -179,53 +180,19 @@ public class MovieController {
     }
 
     /**
-     * Modifica una película existente.
+     * Busca películas combinando filtros opcionales, de forma paginada.
      *
      * <p>
-     * Los datos recibidos se utilizan para actualizar la película
-     * identificada mediante el ID proporcionado en la URL.
-     * </p>
-     *
-     * @param id      identificador de la película que se desea modificar
-     * @param request datos actualizados de la película
-     * @return película modificada
-     * @throws MovieNotFoundException si no existe la película indicada
-     */
-    @PutMapping("/{id}")
-    @Operation(summary = "Modifica una película", description = "Actualiza los datos de una película existente "
-            + "y sus géneros asociados.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Película modificada correctamente"),
-            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
-            @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
-            @ApiResponse(responseCode = "404", description = "Película o género no encontrado")
-    })
-    public MovieResponse updateMovie(
-            @PathVariable Long id,
-            @Valid @RequestBody UpdateMovieRequest request) {
-
-        Movie updatedMovie = movieService.updateMovie(id, request);
-
-        return MovieMapper.toResponse(updatedMovie);
-    }
-
-    /**
-     * Busca películas utilizando filtros opcionales y devuelve
-     * los resultados de forma paginada.
-     *
-     * <p>
-     * Se pueden combinar los filtros de título, género y año
-     * de lanzamiento. Los parámetros que no se proporcionen
-     * no se utilizan como criterio de búsqueda.
+     * Los parámetros que no se indican no se usan como criterio.
      * </p>
      *
      * @param title       texto que debe contener el título
      * @param genreId     identificador del género
      * @param releaseYear año de lanzamiento
      * @param page        número de página, comenzando desde 0
-     * @param size        número máximo de películas por página
-     * @param sort        campo utilizado para ordenar los resultados
-     * @return respuesta paginada con las películas encontradas
+     * @param size        número de películas por página (1 a 100)
+     * @param sort        campo de ordenación (ver {@link #SORTABLE_FIELDS})
+     * @return página de películas encontradas
      */
     @GetMapping("/search")
     @Operation(summary = "Busca películas", description = "Busca películas aplicando opcionalmente filtros "
@@ -240,24 +207,25 @@ public class MovieController {
             @RequestParam(required = false) String title,
             @RequestParam(required = false) Long genreId,
             @RequestParam(required = false) Integer releaseYear,
-            @RequestParam(defaultValue = "0")  @Min(value = 0,   message = "La página no puede ser negativa") int page,
-            @RequestParam(defaultValue = "10") @Min(value = 1,   message = "El tamaño mínimo de página es 1")
-                                               @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
+            @RequestParam(defaultValue = "0") @Min(value = 0, message = "La página no puede ser negativa") int page,
+            @RequestParam(defaultValue = "10") @Min(value = 1, message = "El tamaño mínimo de página es 1")
+            @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
             @RequestParam(defaultValue = "title") String sort) {
 
-        Pageable pageable = buildPageable(page, size, sort);
-
-        Page<Movie> moviePage = movieService.searchMovies(
-                title,
-                genreId,
-                releaseYear,
-                pageable);
-
-        return MoviePageResponse.from(moviePage);
+        return MoviePageResponse.from(
+                movieService.searchMovies(title, genreId, releaseYear, buildPageable(page, size, sort)));
     }
 
     /**
      * Construye la paginación validando el campo de ordenación.
+     *
+     * <p>
+     * Se añade el {@code id} como criterio secundario: si varias películas
+     * tienen el mismo valor en el campo elegido (por ejemplo el mismo año),
+     * el orden entre ellas sería indefinido y una película podría aparecer en
+     * dos páginas o en ninguna. Con el {@code id} el orden es siempre
+     * determinista.
+     * </p>
      *
      * @param page número de página
      * @param size tamaño de página
@@ -274,7 +242,11 @@ public class MovieController {
                             + String.join(", ", new TreeSet<>(SORTABLE_FIELDS)));
         }
 
-        return PageRequest.of(page, size, Sort.by(sort).ascending());
-    }
+        Sort ordering = Sort.by(sort).ascending();
+        if (!"id".equals(sort)) {
+            ordering = ordering.and(Sort.by("id").ascending());
+        }
 
+        return PageRequest.of(page, size, ordering);
+    }
 }

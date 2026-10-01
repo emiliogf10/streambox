@@ -5,7 +5,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Date;
 
 import javax.crypto.SecretKey;
@@ -220,7 +220,7 @@ class JwtAuthenticationIntegrationTest {
         u.setEmail(name + "@test.com");
         u.setPassword(passwordEncoder.encode("password123"));
         u.setRole(role);
-        u.setCreatedAt(LocalDateTime.now());
+        u.setCreatedAt(Instant.now());
         return userRepository.save(u);
     }
 
