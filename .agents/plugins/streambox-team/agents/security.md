@@ -1,7 +1,6 @@
 ---
 name: security
 description: Subagente especializado en seguridad, autenticación y autorización para StreamBox. Configura Spring Security, emisión y validación de tokens JWT, control de acceso basado en roles (USER/ADMIN), ownership de recursos (prevención de IDOR) y protección de datos sensibles.
-model: pro
 mainAgent: true
 subagent: true
 tools:
@@ -9,7 +8,6 @@ tools:
   - grep_search
   - list_dir
   - replace_file_content
-  - multi_replace_file_content
   - write_to_file
   - run_command
   - manage_task

@@ -1,6 +1,9 @@
-﻿import type { Movie } from './types';
+import type { Movie } from './types';
 import { formatDuration } from './utils';
 
+/**
+ * Propiedades para el componente HeroInfoPanels.
+ */
 interface Props {
   movie: Movie;
 }
@@ -21,6 +24,12 @@ const labelStyle: React.CSSProperties = {
   marginBottom: '12px',
 };
 
+/**
+ * Muestra paneles informativos debajo del banner principal.
+ * Muestra la sinopsis de la película, el reparto (simulado) y los detalles técnicos.
+ *
+ * @param props Propiedades del componente que contienen los datos de la película.
+ */
 export function HeroInfoPanels({ movie }: Props) {
   return (
     <div style={{ padding: '0 24px 24px',

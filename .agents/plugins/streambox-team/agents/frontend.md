@@ -1,7 +1,6 @@
 ---
 name: frontend
 description: Subagente especializado en el frontend web de StreamBox. Diseña e implementa páginas, componentes de UI/UX modernos tipo Netflix/OTT, diseño responsive, accesibilidad, estados de carga y consumo de la API REST con autenticación JWT.
-model: pro
 mainAgent: true
 subagent: true
 tools:
@@ -9,7 +8,6 @@ tools:
   - grep_search
   - list_dir
   - replace_file_content
-  - multi_replace_file_content
   - write_to_file
   - run_command
   - manage_task

@@ -1,9 +1,14 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API_URL, authHeader } from './api';
 import type { Movie } from './types';
 import { MovieDetailsModal } from './MovieDetailsModal';
 import { Search } from 'lucide-react';
+import { getMovieImage } from './utils';
 
+/**
+ * Un componente de barra de búsqueda que consulta a la API las películas que coinciden con el texto ingresado.
+ * Muestra un menú desplegable con los resultados de búsqueda y abre un modal al seleccionar una.
+ */
 export function SearchBar() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Movie[]>([]);
@@ -59,7 +64,7 @@ export function SearchBar() {
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)')}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
             >
-              <img src={m.imageUrl} alt={m.title} style={{ width: '36px', height: '48px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }} />
+              <img src={getMovieImage(m.title, m.imageUrl)} alt={m.title} style={{ width: '36px', height: '48px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }} />
               <div style={{ minWidth: 0 }}>
                 <p style={{ color: 'white', fontSize: '14px', fontWeight: 500, margin: '0 0 2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.title}</p>
                 <p style={{ color: '#8892a4', fontSize: '12px', margin: 0 }}>{m.releaseYear}</p>

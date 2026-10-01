@@ -1,12 +1,20 @@
-﻿import type { Movie } from './types';
+import type { Movie } from './types';
 import { MovieCard } from './MovieCard';
 
+/**
+ * Propiedades para el componente MovieRow.
+ */
 interface Props {
   title: string;
   movies: Movie[];
   onSelectMovie: (movie: Movie) => void;
 }
 
+/**
+ * Renderiza una fila desplazable horizontalmente de tarjetas de películas con un título dado.
+ *
+ * @param props Las propiedades del componente que contienen el título, la lista de películas y el manejador de clics.
+ */
 export function MovieRow({ title, movies, onSelectMovie }: Props) {
   if (movies.length === 0) return null;
   return (

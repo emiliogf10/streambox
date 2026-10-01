@@ -1,7 +1,10 @@
-﻿import { Check, Play, Plus } from 'lucide-react';
+import { Check, Play, Plus } from 'lucide-react';
 import type { Movie } from './types';
-import { formatDuration } from './utils';
+import { formatDuration, getMovieImage } from './utils';
 
+/**
+ * Define las propiedades esperadas por el componente HeroBanner.
+ */
 interface Props {
   movie: Movie;
   isFavorite: boolean;
@@ -9,6 +12,12 @@ interface Props {
   onDetails: (movie: Movie) => void;
 }
 
+/**
+ * Renderiza el banner principal destacado para una película.
+ * Incluye el póster de la película, título, metadatos y botones de acción.
+ *
+ * @param props Las propiedades del componente que contienen los datos de la película y los manejadores de eventos.
+ */
 export function HeroBanner({ movie, isFavorite, onToggleFavorite, onDetails }: Props) {
   return (
     <section style={{ padding: '16px 24px 20px' }}>
@@ -16,7 +25,7 @@ export function HeroBanner({ movie, isFavorite, onToggleFavorite, onDetails }: P
 
         {/* Imagen */}
         <img
-          src={movie.imageUrl}
+          src={getMovieImage(movie.title, movie.imageUrl)}
           alt={movie.title}
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
           onError={(e) => { (e.target as HTMLImageElement).style.opacity = '0'; }}

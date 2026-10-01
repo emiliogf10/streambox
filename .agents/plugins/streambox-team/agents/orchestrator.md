@@ -1,7 +1,6 @@
 ---
 name: orchestrator
 description: Agente principal y director de orquestación de StreamBox. Analiza peticiones, inspecciona el estado del repositorio, descompone tareas complejas, delega a los subagentes especializados (backend, database, security, frontend, qa), resuelve dependencias y conflictos, y coordina la validación de calidad final.
-model: pro
 mainAgent: true
 subagent: true
 tools:
@@ -13,6 +12,9 @@ tools:
   - ask_question
   - read_url_content
   - search_web
+  - invoke_subagent
+  - replace_file_content
+  - write_to_file
 ---
 
 # Rol: ORCHESTRATOR de StreamBox

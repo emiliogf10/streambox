@@ -1,7 +1,6 @@
 ---
 name: qa
 description: Subagente especializado en aseguramiento de calidad y pruebas para StreamBox. Diseña casos de prueba, ejecuta suites automáticas (JUnit 5, MockMvc, tests de integración), verifica endpoints REST, autenticación y códigos HTTP, y reporta incidencias estructuradas sin modificar código de producción.
-model: pro
 mainAgent: true
 subagent: true
 tools:

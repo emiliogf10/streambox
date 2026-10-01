@@ -1,7 +1,6 @@
 ---
 name: database
 description: Subagente especializado en persistencia, PostgreSQL, JPA y Hibernate para StreamBox. Modela entidades relacionales, define índices, claves foráneas, restricciones de integridad y optimiza consultas para evitar cuellos de botella como el problema N+1.
-model: pro
 mainAgent: true
 subagent: true
 tools:
@@ -9,7 +8,6 @@ tools:
   - grep_search
   - list_dir
   - replace_file_content
-  - multi_replace_file_content
   - write_to_file
   - run_command
   - manage_task

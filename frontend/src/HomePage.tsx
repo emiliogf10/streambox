@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API_URL, authHeader } from './api';
 import type { Movie } from './types';
@@ -7,6 +7,9 @@ import { HeroInfoPanels } from './HeroInfoPanels';
 import { MovieRow } from './MovieRow';
 import { MovieDetailsModal } from './MovieDetailsModal';
 
+/**
+ * Renderiza un indicador de carga (spinner) para operaciones asíncronas.
+ */
 function Spinner() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -26,6 +29,9 @@ function Spinner() {
   );
 }
 
+/**
+ * Muestra un mensaje de error cuando falla una petición de red o la carga de datos.
+ */
 function ErrorPanel({ message }: { message: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -52,6 +58,9 @@ function ErrorPanel({ message }: { message: string }) {
   );
 }
 
+/**
+ * Renderiza una vista de estado vacío cuando el catálogo de películas no tiene contenido.
+ */
 function EmptyState() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -70,6 +79,10 @@ function EmptyState() {
   );
 }
 
+/**
+ * La página principal de la aplicación.
+ * Obtiene y muestra el catálogo de películas, incluyendo el banner principal y las filas categorizadas.
+ */
 export function HomePage() {
   const [movies, setMovies]       = useState<Movie[]>([]);
   const [favorites, setFavorites] = useState<Set<number>>(new Set());

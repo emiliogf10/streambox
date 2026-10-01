@@ -1,15 +1,24 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { API_URL, authHeader } from './api';
 import type { Movie } from './types';
-import { formatDuration } from './utils';
+import { formatDuration, getMovieImage } from './utils';
 import { Check, Play, Plus, X } from 'lucide-react';
 
+/**
+ * Propiedades para el componente MovieDetailsModal.
+ */
 interface Props {
   movie: Movie;
   onClose: () => void;
   onUpdate?: () => void;
 }
 
+/**
+ * Renderiza un modal superpuesto con información detallada sobre una película específica.
+ * Permite al usuario alternar el estado de favorito de la película.
+ *
+ * @param props Las propiedades, incluyendo la película a mostrar y las funciones de retorno (callbacks).
+ */
 export function MovieDetailsModal({ movie, onClose, onUpdate }: Props) {
   const [isFavorite, setIsFavorite] = useState(false);
   const [toggling, setToggling]     = useState(false);
@@ -56,7 +65,7 @@ export function MovieDetailsModal({ movie, onClose, onUpdate }: Props) {
         </button>
 
         <div style={{ position: 'relative', height: '288px', width: '100%' }}>
-          <img src={movie.imageUrl} alt={movie.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <img src={getMovieImage(movie.title, movie.imageUrl)} alt={movie.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, #161b27 0%, rgba(22,27,39,0.25) 50%, transparent 100%)' }} />
           
           <div style={{ position: 'absolute', bottom: '16px', left: '24px', right: '40px' }}>

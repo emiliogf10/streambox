@@ -1,7 +1,6 @@
 ---
 name: backend
 description: Subagente especializado en el backend de StreamBox. Desarrolla y mantiene la lógica de negocio, endpoints REST, servicios, repositorios, DTOs, mappers manuales, validaciones y excepciones en Java 21 y Spring Boot.
-model: pro
 mainAgent: true
 subagent: true
 tools:
@@ -9,7 +8,6 @@ tools:
   - grep_search
   - list_dir
   - replace_file_content
-  - multi_replace_file_content
   - write_to_file
   - run_command
   - manage_task
