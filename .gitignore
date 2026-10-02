@@ -66,6 +66,3 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 .next/
-
-# Documentación y planes de acción
-docs/

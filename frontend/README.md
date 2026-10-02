@@ -1,47 +1,60 @@
-﻿# StreamBox Frontend
+# StreamBox: frontend
 
-Aplicacin web tipo OTT (estilo Netflix) construida con **React 19**, **Vite**, **TypeScript** y **Tailwind CSS v4**.
+SPA de la plataforma de streaming StreamBox: catálogo de películas, búsqueda,
+registro e inicio de sesión y la lista personal de favoritos. Consume la API
+REST del backend (carpeta `../streambox`).
 
-## Caractersticas Principales
+Stack: React 19, Vite, TypeScript, Tailwind CSS v4 (se configura en
+`src/index.css` con `@theme`, no hay `tailwind.config.js`), `react-router-dom` 7
+y `lucide-react`. Tests con Vitest + Testing Library y Playwright.
 
-- **Diseo OTT Inmersivo**: Interfaz oscura con degradados, hero banner y carruseles horizontales.
-- **Navegacin SPA**: Router integrado para navegar entre el Login, la Home y "Mi Lista".
-- **Autenticacin JWT**: Sistema de login conectado al backend que gestiona y almacena tokens seguros.
-- **Integracin con API Real**: Consume el backend de Spring Boot mediante un proxy configurado en Vite, solucionando problemas de CORS.
-- **Diseo Responsivo y Accesible**: Controles de teclado en modales y diseño adaptable a múltiples resoluciones.
+## Requisitos
 
-## Requisitos Previos
+- Node.js 20.19 o superior (o 22.12+) y npm.
+- Para `npm run dev`, el backend en marcha en `http://localhost:8080`: el proxy
+  de Vite envía `/api` a ese puerto.
 
-- **Node.js** (v18+)
-- Backend de StreamBox corriendo localmente en el puerto `8080`.
+## Comandos
 
-## Scripts de Ejecucin
+Todos se ejecutan desde esta carpeta (`frontend/`):
 
-1. **Instalar dependencias:**
-   ```bash
-   npm install
-   ```
+| Comando | Qué hace |
+| :--- | :--- |
+| `npm install` | Instala las dependencias |
+| `npm run dev` | Servidor de desarrollo en http://localhost:5173 |
+| `npm run build` | Comprueba los tipos (`tsc -b`) y genera `dist/` |
+| `npm run preview` | Sirve `dist/` para probar la compilación |
+| `npm run lint` | Análisis estático con oxlint (todo el proyecto) |
+| `npx oxlint src e2e playwright.config.ts` | Lint explícito del código y de los E2E |
+| `npm run test` | Tests unitarios y de componentes (Vitest, una pasada) |
+| `npm run test:watch` | Vitest en modo vigilancia |
+| `npm run test:e2e` | Tests E2E (Playwright, Chromium) |
 
-2. **Servidor de desarrollo:**
-   ```bash
-   npm run dev
-   ```
-   La aplicacin estarǭ disponible en `http://localhost:5173`. Todas las llamadas a `/api/*` serǭn redirigidas automǭticamente al backend en `localhost:8080`.
+`npm run test:e2e` levanta **su propio backend** (puerto 8099, H2 en memoria) y
+su propio Vite (puerto 5199), así que no toca tu base de datos ni los puertos
+8080 y 5173. Necesita Java 21 y el wrapper de Maven del backend.
 
-3. **Compilacin de produccin:**
-   ```bash
-   npm run build
-   ```
+## Estructura
 
-4. **Verificacin de TypeScript:**
-   ```bash
-   npm run tsc
-   ```
+```
+frontend/
+├── src/
+│   ├── pages/        Pantallas (Home, Login, Register, MyList)
+│   ├── components/   Componentes reutilizables (Navbar, Modal, MoviePoster, estados cargando/vacío/error...)
+│   ├── context/      Estado global: sesión (AuthContext), avisos (ToastContext) y favoritos (FavoritesContext)
+│   ├── hooks/        Hooks propios (useCatalog, useModalDialog, useCountdown...)
+│   ├── lib/          Cliente HTTP central (api.ts), tipos de la API, validación y utilidades
+│   ├── test/         Utilidades compartidas por los tests (render con proveedores, fetch simulado, setup)
+│   ├── index.css     Tailwind v4 y tokens de diseño (@theme)
+│   └── main.tsx      Punto de entrada
+├── e2e/              Tests de Playwright y su soporte (arranque, datos de ejemplo, fixtures)
+├── public/           Archivos estáticos (favicon y portadas de ejemplo en covers/)
+└── playwright.config.ts
+```
 
-## Estructura del Proyecto
+Los tests unitarios viven junto al código que prueban (`*.test.ts(x)`).
 
-- `src/AppShell.tsx`: Layout base (Navbar + padding de contenido).
-- `src/HomePage.tsx`: Landing principal con catǭlogo y filas de pelculas.
-- `src/LoginPage.tsx`: Interfaz de autenticacin protegida.
-- `src/MyListPage.tsx`: Gestin y visualizacin de pelculas favoritas.
-- `src/MovieDetailsModal.tsx`: Modal oscuro superpuesto para detalles de pelculas.
+## Más información
+
+Descripción general, endpoints de la API, configuración del backend y plan de
+trabajo: [README de la raíz](../README.md) y [`docs/PLAN_DE_ACCION.md`](../docs/PLAN_DE_ACCION.md).

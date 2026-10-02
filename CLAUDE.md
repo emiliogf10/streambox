@@ -93,7 +93,7 @@ SPA en `frontend/src/` organizada en `pages/`, `components/`, `context/`, `hooks
 - Las URLs que vienen de la API (`videoUrl`) se validan con `getSafeVideoUrl` (solo http/https, sin credenciales).
 - El catálogo se pide ordenado por el servidor: `GET /api/movies?sort=createdAt&direction=desc` (`direction` = `asc`|`desc`, por defecto `asc`).
 
-Pendiente: scripts sueltos en la raíz de `frontend/` que hacen fallar `npm run lint` completo (tarea 25) y la revisión visual humana. Al tocar el frontend verifica con `npm run build`, `npx oxlint src`, `npm run test` y, si afecta a flujos o a la maquetación, `npm run test:e2e` (`npm run lint` fallará por esos scripts hasta la tarea 25).
+Pendiente: la revisión visual humana. Al tocar el frontend verifica con `npm run build`, `npm run lint` (debe dar código 0), `npm run test` y, si afecta a flujos o a la maquetación, `npm run test:e2e`.
 
 ## Agentes (`.claude/agents/`)
 

@@ -96,8 +96,9 @@ public class AuthenticationService {
      * @param email    dirección de correo electrónico del usuario
      * @param password contraseña proporcionada durante el inicio de sesión
      * @return usuario autenticado correctamente
-     * @throws RuntimeException si el correo electrónico no existe o
+     * @throws InvalidCredentialsException si el correo electrónico no existe o
      *                          la contraseña proporcionada es incorrecta
+     * @throws com.emilio.streambox.exception.TooManyRequestsException si la cuenta está bloqueada
      */
     private User authenticate(String email, String password) {
 

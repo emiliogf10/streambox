@@ -51,12 +51,6 @@ export interface User {
   createdAt: string;
 }
 
-/** Cuerpo de `POST /api/auth/login`. */
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
-
 /** Respuesta de `POST /api/auth/login`. */
 export interface LoginResponse {
   token: string;

@@ -9,7 +9,7 @@
 import type { ApiErrorBody } from './types';
 
 /** Prefijo común de todos los endpoints (el proxy de Vite lo envía al backend). */
-export const API_URL = '/api';
+const API_URL = '/api';
 
 /** Datos con los que se construye un {@link ApiError}. */
 interface ApiErrorInit {

@@ -16,9 +16,8 @@ import jakarta.validation.constraints.Size;
  * ({@code POST /api/movies}) como para modificarla ({@code PUT /api/movies/{id}}).
  *
  * <p>
- * Antes existían dos clases idénticas ({@code CreateMovieRequest} y
- * {@code UpdateMovieRequest}). Como {@code PUT} sustituye la película completa,
- * ambas operaciones reciben exactamente los mismos campos y basta un solo DTO.
+ * Como {@code PUT} sustituye la película completa, ambas operaciones reciben
+ * exactamente los mismos campos y basta un solo DTO.
  * </p>
  *
  * <p>

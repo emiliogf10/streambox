@@ -26,7 +26,7 @@ import com.emilio.streambox.repository.UserRepository;
  * Cada operación es una consulta directa sobre la tabla de unión: añadir una
  * película es un {@code INSERT}, quitarla un {@code DELETE}. No se carga la
  * colección completa de favoritos del usuario (con los géneros de cada
- * película) para modificar un solo elemento, como ocurría antes.
+ * película) para modificar un solo elemento.
  * </p>
  *
  * <p>

@@ -9,7 +9,6 @@ interface ConfirmDialogProps {
   title: string;
   description: string;
   confirmLabel: string;
-  cancelLabel?: string;
   /** Mientras es `true` (operación en curso) no se puede cancelar y el botón de confirmar se bloquea. */
   busy?: boolean;
   onConfirm: () => void;
@@ -31,7 +30,6 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
-  cancelLabel = 'Cancelar',
   busy = false,
   onConfirm,
   onCancel,
@@ -60,7 +58,7 @@ export function ConfirmDialog({
         </p>
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <Button ref={cancelRef} variant="outline" onClick={onCancel} disabled={busy}>
-            {cancelLabel}
+            Cancelar
           </Button>
           <Button variant="danger" onClick={onConfirm} disabled={busy}>
             {busy ? 'Procesando...' : confirmLabel}
