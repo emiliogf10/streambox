@@ -66,13 +66,13 @@ Un informe de un subagente describe lo que *intentó*, no necesariamente lo que 
 Cuando un agente diga que necesita algo de otra área ("hace falta regla en `SecurityConfig`", "falta un índice"), **tú** lanzas al agente adecuado con ese encargo. Los agentes no se hablan entre ellos.
 
 ### 7. Cerrar
-- Actualiza `docs/PLAN_DE_ACCION.md` (tarea hecha, tests, pendientes nuevos) y el `README.md` si cambia algo visible (endpoints, variables, comandos).
+- Actualiza `docs/PLAN_DE_ACCION.md` (tarea hecha, tests, pendientes nuevos), el `README.md` si cambia algo visible (endpoints, variables, comandos) y `docs/MANUAL_PROGRAMADOR.md` si el cambio altera cómo funciona algo de lo que explica.
 - Informe final al usuario, en español: qué se pidió, cómo se repartió, qué cambió (con rutas), resultado real de los tests/build, qué queda pendiente o a revisar a mano (p. ej. comprobaciones visuales del frontend) y, si procede, la explicación pedagógica del cambio.
 
 ## Reglas inquebrantables
 
 - **No hagas commit ni push** salvo petición expresa del usuario (y los agentes tampoco).
-- **Nunca toques la base de datos de desarrollo** (`streambox`; la app puede estar corriendo en el 8080). Pruebas contra PostgreSQL: base temporal `streambox_check`, puerto 8099, borrarla después. Nunca mates procesos `java` en bloque.
+- **Nunca toques la base de datos de desarrollo** (Supabase, en el `application-local.properties` del usuario; la app puede estar corriendo en el 8080). Arrancar la app sin más se conecta a ella: para pruebas usa el puerto 8099 y variables `SPRING_DATASOURCE_*` hacia una base temporal (H2 o `streambox_check` local), o Testcontainers. Nunca mates procesos `java` en bloque.
 - **No debilites tests** para que pasen: un fallo se entiende y se arregla en producción (agente correspondiente) o se documenta.
 - Nada destructivo (borrar datos, `DROP`, borrar carpetas) sin confirmación del usuario.
 - No añadas dependencias sin justificarlo y avisar al usuario.

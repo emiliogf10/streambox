@@ -2,18 +2,36 @@
 # Plantilla de Configuración Local de StreamBox
 # ===================================================================
 # Copia este archivo como "application-local.properties" en esta misma
-# carpeta (streambox/src/main/resources/) y ajusta tus credenciales.
+# carpeta (streambox/src/main/resources/) y rellena tus valores.
 #
 # NOTA: "application-local.properties" está ignorado en Git para
-# garantizar que tus credenciales locales nunca se hagan públicas.
+# garantizar que tus credenciales nunca se hagan públicas.
+# NUNCA escribas credenciales en ESTE archivo (.example): sí se versiona.
+#
+# Spring lo lee siempre (ver spring.config.import en application.properties),
+# así que no hace falta activar ningún perfil. Los tests NO lo usan: tienen su
+# propia base de datos H2 en memoria (application-test.properties).
 # ===================================================================
 
-# Credenciales de acceso a PostgreSQL local
+# ---- Opción A: PostgreSQL local (valor por defecto de la aplicación) ----
+# La URL por defecto es jdbc:postgresql://localhost:5432/streambox
 spring.datasource.username=postgres
 spring.datasource.password=tu_contraseña_aqui
 
-# Opcional: Sobrescribir puerto o URL si difiere de localhost:5432
-# spring.datasource.url=jdbc:postgresql://localhost:5432/streambox
+# ---- Opción B: Supabase (PostgreSQL gestionado) ----
+# Sustituye las tres propiedades de arriba por estas, con los valores del botón
+# "Connect" del panel de Supabase:
+#  - Usa la cadena "Session pooler" (puerto 5432). El "Transaction pooler"
+#    (6543) no admite las sentencias preparadas que usa Hibernate.
+#  - sslmode=require es obligatorio: Supabase no acepta conexiones sin cifrar.
+#  - El usuario y la contraseña NO van dentro de la URL, sino en sus propiedades.
+#  - Con el pooler el usuario es "postgres.<id-del-proyecto>".
+#  - Tras crear el esquema, ejecuta docs/supabase-seguridad.sql (ver el manual,
+#    sección 4.5): cierra la API pública de Supabase sobre tus tablas.
+#
+# spring.datasource.url=jdbc:postgresql://<host-del-pooler>:5432/postgres?sslmode=require
+# spring.datasource.username=postgres.<id-del-proyecto>
+# spring.datasource.password=<contraseña-de-la-base-de-datos>
 
 # Opcional: Secreto JWT para desarrollo local (mínimo 32 caracteres).
 # Genera uno con: openssl rand -base64 48

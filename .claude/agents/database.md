@@ -32,7 +32,7 @@ Eres el especialista en base de datos y persistencia. Lee primero `CLAUDE.md` (r
 
 - No escribas lógica de negocio, controladores ni DTOs: avisa de qué debe cambiar en repositorios/servicios y qué debe hacer `backend`. Eres el dueño de `entity/`, de las migraciones y de los `@Query`/SQL nativo; `backend` solo añade métodos derivados simples y `Specification`.
 - **Prohibido** `DROP TABLE`, `TRUNCATE`, borrar columnas con datos o cualquier acción destructiva sin confirmación expresa del usuario.
-- **Nunca uses la base de datos de desarrollo del usuario** (`streambox`; su app puede estar corriendo). Para probar en PostgreSQL real crea una base temporal (`streambox_check`), arranca con `--server.port=8099` y bórrala al terminar. Los tests no la necesitan.
+- **Nunca uses la base de datos de desarrollo del usuario** (Supabase, definida en su `application-local.properties`; su app puede estar corriendo). Arrancar la app sin más se conecta a ella: para probar en PostgreSQL real usa Testcontainers, o arranca con `--server.port=8099` y variables `SPRING_DATASOURCE_*` hacia una base temporal (`streambox_check` en un PostgreSQL local) y bórrala al terminar. Los tests no la necesitan.
 - Todo con Javadoc/comentarios en español; las migraciones llevan comentario en cabecera con el porqué y los riesgos para datos existentes.
 - No hagas commit.
 

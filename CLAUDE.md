@@ -5,6 +5,7 @@ Plataforma de streaming tipo Netflix. Es un **proyecto de portfolio**: el objeti
 ## Estado y plan
 
 - **`docs/PLAN_DE_ACCION.md` es la fuente de verdad** de lo hecho y lo pendiente. Al terminar una tarea del plan, actualízalo (y el README si cambia algo visible: endpoints, variables, comandos).
+- **`docs/MANUAL_PROGRAMADOR.md` explica cómo funciona todo por dentro.** Tras cualquier cambio que altere cómo funciona algo (flujos, seguridad, configuración, endpoints, esquema, frontend, tests, comandos), actualiza el capítulo correspondiente para que el manual siga describiendo el código real. Si el cambio no afecta a nada de lo que explica, no hace falta tocarlo.
 - Antes de proponer o implementar algo, comprueba en el código que no existe ya o que sigue igual: el plan y este archivo pueden quedar por detrás del repositorio.
 
 ## Estructura del repositorio
@@ -26,7 +27,7 @@ Backend (desde `streambox/`; en PowerShell `.\mvnw.cmd`, en bash `./mvnw`):
 .\mvnw.cmd test                         # toda la suite (H2 en memoria, no necesita PostgreSQL ni JWT_SECRET; si la variable existe en tu shell debe tener ≥32 caracteres)
 .\mvnw.cmd test -Dtest=NombreDeTest     # un test concreto
 .\mvnw.cmd -q compile                   # solo compilar
-.\mvnw.cmd spring-boot:run              # perfil dev: necesita PostgreSQL local + JWT_SECRET + application-local.properties
+.\mvnw.cmd spring-boot:run              # perfil dev: necesita JWT_SECRET + application-local.properties con la conexión (Supabase o PostgreSQL local)
 ```
 
 Frontend (desde `frontend/`): `npm run dev` (puerto 5173, proxy de `/api` a `localhost:8080`), `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint), `npm run test` (Vitest, ~15 s) y `npm run test:e2e` (Playwright, ~60 s; levanta su propio backend en el 8099 y Vite en el 5199, aislados de la BD y los puertos del usuario).
@@ -39,7 +40,7 @@ Frontend (desde `frontend/`): `npm run dev` (puerto 5173, proxy de `/api` a `loc
 - **Todo código nuevo lleva Javadoc en español** (clases, métodos públicos y la razón de las decisiones no obvias). Los comentarios explican el *porqué*, no repiten el código.
 - **Idioma:** respuestas, documentación, mensajes de error de la API y OpenAPI en español.
 - No añadas dependencias al `pom.xml` o `package.json` sin justificarlo y avisar.
-- **Nunca toques la base de datos de desarrollo del usuario** (`streambox` en su PostgreSQL local; puede tener la app corriendo en el puerto 8080). Para probar contra PostgreSQL crea una base temporal (`streambox_check`), usa otro puerto (`--server.port=8099`) y bórrala al terminar. Los tests no la necesitan.
+- **Nunca toques la base de datos de desarrollo del usuario: es Supabase** (su `application-local.properties`, ignorado por git, la define; puede tener la app corriendo en el puerto 8080). **Arrancar la app sin más (`spring-boot:run`) se conecta a ella**, así que para cualquier prueba arranca con otro puerto (`--server.port=8099`) **y sobrescribe la conexión con variables de entorno** (`SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, que ganan a ese archivo) apuntando a una base temporal: H2 en memoria como hace el E2E (`frontend/playwright.config.ts`) o una base `streambox_check` en un PostgreSQL local, que se borra al terminar. Los tests no la necesitan: usan H2 y Testcontainers, nunca ese archivo (comprobado con una conexión falsa).
 - Entorno Windows: el tool Bash rechaza scripts largos con muchas comillas/heredocs; para ficheros usa las herramientas Write/Edit.
 - No inventes datos ni "arregles" tests debilitándolos: si un test falla, entiende la causa.
 

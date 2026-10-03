@@ -58,6 +58,8 @@
 
 ## 🏛️ Arquitectura del Proyecto
 
+> 📘 **Explicación detallada de cómo funciona todo por dentro** (recorrido de una petición, seguridad JWT, rate limiting, Flyway, transacciones y N+1, gestión de errores, frontend y tests): [docs/MANUAL_PROGRAMADOR.md](docs/MANUAL_PROGRAMADOR.md).
+
 El backend sigue una arquitectura limpia orientada por capas bajo el paquete base `com.emilio.streambox`:
 
 ```
@@ -144,11 +146,11 @@ Configura las siguientes variables de entorno en tu sistema o en tu IDE:
 
 | Perfil | Cuándo | Qué hace |
 | :--- | :--- | :--- |
-| `dev` (por defecto) | Desarrollo local | `ddl-auto=update`, SQL visible en el log, Swagger activado |
+| `dev` (por defecto) | Desarrollo local | Esquema gestionado por Flyway (Hibernate solo valida), SQL visible en el log, Swagger activado |
 | `prod` | Producción (`SPRING_PROFILES_ACTIVE=prod`) | logs en formato JSON (ECS), sin SQL en logs, Swagger desactivado, errores sin detalles. Requiere `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` y `JWT_SECRET` |
 | `test` | Lo activan los tests (`@ActiveProfiles("test")`) | H2 en memoria y un secreto JWT fijo de pruebas: **no necesitas definir `JWT_SECRET` para ejecutar los tests** |
 
-> Alternativamente, puedes crear un archivo `application-local.properties` dentro de `streambox/src/main/resources/` (ignorado en Git) para sobreescribir las credenciales locales de la base de datos o el secreto JWT.
+> **Conexión a la base de datos.** Copia `streambox/src/main/resources/application-local.properties.example` como `application-local.properties` (en la misma carpeta, ignorado en Git) y rellénalo con tu conexión: **PostgreSQL local** (opción A, la URL por defecto es `localhost:5432/streambox`) o **Supabase** (opción B, con la cadena *Session pooler*; después ejecuta `docs/supabase-seguridad.sql`, ver el [manual](docs/MANUAL_PROGRAMADOR.md), sección 4.5). Ahí también puedes fijar el secreto JWT. Los tests no usan ese archivo: tienen su propia base H2 en memoria.
 
 ### Base de datos y migraciones
 
