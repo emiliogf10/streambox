@@ -6,6 +6,7 @@
  */
 import { HERO_TITLE, MOVIES, PAGE_SIZE } from './support/catalog';
 import { expect, movieCard, test } from './support/fixtures';
+import { expectCovers, expectWholePoster } from './support/images';
 
 /** Géneros que tienen fila propia en la portada (≥ 3 películas cargadas). */
 const GENRE_ROWS = ['Ciencia ficción', 'Acción', 'Drama'];
@@ -27,21 +28,24 @@ test.describe('Catálogo', () => {
     await expect(banner.getByRole('button', { name: /^Mi lista/ })).toBeVisible();
     await expect(banner.getByRole('button', { name: /^Más información/ })).toBeVisible();
 
-    // La portada del banner se ha descargado de verdad (no es el hueco de respaldo).
-    const image = banner.locator('img');
-    await expect(image).toHaveCount(1);
-    await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+    // Dos imágenes (en este orden en el DOM): el fondo desenfocado y el póster nítido. Las dos son
+    // la MISMA URL, así que el navegador la descarga una sola vez.
+    const images = banner.locator('img');
+    await expect(images).toHaveCount(2);
+    const [backdrop, poster] = [images.first(), images.last()];
+    expect(await backdrop.getAttribute('src')).toBe(await poster.getAttribute('src'));
 
-    // ...y CUBRE todo el banner. Regresión real: con `relative` + `absolute` en el mismo contenedor
-    // la portada salía a su tamaño intrínseco (600 px) y dejaba el resto del banner vacío.
-    // (La sección tiene un margen lateral pequeño, por eso se pide ≥ 90 % de su ancho y no el 100 %.)
-    const sectionBox = await banner.boundingBox();
-    const imageBox = await image.boundingBox();
-    expect(imageBox?.width ?? 0).toBeGreaterThanOrEqual((sectionBox?.width ?? Infinity) * 0.9);
+    // El FONDO cubre todo el banner. Regresión real: con `relative` + `absolute` en el mismo
+    // contenedor la portada salía a su tamaño intrínseco (600 px) y dejaba el resto vacío.
+    await expectCovers(backdrop, banner, 'fondo del banner');
+    // El PÓSTER se ve entero (2:3, sin recorte). Defecto anterior: el póster vertical estirado a lo
+    // ancho del banner solo dejaba ver una franja ampliada («PARTE DOS» gigante).
+    await expectWholePoster(poster, banner, 'póster del banner');
 
-    // Sinopsis y ficha técnica del banner.
-    await expect(page.getByRole('heading', { level: 3, name: 'Sinopsis' })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 3, name: 'Ficha' })).toBeVisible();
+    // Sinopsis recortada en el banner; ya no hay paneles «Sinopsis/Reparto/Ficha» debajo.
+    await expect(banner.getByText(/^En un futuro cercano/)).toBeVisible();
+    await expect(page.getByRole('heading', { level: 3 })).toHaveCount(0);
+    await expect(page.getByText('Información no disponible en esta versión.')).toHaveCount(0);
   });
 
   test('hay una fila de Novedades y una por género con varias películas, sin repetir la del banner', async ({

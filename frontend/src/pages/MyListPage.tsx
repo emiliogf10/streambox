@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ListX } from 'lucide-react';
+import { ListX, Plus } from 'lucide-react';
 import { Button } from '../components/Button';
 import { buttonClasses } from '../components/buttonStyles';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -13,6 +13,30 @@ import { MovieDetailsModal } from '../components/MovieDetailsModal';
 import { useFavorites } from '../context/FavoritesContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { Movie } from '../lib/types';
+
+/**
+ * Ilustración del estado vacío: tres huecos de póster (2:3, borde discontinuo)
+ * abiertos en abanico, el del centro con un "+" en el color de acento.
+ *
+ * Por qué y no un icono genérico en un círculo: enseña QUÉ va a aparecer aquí
+ * (pósters) y con qué gesto (el "+" es el mismo icono del botón "Mi lista"), así
+ * que la pantalla vacía también explica cómo llenarla. Son tres `div` con
+ * clases de Tailwind: sin imágenes, sin peticiones y sin animación. Es
+ * decorativa (`EmptyState` la oculta a los lectores de pantalla; el texto ya
+ * lo dice todo).
+ */
+function EmptyListArt() {
+  const slot = 'aspect-2/3 rounded-lg border-2 border-dashed';
+  return (
+    <div className="flex items-end justify-center">
+      <div className={`${slot} w-14 translate-x-2 -rotate-8 border-white/15 bg-white/2`} />
+      <div className={`${slot} relative z-10 flex w-20 items-center justify-center border-accent/60 bg-canvas text-accent`}>
+        <Plus className="size-7" strokeWidth={2.25} />
+      </div>
+      <div className={`${slot} w-14 -translate-x-2 rotate-8 border-white/15 bg-white/2`} />
+    </div>
+  );
+}
 
 /**
  * Página "Mi lista": las películas favoritas del usuario.
@@ -62,9 +86,9 @@ export function MyListPage() {
   } else if (movies.length === 0) {
     content = (
       <EmptyState
-        icon={<ListX className="size-8" />}
+        visual={<EmptyListArt />}
         title="Tu lista está vacía"
-        description="Agrega películas desde el catálogo para encontrarlas aquí."
+        description="Pulsa «Mi lista» en cualquier película del catálogo y la encontrarás aquí."
         action={
           <Link to="/" className={buttonClasses('light')}>
             Explorar catálogo
@@ -88,7 +112,7 @@ export function MyListPage() {
     <div className="min-h-screen px-4 py-6 sm:px-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         {/* tabIndex -1: recibe el foco por código tras vaciar la lista; no es una parada de tabulador. */}
-        <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold outline-hidden">
+        <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold tracking-tight outline-hidden sm:text-3xl">
           Mi lista
         </h1>
         {status === 'ready' && movies.length > 0 && (

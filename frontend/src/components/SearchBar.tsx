@@ -209,7 +209,7 @@ export function SearchBar() {
           id={listId}
           role="listbox"
           aria-label="Resultados de la búsqueda"
-          className="absolute top-full right-0 left-0 z-50 mt-2 max-h-80 overflow-y-auto rounded-xl border border-line bg-surface shadow-2xl md:left-auto md:w-80"
+          className="absolute top-full right-0 left-0 z-50 mt-2 flex max-h-80 flex-col gap-0.5 overflow-y-auto rounded-xl border border-line bg-surface p-1.5 shadow-2xl md:left-auto md:w-80"
         >
           {results.map((movie, index) => (
             <li
@@ -220,7 +220,9 @@ export function SearchBar() {
               // Evita que el clic robe el foco al campo (el foco debe seguir en el combobox).
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => handleSelect(movie)}
-              className="flex min-h-14 cursor-pointer items-center gap-3 border-b border-l-4 border-b-white/5 border-l-transparent px-3 py-2 last:border-b-0 hover:bg-white/5 aria-selected:border-l-accent aria-selected:bg-white/10"
+              // Opción activa: fondo más claro + contorno de acento alrededor de TODA la fila (no solo una barra
+              // lateral de color): el cambio de forma se ve aunque no se distinga el color.
+              className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 hover:bg-white/5 aria-selected:bg-white/10 aria-selected:ring-1 aria-selected:ring-accent/70 aria-selected:ring-inset"
             >
               <MoviePoster title={movie.title} src={movie.imageUrl} compact className="h-12 w-9 shrink-0 rounded-md" />
               <div className="min-w-0">

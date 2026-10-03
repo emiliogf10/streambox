@@ -14,6 +14,7 @@ import type { Locator, Page } from '@playwright/test';
 import { addFavoritesByTitle } from './support/api';
 import { HERO_TITLE } from './support/catalog';
 import { expect, test } from './support/fixtures';
+import { expectCovers, expectWholePoster } from './support/images';
 
 const VIEWPORTS = [
   { name: 'móvil 375x812', width: 375, height: 812 },
@@ -104,6 +105,20 @@ for (const viewport of VIEWPORTS) {
       await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Ver ahora/ }), page, '«Ver ahora»');
       await expectFullyInsideViewportWidth(banner.getByRole('button', { name: /^Mi lista/ }), page, '«Mi lista» del banner');
       await expectFullyInsideViewportWidth(banner.getByRole('button', { name: /^Más información/ }), page, '«Más información»');
+
+      // El fondo cubre el banner y el póster nítido (tarjeta 2:3) se ve ENTERO en todos los anchos.
+      // Antes, en móvil, el póster era el fondo nítido y el degradado del texto tapaba su mitad
+      // inferior; ahora va pequeño junto al título (como en el modal) y debe verse sin recortes.
+      const images = banner.locator('img');
+      await expectCovers(images.first(), banner, 'fondo del banner');
+      await expectWholePoster(images.last(), banner, 'póster del banner');
+      // El póster va JUNTO al título (misma fila en móvil, columna contigua en escritorio): el hueco
+      // horizontal entre ambos no supera los 64 px. Regresión que evita: a 1280 px el póster estaba
+      // en el borde derecho, a ~430 px del texto.
+      const posterBox = await images.last().boundingBox();
+      const titleBox = await banner.getByRole('heading', { level: 2, name: HERO_TITLE }).boundingBox();
+      expect(titleBox!.x - (posterBox!.x + posterBox!.width), 'hueco entre póster y título').toBeLessThanOrEqual(64);
+      expect(titleBox!.x - (posterBox!.x + posterBox!.width), 'el título no pisa el póster').toBeGreaterThanOrEqual(0);
       await expectNoHorizontalScroll(page);
 
       // Con la página completa (segunda página incluida) tampoco hay desborde.
@@ -154,6 +169,8 @@ for (const viewport of VIEWPORTS) {
       const dialog = page.getByRole('dialog', { name: 'Dredd' });
       await expectFullyInsideViewportWidth(dialog, page, 'modal de detalle');
       await expectFullyInsideViewportWidth(dialog.getByRole('button', { name: /^Cerrar detalles/ }), page, 'botón de cerrar');
+      // El póster de la cabecera se ve entero también en 375 px (más pequeño, a la izquierda del título).
+      await expectWholePoster(dialog.locator('img').last(), dialog, 'póster del modal');
       await expectNoHorizontalScroll(page);
     });
   });

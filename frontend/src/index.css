@@ -13,6 +13,14 @@
  *   accent sobre canvas 8.53 · sobre surface 7.77
  *   danger sobre canvas 6.83 · sobre surface 6.22
  * Todos los pares usados cumplen, así que no hizo falta cambiar ningún token.
+ *
+ * `field-border` (borde de los campos de formulario) es un contraste de
+ * COMPONENTE, no de texto: WCAG 1.4.11 pide 3:1 entre el borde que delimita un
+ * control y lo que lo rodea. El borde anterior (`white/15`) daba 1.47:1 sobre
+ * canvas: el campo solo se adivinaba por la etiqueta.
+ *   field-border sobre canvas 3.90 · sobre surface 3.55
+ * Texto seleccionado (`::selection`, blanco sobre accent al 35 % encima de
+ * canvas, ≈ #5a431a): 9.33.
  */
 @theme {
   --color-canvas: #0e1117;
@@ -21,8 +29,17 @@
   --color-accent: #e8a020;
   --color-muted: #8892a4;
   --color-line: rgb(255 255 255 / 0.1);
+  --color-field-border: #687286;
   --color-danger: #f87171;
   --color-success: #4ade80;
+
+  /*
+   * Curva de salida "fuerte" para entradas y respuestas a una acción (genera
+   * `ease-out-strong`). Las curvas de CSS (`ease-out`) arrancan demasiado
+   * suaves: con esta el movimiento empieza rápido (la interfaz "responde" en
+   * el primer fotograma) y frena con calma.
+   */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 @layer base {
@@ -32,6 +49,53 @@
     /* Reserva el hueco de la barra de scroll: al bloquear el scroll con un modal la página no "salta". */
     scrollbar-gutter: stable;
     background-color: var(--color-canvas);
+    /* Barra de scroll fina y oscura (Firefox y Chromium modernos) en lugar de la gris clara del sistema. */
+    scrollbar-color: rgb(255 255 255 / 0.18) transparent;
+  }
+
+  /*
+   * Superficies que pinta el navegador: sin esto, el texto seleccionado sale en
+   * el azul del sistema y el cursor de escritura en blanco genérico, ajenos a
+   * la paleta. Son detalles pequeños, pero se notan cuando faltan.
+   */
+  ::selection {
+    background-color: rgb(232 160 32 / 0.35);
+    color: #ffffff;
+  }
+
+  input,
+  textarea {
+    caret-color: var(--color-accent);
+  }
+
+  /*
+   * Entrada de los diálogos (`<dialog>` abierto con `showModal()`): aparecen
+   * con un fundido y un ligero crecimiento (96 % → 100 %), no de golpe, para que
+   * se entienda de dónde sale la capa nueva. 200 ms con salida fuerte: rápido,
+   * porque el usuario está esperando el contenido. `@starting-style` define el
+   * estado "antes de aparecer" sin JavaScript; los navegadores que no lo
+   * entienden simplemente lo muestran sin animación. Con `prefers-reduced-motion`
+   * la regla global de abajo deja la duración a ~0 ms.
+   */
+  dialog[open] {
+    opacity: 1;
+    scale: 1;
+    transition:
+      opacity 200ms var(--ease-out-strong),
+      scale 200ms var(--ease-out-strong);
+
+    @starting-style {
+      opacity: 0;
+      scale: 0.96;
+    }
+  }
+
+  dialog[open]::backdrop {
+    transition: opacity 200ms ease-out;
+
+    @starting-style {
+      opacity: 0;
+    }
   }
 
   /* Lo añade `useModalDialog` mientras hay un diálogo abierto: el fondo no debe desplazarse. */

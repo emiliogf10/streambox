@@ -1,7 +1,7 @@
 ---
 name: frontend
 description: Especialista en el frontend de StreamBox (React 19, Vite, TypeScript, Tailwind v4). Úsalo para UI/UX, componentes, formularios, estados de carga/error/vacío, accesibilidad, responsive y consumo de la API con JWT. No toca el backend.
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Skill, Read, Grep, Glob, Edit, Write, Bash
 ---
 
 # Rol: FRONTEND de StreamBox

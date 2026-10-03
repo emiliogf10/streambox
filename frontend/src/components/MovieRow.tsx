@@ -15,7 +15,8 @@ interface Props {
 /** Clases de los botones "anterior/siguiente" (solo se ven desde `md`, donde no hay gesto táctil). */
 const arrowClass =
   'focus-ring hidden size-10 items-center justify-center rounded-full border border-line bg-surface-raised ' +
-  'text-white transition-colors hover:bg-white/15 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 md:inline-flex';
+  'text-white transition-[background-color,scale] duration-150 ease-out-strong hover:bg-white/15 active:scale-95 ' +
+  'motion-reduce:active:scale-100 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:active:scale-100 md:inline-flex';
 
 /**
  * Fila de tarjetas de películas con scroll horizontal propio y un título.
@@ -71,9 +72,11 @@ export function MovieRow({ title, movies, onSelectMovie }: Props) {
   };
 
   return (
-    <section aria-labelledby={headingId} className="mb-8 px-4 sm:px-6">
+    // Título de fila un paso por encima del texto de las tarjetas (text-lg frente a text-sm) y separación entre
+    // filas mayor que la del título a sus tarjetas: así cada fila se lee como un grupo (ley de proximidad).
+    <section aria-labelledby={headingId} className="mb-9 px-4 sm:mb-10 sm:px-6">
       <div className="mb-3 flex items-center justify-between gap-4">
-        <h2 id={headingId} className="text-base font-bold text-white">
+        <h2 id={headingId} className="text-lg font-bold tracking-tight text-white">
           {title}
         </h2>
         <div className="flex gap-2">
@@ -102,7 +105,7 @@ export function MovieRow({ title, movies, onSelectMovie }: Props) {
       <ul
         ref={scrollerRef}
         role="list"
-        className="scrollbar-hide -mx-4 flex snap-x snap-proximity scroll-px-4 gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:scroll-px-6 sm:px-6"
+        className="scrollbar-hide -mx-4 flex snap-x snap-proximity scroll-px-4 gap-3 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:scroll-px-6 sm:gap-4 sm:px-6"
       >
         {movies.map((movie) => (
           <li key={movie.id} className="shrink-0 snap-start">

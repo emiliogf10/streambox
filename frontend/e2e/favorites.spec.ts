@@ -8,6 +8,7 @@
 import { addFavoritesByTitle } from './support/api';
 import { MOVIES, videoUrl } from './support/catalog';
 import { expect, movieCard, test } from './support/fixtures';
+import { expectWholePoster } from './support/images';
 
 /** Una película con dos géneros y portada, que aparece en la fila "Novedades". */
 const FILM = MOVIES.find((movie) => movie.title === 'Interstellar');
@@ -31,10 +32,18 @@ test.describe('Detalle y favoritos', () => {
     }
     await expect(dialog.getByRole('heading', { level: 3, name: 'Sinopsis' })).toBeVisible();
 
-    // La portada cubre el ancho del diálogo (mismo defecto que el banner: salía a 600 px de ancho fijo).
+    // Cabecera: fondo desenfocado (1.ª imagen) + póster nítido (2.ª), con la misma URL.
+    const images = dialog.locator('img');
+    await expect(images).toHaveCount(2);
+    const [backdrop, poster] = [images.first(), images.last()];
+    expect(await backdrop.getAttribute('src')).toBe(await poster.getAttribute('src'));
+    // El fondo cubre el ancho del diálogo (mismo defecto que el banner: salía a 600 px de ancho fijo;
+    // el diálogo tiene 1 px de borde a cada lado, de ahí el margen de 2 px).
     const dialogBox = await dialog.boundingBox();
-    const posterBox = await dialog.locator('img').boundingBox();
-    expect(posterBox?.width ?? 0).toBeGreaterThanOrEqual((dialogBox?.width ?? Infinity) - 2);
+    const backdropBox = await backdrop.boundingBox();
+    expect(backdropBox?.width ?? 0).toBeGreaterThanOrEqual((dialogBox?.width ?? Infinity) - 2);
+    // El póster se ve entero, sin recortar (antes la cabecera horizontal mostraba solo una franja).
+    await expectWholePoster(poster, dialog, 'póster del modal');
 
     const watch = dialog.getByRole('link', { name: /^Ver ahora/ });
     await expect(watch).toHaveAttribute('target', '_blank');

@@ -50,9 +50,10 @@ describe('RegisterPage: validación en el cliente', () => {
     for (const field of [username(), email(), password()]) {
       expect(field).toHaveAttribute('aria-invalid', 'true');
     }
-    expect(username()).toHaveAccessibleDescription(/Entre 3 y 50 caracteres\..*El nombre de usuario debe tener entre 3 y 50/);
+    // El error sustituye a la ayuda (ya dice el requisito): se describe el campo solo con él.
+    expect(username()).toHaveAccessibleDescription('El nombre de usuario debe tener entre 3 y 50 caracteres.');
     expect(email()).toHaveAccessibleDescription('Introduce tu correo electrónico.');
-    expect(password()).toHaveAccessibleDescription(/La contraseña debe tener entre 8 y 100 caracteres\./);
+    expect(password()).toHaveAccessibleDescription('La contraseña debe tener entre 8 y 100 caracteres.');
     expect(username()).toHaveFocus();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -72,6 +73,23 @@ describe('RegisterPage: validación en el cliente', () => {
     expect(email()).toHaveFocus();
     expect(username()).not.toHaveAttribute('aria-invalid');
     expect(password()).not.toHaveAttribute('aria-invalid');
+  });
+
+  it('la ayuda describe el campo; con error se sustituye por el error (no se repiten) y vuelve al corregir', async () => {
+    const user = userEvent.setup();
+    renderRegister();
+
+    expect(username()).toHaveAccessibleDescription('Entre 3 y 50 caracteres.');
+    expect(screen.getByText('Entre 3 y 50 caracteres.')).toBeVisible();
+
+    await user.click(submit());
+    expect(screen.queryByText('Entre 3 y 50 caracteres.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Entre 8 y 100 caracteres.')).not.toBeInTheDocument();
+    expect(screen.getByText('El nombre de usuario debe tener entre 3 y 50 caracteres.')).toBeVisible();
+
+    await user.type(username(), 'a');
+    expect(username()).toHaveAccessibleDescription('Entre 3 y 50 caracteres.');
+    expect(screen.queryByText('El nombre de usuario debe tener entre 3 y 50 caracteres.')).not.toBeInTheDocument();
   });
 
   it('empezar a corregir un campo borra su error al instante', async () => {

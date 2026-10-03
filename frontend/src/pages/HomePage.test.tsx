@@ -95,6 +95,21 @@ describe('HomePage: contenido', () => {
     expect(within(news).getAllByRole('button', { name: /^(Segunda|Tercera|Cuarta)/ })).toHaveLength(3);
   });
 
+  it('jerarquía de encabezados: un único h1 y, debajo, banner y filas como h2 (sin h3 sueltos)', async () => {
+    renderHome();
+    await screen.findByRole('region', { name: 'Novedades' });
+
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Estreno estrella',
+      'Novedades',
+      'Terror',
+    ]);
+    // Los antiguos paneles "Sinopsis / Reparto / Ficha" (h3) ya no existen.
+    expect(screen.queryByRole('heading', { level: 3 })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Información no disponible/)).not.toBeInTheDocument();
+  });
+
   it('crea una fila por género con al menos 3 películas (sin contar el banner)', async () => {
     renderHome();
 

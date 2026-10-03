@@ -80,7 +80,7 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 - Cada bug corregido deja un test que falla sin el arreglo.
 - Lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia real) se prueba también contra PostgreSQL real en `src/test/.../postgres/` (extiende `PostgresIntegrationTestSupport`); H2 puede ocultar diferencias (ya ocultó un bug de búsqueda).
 - Frontend: lógica y componentes con Vitest + Testing Library (`*.test.ts(x)` junto al código, utilidades en `src/test/`); flujos completos con Playwright en `frontend/e2e/`. Localiza por rol/etiqueta, no con `data-testid`.
-- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: 469 de backend, 236 de Vitest y 48 E2E).
+- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: 469 de backend, 259 de Vitest y 48 E2E).
 
 ## Frontend: estado actual
 

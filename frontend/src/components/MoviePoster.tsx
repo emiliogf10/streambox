@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Film } from 'lucide-react';
+import { posterFallbackGradient } from '../lib/posterFallback';
 
 /** Propiedades de {@link MoviePoster}. */
 interface MoviePosterProps {
@@ -21,6 +22,13 @@ interface MoviePosterProps {
   priority?: boolean;
   /** Reduce el hueco de reserva a un icono (miniaturas donde no cabe el título). */
   compact?: boolean;
+  /**
+   * Uso como FONDO decorativo (banner y cabecera del modal, desenfocado detrás
+   * del póster nítido): si no hay imagen, el hueco es solo el degradado, sin
+   * icono ni título (ya los muestra el póster de delante), y siempre oculto a
+   * los lectores de pantalla.
+   */
+  backdrop?: boolean;
   /** Clases del contenedor: tamaño/proporción (`aspect-2/3 w-full`, `size-full`...) y bordes. */
   className?: string;
   /** Clases de la `<img>` (p. ej. el zoom al pasar el ratón por una tarjeta). */
@@ -40,6 +48,11 @@ interface MoviePosterProps {
  *   petición, no puede fallar ni volver a disparar `onError`. Se recuerda QUÉ
  *   `src` falló (y no un simple "ha fallado"), así que si la película cambia
  *   de imagen se vuelve a intentar cargar.
+ * - **Huecos distinguibles**: el fondo del hueco es un degradado elegido por el
+ *   título ({@link posterFallbackGradient}), no un color único: varias películas
+ *   sin portada seguidas no parecen una página a medio cargar. El título va en
+ *   blanco y negrita, y crece si el hueco es grande (consulta de contenedor
+ *   `@container`, sin props extra).
  */
 export function MoviePoster({
   title,
@@ -47,11 +60,14 @@ export function MoviePoster({
   alt = '',
   priority = false,
   compact = false,
+  backdrop = false,
   className = '',
   imgClassName = '',
 }: MoviePosterProps) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const showFallback = !src || failedSrc === src;
+  // Un fondo nunca hace de imagen con nombre: lo que importa está delante.
+  const labelled = Boolean(alt) && !backdrop;
 
   return (
     // Sin `relative` a propósito: quien lo usa como fondo pasa `absolute inset-0`, y si el contenedor
@@ -62,20 +78,22 @@ export function MoviePoster({
       {showFallback ? (
         <div
           // Si hay `alt` el hueco se comporta como imagen con ese nombre; si no, es decorativo.
-          role={alt ? 'img' : undefined}
-          aria-label={alt || undefined}
-          aria-hidden={alt ? undefined : true}
-          className="flex size-full flex-col items-center justify-center gap-2 bg-linear-to-br from-surface-raised to-surface p-2 text-center"
+          role={labelled ? 'img' : undefined}
+          aria-label={labelled ? alt : undefined}
+          aria-hidden={labelled ? undefined : true}
+          className={`@container flex size-full flex-col items-center justify-center gap-2 p-3 text-center ${posterFallbackGradient(title)}`}
         >
-          <Film aria-hidden="true" className="size-6 shrink-0 text-muted" />
-          {!compact && (
-            <span className="line-clamp-4 text-xs leading-snug font-semibold text-gray-300">{title}</span>
+          {!backdrop && <Film aria-hidden="true" className="size-6 shrink-0 text-white/60 @[12rem]:size-9" />}
+          {!compact && !backdrop && (
+            <span className="line-clamp-4 text-sm leading-snug font-bold text-balance text-white @[12rem]:text-xl">
+              {title}
+            </span>
           )}
         </div>
       ) : (
         <img
           src={src}
-          alt={alt}
+          alt={labelled ? alt : ''}
           width={600}
           height={900}
           loading={priority ? 'eager' : 'lazy'}

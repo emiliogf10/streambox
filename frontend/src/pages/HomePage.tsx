@@ -2,11 +2,10 @@ import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Film } from 'lucide-react';
 import { Button } from '../components/Button';
+import { CatalogSkeleton } from '../components/CatalogSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { HeroBanner } from '../components/HeroBanner';
-import { HeroInfoPanels } from '../components/HeroInfoPanels';
-import { LoadingState } from '../components/LoadingState';
 import { MovieDetailsModal } from '../components/MovieDetailsModal';
 import { MovieRow } from '../components/MovieRow';
 import { useCatalog } from '../hooks/useCatalog';
@@ -26,8 +25,12 @@ import type { Movie } from '../lib/types';
  * fallo de "cargar más" se trata aparte para no perder lo ya mostrado.
  *
  * Estructura de encabezados: un único `<h1>` (oculto visualmente, presente en
- * TODOS los estados), el banner y cada fila son `<h2>`, y los paneles del
- * banner `<h3>`.
+ * TODOS los estados) y, por debajo, el banner y cada fila como `<h2>` hermanos.
+ *
+ * Bajo el banner ya no hay paneles de "Sinopsis / Reparto / Ficha": el reparto
+ * no existe en la API (el panel solo decía "no disponible") y la ficha repetía
+ * año y duración del banner; además empujaban las filas fuera de la primera
+ * pantalla. La sinopsis va recortada en el banner y entera en "Más información".
  */
 export function HomePage() {
   useDocumentTitle('Inicio');
@@ -41,7 +44,8 @@ export function HomePage() {
 
   let content: ReactNode;
   if (status === 'loading') {
-    content = <LoadingState label="Cargando catálogo..." />;
+    // Silueta del banner y de una fila (no un spinner): el cambio al contenido real es mínimo.
+    content = <CatalogSkeleton label="Cargando catálogo..." />;
   } else if (status === 'error') {
     content = <ErrorState title="No se pudo cargar el catálogo" message={errorMessage} onRetry={reload} />;
   } else if (!hero) {
@@ -56,7 +60,6 @@ export function HomePage() {
     content = (
       <>
         <HeroBanner movie={hero} onDetails={setSelectedMovie} />
-        <HeroInfoPanels movie={hero} />
 
         {rows.map((row) => (
           <MovieRow key={row.id} title={row.title} movies={row.movies} onSelectMovie={setSelectedMovie} />

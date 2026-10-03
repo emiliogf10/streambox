@@ -1189,7 +1189,8 @@ Qué hace, paso a paso:
 
 `HomePage` reparte las películas así:
 
-- **Banner (hero)**: la primera, es decir, la más reciente.
+- **Banner (hero)** (`components/HeroBanner.tsx`): la primera, es decir, la más reciente. Lleva póster, título, metadatos, una sinopsis recortada a 3 líneas y tres botones con jerarquía: «Ver ahora» (principal, variante `light`), «Mi lista» (secundaria, `outline`) y «Más información» (terciaria, `ghost`, sin borde), que abre el modal con la sinopsis completa. En los metadatos, «Estreno reciente» es una etiqueta de acento, el año y la duración van en texto plano con cifras tabulares, y solo los géneros llevan etiqueta (`MovieMetaTags`): si todo es etiqueta, nada destaca. Va a sangre (todo el ancho) bajo la barra superior. Ver en 21.3 por qué el póster se muestra dos veces y por qué va junto al título.
+- **Mientras carga**, la portada muestra `CatalogSkeleton`: siluetas con la forma real del banner y de una fila (`role="status"` con texto para lectores de pantalla; las siluetas están ocultas a la accesibilidad). Con un spinner, toda la pantalla cambiaba de golpe al llegar los datos; con el esqueleto, el contenido aparece donde ya se esperaba.
 - **Filas** (`lib/catalog.ts` → `buildCatalogRows`, con el resto de películas): «Novedades» con las 12 primeras, y **una fila por género** que tenga al menos 3 películas (una fila con 1 o 2 queda casi vacía). Las filas de género se ordenan de más a menos películas.
 
 ### 20.2 «Mi lista» y favoritos (`context/FavoritesContext.tsx`)
@@ -1207,6 +1208,8 @@ Antes cada pantalla guardaba su propia copia de la lista y se desincronizaban. A
 
 **Vaciar la lista no es optimista**: es destructivo, así que primero se confirma con un diálogo y se espera a la respuesta del servidor.
 
+**La lista vacía enseña qué va a pasar.** En lugar de un icono genérico, `EmptyState` recibe en la prop `visual` una ilustración decorativa (tres huecos de póster en abanico con un «+») y el texto nombra el botón que hay que pulsar. Un estado vacío es la primera vez que el usuario ve esa pantalla: debe decirle cómo llenarla.
+
 ### 20.3 Registro (`pages/RegisterPage.tsx` + `lib/validation.ts`)
 
 - Valida en el navegador con **los mismos límites que el backend** (usuario 3–50, contraseña 8–100, email), para dar feedback inmediato. **La validación que manda es la del servidor**: la del cliente se puede saltar.
@@ -1214,6 +1217,7 @@ Antes cada pantalla guardaba su propia copia de la lista y se desincronizaban. A
 - 409 (usuario o email en uso) se muestra como aviso del formulario.
 - 429: el botón se bloquea con una cuenta atrás (`hooks/useCountdown.ts`) usando `retryAfterSeconds`. La cuenta atrás es solo comodidad: el límite real lo impone el servidor.
 - Éxito: lleva a `/login` con un aviso. No inicia sesión automáticamente.
+- **Aspecto** (común a login y registro, `components/AuthLayout.tsx`): formulario sin tarjeta, en una columna `max-w-sm`, con una luz radial ámbar muy tenue desde arriba (solo CSS, retoma el punto del logo). La tarjeta centrada era el patrón de plantilla más reconocible y, en móvil, estrechaba los campos. Los campos (`FormField`) usan el token `field-border` (ver 21.1).
 
 ### 20.4 Avisos (`context/ToastContext.tsx`)
 
@@ -1225,6 +1229,7 @@ Antes cada pantalla guardaba su propia copia de la lista y se desincronizaban. A
 - **Cancelación**: si escribes otra letra mientras una búsqueda está en vuelo, la anterior se cancela. Sin esto, una respuesta lenta antigua podría llegar después y sustituir a la nueva.
 - Pide `/movies/search?title=...&size=10&sort=title`.
 - Teclado: ↑/↓ recorren los resultados, Intro abre la película, Escape cierra y vacía.
+- La opción resaltada lleva un contorno de acento alrededor de toda la fila (3,5:1 sobre el fondo), no una barra lateral de color: esa barra es uno de los patrones que más delatan una interfaz generada y, además, solo marca un borde.
 
 ### 20.6 Modales (`components/Modal.tsx` + `hooks/useModalDialog.ts`)
 
@@ -1236,6 +1241,8 @@ Usan el elemento nativo `<dialog>` con `showModal()`, que ya da: capa por encima
 - Escape y clic en el fondo cierran.
 
 Un detalle: un `<dialog>` modal vuelve inerte todo lo de fuera, incluidos los avisos. Por eso, mientras hay un modal abierto, `ToastContext` mueve los avisos **dentro** del diálogo (con un *portal*, `registerHost`).
+
+**Entrada con movimiento.** El `<dialog>` aparece con un fundido y una escala de 96 % a 100 % en 200 ms. Los avisos suben 8 px en 250 ms. Las dos animaciones son **transiciones** y no `@keyframes`: una transición se puede interrumpir a mitad (si cierras el modal mientras entra, vuelve desde donde está, sin saltos). El estado inicial se define con `@starting-style` (en `index.css` para el diálogo y con la variante `starting:` de Tailwind en `Toast.tsx`). La curva es `ease-out-strong` (`cubic-bezier(0.23, 1, 0.32, 1)`, token en `@theme`): arranca rápido y frena suave, de modo que la respuesta se percibe inmediata. Con `prefers-reduced-motion` la regla global deja todo en ~0 ms.
 
 ---
 
@@ -1251,6 +1258,7 @@ Un detalle: un `<dialog>` modal vuelve inerte todo lo de fuera, incluidos los av
 - Avisos en regiones `aria-live` que **existen desde el principio** (los lectores de pantalla solo anuncian cambios en regiones que ya estaban).
 - `prefers-reduced-motion`: si el sistema pide menos movimiento, se desactivan animaciones.
 - Contrastes calculados para cumplir WCAG AA (4,5:1); las cifras están comentadas en `index.css`.
+- **El contorno de los controles también cuenta** (WCAG 1.4.11 pide 3:1 en los elementos de interfaz). El borde de los campos era `white/15` (1,47:1) y pasó al token `field-border` (`#687286`: 3,90:1 sobre `canvas` y 3,55:1 sobre `surface`). Pendiente conocido: el contorno del buscador no llega a 3:1 (lo identifican el icono y el texto de ejemplo).
 - «Películas» y «Series» del menú son texto reservado (`PLANNED_SECTIONS` en `Navbar.tsx`), sin enlace y no enfocables, con «(próximamente)» para lectores de pantalla.
 
 ### 21.2 Estilos (Tailwind CSS v4)
@@ -1267,12 +1275,19 @@ Tailwind genera clases de utilidad (`flex`, `p-4`, `text-sm`…) y solo incluye 
 
 Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto: **cero `style={{...}}`**, todo con clases y tokens; si cambias un color, cambia en un solo sitio. `postcss.config.js` solo carga el plugin de Tailwind para Vite.
 
+**Botones (`components/buttonStyles.ts`).** Hay cinco variantes con jerarquía: `primary` (acento), `light` (acción principal sobre imágenes), `outline` (secundaria), `ghost` (terciaria, sin borde: pesa menos y no compite con las otras) y `danger`. Todos se hunden un 3 % al pulsar (`active:scale-97`, 150 ms, curva `ease-out-strong`), salvo los desactivados y con movimiento reducido: es la confirmación física de que el clic se ha registrado. `WatchButton` y `FavoriteButton` aceptan `className` para colocarlos en una rejilla.
+
+**Detalles globales en `index.css`:** el texto seleccionado y el cursor de los campos usan el acento (la selección da 9,33:1), y la barra de desplazamiento usa la paleta oscura en vez de la del sistema.
+
 ### 21.3 Imágenes (`components/MoviePoster.tsx`)
 
 - La imagen sale **siempre de `movie.imageUrl`** (lo que diga la base de datos).
 - `loading="lazy"`: solo se descarga al acercarse a la pantalla. La del banner, en cambio, carga con prioridad alta, porque es lo primero que se ve.
 - Ancho y alto reservados: la página no «salta» al cargar.
-- Si no hay URL o la imagen falla, se muestra un hueco con icono y título, hecho con HTML (no es otra imagen, así que no puede fallar en bucle).
+- Si no hay URL o la imagen falla, se muestra un hueco con icono y título, hecho con HTML (no es otra imagen, así que no puede fallar en bucle). El hueco lleva **un degradado elegido por el título** (`lib/posterFallback.ts`): un hash del título (FNV-1a) escoge uno de 6 degradados, así que la misma película tiene siempre el mismo color y varios huecos seguidos no parecen una página sin cargar. Todos los degradados dan un contraste de 9:1 o más con el texto blanco (cifras en el código).
+- **Banner y modal: fondo desenfocado + póster entero.** Las portadas son verticales (2:3) y el banner y la cabecera del modal son horizontales. Con `object-cover`, una imagen vertical en una caja horizontal solo deja ver una franja central ampliada (antes se veía un «PARTE DOS» gigante y borroso). Por eso el banner usa la misma imagen dos veces: como **fondo** a sangre, muy desenfocado y bajo un velo `canvas/60` (con degradados hacia el color de fondo) para que el texto se lea, y como **póster nítido entero** pegado al título, en todos los anchos. El modal hace lo mismo. Ambas usan la misma URL, así que el navegador la descarga una sola vez. La versión de fondo se pinta con la prop `backdrop` de `MoviePoster` (sin icono ni título si falla, y oculta a los lectores de pantalla porque es decorativa). Los E2E vigilan tres cosas: que el fondo cubre su sección, que el póster se ve entero, en proporción 2:3 y sin recortar (`e2e/support/images.ts`), y que entre póster y título no hay más de 64 px (`e2e/responsive.spec.ts`).
+- **Por qué el póster va junto al título (revisión de diseño del 2026-10-03).** Antes, a 1280 px, el póster estaba en el borde derecho, a ~430 px del texto: por proximidad se leían como dos cosas sin relación. En móvil iba detrás del texto y el degradado tapaba su mitad, así que parecía una imagen rota. Ahora en móvil es una rejilla de dos columnas (póster pequeño | título) con metadatos, sinopsis y botones a todo el ancho debajo. La columna de texto usa `display: contents` en móvil (sus hijos se colocan directamente en la rejilla) y desde `md` pasa a ser una columna flex junto al póster; así no hay que duplicar el marcado para cada tamaño.
+- **El velo del 60 %** se eligió calculando el peor caso (fondo blanco puro detrás): título 7,5:1, sinopsis 6,0:1 y etiquetas de género 4,8:1. Con un 55 % los géneros bajaban a 4,3:1 y no llegaban a WCAG AA. Las cifras están en `HeroBanner.tsx`.
 - `referrerPolicy="no-referrer"`: si la imagen está en un servidor ajeno, ese servidor no recibe la URL de la aplicación de cada visitante.
 - Las portadas de ejemplo están en `public/covers/*.webp` (se sirven como `/covers/...`). El script opcional `docs/portadas-locales.sql` apunta las películas de ejemplo a ellas.
 
@@ -1290,7 +1305,7 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 | :--- | :--- | :--- | :--- |
 | Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 387 | `.\mvnw.cmd test` (desde `streambox/`) |
 | Backend (PostgreSQL real) | Testcontainers | 82 | Incluidos en el anterior; se omiten si Docker no está en marcha |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 236 | `npm run test` (desde `frontend/`) |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 259 | `npm run test` (desde `frontend/`) |
 | Frontend (flujos completos) | Playwright (Chromium) | 48 | `npm run test:e2e` |
 
 ### 22.2 Tests del backend

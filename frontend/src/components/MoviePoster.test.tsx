@@ -8,6 +8,7 @@
  */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { posterFallbackGradient } from '../lib/posterFallback';
 import { MoviePoster } from './MoviePoster';
 
 describe('MoviePoster: con imagen', () => {
@@ -83,5 +84,41 @@ describe('MoviePoster: respaldo sin imagen', () => {
     render(<MoviePoster title="Matrix" src={null} compact />);
 
     expect(screen.queryByText('Matrix')).not.toBeInTheDocument();
+  });
+
+  it('el hueco usa el degradado propio del título: el mismo en todas partes', () => {
+    render(
+      <>
+        <MoviePoster title="Puerto Seco" src={null} />
+        <MoviePoster title="Puerto Seco" src="https://img.example/rota.webp" />
+      </>,
+    );
+    fireEvent.error(document.querySelector('img')!);
+
+    const [first, second] = screen.getAllByText('Puerto Seco').map((title) => title.parentElement!);
+    for (const gradientClass of posterFallbackGradient('Puerto Seco').split(' ')) {
+      expect(first).toHaveClass(gradientClass);
+      expect(second).toHaveClass(gradientClass);
+    }
+  });
+});
+
+describe('MoviePoster: como fondo decorativo (backdrop)', () => {
+  it('con imagen, es siempre decorativa aunque reciba alt', () => {
+    render(<MoviePoster title="Matrix" src="https://img.example/matrix.webp" alt="Cartel" backdrop />);
+
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(document.querySelector('img')).toHaveAttribute('alt', '');
+  });
+
+  it('sin imagen, el hueco es solo el degradado: sin título ni icono y oculto a lectores de pantalla', () => {
+    const { container } = render(<MoviePoster title="Matrix" src={null} alt="Cartel" backdrop />);
+
+    expect(screen.queryByText('Matrix')).not.toBeInTheDocument();
+    expect(container.querySelector('svg')).toBeNull();
+    const fallback = container.firstElementChild!.firstElementChild!;
+    expect(fallback).toHaveAttribute('aria-hidden', 'true');
+    expect(fallback).not.toHaveAttribute('role');
+    expect(fallback).toHaveClass(posterFallbackGradient('Matrix').split(' ')[1]);
   });
 });

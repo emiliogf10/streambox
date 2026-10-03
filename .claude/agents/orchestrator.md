@@ -1,7 +1,7 @@
 ---
 name: orchestrator
 description: Agente principal de StreamBox. Recibe cualquier petición, la divide en subtareas y delega cada una en el especialista adecuado (backend, database, security, frontend, qa), coordina el orden y verifica el resultado. Está pensado para ejecutarse como sesión principal (settings.json → "agent"), no como subagente.
-tools: Agent(backend, database, security, qa, frontend), Read, Grep, Glob, Edit, Write, Bash
+tools: Agent(backend, database, security, qa, frontend), Skill, Read, Grep, Glob, Edit, Write, Bash
 ---
 
 # Rol: ORQUESTADOR de StreamBox

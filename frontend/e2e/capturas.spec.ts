@@ -27,10 +27,17 @@ const VIEWPORTS = [
 
 test.skip(!OUT_DIR, 'Define E2E_SCREENSHOTS_DIR para generar las capturas de revisión visual');
 
-/** Guarda una captura como `<carpeta>/<ancho>-<nombre>.png`. */
+/**
+ * Guarda una captura como `<carpeta>/<ancho>-<nombre>.png`.
+ *
+ * `animations: 'disabled'` adelanta al final las transiciones en curso: los
+ * diálogos y los avisos entran con un fundido de ~200 ms y, sin esto, la foto
+ * podía salir a mitad (el diálogo medio transparente, con la página de detrás
+ * asomando). Para revisar el diseño interesa el estado ya asentado.
+ */
 async function shot(page: Page, name: string, fullPage = false): Promise<void> {
   const width = page.viewportSize()?.width ?? 0;
-  await page.screenshot({ path: path.join(OUT_DIR ?? '', `${width}-${name}.png`), fullPage });
+  await page.screenshot({ path: path.join(OUT_DIR ?? '', `${width}-${name}.png`), fullPage, animations: 'disabled' });
 }
 
 for (const viewport of VIEWPORTS) {
@@ -53,9 +60,16 @@ for (const viewport of VIEWPORTS) {
       await page.goto('/');
       const banner = page.getByRole('region', { name: HERO_TITLE });
       await expect(banner).toBeVisible();
-      await expect.poll(() => banner.locator('img').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+      await expect.poll(() => banner.locator('img').first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
       await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
+      // Que terminen de descargarse las portadas visibles: si no, alguna sale como hueco "cargando".
+      await page.waitForLoadState('networkidle');
       await shot(page, '03-portada-arriba');
+      // La captura de página completa desplaza la vista: las portadas diferidas que entran entonces
+      // pueden no haber llegado y salir como hueco liso "cargando" (no es el respaldo).
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForLoadState('networkidle');
+      await page.evaluate(() => window.scrollTo(0, 0));
       await shot(page, '04-portada-completa', true);
 
       await page.getByRole('button', { name: 'Cargar más películas' }).click();
@@ -71,11 +85,24 @@ for (const viewport of VIEWPORTS) {
       await movieCard(page.getByRole('region', { name: 'Novedades' }), 'Interstellar').click();
       const dialog = page.getByRole('dialog', { name: 'Interstellar' });
       await expect(dialog).toBeVisible();
+      await expect.poll(() => dialog.locator('img').last().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
       await shot(page, '07-modal-detalle');
 
       await dialog.getByRole('button', { name: /^Mi lista/ }).click();
       await expect(dialog.getByText('«Interstellar» se ha añadido a tu lista.')).toBeVisible();
       await shot(page, '08-toast-en-modal');
+    });
+
+    test('banner sin portada (respaldo)', async ({ page, user, signIn }) => {
+      // La portada del banner da 404: se ve el respaldo de MoviePoster en el fondo y en la tarjeta.
+      await page.route('**/covers/dune-parte-dos.webp', (route) => route.fulfill({ status: 404, body: '' }));
+      await signIn(user);
+      await page.goto('/');
+      const banner = page.getByRole('region', { name: HERO_TITLE });
+      await expect(banner).toBeVisible();
+      await expect(banner.locator('img')).toHaveCount(0);
+      await page.waitForLoadState('networkidle');
+      await shot(page, '12-banner-sin-portada');
     });
 
     test('Mi lista: vacía, con películas y confirmación', async ({ page, request, user, signIn }) => {
@@ -94,6 +121,7 @@ for (const viewport of VIEWPORTS) {
       ]);
       await page.reload();
       await expect(page.getByRole('main').getByRole('button', { name: /\d{4} ·/ })).toHaveCount(6);
+      await page.waitForLoadState('networkidle');
       await shot(page, '10-mi-lista-con-peliculas');
 
       await page.getByRole('button', { name: 'Vaciar lista' }).click();

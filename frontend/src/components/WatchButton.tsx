@@ -9,6 +9,8 @@ interface WatchButtonProps {
   videoUrl: string | null | undefined;
   /** Título, para dar un nombre accesible único al enlace. */
   title: string;
+  /** Clases extra de colocación (ancho dentro de una rejilla de acciones...). */
+  className?: string;
 }
 
 /**
@@ -24,7 +26,7 @@ interface WatchButtonProps {
  * Si no hay URL válida se muestra un botón con `aria-disabled` (sigue siendo
  * enfocable, a diferencia de `disabled`) y una explicación para lectores de pantalla.
  */
-export function WatchButton({ videoUrl, title }: WatchButtonProps) {
+export function WatchButton({ videoUrl, title, className = '' }: WatchButtonProps) {
   const reasonId = useId();
   const safeUrl = getSafeVideoUrl(videoUrl);
 
@@ -35,7 +37,7 @@ export function WatchButton({ videoUrl, title }: WatchButtonProps) {
         target="_blank"
         rel="noopener noreferrer"
         aria-label={`Ver ahora ${title} (se abre en una pestaña nueva)`}
-        className={buttonClasses('light')}
+        className={buttonClasses('light', className)}
       >
         <Play aria-hidden="true" className="size-4 fill-black" />
         Ver ahora
@@ -50,7 +52,7 @@ export function WatchButton({ videoUrl, title }: WatchButtonProps) {
         aria-disabled="true"
         aria-describedby={reasonId}
         title="Esta película no tiene un vídeo disponible"
-        className={buttonClasses('light')}
+        className={buttonClasses('light', className)}
         onClick={(event) => event.preventDefault()}
       >
         <Play aria-hidden="true" className="size-4 fill-black" />

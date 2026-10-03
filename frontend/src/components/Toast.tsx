@@ -29,6 +29,13 @@ interface ToastProps {
  * Se cierra solo tras unos segundos, o a mano con el botón. El temporizador se
  * pausa mientras el puntero o el foco están encima, para que quien lee despacio
  * o usa teclado no pierda el mensaje.
+ *
+ * Entra con un fundido y un desplazamiento corto desde abajo (8 px, 250 ms),
+ * la misma dirección de la que viene la zona de avisos: así se percibe como
+ * algo que llega, no como un parpadeo. Se hace con `@starting-style`
+ * (variante `starting:` de Tailwind) y una TRANSICIÓN, no con `@keyframes`:
+ * si llegan varios avisos seguidos, una transición se puede interrumpir sin
+ * saltos. Con `prefers-reduced-motion` la regla global la deja a ~0 ms.
  */
 export function Toast({ toast, onDismiss }: ToastProps) {
   const [paused, setPaused] = useState(false);
@@ -42,7 +49,7 @@ export function Toast({ toast, onDismiss }: ToastProps) {
 
   return (
     <div
-      className="pointer-events-auto flex items-start gap-3 rounded-xl border border-line bg-surface-raised p-4 shadow-2xl"
+      className="pointer-events-auto flex items-start gap-3 rounded-xl border border-line bg-surface-raised p-4 shadow-2xl transition-[opacity,translate] duration-250 ease-out-strong starting:translate-y-2 starting:opacity-0"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
