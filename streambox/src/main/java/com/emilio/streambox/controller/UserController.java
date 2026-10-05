@@ -101,7 +101,12 @@ public class UserController {
             + "No requiere autenticación.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Usuario creado correctamente"),
-            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
+            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos "
+                    + "(código VALIDATION_ERROR, un mensaje por campo en validationErrors). La contraseña "
+                    + "debe tener entre 12 y 64 caracteres, ocupar como máximo 72 bytes en UTF-8, no ser "
+                    + "común ni trivial y no contener el nombre de usuario ni la parte local del email. "
+                    + "Si incumple varias reglas solo se informa de una, por este orden: longitud, bytes, "
+                    + "común, datos personales"),
             @ApiResponse(responseCode = "409", description = "El nombre de usuario o el correo ya están en uso"),
             @ApiResponse(responseCode = "429", description = "Demasiados registros desde esta IP; "
                     + "ver cabecera Retry-After")

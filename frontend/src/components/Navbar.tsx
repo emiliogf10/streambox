@@ -1,9 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Link, NavLink } from 'react-router-dom';
-import { LogOut, UserCircle } from 'lucide-react';
+import { LogOut, ShieldCheck, UserCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useHeightCssVariable } from '../hooks/useHeightCssVariable';
 import { SearchBar } from './SearchBar';
+
+/**
+ * Variable CSS con la altura real de la barra (la publica {@link useHeightCssVariable}).
+ * La usa `index.css` para que el foco nunca quede debajo de la barra.
+ */
+export const NAVBAR_HEIGHT_VARIABLE = '--navbar-height';
 
 /**
  * Clases de un enlace de la navegación principal. `NavLink` de react-router
@@ -30,10 +37,11 @@ const PLANNED_SECTIONS = ['Películas', 'Series'] as const;
 /**
  * Barra superior de la zona autenticada: logo, navegación principal, buscador y menú de usuario.
  *
- * **Responsive.** Se queda pegada arriba (`sticky`, no `fixed`: así no hace
- * falta compensar su altura en el contenido). En pantallas estrechas se
- * apila en tres filas (`flex-wrap`): logo + menú de usuario, navegación a todo
- * el ancho y buscador a todo el ancho; desde `md` todo cabe en una fila. No se
+ * **Responsive.** Se queda pegada arriba (`sticky`, no `fixed`: ocupa su sitio
+ * en el flujo, así que el contenido no necesita un margen superior que la
+ * compense). En pantallas estrechas se apila en tres filas (`flex-wrap`):
+ * logo + menú de usuario, navegación a todo el ancho y buscador a todo el
+ * ancho; desde `md` todo cabe en una fila. No se
  * usa menú "hamburguesa": con cuatro entradas cortas caben en una fila de
  * 320 px, y esconderlas tras un botón añadiría un clic sin ganar espacio real.
  *
@@ -41,13 +49,43 @@ const PLANNED_SECTIONS = ['Películas', 'Series'] as const;
  * botón de despliegue (`aria-expanded` + `aria-controls`) que se cierra con
  * Escape (devolviendo el foco al botón), al pulsar fuera o al sacar el foco.
  * Todos los objetivos táctiles miden al menos 44 px.
+ *
+ * **Usuario y rol.** Cuando `AuthContext` ya ha cargado el usuario
+ * (`GET /api/users/me`), el menú muestra su nombre y, solo a los
+ * administradores, la etiqueta «Administrador» (texto con icono, no solo un
+ * color). Es contenido normal del desplegable, no un `role="menu"`, así que el
+ * lector de pantalla lo lee en orden al recorrerlo. Es informativo: el rol en el
+ * cliente solo decide qué se pinta; quien protege los datos es el backend (403).
+ *
+ * **Enlace de administración.** Solo los administradores ven «Administrar»
+ * (a `/admin`), tras «Mi lista». Con él la navegación pasa de cuatro a cinco
+ * entradas y deja de caber en dos sitios: la fila propia del móvil (por debajo
+ * de 640 px) y la fila única de 768–1023 px, donde comparte espacio con el logo,
+ * el buscador y el menú. Ahí el enlace se queda en su icono (el escudo, el mismo
+ * de la etiqueta «Administrador» del menú) y el texto pasa a `sr-only`: el
+ * nombre accesible sigue siendo «Administrar» y el `title` lo muestra al pasar
+ * el ratón. Además la navegación admite `flex-wrap` como red de seguridad: en
+ * una pantalla aún más estrecha (320 px) baja a otra línea antes que provocar
+ * scroll horizontal. Para ganar margen a 768 px, el buscador mide 12rem en
+ * `md` y vuelve a 15rem desde `lg`.
+ *
+ * **El foco no queda debajo de la barra (WCAG 2.2 · 2.4.11).** Que sea
+ * `sticky` evita compensarla en la maquetación, pero NO al desplazar: cuando el
+ * navegador lleva a la vista el elemento enfocado (Tab, `focus()` de un
+ * formulario con errores, `scrollIntoView`), solo comprueba que quepa en la
+ * ventana, y la franja de arriba la tapa la barra. Por eso la barra publica su
+ * altura real en `--navbar-height` ({@link useHeightCssVariable}) e `index.css`
+ * da a todo lo que hay en `<main>` un `scroll-margin-top` de esa altura más un
+ * respiro (ver allí por qué así y no con `scroll-padding-top` en `<html>`).
  */
 export function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, user, isAdmin, logout } = useAuth();
+  const headerRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
+  useHeightCssVariable(headerRef, NAVBAR_HEIGHT_VARIABLE);
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
@@ -69,7 +107,7 @@ export function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-50 border-b border-line bg-canvas">
+    <header ref={headerRef} className="sticky top-0 z-50 border-b border-line bg-canvas">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 sm:px-6 md:min-h-14 md:flex-nowrap md:gap-x-4 md:py-0 lg:gap-x-6">
         <Link to="/" className="focus-ring flex min-h-11 items-center gap-2 rounded-md pr-1">
           <span aria-hidden="true" className="size-2.5 rounded-full bg-accent" />
@@ -80,7 +118,7 @@ export function Navbar() {
         {isAuthenticated && (
           <nav
             aria-label="Principal"
-            className="order-last flex w-full items-center gap-1 md:order-none md:w-auto md:flex-1 lg:gap-3"
+            className="order-last flex w-full flex-wrap items-center gap-1 md:order-none md:w-auto md:flex-1 lg:gap-3"
           >
             <NavLink to="/" end className={navLinkClass}>
               Inicio
@@ -99,6 +137,14 @@ export function Navbar() {
             <NavLink to="/favorites" className={navLinkClass}>
               Mi lista
             </NavLink>
+            {/* Solo con el rol ya confirmado por el servidor: mientras carga `isAdmin` es false y no aparece. */}
+            {isAdmin && (
+              <NavLink to="/admin" title="Administrar" className={(state) => `${navLinkClass(state)} gap-1.5`}>
+                <ShieldCheck aria-hidden="true" className="size-4 shrink-0" />
+                {/* El texto se oculta (solo a la vista) donde no cabe: ver «Enlace de administración» arriba. */}
+                <span className="max-sm:sr-only md:max-lg:sr-only">Administrar</span>
+              </NavLink>
+            )}
           </nav>
         )}
 
@@ -134,8 +180,23 @@ export function Navbar() {
             {menuOpen && (
               <div
                 id={menuId}
-                className="absolute top-full right-0 z-60 mt-1 min-w-44 rounded-xl border border-line bg-surface py-1 shadow-2xl"
+                className="absolute top-full right-0 z-60 mt-1 max-w-[min(18rem,calc(100vw-2rem))] min-w-44 rounded-xl border border-line bg-surface py-1 shadow-2xl"
               >
+                {/* Solo con el usuario ya cargado: mientras carga o si falla, el menú queda como siempre (sin huecos). */}
+                {user && (
+                  <div className="mb-1 border-b border-line px-4 pt-2 pb-3">
+                    <p className="text-xs text-muted">Sesión iniciada como</p>
+                    <p className="truncate text-sm font-semibold text-white" title={user.username}>
+                      {user.username}
+                    </p>
+                    {isAdmin && (
+                      <p className="mt-2 inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                        <ShieldCheck aria-hidden="true" className="size-3.5" />
+                        Administrador
+                      </p>
+                    )}
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => logout()}

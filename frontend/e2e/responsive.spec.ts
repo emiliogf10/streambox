@@ -5,15 +5,17 @@
  * Protege contra el fallo más común al tocar estilos: una tarjeta, una fila o la
  * barra de navegación que se sale por la derecha en 375 px. En la barra se
  * comprueba además que ningún elemento se solape con otro (a 768 px el cálculo
- * de anchos es muy justo).
+ * de anchos es muy justo), también con el enlace «Administrar» que solo ven los
+ * administradores, y que las pantallas del panel (tabla, formulario, géneros)
+ * caben sin scroll horizontal.
  *
  * Nota: las filas de películas SÍ tienen scroll horizontal INTERNO (carrusel);
  * lo que no puede desbordarse es la página (`documentElement`).
  */
 import type { Locator, Page } from '@playwright/test';
-import { addFavoritesByTitle } from './support/api';
+import { addFavoritesByTitle, loginAdmin } from './support/api';
 import { HERO_TITLE } from './support/catalog';
-import { expect, test } from './support/fixtures';
+import { expect, test, waitForMovieForm } from './support/fixtures';
 import { expectCovers, expectWholePoster } from './support/images';
 
 const VIEWPORTS = [
@@ -41,6 +43,41 @@ async function expectFullyInsideViewportWidth(locator: Locator, page: Page, labe
   expect(box!.x + box!.width, `${label} se sale por la derecha`).toBeLessThanOrEqual(width + 0.5);
 }
 
+/**
+ * La barra superior cabe: cada elemento se ve entero dentro de la ventana y ninguno pisa a otro (a 768 px
+ * el margen es mínimo, y con el enlace «Administrar» de los administradores aún más).
+ *
+ * @param withAdminLink si se espera también el enlace «Administrar»
+ */
+async function expectNavbarFits(page: Page, withAdminLink: boolean): Promise<void> {
+  const nav = page.getByRole('navigation', { name: 'Principal' });
+  const items: [Locator, string][] = [
+    [page.getByRole('link', { name: 'streambox' }), 'logo'],
+    [nav.getByRole('link', { name: 'Inicio' }), 'Inicio'],
+    [nav.getByText('Películas'), 'Películas'],
+    [nav.getByText('Series'), 'Series'],
+    [nav.getByRole('link', { name: 'Mi lista' }), 'Mi lista'],
+    ...(withAdminLink ? ([[nav.getByRole('link', { name: 'Administrar' }), 'Administrar']] as [Locator, string][]) : []),
+    [page.getByRole('combobox', { name: 'Buscar películas por título' }), 'buscador'],
+    [page.getByRole('button', { name: 'Menú de usuario' }), 'menú de usuario'],
+  ];
+
+  const boxes: { label: string; x: number; y: number; width: number; height: number }[] = [];
+  for (const [locator, label] of items) {
+    await expectFullyInsideViewportWidth(locator, page, label);
+    const box = await locator.boundingBox();
+    boxes.push({ label, ...box! });
+  }
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const a = boxes[i];
+      const b = boxes[j];
+      const overlap = a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1;
+      expect(overlap, `«${a.label}» y «${b.label}» se solapan en la barra`).toBe(false);
+    }
+  }
+}
+
 for (const viewport of VIEWPORTS) {
   test.describe(`Responsive ${viewport.name}`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
@@ -63,7 +100,7 @@ for (const viewport of VIEWPORTS) {
 
       // Con los mensajes de error los textos son más largos: tampoco debe desbordar.
       await page.getByRole('button', { name: 'Crear cuenta' }).click();
-      await expect(page.getByText('La contraseña debe tener entre 8 y 100 caracteres.')).toBeVisible();
+      await expect(page.getByText('La contraseña debe tener entre 12 y 64 caracteres.')).toBeVisible();
       await expectNoHorizontalScroll(page);
     });
 
@@ -72,32 +109,9 @@ for (const viewport of VIEWPORTS) {
       await page.goto('/');
       await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
 
-      const nav = page.getByRole('navigation', { name: 'Principal' });
-      const items: [Locator, string][] = [
-        [page.getByRole('link', { name: 'streambox' }), 'logo'],
-        [nav.getByRole('link', { name: 'Inicio' }), 'Inicio'],
-        [nav.getByText('Películas'), 'Películas'],
-        [nav.getByText('Series'), 'Series'],
-        [nav.getByRole('link', { name: 'Mi lista' }), 'Mi lista'],
-        [page.getByRole('combobox', { name: 'Buscar películas por título' }), 'buscador'],
-        [page.getByRole('button', { name: 'Menú de usuario' }), 'menú de usuario'],
-      ];
-
-      const boxes: { label: string; x: number; y: number; width: number; height: number }[] = [];
-      for (const [locator, label] of items) {
-        await expectFullyInsideViewportWidth(locator, page, label);
-        const box = await locator.boundingBox();
-        boxes.push({ label, ...box! });
-      }
-      // Ningún elemento de la barra pisa a otro (a 768 px el margen es mínimo).
-      for (let i = 0; i < boxes.length; i += 1) {
-        for (let j = i + 1; j < boxes.length; j += 1) {
-          const a = boxes[i];
-          const b = boxes[j];
-          const overlap = a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1;
-          expect(overlap, `«${a.label}» y «${b.label}» se solapan en la barra`).toBe(false);
-        }
-      }
+      // Barra de un usuario normal: sin «Administrar». Nada se sale ni se pisa (a 768 px el margen es mínimo).
+      await expectNavbarFits(page, false);
+      await expect(page.getByRole('link', { name: 'Administrar' })).toHaveCount(0);
 
       const banner = page.getByRole('region', { name: HERO_TITLE });
       await expectFullyInsideViewportWidth(banner, page, 'banner');
@@ -172,6 +186,58 @@ for (const viewport of VIEWPORTS) {
       // El póster de la cabecera se ve entero también en 375 px (más pequeño, a la izquierda del título).
       await expectWholePoster(dialog.locator('img').last(), dialog, 'póster del modal');
       await expectNoHorizontalScroll(page);
+    });
+
+    test('panel de administración: la barra con «Administrar», el listado, el formulario y los géneros', async ({
+      page,
+      request,
+      signIn,
+    }) => {
+      // Solo lectura: no crea ni borra nada (el administrador y el catálogo son compartidos).
+      await signIn({ token: await loginAdmin(request) });
+      await page.goto('/admin/peliculas');
+      const table = page.getByRole('table', { name: /^Películas del catálogo/ });
+      await expect(table).toBeVisible();
+
+      // Con el quinto enlace, la barra sigue cabiendo sin solaparse (en 375 y 768 px «Administrar» queda en icono).
+      await expectNavbarFits(page, true);
+      await expectNoHorizontalScroll(page);
+
+      const sections = page.getByRole('navigation', { name: 'Secciones de administración' });
+      await expectFullyInsideViewportWidth(sections.getByRole('link', { name: 'Géneros' }), page, 'pestaña Géneros');
+      await expectFullyInsideViewportWidth(page.getByRole('link', { name: 'Nueva película' }), page, '«Nueva película»');
+      await expectFullyInsideViewportWidth(page.getByRole('searchbox', { name: 'Buscar por título' }), page, 'buscador del panel');
+      // La tabla (y las acciones de cada fila) caben: en móvil se ocultan columnas, no se desborda.
+      await expectFullyInsideViewportWidth(table, page, 'tabla');
+      const firstRow = table.getByRole('row').nth(1);
+      await expectFullyInsideViewportWidth(firstRow.getByRole('link', { name: /^Editar / }), page, '«Editar» de la primera fila');
+      await expectFullyInsideViewportWidth(firstRow.getByRole('button', { name: /^Borrar / }), page, '«Borrar» de la primera fila');
+      const pagination = page.getByRole('navigation', { name: 'Paginación de películas' });
+      await expectFullyInsideViewportWidth(pagination.getByRole('button', { name: 'Siguiente' }), page, '«Siguiente»');
+
+      // Formulario con todos los errores a la vista y la vista previa.
+      await page.goto('/admin/peliculas/nueva');
+      // Sin esta espera el clic podía caer durante el salto que provoca la llegada de los géneros (ver la función).
+      await waitForMovieForm(page);
+      await page.getByRole('button', { name: 'Crear película' }).click();
+      await expect(page.getByText('Elige al menos un género')).toBeVisible();
+      await expectFullyInsideViewportWidth(page.getByLabel('URL de la portada'), page, 'campo de portada');
+      await expectFullyInsideViewportWidth(
+        page.getByRole('complementary', { name: 'Vista previa de la portada' }),
+        page,
+        'vista previa',
+      );
+      await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Crear película' }), page, '«Crear película»');
+      await expectNoHorizontalScroll(page);
+
+      // Géneros, también con el renombrado en línea abierto (campo + dos botones en la misma fila).
+      await page.goto('/admin/generos');
+      await expect(page.getByRole('list', { name: 'Géneros' })).toBeVisible();
+      await page.getByRole('button', { name: 'Renombrar Drama' }).click();
+      await expectFullyInsideViewportWidth(page.getByRole('textbox', { name: 'Nuevo nombre para Drama' }), page, 'campo de renombrar');
+      await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Guardar' }), page, '«Guardar»');
+      await expectNoHorizontalScroll(page);
+      await page.keyboard.press('Escape');
     });
   });
 }

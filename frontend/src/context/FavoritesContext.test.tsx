@@ -64,7 +64,9 @@ describe('FavoriteButton (interfaz)', () => {
   it('carga la lista con el token y refleja que la película ya está en ella', async () => {
     await setup([m1]);
 
-    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe('Bearer jwt');
+    // Se busca la petición de la lista (no "la primera"): `AuthProvider` también pide `/users/me`.
+    const listCall = fetchMock.mock.calls.find(([url]) => String(url) === '/api/users/me/favorites');
+    expect(new Headers(listCall?.[1]?.headers).get('Authorization')).toBe('Bearer jwt');
     expect(screen.getByRole('button', { name: IN_LIST })).toBeInTheDocument();
   });
 

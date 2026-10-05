@@ -49,10 +49,21 @@ public class AuthController {
             + "y contraseña y devuelve un token JWT.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Autenticación realizada correctamente"),
-            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
-            @ApiResponse(responseCode = "401", description = "Credenciales incorrectas"),
-            @ApiResponse(responseCode = "429", description = "Demasiados intentos desde esta IP o para esta cuenta; "
-                    + "ver cabecera Retry-After")
+            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos "
+                    + "(email con formato incorrecto, contraseña vacía o de más de 1024 caracteres). No "
+                    + "gasta intento de la cuenta. En el login no se aplica la política de longitud del "
+                    + "registro: las cuentas antiguas siguen pudiendo entrar"),
+            @ApiResponse(responseCode = "401", description = "Credenciales incorrectas (código "
+                    + "INVALID_CREDENTIALS, mensaje «Email o contraseña incorrectos»). El cuerpo incluye "
+                    + "remainingAttempts: intentos que le quedan a la cuenta ya descontado este fallo "
+                    + "(siempre 1 o más); si el siguiente intento también falla y era el último, la "
+                    + "cuenta se bloquea y se responde 429 ACCOUNT_LOCKED. Es idéntico exista o no el email"),
+            @ApiResponse(responseCode = "429", description = "Demasiados intentos; la cabecera Retry-After "
+                    + "indica los segundos que hay que esperar. Código ACCOUNT_LOCKED: la cuenta está "
+                    + "bloqueada por logins fallidos (lo devuelve el fallo que agota los intentos y "
+                    + "cualquier intento durante el bloqueo, aunque la contraseña sea correcta; el mensaje "
+                    + "dice cuántos minutos dura). Código RATE_LIMIT_EXCEEDED: demasiadas peticiones de "
+                    + "login desde esta IP")
     })
     public LoginResponse login(@Valid @RequestBody LoginRequest request) {
 

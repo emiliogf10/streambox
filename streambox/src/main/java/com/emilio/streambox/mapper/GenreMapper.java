@@ -2,7 +2,7 @@ package com.emilio.streambox.mapper;
 
 import java.util.List;
 
-import com.emilio.streambox.dto.CreateGenreRequest;
+import com.emilio.streambox.dto.GenreRequest;
 import com.emilio.streambox.dto.GenreResponse;
 import com.emilio.streambox.entity.Genre;
 
@@ -21,10 +21,10 @@ public final class GenreMapper {
      * @param request datos del género recibidos del cliente
      * @return entidad {@link Genre} sin guardar
      */
-    public static Genre toEntity(CreateGenreRequest request) {
+    public static Genre toEntity(GenreRequest request) {
 
         Genre genre = new Genre();
-        genre.setName(request.getName());
+        genre.setName(request.name());
         return genre;
     }
 

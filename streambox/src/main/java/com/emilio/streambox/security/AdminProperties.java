@@ -14,8 +14,14 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * @param email    correo del administrador (vacío = no crear)
  * @param username nombre de usuario del administrador ({@code admin} por defecto)
- * @param password contraseña inicial en texto plano (mínimo 12 caracteres); se
- *                 guarda cifrada con BCrypt
+ * @param password contraseña inicial en texto plano; al crear la cuenta debe
+ *                 cumplir la política de contraseñas ({@code PasswordPolicy}:
+ *                 12 a 64 caracteres, máximo 72 bytes, no común y sin el
+ *                 usuario ni el email). Se guarda cifrada con BCrypt. Si el
+ *                 administrador ya existe no se usa ni se valida (solo se
+ *                 avisa en el log si no cumple la política). Por eso aquí no
+ *                 hay restricciones de Bean Validation: impedirían arrancar
+ *                 también cuando la cuenta ya existe
  */
 @ConfigurationProperties(prefix = "streambox.admin")
 public record AdminProperties(

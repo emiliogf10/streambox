@@ -13,9 +13,9 @@
  */
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { addFavoritesByTitle } from './support/api';
+import { addFavoritesByTitle, loginAdmin } from './support/api';
 import { HERO_TITLE } from './support/catalog';
-import { expect, movieCard, test } from './support/fixtures';
+import { expect, movieCard, test, waitForMovieForm } from './support/fixtures';
 
 const OUT_DIR = process.env.E2E_SCREENSHOTS_DIR;
 
@@ -127,6 +127,34 @@ for (const viewport of VIEWPORTS) {
       await page.getByRole('button', { name: 'Vaciar lista' }).click();
       await expect(page.getByRole('alertdialog')).toBeVisible();
       await shot(page, '11-confirmacion-vaciar');
+    });
+
+    test('panel de administración (solo lectura)', async ({ page, request, signIn }) => {
+      await signIn({ token: await loginAdmin(request) });
+      await page.goto('/admin/peliculas');
+      await expect(page.getByRole('table')).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      await shot(page, '13-admin-peliculas', true);
+
+      await page.getByRole('button', { name: `Borrar ${HERO_TITLE}` }).click();
+      await expect(page.getByRole('alertdialog')).toBeVisible();
+      await shot(page, '14-admin-confirmar-borrado');
+      await page.getByRole('alertdialog').getByRole('button', { name: 'Cancelar' }).click();
+
+      await page.goto('/admin/peliculas/nueva');
+      // Formulario completo antes de pulsar: la llegada de los géneros desplaza el botón (ver la función).
+      await waitForMovieForm(page);
+      await page.getByLabel('URL de la portada').fill('/covers/interstellar.webp');
+      await page.getByRole('button', { name: 'Crear película' }).click();
+      await expect(page.getByText('Elige al menos un género')).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      await shot(page, '15-admin-formulario-errores', true);
+
+      await page.goto('/admin/generos');
+      await expect(page.getByRole('list', { name: 'Géneros' })).toBeVisible();
+      await page.getByRole('button', { name: 'Renombrar Drama' }).click();
+      await shot(page, '16-admin-generos-renombrar', true);
+      await page.keyboard.press('Escape');
     });
   });
 }

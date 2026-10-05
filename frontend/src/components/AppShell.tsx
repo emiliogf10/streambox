@@ -6,7 +6,9 @@ import { Navbar } from './Navbar';
 /**
  * Estructura de la zona autenticada: barra de navegación + contenido de la ruta
  * hija (`<Outlet />`) dentro de `<main>`, el landmark principal de la página.
- * La barra es `sticky`, por lo que el contenido no necesita margen superior.
+ * La barra es `sticky`, por lo que el contenido no necesita margen superior; lo
+ * que sí la tiene en cuenta es el desplazamiento hasta el elemento enfocado
+ * (`scroll-margin-top` de todo lo que hay en `<main>`, ver `index.css`).
  *
  * Se usa como "ruta de diseño" en `App.tsx`, así que se monta UNA vez al entrar
  * y no se destruye al navegar entre páginas. Por eso aquí vive también el

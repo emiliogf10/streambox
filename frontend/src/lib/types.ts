@@ -64,6 +64,30 @@ export interface RegisterRequest {
 }
 
 /**
+ * Cuerpo de `POST /api/movies` y `PUT /api/movies/{id}` (`MovieRequest`, solo
+ * administradores). `PUT` sustituye la película completa, así que alta y
+ * edición envían exactamente los mismos campos.
+ */
+export interface MovieRequest {
+  title: string;
+  description: string;
+  /** Duración en minutos (entero, al menos 1). */
+  duration: number;
+  releaseYear: number;
+  /** `https://...` o una portada propia `/covers/<archivo>`. */
+  imageUrl: string;
+  /** Solo `https://...`. */
+  videoUrl: string;
+  /** Al menos un género. */
+  genreIds: number[];
+}
+
+/** Cuerpo de `POST /api/genres` y `PUT /api/genres/{id}` (`GenreRequest`, solo administradores). */
+export interface GenreRequest {
+  name: string;
+}
+
+/**
  * Cuerpo de cualquier respuesta de error de la API (`ErrorResponse`).
  *
  * El cliente decide por `status` y `code`, nunca por el texto de `message`,
@@ -77,4 +101,10 @@ export interface ApiErrorBody {
   message: string;
   path: string;
   validationErrors?: Record<string, string>;
+  /**
+   * Intentos de login que quedan antes de que la cuenta se bloquee. Solo viene
+   * en el 401 `INVALID_CREDENTIALS` de `POST /api/auth/login` (entero ≥ 1); en
+   * el resto de errores no aparece.
+   */
+  remainingAttempts?: number;
 }

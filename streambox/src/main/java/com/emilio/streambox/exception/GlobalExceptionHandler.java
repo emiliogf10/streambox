@@ -91,11 +91,33 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 exception.getMessage(), request);
     }
 
+    @ExceptionHandler(GenreAlreadyExistsException.class)
+    public ResponseEntity<ErrorResponse> handleGenreAlreadyExists(
+            GenreAlreadyExistsException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.CONFLICT, ErrorCode.GENRE_ALREADY_EXISTS,
+                exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(GenreInUseException.class)
+    public ResponseEntity<ErrorResponse> handleGenreInUse(
+            GenreInUseException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.CONFLICT, ErrorCode.GENRE_IN_USE,
+                exception.getMessage(), request);
+    }
+
+    /**
+     * 401 del login. Incluye {@code remainingAttempts} (intentos antes del
+     * bloqueo) cuando la excepción lo trae; si no, el campo se omite.
+     */
     @ExceptionHandler(InvalidCredentialsException.class)
     public ResponseEntity<ErrorResponse> handleInvalidCredentials(
             InvalidCredentialsException exception, HttpServletRequest request) {
-        return buildErrorResponse(HttpStatus.UNAUTHORIZED, ErrorCode.INVALID_CREDENTIALS,
-                exception.getMessage(), request);
+        HttpStatus status = HttpStatus.UNAUTHORIZED;
+        ErrorResponse error = new ErrorResponse(
+                Instant.now(), status.value(), status.getReasonPhrase(),
+                ErrorCode.INVALID_CREDENTIALS, exception.getMessage(), request.getRequestURI(),
+                null, exception.getRemainingAttempts());
+        return ResponseEntity.status(status).body(error);
     }
 
     @ExceptionHandler(AmbiguousTitleException.class)
@@ -108,13 +130,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(TooManyRequestsException.class)
     public ResponseEntity<ErrorResponse> handleTooManyRequests(
             TooManyRequestsException exception, HttpServletRequest request) {
-        ResponseEntity<ErrorResponse> response = buildErrorResponse(
-                HttpStatus.TOO_MANY_REQUESTS, ErrorCode.RATE_LIMIT_EXCEEDED,
-                exception.getMessage(), request);
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                .header(HttpHeaders.RETRY_AFTER,
-                        String.valueOf(exception.getRetryAfter().toSeconds()))
-                .body(response.getBody());
+        return tooManyRequests(ErrorCode.RATE_LIMIT_EXCEEDED, exception, request);
+    }
+
+    /**
+     * Cuenta bloqueada por logins fallidos: 429 con su propio código. Spring
+     * elige este método y no el de {@link TooManyRequestsException} porque es
+     * el manejador de la clase más concreta.
+     */
+    @ExceptionHandler(AccountLockedException.class)
+    public ResponseEntity<ErrorResponse> handleAccountLocked(
+            AccountLockedException exception, HttpServletRequest request) {
+        return tooManyRequests(ErrorCode.ACCOUNT_LOCKED, exception, request);
     }
 
     @ExceptionHandler(InvalidParameterException.class)
@@ -275,6 +302,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 Instant.now(), status.value(), status.getReasonPhrase(),
                 code, message, request.getRequestURI(), validationErrors);
         return ResponseEntity.status(status).body(error);
+    }
+
+    /** 429 con la cabecera {@code Retry-After} en segundos. */
+    private ResponseEntity<ErrorResponse> tooManyRequests(
+            ErrorCode code, TooManyRequestsException exception, HttpServletRequest request) {
+        ResponseEntity<ErrorResponse> response = buildErrorResponse(
+                HttpStatus.TOO_MANY_REQUESTS, code, exception.getMessage(), request);
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER,
+                        String.valueOf(exception.getRetryAfter().toSeconds()))
+                .body(response.getBody());
     }
 
     /** Variante para los métodos heredados, que trabajan con {@link WebRequest}. */

@@ -10,6 +10,12 @@ interface FormFieldProps extends ComponentProps<'input'> {
   error?: string;
   /** Texto de ayuda permanente (requisitos del campo). */
   hint?: string;
+  /**
+   * Oculta la etiqueta a la vista (sigue existiendo para los lectores de
+   * pantalla). Solo para campos cuyo propósito ya es evidente por el contexto,
+   * como renombrar en línea un elemento de una lista.
+   */
+  hideLabel?: boolean;
 }
 
 /**
@@ -30,7 +36,7 @@ interface FormFieldProps extends ComponentProps<'input'> {
  *   WCAG 1.4.11 pide 3:1 para el contorno que permite identificar un control,
  *   y el anterior `white/15` se quedaba en 1.5:1. Al pasar el ratón se aclara.
  */
-export function FormField({ id, label, error, hint, className = '', ...inputProps }: FormFieldProps) {
+export function FormField({ id, label, error, hint, hideLabel = false, className = '', ...inputProps }: FormFieldProps) {
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const showHint = Boolean(hint) && !error;
@@ -38,7 +44,7 @@ export function FormField({ id, label, error, hint, className = '', ...inputProp
 
   return (
     <div>
-      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-gray-300">
+      <label htmlFor={id} className={hideLabel ? 'sr-only' : 'mb-1.5 block text-sm font-medium text-gray-300'}>
         {label}
       </label>
       <input

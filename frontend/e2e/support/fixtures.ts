@@ -71,3 +71,22 @@ export function movieCard(scope: Page | Locator, title: string): Locator {
 export function formAlert(page: Page): Locator {
   return page.getByRole('alert').filter({ hasText: /\S/ });
 }
+
+/**
+ * Espera a que el formulario de película del panel esté COMPLETO, con las
+ * casillas de géneros: la señal visible que esperaría una persona antes de
+ * pulsar «Crear película».
+ *
+ * Por qué hace falta: los géneros llegan en una petición aparte
+ * (`GET /api/genres`) y, al cambiar la línea «Cargando géneros...» por las
+ * casillas, todo lo que hay debajo (la vista previa y los botones) baja de golpe
+ * (~130 px a 375 px). Si el clic coincide con ese salto, el botón ya no está bajo
+ * el puntero y el formulario no se envía: así fallaba a veces el test responsive
+ * a 375 px. Las esperas automáticas de Playwright no lo evitan: comprueban que el
+ * botón está quieto ANTES de empezar el clic y miran qué hay bajo el puntero
+ * solo en el PRIMER evento (`mousedown`). Si la página se mueve antes del
+ * `mouseup`, el `click` va a parar a otro elemento.
+ */
+export async function waitForMovieForm(page: Page): Promise<void> {
+  await expect(page.getByRole('group', { name: 'Géneros' }).getByRole('checkbox').first()).toBeVisible();
+}

@@ -51,6 +51,20 @@ const isWindows = process.platform === 'win32';
  */
 const reuseServers = process.env.E2E_REUSE_SERVERS === '1';
 
+/**
+ * Specs que MODIFICAN el catálogo compartido (crean y borran películas desde el panel).
+ *
+ * Todos los tests usan el mismo catálogo sembrado y muchos comprueban cosas que dependen de él: la
+ * película del banner es la más reciente, la portada dice "Mostrando 25 de 25"... Mientras existe una
+ * película creada por un test, ELLA pasa a ser la más reciente y esos tests fallarían al azar según el
+ * orden en que corran. Por eso estos specs van en un proyecto propio (`catalogo-mutable`) que depende del
+ * principal: Playwright no lo empieza hasta que el resto ha terminado.
+ *
+ * Contrapartida conocida: si falla algún test del proyecto principal, este se omite. Para ejecutarlo
+ * solo: `npx playwright test admin-peliculas --no-deps`.
+ */
+const CATALOG_MUTATING_SPECS = /admin-peliculas\.spec\.ts$/;
+
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.spec.ts',
@@ -74,7 +88,15 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
 
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: CATALOG_MUTATING_SPECS },
+    {
+      name: 'catalogo-mutable',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: CATALOG_MUTATING_SPECS,
+      dependencies: ['chromium'],
+    },
+  ],
 
   webServer: [
     {

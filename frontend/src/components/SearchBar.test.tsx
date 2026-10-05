@@ -9,10 +9,11 @@
  * `fetch` está simulado y el retardo de la búsqueda usa temporizadores falsos
  * (ningún test espera tiempo real).
  */
-import { act, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FavoritesProvider } from '../context/FavoritesContext';
+import { installManualTimers, passTime } from '../test/fakeTimers';
 import { errorResponse, jsonResponse, makeMovie, makePage, renderWithProviders, routeFetch } from '../test/helpers';
 import { SearchBar } from './SearchBar';
 
@@ -27,12 +28,8 @@ const SEARCH_URL = 'GET /api/movies/search?title=matrix&size=10&sort=title';
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-  // Testing Library solo sabe convivir con temporizadores falsos si existe un
-  // global `jest` con `advanceTimersByTime` (su detección es específica de Jest).
-  // Este puente, recomendado por la documentación de Vitest, hace que `findBy*`
-  // y `user-event` avancen el reloj falso en lugar de esperar un `setTimeout` que nunca llegaría.
-  vi.stubGlobal('jest', { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) });
+  // Reloj falso manual (y el puente que necesita Testing Library): ver `test/fakeTimers.ts`.
+  installManualTimers();
 });
 
 afterEach(() => {
@@ -63,9 +60,7 @@ function announced() {
 
 /** Deja pasar el retardo de la búsqueda (300 ms). */
 function passDebounce(ms = 300) {
-  act(() => {
-    vi.advanceTimersByTime(ms);
-  });
+  passTime(ms);
 }
 
 /** Escribe "matrix", espera el retardo y a que aparezca la lista de resultados. */

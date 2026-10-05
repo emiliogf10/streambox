@@ -100,7 +100,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
 
 **3. Tomcat** (el servidor web que Spring Boot lleva dentro) recibe la petición y la pasa por la **cadena de filtros**.
 
-**4. `RateLimitingFilter`.** Solo actúa en `POST /api/auth/login` y `POST /api/users`. Esta petición es un `GET`, así que la deja pasar.
+**4. `RateLimitingFilter`.** Solo actúa en `POST /api/auth/login` y `POST /api/users` (los reconoce con el mismo tipo de comparador de rutas que la autorización; capítulo 11). Esta petición es un `GET`, así que la deja pasar.
 
 **5. `JwtAuthenticationFilter`.** Lee la cabecera `Authorization`, valida el token (firma, caducidad, emisor), saca el email, busca el usuario en la base de datos y lo deja «apuntado» en el `SecurityContext` como usuario autenticado con su rol.
 
@@ -221,7 +221,7 @@ Las duraciones se escriben como `1m`, `1h`, `15m` y Spring las convierte en `jav
 | :--- | :--- | :--- |
 | `JWT_SECRET` | Sí | Secreto de firma de los tokens (≥32 caracteres). Genera uno: `openssl rand -base64 48` |
 | `JWT_EXPIRATION_HOURS` | No (24) | Validez del token |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | No | Crean el primer administrador (contraseña ≥12 caracteres) |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | No | Crean el primer administrador. Al crearlo, la contraseña debe cumplir la política del registro (capítulo 10.5); si ya existe, no se valida |
 | `ADMIN_USERNAME` | No (`admin`) | Nombre del administrador |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | Solo en `prod` | Conexión a la base de datos |
 | `SPRING_PROFILES_ACTIVE` | No | `prod` en producción |
@@ -411,7 +411,7 @@ public int hashCode() { return Movie.class.hashCode(); }   // constante
 
 ### 6.4 Lombok
 
-Lombok genera código al compilar a partir de anotaciones: `@Getter`/`@Setter` crean los getters y setters. Lo usan las entidades y tres DTOs antiguos (`CreateUserRequest`, `CreateGenreRequest`, `LoginRequest`). El resto de DTOs son `record`, que ya traen todo esto en el propio lenguaje.
+Lombok genera código al compilar a partir de anotaciones: `@Getter`/`@Setter` crean los getters y setters. Lo usan las entidades y dos DTOs antiguos (`CreateUserRequest`, `LoginRequest`). El resto de DTOs son `record`, que ya traen todo esto en el propio lenguaje.
 
 ---
 
@@ -559,15 +559,18 @@ Se evalúan **de arriba abajo** y gana la primera que coincide:
 | :--- | :--- |
 | `POST /api/users`, `POST /api/auth/login` | Cualquiera (registro y login) |
 | `GET /api/users` | Solo `ADMIN` |
-| `GET /api/movies/**` | Cualquier usuario autenticado |
-| `POST`, `PUT`, `DELETE /api/movies/**` | Solo `ADMIN` |
-| `GET /api/genres/**` | Cualquier usuario autenticado |
-| `POST /api/genres/**` | Solo `ADMIN` |
+| `GET`, `HEAD /api/movies/**` | Cualquier usuario autenticado |
+| `POST`, `PUT`, `PATCH`, `DELETE /api/movies/**` | Solo `ADMIN` |
+| `GET`, `HEAD /api/genres/**` | Cualquier usuario autenticado |
+| `POST`, `PUT`, `PATCH`, `DELETE /api/genres/**` | Solo `ADMIN` |
+| **Cualquier otro método** sobre `/api/movies/**` y `/api/genres/**` (regla de cierre del catálogo) | Solo `ADMIN` |
 | `/actuator/health`, `/actuator/health/**` | Cualquiera (comprobaciones de salud) |
 | `/v3/api-docs/**`, `/swagger-ui/**` | Cualquiera (en `prod` están desactivados) |
 | **Todo lo demás** (`anyRequest()`) | Cualquier usuario autenticado |
 
 La última regla es una red de seguridad: un endpoint nuevo que se olvide de añadir aquí queda **protegido por defecto**, no abierto. Por ejemplo, `/api/users/me` y `/api/users/me/favorites` caen en ella.
+
+**Pero «autenticado» no basta para escribir.** Hasta octubre de 2026 solo había reglas para `GET` y `POST` de géneros, así que `PUT` y `DELETE` habrían caído en `anyRequest().authenticated()`: en cuanto se crearon esos endpoints, **cualquier usuario normal** habría podido editar o borrar géneros. Por eso se añadieron antes que los endpoints, y además una **regla de cierre del catálogo**: cualquier método que no sea lectura (`GET`/`HEAD`) sobre películas o géneros es solo para `ADMIN`. Así, un endpoint de escritura que se añada en el futuro nace protegido aunque se olvide su regla. `HEAD` va con `GET` porque es la misma lectura sin cuerpo (Spring MVC lo atiende con los `@GetMapping`). Lo vigilan `CatalogWriteAuthorizationIntegrationTest` (401/403 en cada método de escritura) y `CatalogClosureRuleRegressionIntegrationTest` (la regla de cierre no bloquea lecturas, endpoints personales, login/registro, Actuator ni Swagger; y un cambio de rol se aplica con el mismo token).
 
 `hasRole("ADMIN")` comprueba que el usuario tiene la autoridad `ROLE_ADMIN`. El prefijo `ROLE_` lo añade el filtro JWT (sección 9.3).
 
@@ -651,20 +654,21 @@ sequenceDiagram
 
     F->>RL: POST /api/auth/login {email, password}
     RL->>RL: ¿esta IP superó 10 intentos/min?
-    RL-->>F: 429 + Retry-After (si se pasa)
+    RL-->>F: 429 RATE_LIMIT_EXCEEDED + Retry-After (si se pasa)
     RL->>C: continúa
-    C->>C: @Valid (email con formato, password no vacía)
+    C->>C: @Valid (email con formato, password no vacía y ≤1024)
     C->>A: login(email, password)
     A->>A: normaliza email (trim + minúsculas)
-    A->>L: checkNotLocked(email)
-    L-->>F: 429 si la cuenta acumula 5 fallos en 15 min
+    A->>L: reserveAttempt(email)
+    L-->>F: 429 ACCOUNT_LOCKED + Retry-After si la cuenta ya acumula 5 fallos en 15 min
     A->>DB: findByEmail(email)
     A->>A: BCrypt.matches(password, hash real o hash falso)
     alt incorrecto
-        A->>L: recordFailure(email)
-        A-->>F: 401 "Email o contraseña incorrectos"
+        A->>L: recordFailure(intento) → intentos restantes
+        A-->>F: 401 INVALID_CREDENTIALS + remainingAttempts (4, 3, 2, 1)
+        L-->>F: o 429 ACCOUNT_LOCKED si este fallo era el 5.º
     else correcto
-        A->>L: recordSuccess(email) (borra los fallos)
+        A->>L: recordSuccess(intento) (borra los fallos)
         A->>A: JwtService.generateToken(user)
         A-->>F: 200 {"token": "eyJ..."}
     end
@@ -676,6 +680,8 @@ Detalles de seguridad que conviene saber defender:
 2. **Mismo mensaje para todo.** Tanto si el email no existe como si la contraseña es incorrecta, la respuesta es la misma: «Email o contraseña incorrectos». Si fueran distintos, un atacante podría averiguar qué emails están registrados (*enumeración de usuarios*).
 3. **El hash falso.** Si el email no existe, no hay hash con el que comparar, y la respuesta sería instantánea; si existe, BCrypt tarda ~100 ms. Esa diferencia de tiempo delataría qué emails existen. Por eso, cuando el usuario no existe, se compara contra un hash falso (`dummyPasswordHash`, calculado una vez en el constructor) para que el tiempo sea parecido.
 4. **El bloqueo se comprueba antes que la contraseña.** Una cuenta bloqueada rechaza el login aunque la contraseña sea correcta; si no, el bloqueo no protegería nada.
+5. **El intento se reserva antes de comprobar la contraseña** (`reserveAttempt`), de forma atómica. Si solo se contara al fallar, 20 peticiones simultáneas pasarían todas la comprobación de bloqueo mientras BCrypt trabaja y se probarían 20 contraseñas en vez de 5.
+6. **La contraseña del login no tiene mínimo** (las cuentas antiguas de 8 caracteres siguen entrando: la política de 12 solo se aplica al registrarse), pero sí un **máximo de 1024 caracteres**, para no leer cuerpos enormes ni pasárselos a BCrypt. Ese 400 ocurre antes del servicio, así que no gasta intento de la cuenta.
 
 ### 10.5 El registro
 
@@ -688,6 +694,25 @@ Detalles de seguridad que conviene saber defender:
 
 El registro **sí** revela si un email está en uso (es inevitable: hay que decirle al usuario por qué no puede registrarse). Se mitiga con el límite de 5 registros por hora por IP.
 
+#### Política de contraseñas (`security/password/PasswordPolicy`)
+
+Solo se aplica a las **cuentas nuevas** (registro y creación del administrador inicial). Sigue la guía NIST SP 800-63B: **longitud y lista de bloqueo**, en lugar de reglas de composición del tipo «una mayúscula, un número y un símbolo», que producen contraseñas como `Password1!`, fáciles de adivinar y difíciles de recordar.
+
+| Regla | Mensaje (en `validationErrors.password`) |
+| :--- | :--- |
+| Obligatoria | «La contraseña es obligatoria» |
+| Entre **12 y 64 caracteres** | «La contraseña debe tener entre 12 y 64 caracteres» |
+| Como máximo **72 bytes en UTF-8** | Mensaje propio (pide usar menos caracteres acentuados o especiales) |
+| No es **común ni trivial**: una lista de ~200 contraseñas en el código (sin ficheros ni dependencias), comparada sin mayúsculas, y un mínimo de 5 caracteres distintos (`aaaaaaaaaaaa` no vale) | «La contraseña es demasiado común. Elige otra más difícil de adivinar.» |
+| No contiene el **nombre de usuario** ni la **parte local del email** (si tienen 4 caracteres o más) | «La contraseña no puede contener tu nombre de usuario ni tu email.» |
+
+- **¿Por qué 72 bytes?** BCrypt solo usa los primeros 72 bytes. Con la versión de Spring Security del proyecto, `BCryptPasswordEncoder` lanza una excepción si se pasan; antes se aceptaban hasta 100 caracteres, así que una contraseña de 64 caracteres con tildes (2 bytes cada una) acababa en un **500**. Era un bug real y ahora lo cubre un test.
+- **Un solo mensaje por campo.** Hay prioridad: longitud > bytes > común > datos personales. Cada comprobación ignora lo que ya rechaza la anterior, porque el manejador de errores guarda un mensaje por campo y Bean Validation no garantiza el orden.
+- **¿Por qué 4 caracteres en la regla de datos personales?** Con 3 había falsos positivos: la usuaria `ana` no podía usar «mañana iremos al cine».
+- **Normalización para comparar.** Se quitan los caracteres invisibles de los extremos (separadores Unicode, controles y caracteres de formato: la misma expresión que `GenreService`) y se pasa a minúsculas. Con `trim()`, `password1234` rodeada de espacios de no separación pasaba la lista. La contraseña que se cifra es siempre la original.
+- Se implementa con una anotación de clase (`@ValidPassword` sobre `CreateUserRequest`, que implementa `NewPasswordRequest`), porque necesita ver a la vez la contraseña, el usuario y el email.
+- El frontend solo valida la longitud (12–64); el resto lo decide el servidor y el formulario pinta su mensaje. Así la lista de contraseñas comunes no se duplica.
+
 ---
 
 ## 11. Seguridad (III): rate limiting y bloqueo de cuentas
@@ -699,7 +724,22 @@ Hay dos protecciones contra la fuerza bruta, complementarias:
 | **Por IP** | `RateLimitingFilter` | IP del cliente | Login: 10/min. Registro: 5/h | Un atacante que prueba muchas cuentas desde una IP |
 | **Por cuenta** | `LoginAttemptService` | Email | 5 fallos en 15 min | Un atacante que prueba muchas contraseñas contra una cuenta desde muchas IPs |
 
-Ambas responden **429 Too Many Requests** con la cabecera **`Retry-After`** (segundos que hay que esperar), que el frontend usa para la cuenta atrás.
+Ambas responden **429 Too Many Requests** con la cabecera **`Retry-After`** (segundos que hay que esperar), que el frontend usa para la cuenta atrás. Se distinguen por el `code`: **`RATE_LIMIT_EXCEEDED`** (límite por IP) o **`ACCOUNT_LOCKED`** (cuenta bloqueada).
+
+**Contrato del bloqueo por cuenta** (5 fallos en 15 minutos, configurable en `streambox.security.rate-limit.lockout.*`):
+
+| Intento | Respuesta |
+| :--- | :--- |
+| Fallos 1.º a 4.º | 401 `INVALID_CREDENTIALS` «Email o contraseña incorrectos» con **`remainingAttempts`** = 4, 3, 2, 1 |
+| 5.º fallo | 429 `ACCOUNT_LOCKED` + `Retry-After: 900` «Has superado el número máximo de intentos. La cuenta queda bloqueada durante 15 minutos.» |
+| Cualquier intento durante el bloqueo (también con la contraseña correcta) | 429 `ACCOUNT_LOCKED` con el tiempo que falta («…Inténtalo de nuevo en N minutos.») |
+| Login correcto | 200; borra los fallos acumulados |
+
+- `remainingAttempts` son los intentos que le quedan a la cuenta **con este fallo ya descontado**. Por eso nunca vale 0: el fallo que agota los intentos ya responde 429. En el resto de errores de la API el campo **no aparece** (ni siquiera como `null`).
+- **No revela qué emails existen:** los números, los mensajes, las cabeceras y el bloqueo son idénticos para un email registrado y para uno inexistente (lo comprueba `LoginLockoutContractIntegrationTest`, que también mide que los tiempos de respuesta sean parecidos).
+- El frontend muestra «Te quedan N intentos antes de que la cuenta se bloquee 15 minutos» y, con `ACCOUNT_LOCKED`, un aviso de cuenta bloqueada con cuenta atrás en minutos y segundos (capítulo 20).
+
+**Cómo reconoce el filtro las rutas.** `RateLimitingFilter` usa los mismos `PathPatternRequestMatcher` que las reglas de autorización, y las rutas (`LOGIN_PATH`, `REGISTER_PATH`) son constantes que `SecurityConfig` también usa en su `permitAll()`: lo público y lo limitado son siempre lo mismo. **Antes había un fallo de seguridad (encontrado por `qa` en octubre de 2026):** el filtro comparaba `request.getRequestURI()` con `equals`, pero ese método devuelve la ruta **sin decodificar**, mientras que Spring MVC decodifica cada segmento. `POST /api/auth/%6cogin` (la `l` codificada) llegaba al login sin pasar por el contador, y `POST /api/%75sers` creaba cuentas sin límite. El cortafuegos de Spring Security no lo impide, porque una letra codificada es legal. Lección: **para decidir sobre una ruta, compárala igual que la compara quien la enruta.**
 
 ### 11.1 `SlidingWindowCounter`: el algoritmo
 
@@ -712,7 +752,8 @@ IP 1.2.3.4 → [12:00:05, 12:00:07, 12:00:30, ...]
 
 - **`tryAcquire(clave, max)`**: primero tira de la cola los eventos más antiguos que la ventana; si quedan menos de `max`, apunta el nuevo y devuelve `true`; si no, devuelve `false` **sin apuntarlo**. Así, un cliente que espera recupera el acceso (las peticiones rechazadas no alargan el bloqueo).
 - **`retryAfter(clave)`**: cuánto falta para que el evento más antiguo salga de la ventana, es decir, para que se libere un hueco.
-- **`record` / `count` / `reset`**: los usa el bloqueo por cuenta (apuntar un fallo, contar fallos, borrarlos tras un login correcto).
+- **`reserve` / `confirm` / `reset`**: los usa el bloqueo por cuenta. `reserve` aparta el intento antes de comprobar la contraseña (devuelve una `Reservation` con id), `confirm` lo deja apuntado como fallo y devuelve su **posición real** en la ventana, y `reset` borra los fallos tras un login correcto.
+- **¿Por qué la posición real y no el número de la reserva?** Durante los ~100 ms de BCrypt pueden pasar cosas: un login correcto simultáneo borra la cola entera, o caduca un fallo antiguo. Si se decidiera con el número obtenido al reservar, de cinco intentos simultáneos en los que el primero acierta, los otros cuatro responderían 3, 2, 1 y un 429 con la cuenta sin bloquear. `confirm` vuelve a apuntar la reserva si un acierto la borró (con el mismo id, para no contarla dos veces).
 - **Limpieza periódica**: cada 500 operaciones borra las claves caducadas, para que un atacante no pueda llenar la memoria con millones de IPs distintas.
 - **`synchronized`**: todos los métodos están sincronizados porque Tomcat atiende muchas peticiones a la vez en hilos distintos.
 
@@ -739,9 +780,9 @@ Hay dos: `USER` y `ADMIN` (`entity/Role`). El `USER` consulta el catálogo y ges
 El registro público siempre crea `USER`. Los administradores solo se crean así:
 
 1. Defines `ADMIN_EMAIL` y `ADMIN_PASSWORD` (y opcionalmente `ADMIN_USERNAME`) antes de arrancar.
-2. Al arrancar, `AdminAccountInitializer.run` valida los datos (email con `@`, usuario de 3 a 50 caracteres, contraseña de **12 o más**). Si algo es inválido, **la aplicación no arranca**.
-3. Si ya existe un usuario con ese email, **no lo toca** (nunca sobrescribe una contraseña). Si el nombre de usuario lo tiene otra cuenta, falla con un mensaje claro.
-4. Si no existe, lo crea con rol `ADMIN` y contraseña cifrada. La contraseña nunca se escribe en los logs.
+2. Al arrancar, `AdminAccountInitializer.run` valida los datos (email con `@`, usuario de 3 a 50 caracteres).
+3. Si ya existe un usuario con ese email, **no lo toca** (nunca sobrescribe una contraseña) y **no valida la contraseña configurada**: validarla solo serviría para que una instalación que funcionaba dejara de arrancar al endurecerse la política. Si esa contraseña no cumple la política, escribe un aviso en el log **sin la contraseña ni la regla que falla** (sería una pista sobre la contraseña de una cuenta activa). Si el nombre de usuario lo tiene otra cuenta, falla con un mensaje claro.
+4. Si no existe, comprueba que `ADMIN_PASSWORD` cumple **la misma política que el registro** (capítulo 10.5). Si no, **la aplicación no arranca** y el error dice qué regla falla, nunca la contraseña. Después lo crea con rol `ADMIN` y la contraseña cifrada.
 
 Sin esas variables, no hace nada. Por eso, en el día a día, no tienes que preocuparte de él.
 
@@ -780,6 +821,8 @@ public List<MovieResponse> getFavorites(@AuthenticationPrincipal AuthenticatedUs
 | `DELETE` | `/api/movies/{id}` | ADMIN | `MovieController.deleteMovie` |
 | `GET` | `/api/genres` | Autenticado | `GenreController.getGenres` |
 | `POST` | `/api/genres` | ADMIN | `GenreController.createGenre` |
+| `PUT` | `/api/genres/{id}` | ADMIN | `GenreController.updateGenre` |
+| `DELETE` | `/api/genres/{id}` | ADMIN | `GenreController.deleteGenre` |
 | `GET` | `/api/users/me/favorites` | Autenticado | `FavoriteController.getFavorites` |
 | `POST` / `DELETE` | `/api/users/me/favorites/{movieId}` | Autenticado | Añadir / quitar por id |
 | `POST` / `DELETE` | `/api/users/me/favorites/by-title?title=` | Autenticado | Añadir / quitar por título exacto |
@@ -812,10 +855,18 @@ public record MovieRequest(
     @NotBlank @Size(max = 1000) String description,
     @NotNull @Min(1) Integer duration,
     @NotNull @Min(1888) @Max(2100) Integer releaseYear,
-    @NotBlank @URL String imageUrl,
-    @NotBlank @URL String videoUrl,
+    @NotBlank @Size(max = 500) @HttpsUrl(allowLocalCovers = true, maxLength = 500) String imageUrl,
+    @NotBlank @Size(max = 500) @HttpsUrl(maxLength = 500) String videoUrl,
     @NotEmpty Set<Long> genreIds) { }
 ```
+
+**URLs de portada y vídeo (`validation/HttpsUrl` + `HttpsUrlValidator`).** Antes se usaba `@URL` de Hibernate Validator, que acepta cualquier esquema (`http:`, `file:`, `ftp:`, `jar:`…), y no había límite de longitud: una URL de más de 500 caracteres llegaba a la columna `VARCHAR(500)` y el cliente recibía un **409 engañoso**. Ahora:
+
+- Una URL vale si solo tiene **caracteres ASCII visibles** (sin espacios; lo demás va codificado con `%XX`), empieza exactamente por **`https://`** (en minúsculas: `HTTPS://` se rechaza en lugar de normalizarse, porque un validador no debe cambiar el valor), **tiene host** y **no lleva credenciales** (`https://usuario:clave@host`). Se analiza con `java.net.URI`, no con una expresión regular.
+- Solo en `imageUrl` (`allowLocalCovers = true`) vale también una **portada propia** `/covers/<archivo>`, con el archivo de la forma `[A-Za-z0-9][A-Za-z0-9._-]*` (sin subcarpetas, sin `..`, sin `?` ni `%`). Es como se sirven las de `frontend/public/covers`. Antes no pasaban `@URL`, así que `docs/portadas-locales.sql` no se podía reproducir por la API; ahora sí.
+- **Un solo mensaje por campo:** `@HttpsUrl` no evalúa lo que ya rechazan `@NotBlank` (vacío) ni `@Size` (si es demasiado larga, manda el mensaje de longitud). Los mensajes y el máximo son constantes de `MovieRequest`, y el frontend usa exactamente los mismos.
+- ¿Por qué validar en el servidor si el frontend ya filtra `videoUrl` con `getSafeVideoUrl`? Porque la API la pueden usar otros clientes y no debe depender de que cada uno se proteja. Además, `https` encaja con la CSP prevista (`img-src 'self' data: https:`).
+- Consecuencia práctica: una película antigua con una URL `http://` no se puede guardar desde el panel hasta corregir la URL (el formulario muestra el error junto al campo). El servidor nunca descarga estas URLs, así que no hay riesgo de peticiones internas (SSRF).
 
 Los parámetros de la URL también se validan (`@Min`/`@Max` en `page` y `size`). Para eso el controlador lleva `@Validated` en la clase. Si un parámetro no tiene el tipo correcto (`page=abc`), Spring lanza una excepción de conversión que el manejador de errores convierte en 400.
 
@@ -919,7 +970,18 @@ Un `JOIN` directo multiplicaría las filas de una película que tenga varios gé
 
 ### 14.5 Géneros
 
-`GenreService.createGenre` normaliza el nombre (primera letra en mayúscula y el resto en minúscula) para que `ACCION` y `accion` no sean dos géneros. Un nombre duplicado choca con la restricción `UNIQUE` de la base de datos, y el manejador de errores lo convierte en 409.
+Los administradores pueden crear (`POST`), renombrar (`PUT /api/genres/{id}`) y borrar (`DELETE /api/genres/{id}`) géneros. Alta y edición reciben el mismo DTO, `record GenreRequest(String name)`.
+
+**Normalización del nombre** (`GenreService.normalizeAndValidateName`, un único método que comparten alta y edición):
+
+1. Se recortan los extremos, incluidos los separadores y caracteres invisibles de Unicode (`\p{Z}`, `\p{Cc}`, `\p{Cf}`). `String.trim()` y `strip()` no bastan: ninguno quita el espacio duro (U+00A0), y con él se podía crear un género de nombre invisible.
+2. Los espacios interiores repetidos se reducen a uno, para que `Ciencia  ficción` no sea un género distinto de `Ciencia ficción`.
+3. Primera letra en mayúscula y el resto en minúscula (`Locale.ROOT`), para que `ACCION` y `accion` no sean dos géneros.
+4. **Se vuelve a comprobar la longitud (2 a 50) sobre el resultado.** Bean Validation (`@NotBlank`, `@Size` en `GenreRequest`) valida el texto *tal como llega*, antes de normalizarlo. Sin esta segunda comprobación, `" a"` pasaba la validación y se guardaba como `"A"` (1 carácter), y un nombre que *crece* al pasarlo a minúsculas (`"İ"` se convierte en dos caracteres) no cabía en `VARCHAR(50)` y acababa en un 409 engañoso. Si no cumple, se lanza `InvalidParameterException` → 400 `VALIDATION_ERROR`, con el mismo mensaje que `@Size` (constantes compartidas en `GenreRequest`). Ocurre antes de tocar la base de datos.
+
+**Duplicados.** El servicio comprueba antes de guardar con `existsByNameIgnoreCase` (o `...AndIdNot` al renombrar, para que renombrar un género a su propio nombre sea un 200). Ignora mayúsculas porque la restricción `UNIQUE` sí las distingue y podría haber filas antiguas como «Ciencia Ficción». La restricción queda como respaldo ante dos altas simultáneas: si salta (SQLSTATE `23505`), se traduce al mismo 409 `GENRE_ALREADY_EXISTS`. Se usa `saveAndFlush` para que el error salte dentro del servicio y se pueda traducir.
+
+**Borrado.** Si alguna película usa el género, se responde 409 `GENRE_IN_USE` con el recuento («lo usan 3 películas»; `MovieRepository.countByGenres_Id`, un `COUNT` que no carga películas). ¿Por qué no borrar y ya? La clave foránea `movie_genres.genre_id` **no** tiene `ON DELETE CASCADE` a propósito, y toda película debe tener al menos un género: borrar en cascada podría dejar películas sin ninguno. La base de datos respalda la regla: si alguien asigna el género justo entre la comprobación y el borrado, la FK salta en el `flush` (SQLSTATE `23503`) y se traduce también a `GENRE_IN_USE`, esta vez sin cifra (tras un `flush` fallido la transacción ya no admite más consultas). `SqlStates` es el ayudante que saca el `SQLSTATE` de la cadena de causas; lo comparten `GenreService` y `FavoriteService`.
 
 ---
 
@@ -996,7 +1058,7 @@ Todos los errores de la API, vengan de donde vengan, tienen la misma forma (`dto
 }
 ```
 
-`validationErrors` solo aparece en errores de validación (`@JsonInclude(NON_NULL)` omite los campos nulos).
+`validationErrors` solo aparece en errores de validación, y **`remainingAttempts`** solo en el 401 de un login fallido (capítulo 11). `@JsonInclude(NON_NULL)` omite los campos nulos, así que en el resto de errores no aparecen.
 
 **El campo importante para los clientes es `code`**, no `message`: el mensaje es para mostrar al usuario y puede cambiar; el código es un contrato estable.
 
@@ -1006,7 +1068,7 @@ Todos los errores de la API, vengan de donde vengan, tienen la misma forma (`dto
 | :--- | :--- | :--- |
 | `VALIDATION_ERROR` | 400 | `@Valid` falla, parámetro mal formado, `sort`/`direction`/`page` no permitidos |
 | `MALFORMED_REQUEST` | 400 | JSON mal escrito o con tipos imposibles |
-| `INVALID_CREDENTIALS` | 401 | Login incorrecto, y también 401 por falta de token |
+| `INVALID_CREDENTIALS` | 401 | Login incorrecto (con `remainingAttempts`), y también 401 por falta de token |
 | `ACCESS_DENIED` | 403 | Autenticado sin el rol necesario |
 | `RESOURCE_NOT_FOUND` | 404 | Película, género o usuario inexistente; ruta inexistente |
 | `MOVIE_NOT_IN_FAVORITES` | 404 | Quitar de la lista algo que no estaba |
@@ -1015,8 +1077,11 @@ Todos los errores de la API, vengan de donde vengan, tienen la misma forma (`dto
 | `USER_ALREADY_EXISTS` | 409 | Registro con usuario o email en uso |
 | `MOVIE_ALREADY_IN_FAVORITES` | 409 | Añadir a la lista algo que ya estaba |
 | `AMBIGUOUS_TITLE` | 409 | Varias películas con el mismo título en `/by-title` |
-| `DATA_INTEGRITY_VIOLATION` | 409 | Choque con una restricción de la base de datos (p. ej. género duplicado) |
-| `RATE_LIMIT_EXCEEDED` | 429 | Límite por IP o cuenta bloqueada (con `Retry-After`) |
+| `GENRE_ALREADY_EXISTS` | 409 | Crear o renombrar un género con un nombre que ya tiene otro (sin distinguir mayúsculas) |
+| `GENRE_IN_USE` | 409 | Borrar un género que tiene asignado alguna película (el mensaje dice cuántas) |
+| `DATA_INTEGRITY_VIOLATION` | 409 | Choque no previsto con una restricción de la base de datos (respaldo genérico) |
+| `RATE_LIMIT_EXCEEDED` | 429 | Límite por IP de login o registro (con `Retry-After`) |
+| `ACCOUNT_LOCKED` | 429 | Cuenta bloqueada por demasiados logins fallidos: el fallo que agota los intentos y cualquier intento durante el bloqueo (con `Retry-After`) |
 | `INTERNAL_ERROR` | 500 | Cualquier error no previsto |
 
 ### 16.3 Cómo funciona `GlobalExceptionHandler`
@@ -1055,6 +1120,15 @@ El resto (`env`, `beans`, `heapdump`…) **no se exponen**: algunos mostrarían 
 
 `config/OpenApiConfig` define el título y el esquema de seguridad `bearerAuth`: en Swagger, pulsas «Authorize», pegas el token y todas las peticiones lo llevan. Los controladores con `@SecurityRequirement(name = "bearerAuth")` muestran el candado.
 
+**Respuestas de error en el OpenAPI.** springdoc rellena cada `@ApiResponse` sin `content` con el tipo de retorno del método. Por eso, hasta octubre de 2026, el 401 del login aparecía documentado como un `LoginResponse` (el token) y el 404 de películas como una `MovieResponse`: un cliente generado a partir del OpenAPI habría leído un error como si fuera un token. Ahora `config/ErrorResponseOpenApiCustomizer` (un `GlobalOpenApiCustomizer` registrado como `@Bean` en `OpenApiConfig`) recorre el documento ya generado y hace dos cosas:
+
+- A toda respuesta cuyo código empieza por 4 o 5 le pone como cuerpo `application/json` con `$ref` a `ErrorResponse`.
+- A los 429 les añade la cabecera `Retry-After` (entero ≥ 1).
+
+Las 2xx conservan su tipo y los 204 siguen sin cuerpo. En los controladores basta con escribir el código y la descripción de cada error: la regla se aplica sola también a los endpoints nuevos. El esquema de `ErrorResponse` se describe con `@Schema` en el propio DTO (solo documenta, no cambia el JSON). Los seis campos fijos son `required`; `validationErrors` y `remainingAttempts` son opcionales. Si se añade un `ErrorCode` nuevo hay que explicarlo también en la descripción de `code`, o `OpenApiErrorResponseDocumentationIntegrationTest` fallará. Ese test recorre todas las rutas y falla si alguna 4xx/5xx documenta otro esquema.
+
+Al generar `/v3/api-docs` aparece 4 veces un WARN de `SpringDocUtils` («Json Processing Exception…»). Es un fallo inofensivo de springdoc al clonar el esquema de `page`/`size` en modo OpenAPI 3.1; esos parámetros conservan sus `minimum`/`maximum`.
+
 ### 17.3 Logs
 
 - En **`dev`**, `show-sql=true` y `format_sql=true` muestran cada consulta SQL formateada en la consola. Muy útil para ver el N+1 con tus propios ojos.
@@ -1073,11 +1147,12 @@ frontend/src/
 ├── App.tsx             proveedores globales + rutas
 ├── index.css           Tailwind + tokens de diseño (@theme) + utilidades propias
 ├── pages/              una por pantalla: HomePage, LoginPage, RegisterPage, MyListPage
-├── components/         piezas reutilizables (Navbar, Modal, MoviePoster, Button...)
+│   └── admin/          panel de administración: AdminLayout, AdminMoviesPage, MovieFormPage, AdminGenresPage
+├── components/         piezas reutilizables (Navbar, Modal, MoviePoster, Pagination, Button...)
 ├── context/            estado compartido: AuthContext, ToastContext, FavoritesContext
-├── hooks/              lógica reutilizable: useCatalog, useModalDialog, useCountdown...
-├── lib/                sin React: api.ts, types.ts, utils.ts, catalog.ts, validation.ts
-└── test/               utilidades de los tests (setup, helpers)
+├── hooks/              lógica reutilizable: useCatalog, useModalDialog, useCountdown, useGenres, useDebouncedValue...
+├── lib/                sin React: api.ts, types.ts, utils.ts, catalog.ts, validation.ts, movieValidation.ts
+└── test/               utilidades de los tests (setup, helpers, fakeTimers)
 ```
 
 ### 18.2 Proveedores y rutas (`App.tsx`)
@@ -1093,6 +1168,12 @@ frontend/src/
             /            → HomePage
             /favorites   → MyListPage
             /my-list     → redirige a /favorites
+            /admin       → RequireAdmin + AdminLayout (h1 «Administración» y pestañas)
+                (índice)              → redirige a /admin/peliculas
+                peliculas             → AdminMoviesPage
+                peliculas/nueva       → MovieFormPage (alta)
+                peliculas/:id/editar  → MovieFormPage (edición)
+                generos               → AdminGenresPage
         *                → redirige a /
 ```
 
@@ -1102,8 +1183,9 @@ Un **contexto** de React es una forma de compartir un valor con todos los compon
 
 - `RequireAuth`: sin sesión, redirige a `/login`.
 - `RedirectIfAuthenticated`: con sesión, `/login` y `/registro` redirigen a `/`.
+- `RequireAdmin` (envuelve todo `/admin`): mientras se carga el usuario muestra «Comprobando permisos...» (así, recargar en `/admin` no expulsa a un administrador real antes de saber su rol); si la carga falla, no enseña el contenido y ofrece «Reintentar»; si el usuario es `USER`, redirige a `/`.
 
-Leen el token de forma **síncrona** al arrancar (de `localStorage`), así que no hay «parpadeo» mostrando contenido protegido un instante. Recuerda que esto es solo experiencia de usuario: **la seguridad real la pone el backend**, que rechaza cualquier petición sin token válido.
+`RequireAuth` y `RedirectIfAuthenticated` leen el token de forma **síncrona** al arrancar (de `localStorage`), así que no hay «parpadeo» mostrando contenido protegido un instante. Recuerda que esto es solo experiencia de usuario: **la seguridad real la pone el backend**, que rechaza cualquier petición sin token válido.
 
 **`FavoritesProvider` vive dentro de `AppShell`**: solo existe en la zona autenticada. Al cerrar sesión se desmonta y la lista de un usuario no puede verla el siguiente.
 
@@ -1144,7 +1226,7 @@ Qué hace, paso a paso:
 | 401 en endpoint privado | «Tu sesión ha caducado…» | Avisa a `AuthProvider` para cerrar sesión (`sessionExpired: true`) |
 | 401 en endpoint público | El del servidor («Email o contraseña incorrectos») | **No** cierra sesión: aquí significa credenciales incorrectas |
 | 403 | «No tienes permisos…» | **No** cierra sesión: el usuario sí está identificado |
-| 429 | «Demasiados intentos. Inténtalo de nuevo en N s.» | `retryAfterSeconds` sale de la cabecera `Retry-After` |
+| 429 | «Demasiados intentos. Inténtalo de nuevo en N s.» | `retryAfterSeconds` sale de la cabecera `Retry-After`; el `code` distingue `ACCOUNT_LOCKED` de `RATE_LIMIT_EXCEEDED` |
 | 5xx | «El servidor ha tenido un problema…» | — |
 | Otros 4xx | El `message` del servidor (ya en español y específico) | `validationErrors` se conserva para pintarlos junto a cada campo |
 
@@ -1169,6 +1251,15 @@ Qué hace, paso a paso:
 - `useLayoutEffect` registra el puente **antes** que cualquier `useEffect`. Los componentes hijos lanzan peticiones en sus `useEffect` al montarse, y esos efectos se ejecutan antes que los del padre; los *layout effects* se ejecutan antes que todos ellos.
 - El evento `storage` sincroniza pestañas: si cierras sesión en una, las demás se enteran. `localStorage.clear()` emite el evento con `key === null` y también cuenta como cierre de sesión.
 - `localStorage` puede lanzar excepciones (modo privado de algunos navegadores); se captura y se trata como «sin sesión».
+
+**El usuario actual y su rol.** Además del token, `AuthProvider` carga el usuario con `GET /api/users/me` cada vez que cambia la sesión: tras `login()`, al arrancar con un token guardado y cuando otra pestaña cambia el token. `useAuth()` expone `user`, `isAdmin`, `userStatus` (`idle` sin sesión, `loading`, `ready` o `error`) y `refreshUser()` para reintentar.
+
+- **Por qué se pregunta al servidor y no se lee del JWT.** El token no lleva el rol (solo el email como `sub` y el emisor). Y aunque lo llevara, quedaría desfasado hasta que caducase (24 h), mientras que el backend lee el usuario de la base de datos en cada petición y un cambio de rol es inmediato. Preguntar a `/users/me` mantiene esa misma coherencia en el cliente.
+- `login()` sigue siendo síncrono: la carga del usuario va detrás y la navegación no espera por ella.
+- **Respuestas tardías.** El resultado se guarda junto al token (y al número de intento) que lo pidió, y `user`/`userStatus` se calculan comparándolo con la sesión actual: el usuario de una sesión anterior nunca se asigna a la nueva. Además, cada cambio cancela la petición en curso con `AbortController`. Son dos defensas independientes.
+- **Errores.** Un 401 lo gestiona `apiFetch` como cualquier otro (cierra sesión y avisa una vez). Si falla por red o un 5xx, la sesión se mantiene con `userStatus = 'error'` e `isAdmin = false`: **falla cerrado** (ante la duda, no se muestra nada de administrador).
+- **El rol del cliente solo decide qué se pinta**: la etiqueta «Administrador» del menú de usuario (`Navbar`, que muestra también «Sesión iniciada como» y el nombre), y la guarda `RequireAdmin`. La seguridad real es el 403 del backend.
+- En los tests, `routeFetch` (`src/test/helpers.tsx`) responde por defecto a `/users/me` con un usuario `USER` (`makeUser`), y cada test puede sobrescribirlo.
 
 **El login** (`pages/LoginPage.tsx`) llama a `apiFetch('/auth/login', { method: 'POST', body, public: true })`, guarda el token con `login(token)` y ya está: `RedirectIfAuthenticated` ve la sesión y lleva a `/`.
 
@@ -1212,7 +1303,7 @@ Antes cada pantalla guardaba su propia copia de la lista y se desincronizaban. A
 
 ### 20.3 Registro (`pages/RegisterPage.tsx` + `lib/validation.ts`)
 
-- Valida en el navegador con **los mismos límites que el backend** (usuario 3–50, contraseña 8–100, email), para dar feedback inmediato. **La validación que manda es la del servidor**: la del cliente se puede saltar.
+- Valida en el navegador con **los mismos límites que el backend** (usuario 3–50, contraseña 12–64, email), para dar feedback inmediato. **La validación que manda es la del servidor**: la del cliente se puede saltar. El resto de la política de contraseñas (comunes, datos personales, 72 bytes; capítulo 10.5) solo la comprueba el servidor, y su mensaje se pinta junto al campo: así la lista de contraseñas comunes no se duplica en el cliente.
 - Si el servidor devuelve `validationErrors`, cada mensaje se pinta junto a su campo y el foco va al primer error.
 - 409 (usuario o email en uso) se muestra como aviso del formulario.
 - 429: el botón se bloquea con una cuenta atrás (`hooks/useCountdown.ts`) usando `retryAfterSeconds`. La cuenta atrás es solo comodidad: el límite real lo impone el servidor.
@@ -1231,6 +1322,16 @@ Antes cada pantalla guardaba su propia copia de la lista y se desincronizaban. A
 - Teclado: ↑/↓ recorren los resultados, Intro abre la película, Escape cierra y vacía.
 - La opción resaltada lleva un contorno de acento alrededor de toda la fila (3,5:1 sobre el fondo), no una barra lateral de color: esa barra es uno de los patrones que más delatan una interfaz generada y, además, solo marca un borde.
 
+### 20.5 bis Login: intentos restantes y bloqueo (`pages/LoginPage.tsx`)
+
+`ApiError` expone `remainingAttempts` (tipado y opcional), copiado del cuerpo del error. La pantalla decide por `status`, `code` y ese campo, nunca por el texto:
+
+- **401 con `remainingAttempts`**: el error genérico («Email o contraseña incorrectos») y, debajo, «Te quedan N intentos antes de que la cuenta se bloquee 15 minutos.» (en singular con 1, y más visible).
+- **429 `ACCOUNT_LOCKED`**: «Tu cuenta está bloqueada temporalmente por demasiados intentos fallidos» con una cuenta atrás legible en minutos y segundos, y el botón bloqueado (`useCountdown` + `retryAfterSeconds`).
+- **429 `RATE_LIMIT_EXCEEDED`** (límite por IP): el aviso de «demasiados intentos», distinto del anterior.
+
+Al terminar la espera, el aviso desaparece y el botón se reactiva. Todos los avisos van en regiones accesibles (`role="alert"`).
+
 ### 20.6 Modales (`components/Modal.tsx` + `hooks/useModalDialog.ts`)
 
 Usan el elemento nativo `<dialog>` con `showModal()`, que ya da: capa por encima de todo, fondo inerte y foco atrapado dentro. El hook añade lo que el navegador no hace:
@@ -1243,6 +1344,28 @@ Usan el elemento nativo `<dialog>` con `showModal()`, que ya da: capa por encima
 Un detalle: un `<dialog>` modal vuelve inerte todo lo de fuera, incluidos los avisos. Por eso, mientras hay un modal abierto, `ToastContext` mueve los avisos **dentro** del diálogo (con un *portal*, `registerHost`).
 
 **Entrada con movimiento.** El `<dialog>` aparece con un fundido y una escala de 96 % a 100 % en 200 ms. Los avisos suben 8 px en 250 ms. Las dos animaciones son **transiciones** y no `@keyframes`: una transición se puede interrumpir a mitad (si cierras el modal mientras entra, vuelve desde donde está, sin saltos). El estado inicial se define con `@starting-style` (en `index.css` para el diálogo y con la variante `starting:` de Tailwind en `Toast.tsx`). La curva es `ease-out-strong` (`cubic-bezier(0.23, 1, 0.32, 1)`, token en `@theme`): arranca rápido y frena suave, de modo que la respuesta se percibe inmediata. Con `prefers-reduced-motion` la regla global deja todo en ~0 ms.
+
+### 20.7 Panel de administración (`pages/admin/`)
+
+Solo para `ADMIN`. La barra muestra el enlace **«Administrar»** únicamente si `isAdmin` (y no mientras se carga el usuario). En 375 px se reduce al icono, con su nombre accesible. Todo `/admin` va dentro de `RequireAdmin`, pero recuerda que **esto es solo interfaz**: quien protege los datos es el backend (403 para un `USER`, regla de cierre del catálogo; capítulo 9.2).
+
+- **`AdminLayout`**: un único `h1` «Administración» y dos pestañas, Películas y Géneros. Como cada pestaña es una **ruta**, son enlaces (`NavLink` con `aria-current="page"`) dentro de un `<nav aria-label="Secciones de administración">`, no el patrón ARIA `tablist`. Ese patrón es para paneles que se muestran sin cambiar de URL, y con enlaces funcionan el botón «Atrás», abrir en otra pestaña y compartir la dirección.
+- **`AdminMoviesPage`** (listado):
+  - Tabla con portada pequeña (`MoviePoster`), título, año, duración, géneros y acciones «Editar X» y «Borrar X» (el nombre accesible incluye el título).
+  - En móvil la tabla se compacta (año, duración y géneros bajo el título, y acciones solo con icono) para no provocar scroll horizontal.
+  - Buscador por título con debounce de 300 ms (`useDebouncedValue`) y cancelación (`AbortController`). Sin texto pide `/movies?sort=createdAt&direction=desc`; con texto, `/movies/search?title=…&sort=title`.
+  - Paginación con «Anterior»/«Siguiente», «Página X de Y» y el total (`components/Pagination`). La búsqueda y la página viven en la URL (`?q=&page=`), así que recargar o volver atrás conserva el estado.
+  - Estados de carga, vacío y error con reintento.
+- **Borrar película**: `ConfirmDialog` («¿Borrar "Título"? También se quitará de las listas de todos los usuarios…»). Espera al servidor (no es optimista, porque es destructivo). Después avisa y recarga la página actual (retrocede una si queda vacía). Un 404 significa que ya estaba borrada: se informa y se recarga.
+- **`MovieFormPage`** (alta y edición, el mismo componente):
+  - Campos: título, sinopsis (con contador de caracteres), duración, año, URL de portada, URL de vídeo y géneros (casillas en un `fieldset` con `legend`, cargadas con `useGenres`; al menos uno).
+  - La validación en el cliente (`lib/movieValidation.ts`) replica **exactamente** las reglas y los mensajes del servidor, incluidas las de URL (capítulo 13.3). Los errores del servidor (`validationErrors`) se pintan junto a cada campo y el foco va al primero.
+  - **Vista previa de la portada**: se actualiza al escribir la URL, con un debounce de 400 ms, usando `MoviePoster` con un objeto película «borrador». Así se respeta la regla de que las imágenes salen siempre de un objeto película. Si la URL no es válida no se intenta cargar y se ve el respaldo.
+  - En edición se carga `GET /api/movies/{id}` (un 404 muestra un mensaje con enlace al listado). Si no hay géneros, el formulario lo dice y enlaza a la pestaña Géneros.
+- **`AdminGenresPage`**:
+  - Alta arriba y lista con **renombrar en línea** (el campo sustituye al nombre; Escape cancela y el foco vuelve al botón) y «Borrar X» con confirmación.
+  - Un 409 `GENRE_ALREADY_EXISTS` se muestra junto al campo. Un 409 `GENRE_IN_USE` muestra el mensaje del servidor («lo usan 3 películas…») y el género sigue en la lista.
+- **Foco bajo la barra fija.** La barra superior es `sticky` en todos los anchos. Cuando un formulario mueve el foco al primer error, el navegador podía dejar el campo justo debajo de la barra, tapado (incumple WCAG 2.2 · 2.4.11). `Navbar` publica su altura real en la variable CSS `--navbar-height` (`hooks/useHeightCssVariable`, con un `ResizeObserver`, porque la barra mide 57 px en escritorio, 165 px en móvil y 213 px a 320 px con «Administrar»). `index.css` aplica `scroll-margin-top: calc(var(--navbar-height) + 2rem)` al contenido de `<main>` (no a los `<dialog>`, que van por encima de todo). Se descartó `scroll-padding-top` en `html` porque también desplazaba la página al enfocar los controles de la propia barra.
 
 ---
 
@@ -1258,6 +1381,7 @@ Un detalle: un `<dialog>` modal vuelve inerte todo lo de fuera, incluidos los av
 - Avisos en regiones `aria-live` que **existen desde el principio** (los lectores de pantalla solo anuncian cambios en regiones que ya estaban).
 - `prefers-reduced-motion`: si el sistema pide menos movimiento, se desactivan animaciones.
 - Contrastes calculados para cumplir WCAG AA (4,5:1); las cifras están comentadas en `index.css`.
+- **El foco nunca queda tapado por la barra fija** (WCAG 2.2 · 2.4.11): variable `--navbar-height` y `scroll-margin-top` en el contenido (detalle en 20.7).
 - **El contorno de los controles también cuenta** (WCAG 1.4.11 pide 3:1 en los elementos de interfaz). El borde de los campos era `white/15` (1,47:1) y pasó al token `field-border` (`#687286`: 3,90:1 sobre `canvas` y 3,55:1 sobre `surface`). Pendiente conocido: el contorno del buscador no llega a 3:1 (lo identifican el icono y el texto de ejemplo).
 - «Películas» y «Series» del menú son texto reservado (`PLANNED_SECTIONS` en `Navbar.tsx`), sin enlace y no enfocables, con «(próximamente)» para lectores de pantalla.
 
@@ -1281,7 +1405,7 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 ### 21.3 Imágenes (`components/MoviePoster.tsx`)
 
-- La imagen sale **siempre de `movie.imageUrl`** (lo que diga la base de datos).
+- La imagen sale **siempre de `movie.imageUrl`** (lo que diga la base de datos). La vista previa del formulario del panel también: usa un objeto película «borrador» con la URL que se está escribiendo.
 - `loading="lazy"`: solo se descarga al acercarse a la pantalla. La del banner, en cambio, carga con prioridad alta, porque es lo primero que se ve.
 - Ancho y alto reservados: la página no «salta» al cargar.
 - Si no hay URL o la imagen falla, se muestra un hueco con icono y título, hecho con HTML (no es otra imagen, así que no puede fallar en bucle). El hueco lleva **un degradado elegido por el título** (`lib/posterFallback.ts`): un hash del título (FNV-1a) escoge uno de 6 degradados, así que la misma película tiene siempre el mismo color y varios huecos seguidos no parecen una página sin cargar. Todos los degradados dan un contraste de 9:1 o más con el texto blanco (cifras en el código).
@@ -1303,10 +1427,10 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 387 | `.\mvnw.cmd test` (desde `streambox/`) |
-| Backend (PostgreSQL real) | Testcontainers | 82 | Incluidos en el anterior; se omiten si Docker no está en marcha |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 259 | `npm run test` (desde `frontend/`) |
-| Frontend (flujos completos) | Playwright (Chromium) | 48 | `npm run test:e2e` |
+| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 850 | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (PostgreSQL real) | Testcontainers | 68 sin Docker (más con Docker) | Se ejecutan con el anterior; se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que con Docker la cifra es mayor (eran 82 antes de añadir `PostgresGenreIntegrationTest`) |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 444 | `npm run test` (desde `frontend/`) |
+| Frontend (flujos completos) | Playwright (Chromium) | 72 (+15 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend
 
@@ -1339,7 +1463,10 @@ Prueban de verdad todo el recorrido del capítulo 2: filtros, seguridad, control
 ### 22.3 Tests del frontend
 
 - **Vitest + Testing Library** (`*.test.ts(x)` junto al código): prueban la lógica (`apiFetch`, validación, `buildCatalogRows`…) y los componentes **como los usaría una persona**: buscan elementos por su rol y su texto (`getByRole('button', { name: 'Iniciar sesión' })`), no por clases CSS. Si un test no encuentra un elemento por su rol, suele ser un problema de accesibilidad. Se ejecutan en `jsdom` (un navegador simulado), con algunas simulaciones en `src/test/setup.ts` (por ejemplo, `<dialog>`, que jsdom no implementa).
-- **Playwright** (`frontend/e2e/`): abre un Chromium real y recorre la aplicación de verdad (registro, login, catálogo, favoritos, buscador, teclado, responsive en 375/768/1280 px). Levanta **su propio backend** en el puerto 8099 con H2 en memoria y su propio Vite en el 5199, siembra 25 películas por la API con un administrador temporal y lo apaga todo al terminar. No toca tu base de datos ni tus puertos 8080 y 5173.
+- **Playwright** (`frontend/e2e/`): abre un Chromium real y recorre la aplicación de verdad (registro, login, catálogo, favoritos, buscador, teclado, responsive en 375/768/1280 px). Levanta **su propio backend** en el puerto 8099 con H2 en memoria y su propio Vite en el 5199, siembra 25 películas por la API con un administrador temporal y lo apaga todo al terminar. No toca tu base de datos ni tus puertos 8080 y 5173. Las portadas se siembran como rutas propias (`/covers/...`), que son las únicas no `https` que acepta la API.
+- **Specs que modifican el catálogo** (`admin-peliculas.spec.ts`: crea, edita y borra una película) van en un proyecto aparte, `catalogo-mutable`, que Playwright solo empieza cuando el resto ha terminado. Mientras existe una película creada por un test, ella pasa a ser la más reciente, y los tests que comprueban el banner o «Mostrando 25 de 25» fallarían según el orden. Contrapartida: si falla algún test del proyecto principal, este se omite. Para ejecutarlo solo: `npx playwright test admin-peliculas --no-deps`.
+- **El tiempo en los tests.** Ningún test de Vitest espera tiempo real. Los que dependen de un debounce (buscador de la barra, buscador del panel, vista previa de la portada) usan el reloj falso de `src/test/fakeTimers.ts`: `installManualTimers()` en `beforeEach` y `passTime(ms)` para dejar pasar el tiempo. Así se comprueba el retraso exacto (nada a los 299 ms, la petición a los 300) y el resultado no depende de lo cargada que esté la máquina. Con el reloj real y `waitFor` (1 s), algunos fallaban a veces con la suite en paralelo.
+- **Esperar como una persona en E2E.** Antes de pulsar en el formulario de película se espera a que esté completo (`waitForMovieForm(page)` en `e2e/support/fixtures.ts`). Los géneros llegan aparte y, al aparecer, desplazan los botones 128 px en móvil. Playwright solo comprueba qué hay bajo el puntero en el primer evento del clic, así que el `mouseup` podía caer en otro elemento.
 
 ### 22.4 Regla del proyecto
 

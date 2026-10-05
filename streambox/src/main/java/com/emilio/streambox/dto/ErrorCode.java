@@ -47,6 +47,29 @@ public enum ErrorCode {
     /** El tipo de contenido de la petición no está soportado. */
     UNSUPPORTED_MEDIA_TYPE,
 
-    /** Se ha superado el límite de intentos o de peticiones permitido. */
-    RATE_LIMIT_EXCEEDED
+    /**
+     * Se ha superado el límite de peticiones permitido desde una misma IP
+     * (login o registro). Va con la cabecera {@code Retry-After}.
+     */
+    RATE_LIMIT_EXCEEDED,
+
+    /**
+     * La cuenta (el email) está bloqueada temporalmente por demasiados logins
+     * fallidos. Lo devuelve el fallo que agota los intentos y cualquier intento
+     * posterior mientras dure el bloqueo, aunque la contraseña sea correcta. Va
+     * con la cabecera {@code Retry-After} y no depende de que el email exista.
+     */
+    ACCOUNT_LOCKED,
+
+    /**
+     * Ya existe otro género con ese nombre (una vez normalizado, sin distinguir
+     * mayúsculas). Lo devuelven el alta y la edición de géneros.
+     */
+    GENRE_ALREADY_EXISTS,
+
+    /**
+     * El género no se puede borrar porque alguna película lo tiene asignado;
+     * hay que quitárselo antes a esas películas.
+     */
+    GENRE_IN_USE
 }

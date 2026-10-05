@@ -1,15 +1,20 @@
 package com.emilio.streambox.controller;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.net.URI;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -86,7 +91,8 @@ class RateLimitingIntegrationTest {
                 .andExpect(header().exists("Retry-After"))
                 .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"))
                 .andExpect(jsonPath("$.status").value(429))
-                .andExpect(jsonPath("$.token").doesNotExist());
+                .andExpect(jsonPath("$.token").doesNotExist())
+                .andExpect(jsonPath("$.remainingAttempts").doesNotExist());
     }
 
     @Test
@@ -140,17 +146,21 @@ class RateLimitingIntegrationTest {
     // --- Bloqueo de cuenta ---
 
     @Test
-    void tras3FallosLaCuentaSeBloqueaAunqueLaPasswordSeaCorrecta() throws Exception {
+    void elTercerFalloBloqueaLaCuentaAunqueDespuesLaPasswordSeaCorrecta() throws Exception {
         createUser("user6");
         // IPs distintas: se prueba el bloqueo por cuenta, no el límite por IP
         login("user6@test.com", "mal", "10.6.0.1").andExpect(status().isUnauthorized());
         login("user6@test.com", "mal", "10.6.0.2").andExpect(status().isUnauthorized());
-        login("user6@test.com", "mal", "10.6.0.3").andExpect(status().isUnauthorized());
+        // El fallo que alcanza el máximo ya responde 429 (antes era un 401 más)
+        login("user6@test.com", "mal", "10.6.0.3")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
 
         login("user6@test.com", "correct-password", "10.6.0.4")
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().exists("Retry-After"))
-                .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
+                .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"))
+                .andExpect(jsonPath("$.token").doesNotExist());
     }
 
     @Test
@@ -170,9 +180,13 @@ class RateLimitingIntegrationTest {
         // emails están registrados.
         login("fantasma@test.com", "mal", "10.8.0.1").andExpect(status().isUnauthorized());
         login("fantasma@test.com", "mal", "10.8.0.2").andExpect(status().isUnauthorized());
-        login("fantasma@test.com", "mal", "10.8.0.3").andExpect(status().isUnauthorized());
+        login("fantasma@test.com", "mal", "10.8.0.3")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
 
-        login("fantasma@test.com", "mal", "10.8.0.4").andExpect(status().isTooManyRequests());
+        login("fantasma@test.com", "mal", "10.8.0.4")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
     }
 
     @Test
@@ -206,7 +220,130 @@ class RateLimitingIntegrationTest {
         login("other@test.com", "other-password", "10.10.0.4").andExpect(status().isOk());
     }
 
+    // --- Variantes de la ruta (regresión) ---
+    //
+    // El filtro comparaba getRequestURI() (la ruta tal como llega, sin
+    // decodificar) con "/api/auth/login" y "/api/users". Spring MVC y las
+    // reglas de autorización sí decodifican cada segmento, así que
+    // "/api/auth/%6cogin" llegaba al login sin pasar por el límite. Se usa
+    // URI.create porque post(String) volvería a codificar el '%'.
+
+    /**
+     * Agotado el límite de login de una IP, la misma petición con la ruta
+     * codificada (que Spring MVC atiende igual) debe recibir también el 429.
+     * Sin el arreglo respondía 401 y dejaba probar contraseñas sin límite.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/api/auth/%6cogin", "/api/auth/%6C%6F%67%69%6E", "/%61pi/auth/login", "/api/%61uth/login"
+    })
+    void elLimiteDeLoginNoSeSaltaCodificandoLaRuta(String encodedPath) throws Exception {
+        String ip = nextVariantIp();
+        // Emails propios de cada invocación: si se repitieran, el bloqueo por
+        // cuenta (3 fallos) daría un 429 que no es el que se quiere probar.
+        String prefix = "variante" + VARIANT_SEQUENCE.get() + "-";
+        for (int i = 0; i < 3; i++) {
+            login(prefix + i + "@test.com", "x", ip).andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(post(URI.create(encodedPath))
+                        .with(ip(ip))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("email", prefix + "x@test.com", "password", "x"))))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
+    }
+
+    /**
+     * Agotado el límite de registro de una IP, la ruta codificada no debe
+     * crear la cuenta. Sin el arreglo respondía 201 y permitía registrar
+     * cuentas sin límite.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = { "/api/%75sers", "/api/user%73", "/%61pi/users" })
+    void elLimiteDeRegistroNoSeSaltaCodificandoLaRuta(String encodedPath) throws Exception {
+        String ip = nextVariantIp();
+        String prefix = "codif" + VARIANT_SEQUENCE.get();
+        register(prefix + "a", ip).andExpect(status().isCreated());
+        register(prefix + "b", ip).andExpect(status().isCreated());
+
+        mockMvc.perform(post(URI.create(encodedPath))
+                        .with(ip(ip))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registerBody(prefix + "c")))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
+
+        assertFalse(userRepository.existsByEmail(prefix + "c@test.com"));
+    }
+
+    /**
+     * Variantes que el filtro no cuenta porque tampoco llegan al registro ni
+     * al login: Spring MVC no enruta la barra final ni otras mayúsculas (y las
+     * reglas de autorización tampoco las hacen públicas, así que sin token
+     * dan 401), y el cortafuegos de Spring Security rechaza el punto y coma
+     * de {@code ;jsessionid} con un 400. En ningún caso se crea la cuenta.
+     */
+    @Test
+    void lasVariantesQueSpringNoEnrutaNoCreanCuentasNiDanToken() throws Exception {
+        String ip = nextVariantIp();
+        register("noenruta1", ip).andExpect(status().isCreated());
+        register("noenruta2", ip).andExpect(status().isCreated());
+
+        for (String path : new String[] { "/api/users/", "/api/Users", "/api/USERS" }) {
+            mockMvc.perform(post(URI.create(path)).with(ip(ip))
+                            .contentType(MediaType.APPLICATION_JSON).content(registerBody("noenruta3")))
+                    .andExpect(status().isUnauthorized());
+        }
+        for (String path : new String[] { "/api/auth/login/", "/api/auth/Login" }) {
+            mockMvc.perform(post(URI.create(path)).with(ip(ip))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(
+                                    Map.of("email", "noenruta1@test.com", "password", "Secure-Pass-2026"))))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.token").doesNotExist());
+        }
+        mockMvc.perform(post(URI.create("/api/users;jsessionid=abc")).with(ip(ip))
+                        .contentType(MediaType.APPLICATION_JSON).content(registerBody("noenruta3")))
+                .andExpect(status().isBadRequest());
+
+        assertFalse(userRepository.existsByEmail("noenruta3@test.com"));
+    }
+
+    /**
+     * Con un token válido (el de una cuenta ya registrada) las variantes no
+     * enrutadas pasan la autorización, pero Spring MVC no las asocia al
+     * registro: no se crea la cuenta, así que no son un atajo para saltarse
+     * el límite.
+     */
+    @Test
+    void conTokenLasVariantesNoEnrutadasTampocoRegistran() throws Exception {
+        String ip = nextVariantIp();
+        register("contoken1", ip).andExpect(status().isCreated());
+        register("contoken2", ip).andExpect(status().isCreated());
+        String token = "Bearer " + jwtService.generateToken(
+                userRepository.findByEmail("contoken1@test.com").orElseThrow());
+
+        for (String path : new String[] { "/api/users/", "/api/Users" }) {
+            mockMvc.perform(post(URI.create(path)).with(ip(ip)).header("Authorization", token)
+                            .contentType(MediaType.APPLICATION_JSON).content(registerBody("contoken3")))
+                    .andExpect(status().isNotFound());
+        }
+
+        assertFalse(userRepository.existsByEmail("contoken3@test.com"));
+    }
+
     // --- Utilidades ---
+
+    /** Secuencia para las IPs de los tests de variantes (10.11.x.y, sin uso en otros tests). */
+    private static final AtomicInteger VARIANT_SEQUENCE = new AtomicInteger();
+
+    private static String nextVariantIp() {
+        int n = VARIANT_SEQUENCE.incrementAndGet();
+        return "10.11." + (n / 250) + "." + (n % 250 + 1);
+    }
 
     private ResultActions login(String email, String password, String ip) throws Exception {
         return mockMvc.perform(post("/api/auth/login")
@@ -219,10 +356,14 @@ class RateLimitingIntegrationTest {
         return mockMvc.perform(post("/api/users")
                 .with(ip(ip))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(Map.of(
-                        "username", name,
-                        "email", name + "@test.com",
-                        "password", "securepass1"))));
+                .content(registerBody(name)));
+    }
+
+    private String registerBody(String name) throws Exception {
+        return objectMapper.writeValueAsString(Map.of(
+                "username", name,
+                "email", name + "@test.com",
+                "password", "Secure-Pass-2026"));
     }
 
     private static RequestPostProcessor ip(String address) {

@@ -2,6 +2,7 @@ package com.emilio.streambox.security.ratelimit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Clock;
@@ -10,6 +11,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 
 import org.junit.jupiter.api.Test;
+
+import com.emilio.streambox.security.ratelimit.SlidingWindowCounter.Reservation;
 
 /** Tests unitarios de {@link SlidingWindowCounter} con un reloj controlado. */
 class SlidingWindowCounterTest {
@@ -38,6 +41,27 @@ class SlidingWindowCounterTest {
         assertTrue(counter.tryAcquire("ip", 3));
 
         assertFalse(counter.tryAcquire("ip", 3));
+    }
+
+    @Test
+    void acquireDevuelveElNumeroDeOrdenOCeroSiSeRechaza() {
+        assertEquals(1, counter.acquire("email", 3));
+        assertEquals(2, counter.acquire("email", 3));
+        assertEquals(3, counter.acquire("email", 3));
+
+        assertEquals(0, counter.acquire("email", 3));
+        assertEquals(3, counter.count("email"));
+    }
+
+    @Test
+    void acquireVuelveAEmpezarCuandoCaducanLosEventos() {
+        counter.acquire("email", 2);
+        clock.advance(Duration.ofSeconds(30));
+        counter.acquire("email", 2);
+        assertEquals(0, counter.acquire("email", 2));
+
+        clock.advance(Duration.ofSeconds(31)); // caduca solo el primero
+        assertEquals(2, counter.acquire("email", 2));
     }
 
     @Test
@@ -100,6 +124,59 @@ class SlidingWindowCounterTest {
         counter.reset("email");
 
         assertEquals(0, counter.count("email"));
+    }
+
+    // ------------------------------------------------------------------
+    // reserve / confirm
+    // ------------------------------------------------------------------
+
+    @Test
+    void reserveDevuelveElNumeroDeOrdenYUnIdentificadorDistinto() {
+        Reservation first = counter.reserve("email", 2).orElseThrow();
+        Reservation second = counter.reserve("email", 2).orElseThrow();
+
+        assertEquals(1, first.number());
+        assertEquals(2, second.number());
+        assertNotEquals(first.id(), second.id());
+        assertTrue(counter.reserve("email", 2).isEmpty());
+    }
+
+    @Test
+    void confirmDevuelveLaPosicionActualQueBajaSiCaducanEventosAnteriores() {
+        Reservation first = counter.reserve("email", 3).orElseThrow();   // t = 0
+        clock.advance(Duration.ofSeconds(30));
+        Reservation second = counter.reserve("email", 3).orElseThrow();  // t = 30
+
+        assertEquals(1, counter.confirm("email", first, 3));
+        assertEquals(2, counter.confirm("email", second, 3));
+
+        clock.advance(Duration.ofSeconds(31));                          // caduca el primero
+        assertEquals(1, counter.confirm("email", second, 3));
+        assertEquals(1, counter.count("email"));
+    }
+
+    @Test
+    void confirmVuelveARegistrarElEventoSiUnResetLoBorro() {
+        counter.reserve("email", 3);
+        Reservation second = counter.reserve("email", 3).orElseThrow();
+        counter.reset("email");
+
+        assertEquals(1, counter.confirm("email", second, 3));
+        assertEquals(1, counter.count("email"));
+        // Confirmarlo otra vez no lo duplica: ya está en la ventana.
+        assertEquals(1, counter.confirm("email", second, 3));
+        assertEquals(1, counter.count("email"));
+    }
+
+    @Test
+    void confirmDevuelveCeroSiElEventoYaNoEstaYNoCabe() {
+        Reservation stale = counter.reserve("email", 2).orElseThrow();
+        counter.reset("email");
+        counter.acquire("email", 2);
+        counter.acquire("email", 2);
+
+        assertEquals(0, counter.confirm("email", stale, 2));
+        assertEquals(2, counter.count("email"));
     }
 
     @Test

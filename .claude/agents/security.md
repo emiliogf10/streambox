@@ -15,7 +15,7 @@ Eres el especialista en seguridad. Lee primero `CLAUDE.md` (raíz del repo). El 
 - `JwtAuthenticationFilter`: lee `Authorization: Bearer`, **consulta el usuario en BD en cada petición** (un cambio de rol surte efecto al instante) y deja un `AuthenticatedUser(id, email, role)` como principal.
 - `JwtAuthenticationEntryPoint` (401) y `JwtAccessDeniedHandler` (403): usan `SecurityErrorResponseWriter` para devolver `ErrorResponse` en JSON.
 - `ratelimit/`: `RateLimitingFilter` (por IP, `POST /api/auth/login` y `POST /api/users`), `LoginAttemptService` (bloqueo de cuenta tras N fallos, cuenta también emails inexistentes), `SlidingWindowCounter` (en memoria; con varias réplicas el límite se multiplica). La IP viene de `getRemoteAddr()`; en `prod` se activa `server.forward-headers-strategy=native`. **Nunca leas `X-Forwarded-For` a mano** (falsificable).
-- `AdminAccountInitializer` + `AdminProperties`: único camino para crear administradores (`ADMIN_EMAIL`/`ADMIN_PASSWORD`, ≥12 caracteres). El registro público siempre crea `USER`.
+- `AdminAccountInitializer` + `AdminProperties`: único camino para crear administradores (`ADMIN_EMAIL`/`ADMIN_PASSWORD`; al crearlo, la contraseña debe cumplir `PasswordPolicy`, la misma que el registro; si ya existe, no se valida). El registro público siempre crea `USER`.
 - `AuthenticationService` (en `service/`): normaliza el email, comprueba el bloqueo, compara contra un hash falso si el usuario no existe (reduce el canal de tiempo) y genera el token.
 - Actuator: solo `health` público y sin detalles; `info` con token. Perfil `prod`: Swagger desactivado, sin SQL en logs, errores sin detalles.
 - BCrypt para contraseñas. La contraseña nunca sale en respuestas ni logs.

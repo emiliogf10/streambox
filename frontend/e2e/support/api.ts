@@ -139,6 +139,53 @@ async function findMovieId(request: APIRequestContext, token: string, title: str
   return match.id;
 }
 
+/**
+ * Borra (administrador) todas las películas cuyo título contiene `text`. Es la LIMPIEZA de los tests
+ * que crean películas desde la interfaz: si un test falla a mitad, la película no se queda en el
+ * catálogo compartido (cambiaría el banner y los totales de otros tests, sobre todo con
+ * `E2E_REUSE_SERVERS=1`, que conserva la base de datos entre ejecuciones). Un 404 cuenta como hecho.
+ */
+export async function deleteMoviesMatching(request: APIRequestContext, adminToken: string, text: string): Promise<void> {
+  const response = await request.get(`${BACKEND_URL}/api/movies/search`, {
+    headers: bearer(adminToken),
+    params: { title: text, size: 100 },
+  });
+  await expectOk(response, `Buscar películas con «${text}»`);
+  const page = (await response.json()) as ApiPage<ApiMovie>;
+  for (const movie of page.content.filter((item) => item.title.includes(text))) {
+    const deleted = await request.delete(`${BACKEND_URL}/api/movies/${movie.id}`, { headers: bearer(adminToken) });
+    if (deleted.status() !== 404) await expectOk(deleted, `Borrar la película «${movie.title}»`);
+  }
+}
+
+/** Género tal como lo devuelve la API. */
+export interface ApiGenre {
+  id: number;
+  name: string;
+}
+
+/** Lista de géneros (`GET /api/genres`). */
+export async function listGenres(request: APIRequestContext, token: string): Promise<ApiGenre[]> {
+  const response = await request.get(`${BACKEND_URL}/api/genres`, { headers: bearer(token) });
+  await expectOk(response, 'Listar los géneros');
+  return (await response.json()) as ApiGenre[];
+}
+
+/**
+ * Borra (administrador) los géneros con alguno de estos nombres, si existen. Limpieza de los tests
+ * que crean géneros desde la interfaz; un género que ya no está (404) cuenta como hecho.
+ */
+export async function deleteGenresNamed(
+  request: APIRequestContext,
+  adminToken: string,
+  names: readonly string[],
+): Promise<void> {
+  for (const genre of (await listGenres(request, adminToken)).filter((item) => names.includes(item.name))) {
+    const deleted = await request.delete(`${BACKEND_URL}/api/genres/${genre.id}`, { headers: bearer(adminToken) });
+    if (deleted.status() !== 404) await expectOk(deleted, `Borrar el género «${genre.name}»`);
+  }
+}
+
 /** Añade películas (por título) a la lista del usuario, directamente por API. */
 export async function addFavoritesByTitle(
   request: APIRequestContext,

@@ -10,8 +10,24 @@ import type { RegisterRequest } from './types';
 /** Límites de `CreateUserRequest` (`@Size`). */
 export const USERNAME_MIN = 3;
 export const USERNAME_MAX = 50;
-export const PASSWORD_MIN = 8;
-export const PASSWORD_MAX = 100;
+/**
+ * Política de contraseñas del registro: de 12 a 64 caracteres.
+ *
+ * - **Mínimo 12**: la longitud es lo que más dificulta adivinar una contraseña
+ *   por fuerza bruta; con 8 caracteres caben demasiadas contraseñas débiles.
+ * - **Máximo 64**: suficiente para frases de contraseña y para los gestores de
+ *   contraseñas. Un tope evita textos enormes y queda por debajo del límite de
+ *   BCrypt (el algoritmo con el que el backend las guarda solo tiene en cuenta
+ *   los primeros 72 bytes).
+ *
+ * El servidor rechaza además las contraseñas comunes y las que contienen el
+ * nombre de usuario o el correo. Esas reglas NO se copian aquí: la lista de
+ * contraseñas comunes vive en el backend (duplicarla en el cliente la haría
+ * pública y la desincronizaría); su motivo llega en `validationErrors.password`
+ * y la pantalla lo pinta junto al campo.
+ */
+export const PASSWORD_MIN = 12;
+export const PASSWORD_MAX = 64;
 
 /** Errores por campo; un campo sin error no aparece. */
 export type RegisterErrors = Partial<Record<keyof RegisterRequest, string>>;

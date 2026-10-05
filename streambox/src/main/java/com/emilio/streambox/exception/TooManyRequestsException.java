@@ -3,9 +3,11 @@ package com.emilio.streambox.exception;
 import java.time.Duration;
 
 /**
- * Excepción utilizada cuando se supera un límite de intentos (por ejemplo,
- * demasiados logins fallidos). Se traduce en una respuesta
- * {@code 429 Too Many Requests} con la cabecera {@code Retry-After}.
+ * Excepción utilizada cuando se supera un límite de intentos o de peticiones.
+ * Se traduce en una respuesta {@code 429 Too Many Requests} con la cabecera
+ * {@code Retry-After} y el código {@code RATE_LIMIT_EXCEEDED}. El bloqueo de
+ * una cuenta por logins fallidos usa la subclase {@link AccountLockedException}
+ * (código {@code ACCOUNT_LOCKED}).
  */
 public class TooManyRequestsException extends RuntimeException {
 

@@ -50,7 +50,7 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 
 - **Controladores:** solo reciben y devuelven **DTOs**, sin lógica. Devuelven el DTO directamente con `@ResponseStatus` (no `ResponseEntity`). Todo endpoint con `@Operation`/`@ApiResponses` en español (códigos reales: 401 sin token, 403 sin permisos, 429 en login/registro).
 - **Servicios:** clases concretas (sin interfaz). Devuelven **DTOs, nunca entidades**; el mapeo ocurre **dentro de la transacción** (`@Transactional(readOnly = true)` en lecturas) porque las colecciones son `LAZY` y `open-in-view=false`.
-- **DTOs:** `record`s (los de petición antiguos `CreateUserRequest`, `CreateGenreRequest`, `LoginRequest` aún son clases Lombok: convertirlos es opcional). Validación con Bean Validation.
+- **DTOs:** `record`s (los de petición antiguos `CreateUserRequest` y `LoginRequest` aún son clases Lombok: convertirlos es opcional). Validación con Bean Validation.
 - **Mappers:** clases `final` con métodos estáticos. No MapStruct.
 - **Entidades:** `equals/hashCode` por id, fechas `Instant` + `@CreationTimestamp`. Relaciones `LAZY`; los listados paginados **no** hacen fetch de colecciones (`default_batch_fetch_size=50`), solo `findById` usa `@EntityGraph`.
 - **Errores:** excepciones de dominio (`ResourceNotFoundException` es la base de los 404) tratadas en `GlobalExceptionHandler` (extiende `ResponseEntityExceptionHandler`), formato `ErrorResponse` con `ErrorCode`. Nunca devuelvas mensajes de excepciones del framework al cliente.
@@ -68,8 +68,10 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 
 - JWT stateless (`JwtService`, `JwtProperties` con secreto ≥32 caracteres validado al arrancar, `issuer=streambox`). El filtro lee el usuario de la BD en cada petición, así que un cambio de rol es inmediato.
 - Roles `USER` y `ADMIN`. Los endpoints personales cuelgan de `/api/users/me/...` y usan el id **del token** (`@AuthenticationPrincipal AuthenticatedUser`), nunca un id de la URL (evita IDOR).
-- Rate limiting: `RateLimitingFilter` (por IP, login y registro) y `LoginAttemptService` (bloqueo de cuenta). Contadores en memoria. Los tests suben los límites en `application-test.properties`; los de rate limiting los bajan con `@TestPropertySource` y usan IPs/emails únicos por test.
-- Los administradores solo se crean con `AdminAccountInitializer` (`ADMIN_EMAIL`/`ADMIN_PASSWORD`); el registro público siempre crea `USER`.
+- Rate limiting: `RateLimitingFilter` (por IP, login y registro; reconoce las rutas con `PathPatternRequestMatcher`, **nunca** comparando `getRequestURI()`, que llega sin decodificar) y `LoginAttemptService` (bloqueo de cuenta: 5 fallos/15 min; los fallos responden 401 con `remainingAttempts` y el que agota los intentos, 429 `ACCOUNT_LOCKED`; el límite por IP es 429 `RATE_LIMIT_EXCEEDED`). Contadores en memoria. Los tests suben los límites en `application-test.properties`; los de rate limiting los bajan con `@TestPropertySource` y usan IPs/emails únicos por test.
+- Contraseñas de cuentas nuevas: `security/password/PasswordPolicy` (12–64 caracteres, ≤72 bytes por BCrypt, no común, sin usuario/email). El login no exige mínimo (cuentas antiguas), solo un máximo de 1024.
+- Catálogo: lectura (`GET`/`HEAD`) para autenticados y cualquier otro método sobre `/api/movies/**` y `/api/genres/**` solo `ADMIN` (regla de cierre en `SecurityConfig`).
+- Los administradores solo se crean con `AdminAccountInitializer` (`ADMIN_EMAIL`/`ADMIN_PASSWORD`; la política de contraseñas se aplica solo al crearlo); el registro público siempre crea `USER`.
 - Actuator: solo `health` (público, sin detalles) e `info` (con token). Perfil `prod`: Swagger desactivado, logs JSON, sin SQL en logs.
 - Nunca secretos en el repositorio. `application-local.properties` está ignorado.
 
@@ -80,7 +82,8 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 - Cada bug corregido deja un test que falla sin el arreglo.
 - Lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia real) se prueba también contra PostgreSQL real en `src/test/.../postgres/` (extiende `PostgresIntegrationTestSupport`); H2 puede ocultar diferencias (ya ocultó un bug de búsqueda).
 - Frontend: lógica y componentes con Vitest + Testing Library (`*.test.ts(x)` junto al código, utilidades en `src/test/`); flujos completos con Playwright en `frontend/e2e/`. Localiza por rol/etiqueta, no con `data-testid`.
-- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: 469 de backend, 259 de Vitest y 48 E2E).
+- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 918 ejecutados sin Docker, de ellos 850 con H2 y 68 de PostgreSQL omitidos (con Docker salen más, porque los parametrizados omitidos cuentan como uno); 444 de Vitest y 72 E2E + 15 de capturas omitidas).
+- Vitest no espera tiempo real: los debounces se prueban con `src/test/fakeTimers.ts`. Los E2E que modifican el catálogo van en el proyecto `catalogo-mutable` de Playwright, que corre al final.
 
 ## Frontend: estado actual
 
@@ -93,6 +96,8 @@ SPA en `frontend/src/` organizada en `pages/`, `components/`, `context/`, `hooks
 - Las imágenes salen **siempre de `movie.imageUrl`** vía `components/MoviePoster` (lazy, con respaldo). Portadas locales de ejemplo en `public/covers/*.webp` (+ script opcional `docs/portadas-locales.sql`).
 - Las URLs que vienen de la API (`videoUrl`) se validan con `getSafeVideoUrl` (solo http/https, sin credenciales).
 - El catálogo se pide ordenado por el servidor: `GET /api/movies?sort=createdAt&direction=desc` (`direction` = `asc`|`desc`, por defecto `asc`).
+- El rol se pregunta al servidor (`GET /api/users/me` en `AuthContext`: `user`, `isAdmin`, `userStatus`); el JWT no lo lleva. Panel de administración en `pages/admin/` (`/admin`, tras `RequireAdmin`); su validación (`lib/movieValidation.ts`) replica exactamente las reglas y mensajes del backend.
+- La barra superior publica su altura en `--navbar-height` y el contenido usa `scroll-margin-top` para que el foco no quede tapado (WCAG 2.4.11).
 
 Pendiente: la revisión visual humana. Al tocar el frontend verifica con `npm run build`, `npm run lint` (debe dar código 0), `npm run test` y, si afecta a flujos o a la maquetación, `npm run test:e2e`.
 

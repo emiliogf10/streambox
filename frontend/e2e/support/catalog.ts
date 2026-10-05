@@ -6,8 +6,8 @@
  *    "Cargar más películas" se prueba de verdad (20 + 5).
  *  - 3 géneros repartidos de forma que todos tengan filas propias (≥ 3 películas)
  *    y algunas películas pertenezcan a dos géneros.
- *  - Portadas reales de `public/covers` en unas y una URL válida pero inexistente
- *    en otras, para provocar el hueco de respaldo con el título (`MoviePoster`).
+ *  - Portadas reales de `public/covers` en unas y una portada propia válida pero
+ *    inexistente en otras, para provocar el hueco de respaldo con el título (`MoviePoster`).
  *  - Títulos largos y una sinopsis larga para ver cómo se comporta el diseño.
  *
  * Nota: el backend exige AL MENOS UN género por película (`@NotEmpty` en
@@ -16,14 +16,12 @@
  * El ORDEN es el de creación (de la más antigua a la más reciente). La portada
  * ordena por `createdAt` descendente, así que la ÚLTIMA de la lista es la del banner.
  */
-import { FRONTEND_URL } from './config';
-
 export interface SeedMovie {
   title: string;
   description: string;
   duration: number;
   releaseYear: number;
-  /** Nombre del archivo de `public/covers` o `null` para una URL válida que no existe (404). */
+  /** Nombre del archivo de `public/covers` o `null` para una portada válida que no existe (404). */
   cover: string | null;
   /** Nombres de los géneros (deben estar en {@link GENRES}). */
   genres: string[];
@@ -90,12 +88,34 @@ export const HERO_TITLE = MOVIES[MOVIES.length - 1].title;
 /** Películas por página que pide la portada (`PAGE_SIZE` de `useCatalog`). */
 export const PAGE_SIZE = 20;
 
-/** URL absoluta de la portada: el backend exige `@URL`, así que no vale una ruta relativa. */
+/**
+ * Convierte un título en un nombre de archivo seguro: sin tildes, en minúsculas y con guiones
+ * ("La Última Frontera" → "la-ultima-frontera"). Se usa en lugar de `encodeURIComponent`, que mete
+ * `%` y espacios codificados que el backend ya no admite en una portada propia.
+ */
+function slug(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // marcas diacríticas que deja `normalize('NFD')` (tildes, diéresis...)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+/**
+ * URL de la portada: una portada PROPIA, relativa (`/covers/<archivo>`).
+ *
+ * El backend solo admite `https://` o `/covers/<archivo>`, con un archivo que empieza por letra o
+ * número y solo lleva letras, números, `.`, `_` y `-`. Antes se usaba la URL absoluta del Vite de la
+ * suite (`http://localhost:5199/covers/...`), que hoy se rechazaría por no ser `https`. La ruta
+ * relativa la sirve el propio frontend (`public/covers`) sea cual sea el puerto.
+ *
+ * Las películas "sin portada" apuntan a un archivo que cumple el formato pero no existe
+ * (`/covers/no-existe-<título>.webp`): el navegador recibe un 404 y se ve el hueco de respaldo.
+ */
 export function coverUrl(movie: SeedMovie): string {
-  return movie.cover
-    ? `${FRONTEND_URL}/covers/${movie.cover}`
-    : // URL válida para el backend pero que da 404: provoca el hueco de respaldo.
-      `${FRONTEND_URL}/covers/no-existe-${encodeURIComponent(movie.title.slice(0, 12))}.webp`;
+  return movie.cover ? `/covers/${movie.cover}` : `/covers/no-existe-${slug(movie.title)}.webp`;
 }
 
 /** Enlace de vídeo de ejemplo (`https`). El test nunca lo abre: solo comprueba el `href`. */

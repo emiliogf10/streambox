@@ -71,7 +71,7 @@ class UserControllerIntegrationTest {
 
     @Test
     void registroDatosValidosRetorna201() throws Exception {
-        var b = Map.of("username", "newuser", "email", "newuser@test.com", "password", "securepass1");
+        var b = Map.of("username", "newuser", "email", "newuser@test.com", "password", "Secure-Pass-2026");
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(b)))
                 .andExpect(status().isCreated())
@@ -82,7 +82,7 @@ class UserControllerIntegrationTest {
 
     @Test
     void registroEmailDuplicadoRetorna409() throws Exception {
-        var b = Map.of("username", "otro", "email", "normaluser@test.com", "password", "securepass1");
+        var b = Map.of("username", "otro", "email", "normaluser@test.com", "password", "Secure-Pass-2026");
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(b)))
                 .andExpect(status().isConflict())
@@ -95,12 +95,13 @@ class UserControllerIntegrationTest {
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(b)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.validationErrors.password").exists());
+                .andExpect(jsonPath("$.validationErrors.password")
+                        .value("La contraseña debe tener entre 12 y 64 caracteres"));
     }
 
     @Test
     void registroEmailInvalidoRetorna400() throws Exception {
-        var b = Map.of("username", "u3", "email", "noemail", "password", "securepass1");
+        var b = Map.of("username", "u3", "email", "noemail", "password", "Secure-Pass-2026");
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(b)))
                 .andExpect(status().isBadRequest())
@@ -109,7 +110,7 @@ class UserControllerIntegrationTest {
 
     @Test
     void registroUsernameCortoRetorna400() throws Exception {
-        var b = Map.of("username", "ab", "email", "ab@test.com", "password", "securepass1");
+        var b = Map.of("username", "ab", "email", "ab@test.com", "password", "Secure-Pass-2026");
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(b)))
                 .andExpect(status().isBadRequest())

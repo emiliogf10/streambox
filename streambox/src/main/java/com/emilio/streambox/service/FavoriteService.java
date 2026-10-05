@@ -1,6 +1,5 @@
 package com.emilio.streambox.service;
 
-import java.sql.SQLException;
 import java.util.List;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -42,13 +41,6 @@ public class FavoriteService {
             "La película ya está incluida en tu lista de favoritos";
     private static final String NOT_IN_FAVORITES =
             "La película no está incluida en tu lista de favoritos";
-
-    /** {@code SQLSTATE} estándar de violación de unicidad (PostgreSQL y H2). */
-    private static final String UNIQUE_VIOLATION = "23505";
-    /** {@code SQLSTATE} estándar de violación de clave foránea (PostgreSQL). */
-    private static final String FOREIGN_KEY_VIOLATION = "23503";
-    /** H2 usa este código cuando el registro padre de la clave foránea no existe. */
-    private static final String H2_FOREIGN_KEY_PARENT_MISSING = "23506";
 
     private final UserRepository userRepository;
     private final MovieRepository movieRepository;
@@ -199,37 +191,16 @@ public class FavoriteService {
      */
     private RuntimeException translateInsertViolation(DataIntegrityViolationException error) {
 
-        String sqlState = findSqlState(error);
+        String sqlState = SqlStates.find(error);
 
-        if (error instanceof DuplicateKeyException || UNIQUE_VIOLATION.equals(sqlState)) {
+        if (error instanceof DuplicateKeyException || SqlStates.UNIQUE_VIOLATION.equals(sqlState)) {
             return new MovieAlreadyInFavoritesException(ALREADY_IN_FAVORITES);
         }
-        if (FOREIGN_KEY_VIOLATION.equals(sqlState) || H2_FOREIGN_KEY_PARENT_MISSING.equals(sqlState)) {
+        if (SqlStates.FOREIGN_KEY_VIOLATION.equals(sqlState)
+                || SqlStates.H2_FOREIGN_KEY_PARENT_MISSING.equals(sqlState)) {
             return new MovieNotFoundException("Película no encontrada");
         }
         return error;
-    }
-
-    /**
-     * Recorre la cadena de causas y devuelve el primer {@code SQLSTATE} que
-     * encuentre. Hibernate envuelve el {@link SQLException} del driver en su
-     * {@code ConstraintViolationException} y Spring lo envuelve a su vez, por lo
-     * que el código no está en la excepción de arriba.
-     *
-     * @param error excepción de la que partir
-     * @return el {@code SQLSTATE}, o {@code null} si ninguna causa lo tiene
-     */
-    private static String findSqlState(Throwable error) {
-
-        Throwable current = error;
-        // El límite protege de ciclos raros en la cadena de causas.
-        for (int depth = 0; current != null && depth < 20; depth++) {
-            if (current instanceof SQLException sql && sql.getSQLState() != null) {
-                return sql.getSQLState();
-            }
-            current = current.getCause() == current ? null : current.getCause();
-        }
-        return null;
     }
 
     private void deleteFavorite(Long userId, Long movieId) {

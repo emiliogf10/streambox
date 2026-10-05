@@ -6,6 +6,24 @@ export function formatDuration(mins: number): string {
 }
 
 /**
+ * Formatea una espera en segundos para leerla de un vistazo: "45 s", "15 min",
+ * "14 min 5 s".
+ *
+ * Existe porque el bloqueo de cuenta por intentos fallidos dura 15 minutos y
+ * "Reintentar en 900 s" obliga a hacer la cuenta de cabeza. Por debajo del
+ * minuto se mantiene el formato en segundos que ya usaba el límite por IP.
+ *
+ * @param totalSeconds segundos que faltan (se redondea hacia arriba; negativos = 0)
+ */
+export function formatWaitTime(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.ceil(totalSeconds));
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes === 0) return `${rest} s`;
+  return rest === 0 ? `${minutes} min` : `${minutes} min ${rest} s`;
+}
+
+/**
  * Valida que una URL de vídeo sea segura para abrirla en una pestaña nueva.
  *
  * Solo se admiten los esquemas `http` y `https`: un valor como

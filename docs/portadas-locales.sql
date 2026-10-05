@@ -22,21 +22,15 @@
 --   transaccion si quieres comprobar antes cuantas filas cambia:
 --   BEGIN; \i docs/portadas-locales.sql  -- revisa los "UPDATE n" -- y COMMIT/ROLLBACK.
 --
--- ADVERTENCIA: RUTA RELATIVA vs. VALIDACION DE LA API
---   El backend valida `imageUrl` con @URL en las altas y ediciones por API
---   (POST /api/movies y PUT /api/movies/{id}). Una ruta relativa como
---   '/covers/x.webp' NO es una URL valida para ese validador, asi que solo se
---   puede escribir por SQL (como hace este script). Consecuencia: si despues
---   editas una de estas peliculas con PUT y reenvias su `imageUrl` tal cual, la
---   API la rechazara con 400 (VALIDATION_ERROR).
---   Alternativa si quieres poder editar por API: guardar una URL ABSOLUTA del
---   host que sirva el frontend, p. ej.
---     'http://localhost:5173/covers/blade-runner.webp'   (desarrollo)
---     'https://tu-dominio.com/covers/blade-runner.webp'  (produccion)
---   Eso pasa @URL, pero acopla los datos al dominio (cambiarlo exige otro
---   UPDATE). Tambien hay una tercera via: subir las imagenes a un almacen/CDN y
---   guardar esas URLs. La decision es tuya; este script usa rutas relativas
---   porque funcionan en cualquier entorno sin tocar nada.
+-- RUTA RELATIVA Y VALIDACION DE LA API (actualizado 2026-10-04)
+--   Desde octubre de 2026 la API valida `imageUrl` con @HttpsUrl: acepta una URL
+--   `https://` o una portada propia '/covers/<archivo>' (archivo con letras,
+--   numeros, '.', '_' o '-'). Las rutas de este script ('/covers/x.webp') pasan
+--   esa validacion, asi que estas peliculas se pueden editar despues desde el
+--   panel de administracion o con PUT /api/movies/{id} sin tocar la portada.
+--   Lo que YA NO pasa es una URL `http://` absoluta (p. ej.
+--   'http://localhost:5173/covers/x.webp'): no la uses. Para un CDN o un
+--   dominio propio, usa siempre `https://`.
 --
 -- NOTA: el archivo esta en UTF-8 (hay un titulo con 'ñ'); si psql en Windows lo
 -- lee mal, ejecuta antes `\encoding UTF8`. `lower()` y `trim()` se aplican a la columna, asi que no se usan indices

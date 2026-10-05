@@ -181,6 +181,42 @@ describe('apiFetch: 401 y sesión', () => {
     expect(error).toMatchObject({ code: 'BAD_CREDENTIALS', message: 'Correo o contraseña incorrectos.' });
   });
 
+  it('401 de login con remainingAttempts: lo expone tipado en el ApiError', async () => {
+    fetchMock.mockResolvedValue(
+      errorResponse(401, 'INVALID_CREDENTIALS', 'Email o contraseña incorrectos', { remainingAttempts: 4 }),
+    );
+
+    const error = (await catchError(apiFetch('/auth/login', { method: 'POST', body: {}, public: true }))) as ApiError;
+
+    expect(error.code).toBe('INVALID_CREDENTIALS');
+    expect(error.remainingAttempts).toBe(4);
+  });
+
+  it.each([
+    ['ausente', undefined],
+    ['0', 0],
+    ['negativo', -1],
+    ['decimal', 2.5],
+    ['texto', '3'],
+  ])('remainingAttempts %s se descarta (solo vale un entero ≥ 1)', async (_caso, value) => {
+    fetchMock.mockResolvedValue(
+      errorResponse(401, 'INVALID_CREDENTIALS', 'x', { remainingAttempts: value as number | undefined }),
+    );
+
+    const error = (await catchError(apiFetch('/auth/login', { method: 'POST', body: {}, public: true }))) as ApiError;
+
+    expect(error.remainingAttempts).toBeUndefined();
+  });
+
+  it('429 ACCOUNT_LOCKED conserva el code (la pantalla lo distingue del límite por IP) y Retry-After', async () => {
+    fetchMock.mockResolvedValue(errorResponse(429, 'ACCOUNT_LOCKED', 'Cuenta bloqueada', {}, { 'Retry-After': '900' }));
+
+    const error = (await catchError(apiFetch('/auth/login', { method: 'POST', body: {}, public: true }))) as ApiError;
+
+    expect(error).toMatchObject({ status: 429, code: 'ACCOUNT_LOCKED', retryAfterSeconds: 900 });
+    expect(error.remainingAttempts).toBeUndefined();
+  });
+
   it('403 no cierra la sesión: el usuario sigue autenticado, solo faltan permisos', async () => {
     fetchMock.mockResolvedValue(errorResponse(403, 'ACCESS_DENIED', 'Acceso denegado'));
 

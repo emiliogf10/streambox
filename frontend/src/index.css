@@ -98,6 +98,33 @@
     }
   }
 
+  /*
+   * El foco nunca queda debajo de la barra superior (WCAG 2.2 · 2.4.11, "Foco no tapado").
+   *
+   * La barra (`Navbar`) es `sticky`: al desplazarse se queda encima de la franja
+   * de arriba de la ventana. Cuando el navegador lleva a la vista un elemento
+   * (Tab, el `focus()` del primer campo con error, `scrollIntoView`), solo se
+   * asegura de que quepa en la ventana, así que puede dejarlo justo debajo de la
+   * barra. `scroll-margin-top` amplía hacia arriba la zona que tiene que quedar
+   * visible: la altura real de la barra (`--navbar-height`, la mide `Navbar`
+   * porque cambia con el ancho: 57 px en una fila, 165 px en tres en móvil) más
+   * 2rem de respiro, que deja ver también la etiqueta del campo (text-sm +
+   * mb-1.5 ≈ 1.6rem). Sin barra (login, registro) la variable no existe y solo
+   * queda el respiro.
+   *
+   * Por qué en el contenido y no `scroll-padding-top` en `html` (la receta
+   * habitual): esa reserva la franja para TODO, incluidos los controles de la
+   * propia barra, y como la barra no se mueve al desplazar, enfocarlos (Shift+Tab
+   * desde el contenido, el buscador) hacía subir la página cientos de píxeles sin
+   * motivo (comprobado en Chromium). Se excluyen los `<dialog>`: van en la capa
+   * superior, la barra no los tapa y el margen solo descolocaría su scroll interno.
+   * Al estar en `@layer base`, una utilidad `scroll-mt-*` puede ajustarlo en un elemento concreto.
+   */
+  main,
+  main :not(dialog, dialog *) {
+    scroll-margin-top: calc(var(--navbar-height, 0px) + 2rem);
+  }
+
   /* Lo añade `useModalDialog` mientras hay un diálogo abierto: el fondo no debe desplazarse. */
   html.scroll-locked {
     overflow: hidden;

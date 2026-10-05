@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import java.time.Duration;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -130,6 +132,52 @@ class GlobalExceptionHandlerTest {
         assertError(response, HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_ERROR,
                 "Los datos proporcionados no son válidos");
         assertEquals("Campo no permitido", response.getBody().getValidationErrors().get("sort"));
+    }
+
+    @Test
+    void invalidCredentialsIncludesRemainingAttempts() {
+        ResponseEntity<ErrorResponse> response = handler.handleInvalidCredentials(
+                new InvalidCredentialsException("Email o contraseña incorrectos", 3), request);
+
+        assertError(response, HttpStatus.UNAUTHORIZED, ErrorCode.INVALID_CREDENTIALS,
+                "Email o contraseña incorrectos");
+        assertEquals(3, response.getBody().getRemainingAttempts());
+    }
+
+    @Test
+    void invalidCredentialsWithoutAttemptsOmitsTheField() {
+        ResponseEntity<ErrorResponse> response = handler.handleInvalidCredentials(
+                new InvalidCredentialsException("Email o contraseña incorrectos"), request);
+
+        assertNull(response.getBody().getRemainingAttempts());
+    }
+
+    @Test
+    void accountLockedReturns429WithItsOwnCodeAndRetryAfter() {
+        ResponseEntity<ErrorResponse> response = handler.handleAccountLocked(
+                new AccountLockedException("Cuenta bloqueada", Duration.ofSeconds(840)), request);
+
+        assertError(response, HttpStatus.TOO_MANY_REQUESTS, ErrorCode.ACCOUNT_LOCKED, "Cuenta bloqueada");
+        assertEquals("840", response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER));
+        assertNull(response.getBody().getRemainingAttempts());
+    }
+
+    @Test
+    void genericTooManyRequestsKeepsRateLimitExceeded() {
+        ResponseEntity<ErrorResponse> response = handler.handleTooManyRequests(
+                new TooManyRequestsException("Demasiadas peticiones", Duration.ofSeconds(30)), request);
+
+        assertError(response, HttpStatus.TOO_MANY_REQUESTS, ErrorCode.RATE_LIMIT_EXCEEDED,
+                "Demasiadas peticiones");
+        assertEquals("30", response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER));
+    }
+
+    @Test
+    void otherErrorsDoNotCarryRemainingAttempts() {
+        ResponseEntity<ErrorResponse> response = handler.handleResourceNotFound(
+                new GenreNotFoundException("Género no encontrado: 9"), request);
+
+        assertNull(response.getBody().getRemainingAttempts());
     }
 
     @Test

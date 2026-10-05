@@ -9,12 +9,27 @@
 import { render } from '@testing-library/react';
 import type { RenderResult } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, parsePath } from 'react-router-dom';
 import type { Mock } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import { ToastProvider } from '../context/ToastContext';
 import { LocationProbe } from './LocationProbe';
-import type { ApiErrorBody, Movie, PageResponse } from '../lib/types';
+import type { ApiErrorBody, Movie, PageResponse, User } from '../lib/types';
+
+/** Crea un usuario de prueba (`UserResponse`); por defecto, rol `USER`. */
+export function makeUser(overrides: Partial<User> = {}): User {
+  return {
+    id: 1,
+    username: 'ana',
+    email: 'ana@example.com',
+    role: 'USER',
+    createdAt: '2026-01-01T10:00:00Z',
+    ...overrides,
+  };
+}
+
+/** Clave de {@link routeFetch} de la petición que `AuthProvider` lanza siempre que hay sesión. */
+export const CURRENT_USER = 'GET /api/users/me';
 
 /** Crea una película de prueba; cada test solo especifica lo que le importa. */
 export function makeMovie(overrides: Partial<Movie> = {}): Movie {
@@ -91,13 +106,20 @@ type RouteHandler = (request: { url: string; init: RequestInit }) => Response | 
  * (p. ej. `'POST /api/users/me/favorites/1'`). Una ruta sin manejador hace fallar
  * el test con un mensaje claro en lugar de devolver algo inventado.
  *
+ * Única excepción: {@link CURRENT_USER} (`GET /api/users/me`) responde por
+ * defecto con un usuario normal ({@link makeUser}). `AuthProvider` lo pide en
+ * CUANTO hay sesión, así que todas las pantallas con token lo lanzan aunque no
+ * tenga nada que ver con lo que prueban; repetirlo en cada test solo añadiría
+ * ruido. Quien prueba el rol lo sobrescribe pasando su propio manejador.
+ *
  * @param fetchMock el `vi.fn()` instalado como `fetch` global
  * @param routes manejadores por clave `"MÉTODO URL"`; se pueden cambiar entre pasos del test
  */
 export function routeFetch(fetchMock: Mock<typeof fetch>, routes: Record<string, RouteHandler>): void {
+  const withDefaults: Record<string, RouteHandler> = { [CURRENT_USER]: () => jsonResponse(makeUser()), ...routes };
   fetchMock.mockImplementation(async (input, init = {}) => {
     const key = `${init.method ?? 'GET'} ${String(input)}`;
-    const handler = routes[key];
+    const handler = withDefaults[key];
     if (!handler) throw new Error(`Petición no prevista en el test: ${key}`);
     return handler({ url: String(input), init });
   });
@@ -109,6 +131,8 @@ interface RenderOptions {
   route?: string;
   /** Token guardado antes de montar (sesión iniciada). Sin él, no hay sesión. */
   token?: string;
+  /** Estado de navegación de la entrada inicial (`location.state`), p. ej. la "vuelta al listado". */
+  routeState?: unknown;
 }
 
 /**
@@ -118,8 +142,11 @@ interface RenderOptions {
  */
 export function renderWithProviders(ui: ReactElement, options: RenderOptions = {}): RenderResult {
   if (options.token) localStorage.setItem('token', options.token);
+  const route = options.route ?? '/';
+  // Con estado, la entrada se pasa como objeto (`parsePath` separa ruta, búsqueda y fragmento).
+  const entry = options.routeState === undefined ? route : { ...parsePath(route), state: options.routeState };
   return render(
-    <MemoryRouter initialEntries={[options.route ?? '/']}>
+    <MemoryRouter initialEntries={[entry]}>
       <ToastProvider>
         <AuthProvider>
           {ui}

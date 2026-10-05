@@ -70,7 +70,43 @@ class AuthControllerIntegrationTest {
         login("loginuser@test.com", "otra-password")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
+                .andExpect(jsonPath("$.message").value("Email o contraseña incorrectos"))
+                .andExpect(jsonPath("$.remainingAttempts").isNumber())
                 .andExpect(jsonPath("$.token").doesNotExist());
+    }
+
+    /**
+     * La política de contraseñas (mínimo 12 caracteres) es solo para cuentas
+     * nuevas: una cuenta creada con la política anterior (mínimo 8) sigue
+     * pudiendo entrar. Se inserta con su hash, como estaría en la base de datos.
+     */
+    @Test
+    void unaCuentaAntiguaConContrasenaDe8CaracteresSigueEntrando() throws Exception {
+        User legacy = new User();
+        legacy.setUsername("legacyuser");
+        legacy.setEmail("legacy@test.com");
+        legacy.setPassword(passwordEncoder.encode("perro123"));
+        legacy.setRole(Role.USER);
+        legacy.setCreatedAt(Instant.now());
+        userRepository.save(legacy);
+
+        login("legacy@test.com", "perro123")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isNotEmpty());
+    }
+
+    /**
+     * {@code BCryptPasswordEncoder.matches} no lanza excepciones con más de 72
+     * bytes (solo {@code encode} lo hace): el login debe responder 401, no 500.
+     */
+    @Test
+    void unaContrasenaDeMasDe72BytesEnElLoginDa401YNo500() throws Exception {
+        login("loginuser@test.com", "ñ".repeat(100))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
+        login("nadie-bytes@test.com", "😀".repeat(100))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));
     }
 
     @Test
@@ -100,12 +136,12 @@ class AuthControllerIntegrationTest {
         var register = Map.of(
                 "username", "mixedcase",
                 "email", "Mixed.Case@Test.com",
-                "password", "securepass1");
+                "password", "Secure-Pass-2026");
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(register)))
                 .andExpect(status().isCreated());
 
-        login("Mixed.Case@Test.com", "securepass1")
+        login("Mixed.Case@Test.com", "Secure-Pass-2026")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").isNotEmpty());
     }

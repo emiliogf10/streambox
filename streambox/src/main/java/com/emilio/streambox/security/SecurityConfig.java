@@ -2,6 +2,7 @@ package com.emilio.streambox.security;
 
 import java.time.Clock;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -11,6 +12,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.ratelimit.RateLimitProperties;
@@ -59,18 +61,30 @@ public class SecurityConfig {
         /**
          * Crea el filtro que limita por IP los intentos de login y registro.
          *
-         * @param properties  límites configurados
-         * @param clock       reloj de la aplicación
-         * @param errorWriter escritor de errores JSON de seguridad
+         * <p>
+         * Recibe el mismo {@link PathPatternRequestMatcher.Builder} que usa
+         * {@code requestMatchers(...)} en las reglas de autorización (Spring Boot
+         * registra uno; si no existiera, se usa el de por defecto, igual que hace
+         * Spring Security). Así el filtro reconoce las rutas exactamente como
+         * ellas: decodificadas y sin parámetros de matriz. Comparar el texto de
+         * la URI permitía saltarse el límite con {@code /api/auth/%6cogin}.
+         * </p>
+         *
+         * @param properties     límites configurados
+         * @param clock          reloj de la aplicación
+         * @param errorWriter    escritor de errores JSON de seguridad
+         * @param matcherBuilder constructor de matchers de rutas de la aplicación
          * @return filtro de limitación de peticiones
          */
         @Bean
         public RateLimitingFilter rateLimitingFilter(
                         RateLimitProperties properties,
                         Clock clock,
-                        SecurityErrorResponseWriter errorWriter) {
+                        SecurityErrorResponseWriter errorWriter,
+                        ObjectProvider<PathPatternRequestMatcher.Builder> matcherBuilder) {
 
-                return new RateLimitingFilter(properties, clock, errorWriter);
+                return new RateLimitingFilter(properties, clock, errorWriter,
+                                matcherBuilder.getIfAvailable(PathPatternRequestMatcher::withDefaults));
         }
 
         /**
@@ -110,6 +124,11 @@ public class SecurityConfig {
          * <li>Permite el acceso sin autenticación a los endpoints
          * de usuarios y autenticación, a las comprobaciones de salud
          * ({@code /actuator/health}) y a la documentación OpenAPI.</li>
+         * <li>En el catálogo ({@code /api/movies/**} y {@code /api/genres/**})
+         * la lectura ({@code GET}/{@code HEAD}) es para cualquier usuario
+         * autenticado y cualquier otro método queda reservado a
+         * {@code ADMIN}, de modo que un endpoint de escritura nuevo nace
+         * protegido.</li>
          * <li>Exige autenticación para cualquier otro endpoint.</li>
          * <li>Registra {@link JwtAuthenticationFilter} antes del filtro
          * estándar {@link UsernamePasswordAuthenticationFilter}.</li>
@@ -146,10 +165,12 @@ public class SecurityConfig {
                                                 .accessDeniedHandler(accessDeniedHandler))
 
                                 .authorizeHttpRequests(auth -> auth
-                                                // Registro y autenticacion son publicos.
+                                                // Registro y autenticacion son publicos. Las rutas
+                                                // salen de RateLimitingFilter para que lo publico y
+                                                // lo limitado por IP sean siempre lo mismo.
                                                 .requestMatchers(HttpMethod.POST,
-                                                                "/api/users",
-                                                                "/api/auth/login")
+                                                                RateLimitingFilter.REGISTER_PATH,
+                                                                RateLimitingFilter.LOGIN_PATH)
                                                 .permitAll()
 
                                                 // Solo ADMIN puede listar todos los usuarios.
@@ -157,7 +178,12 @@ public class SecurityConfig {
                                                 .hasRole("ADMIN")
 
                                                 // Cualquier usuario autenticado puede consultar peliculas.
+                                                // HEAD es la misma lectura sin cuerpo (Spring MVC lo
+                                                // atiende con los @GetMapping), asi que recibe la
+                                                // misma regla que GET.
                                                 .requestMatchers(HttpMethod.GET, "/api/movies/**")
+                                                .authenticated()
+                                                .requestMatchers(HttpMethod.HEAD, "/api/movies/**")
                                                 .authenticated()
 
                                                 // Solo ADMIN puede crear, modificar o eliminar peliculas.
@@ -165,15 +191,36 @@ public class SecurityConfig {
                                                 .hasRole("ADMIN")
                                                 .requestMatchers(HttpMethod.PUT, "/api/movies/**")
                                                 .hasRole("ADMIN")
+                                                .requestMatchers(HttpMethod.PATCH, "/api/movies/**")
+                                                .hasRole("ADMIN")
                                                 .requestMatchers(HttpMethod.DELETE, "/api/movies/**")
                                                 .hasRole("ADMIN")
 
                                                 // Cualquier usuario autenticado puede consultar generos.
                                                 .requestMatchers(HttpMethod.GET, "/api/genres/**")
                                                 .authenticated()
+                                                .requestMatchers(HttpMethod.HEAD, "/api/genres/**")
+                                                .authenticated()
 
-                                                // Solo ADMIN puede crear generos.
+                                                // Solo ADMIN puede crear, modificar o eliminar generos.
                                                 .requestMatchers(HttpMethod.POST, "/api/genres/**")
+                                                .hasRole("ADMIN")
+                                                .requestMatchers(HttpMethod.PUT, "/api/genres/**")
+                                                .hasRole("ADMIN")
+                                                .requestMatchers(HttpMethod.PATCH, "/api/genres/**")
+                                                .hasRole("ADMIN")
+                                                .requestMatchers(HttpMethod.DELETE, "/api/genres/**")
+                                                .hasRole("ADMIN")
+
+                                                // Red de seguridad del catalogo: cualquier otro metodo
+                                                // (OPTIONS, TRACE o uno que se use en el futuro) es
+                                                // solo para ADMIN. Asi, un endpoint de escritura nuevo
+                                                // queda protegido aunque se olvide su regla, en vez de
+                                                // caer en anyRequest().authenticated() y quedar abierto
+                                                // a cualquier USER. Las preflight de CORS no se ven
+                                                // afectadas: si algun dia se configura CORS, su filtro
+                                                // las responde antes de llegar a la autorizacion.
+                                                .requestMatchers("/api/movies/**", "/api/genres/**")
                                                 .hasRole("ADMIN")
 
                                                 // Comprobaciones de salud (Actuator) para balanceadores,

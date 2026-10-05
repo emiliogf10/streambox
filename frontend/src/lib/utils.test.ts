@@ -6,7 +6,7 @@
  * pasar y, sobre todo, todo lo que debe rechazarse.
  */
 import { describe, expect, it } from 'vitest';
-import { formatDuration, getSafeVideoUrl } from './utils';
+import { formatDuration, formatWaitTime, getSafeVideoUrl } from './utils';
 
 describe('getSafeVideoUrl', () => {
   it.each([
@@ -70,5 +70,26 @@ describe('formatDuration', () => {
     [125, '2h 5m'],
   ])('%i minutos -> %s', (minutes, expected) => {
     expect(formatDuration(minutes)).toBe(expected);
+  });
+});
+
+describe('formatWaitTime', () => {
+  // La cuenta atrás del bloqueo de cuenta (15 min) debe leerse de un vistazo, no como "900 s".
+  it.each([
+    [0, '0 s'],
+    [1, '1 s'],
+    [59, '59 s'],
+    [60, '1 min'],
+    [65, '1 min 5 s'],
+    [899, '14 min 59 s'],
+    [900, '15 min'],
+    [3600, '60 min'],
+  ])('%i s → %j', (seconds, expected) => {
+    expect(formatWaitTime(seconds)).toBe(expected);
+  });
+
+  it('redondea hacia arriba los decimales y trata los negativos como 0 (nunca "-1 s")', () => {
+    expect(formatWaitTime(59.2)).toBe('1 min');
+    expect(formatWaitTime(-3)).toBe('0 s');
   });
 });

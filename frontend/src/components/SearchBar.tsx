@@ -173,7 +173,9 @@ export function SearchBar() {
           : '';
 
   return (
-    <div ref={containerRef} role="search" className="relative w-full md:w-60">
+    // En `md` (768–1023 px) mide 12rem para que la barra quepa en una fila también con el enlace
+    // «Administrar»; desde `lg` hay sitio de sobra y vuelve a 15rem.
+    <div ref={containerRef} role="search" className="relative w-full md:w-48 lg:w-60">
       <label htmlFor={inputId} className="sr-only">
         Buscar películas por título
       </label>

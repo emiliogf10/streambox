@@ -25,13 +25,15 @@
   - Acción de vaciado completo en una sola operación.
   - Prevención de duplicados (`409 Conflict`) y validación estricta de propiedad de recursos (prevención de IDOR).
 - **🛡️ Validación y Tratamiento Global de Errores**:
-  - Bean Validation declarativo (`@Valid`, `@NotBlank`, `@Size`, `@Min`, `@Max`).
+  - Bean Validation declarativo (`@Valid`, `@NotBlank`, `@Size`, `@Min`, `@Max`) y validadores propios: URLs solo `https://` (o portadas propias `/covers/...`) con máximo 500 caracteres (`@HttpsUrl`), y política de contraseñas para cuentas nuevas (`@ValidPassword`: 12–64 caracteres, máximo 72 bytes por el límite de BCrypt, sin contraseñas comunes ni el usuario o el email dentro).
   - Controlador global de excepciones (`GlobalExceptionHandler`) que transforma errores de validación, reglas de negocio y fallos 404/409 en respuestas JSON uniformes.
 - **📖 Documentación Interactiva OpenAPI/Swagger**:
-  - Swagger UI interactivo generado con `springdoc-openapi` completamente documentado en español.
+  - Swagger UI interactivo generado con `springdoc-openapi` completamente documentado en español. Todas las respuestas de error se documentan con el esquema común `ErrorResponse` (y los 429, con la cabecera `Retry-After`).
 - **🍿 Cliente Frontend Integrado (SPA OTT)**:
   - Interfaz web inmersiva tipo Netflix (Hero banner con la película más reciente, carruseles por género, "Cargar más", modales).
   - Registro e inicio de sesión (JWT), rutas protegidas con React Router y "Mi lista" de favoritos con actualización optimista.
+  - **Panel de administración** (`/admin`, solo `ADMIN`): películas en tabla con buscador y paginación, alta y edición en un formulario con vista previa de la portada, borrado con confirmación, y gestión de géneros (crear, renombrar en línea y borrar si ninguna película lo usa). El enlace «Administrar» solo lo ven los administradores; el rol se consulta al servidor (`GET /api/users/me`) en cada sesión.
+  - Login que avisa de los intentos que quedan antes del bloqueo de la cuenta y muestra la cuenta atrás cuando está bloqueada.
   - Navegación con las secciones "Películas" y "Series" ya reservadas en el menú (marcadas como "próximamente" hasta que existan sus páginas).
   - Cliente HTTP único (`apiFetch`) con manejo uniforme de 401, 403 y 429 (cuenta atrás con `Retry-After`) y avisos (toasts) en cada acción.
   - Accesible (teclado, foco visible, modales con `<dialog>`, buscador tipo combobox, contrastes WCAG AA) y responsive (móvil, tablet y escritorio) con Tailwind v4.
@@ -87,8 +89,8 @@ La base de todos los endpoints es `/api`.
 ### 1. Autenticación y Usuarios
 | Método | Endpoint | Acceso | Descripción |
 | :--- | :--- | :---: | :--- |
-| `POST` | `/api/users` | Público | Registro de nuevos usuarios |
-| `POST` | `/api/auth/login` | Público | Autenticación mediante email y contraseña; retorna JWT |
+| `POST` | `/api/users` | Público | Registro de nuevos usuarios (contraseña de 12 a 64 caracteres, no común y sin el usuario ni el email; 400 con el motivo en `validationErrors.password`) |
+| `POST` | `/api/auth/login` | Público | Autenticación mediante email y contraseña; retorna JWT. Un fallo responde 401 con `remainingAttempts`; al 5.º, 429 `ACCOUNT_LOCKED` |
 | `GET` | `/api/users/me` | `USER`, `ADMIN` | Consulta los datos del usuario autenticado |
 | `GET` | `/api/users` | `ADMIN` | Lista todos los usuarios registrados |
 
@@ -108,7 +110,7 @@ La base de todos los endpoints es `/api`.
 | `GET` | `/api/movies` | `USER`, `ADMIN` | Catálogo paginado (`page`, `size`, `sort`, `direction=asc\|desc`; por defecto `title` ascendente) |
 | `GET` | `/api/movies/{id}` | `USER`, `ADMIN` | Detalle completo de una película y sus géneros |
 | `GET` | `/api/movies/search` | `USER`, `ADMIN` | Búsqueda filtrada (`title`, `genreId`, `releaseYear`) paginada, con `sort` y `direction` como el catálogo |
-| `POST` | `/api/movies` | `ADMIN` | Alta de nueva película con asignación de géneros |
+| `POST` | `/api/movies` | `ADMIN` | Alta de nueva película con asignación de géneros (`imageUrl`: `https://` o `/covers/archivo`; `videoUrl`: `https://`; máximo 500 caracteres) |
 | `PUT` | `/api/movies/{id}` | `ADMIN` | Modificación de datos y géneros de una película |
 | `DELETE` | `/api/movies/{id}` | `ADMIN` | Eliminación de película (desvincula automáticamente de favoritos) |
 
@@ -116,7 +118,9 @@ La base de todos los endpoints es `/api`.
 | Método | Endpoint | Acceso | Descripción |
 | :--- | :--- | :---: | :--- |
 | `GET` | `/api/genres` | `USER`, `ADMIN` | Lista completa de géneros disponibles |
-| `POST` | `/api/genres` | `ADMIN` | Alta de nuevo género cinematográfico |
+| `POST` | `/api/genres` | `ADMIN` | Alta de nuevo género cinematográfico (409 `GENRE_ALREADY_EXISTS` si el nombre ya existe) |
+| `PUT` | `/api/genres/{id}` | `ADMIN` | Renombrar un género (mismas reglas de nombre que el alta) |
+| `DELETE` | `/api/genres/{id}` | `ADMIN` | Eliminar un género (409 `GENRE_IN_USE` si alguna película lo usa) |
 
 ### 5. Operación
 | Método | Endpoint | Acceso | Descripción |
@@ -138,7 +142,7 @@ Configura las siguientes variables de entorno en tu sistema o en tu IDE:
 | :--- | :--- | :--- |
 | `JWT_SECRET` | Clave secreta para firmar los tokens JWT (**obligatoria**). Texto de **al menos 32 caracteres**; la aplicación no arranca si es más corta. Genera una con `openssl rand -base64 48` | — |
 | `JWT_EXPIRATION_HOURS` | Tiempo de vida del token en horas | `24` |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Opcionales. Si ambas están definidas, al arrancar se crea el primer administrador (si no existe ya). La contraseña debe tener al menos 12 caracteres | — |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Opcionales. Si ambas están definidas, al arrancar se crea el primer administrador (si no existe ya). Al crearlo, la contraseña debe cumplir la política del registro (12–64 caracteres, no común, sin el usuario ni el email) o la aplicación no arranca; si ya existe, no se valida | — |
 | `ADMIN_USERNAME` | Opcional. Nombre de usuario del administrador inicial | `admin` |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | Solo perfil `prod`: conexión a PostgreSQL | — |
 
@@ -174,9 +178,9 @@ Solo se exponen `health` e `info`; el resto de endpoints de Actuator (`env`, `be
 
 | Protección | Valor por defecto | Respuesta |
 | :--- | :--- | :--- |
-| Intentos de login por IP | 10 por minuto | `429` + `Retry-After` |
-| Registros por IP | 5 por hora | `429` + `Retry-After` |
-| Cuenta bloqueada tras logins fallidos | 5 fallos en 15 min | `429` + `Retry-After` |
+| Intentos de login por IP | 10 por minuto | `429` `RATE_LIMIT_EXCEEDED` + `Retry-After` |
+| Registros por IP | 5 por hora | `429` `RATE_LIMIT_EXCEEDED` + `Retry-After` |
+| Cuenta bloqueada tras logins fallidos | 5 fallos en 15 min (los fallos previos responden 401 con `remainingAttempts`: 4, 3, 2, 1) | `429` `ACCOUNT_LOCKED` + `Retry-After` |
 
 Configurable en `streambox.security.rate-limit.*` (`application.properties`). Los contadores están en memoria: con varias réplicas de la aplicación cada una lleva su propia cuenta. Detrás de un proxy inverso el perfil `prod` activa `server.forward-headers-strategy=native` para ver la IP real del cliente.
 

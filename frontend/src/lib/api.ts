@@ -18,6 +18,7 @@ interface ApiErrorInit {
   message: string;
   retryAfterSeconds?: number;
   validationErrors?: Record<string, string>;
+  remainingAttempts?: number;
   sessionExpired?: boolean;
 }
 
@@ -39,6 +40,12 @@ export class ApiError extends Error {
   /** Errores de validación por campo (`campo → mensaje`), si el servidor los envió. */
   readonly validationErrors?: Record<string, string>;
   /**
+   * Intentos de login que quedan antes del bloqueo de la cuenta (solo en el 401
+   * de `POST /api/auth/login`). `undefined` si el servidor no lo envió o el
+   * valor no es un entero ≥ 1: mejor no avisar que avisar con un número inventado.
+   */
+  readonly remainingAttempts?: number;
+  /**
    * `true` si este error fue un 401 que ya provocó el cierre de sesión. La UI
    * lo ignora en silencio: el aviso "sesión caducada" se muestra una sola vez.
    */
@@ -51,6 +58,7 @@ export class ApiError extends Error {
     this.code = init.code;
     this.retryAfterSeconds = init.retryAfterSeconds;
     this.validationErrors = init.validationErrors;
+    this.remainingAttempts = init.remainingAttempts;
     this.sessionExpired = init.sessionExpired ?? false;
   }
 }
@@ -124,6 +132,15 @@ function parseRetryAfter(value: string | null): number | undefined {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
 }
 
+/**
+ * Interpreta `remainingAttempts` del cuerpo de error. Solo vale un entero ≥ 1
+ * (el contrato del backend); cualquier otra cosa (texto, decimal, 0, negativo)
+ * se descarta para no mostrar un aviso con un número sin sentido.
+ */
+function parseRemainingAttempts(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : undefined;
+}
+
 /** Intenta interpretar un texto como JSON; devuelve `undefined` si no lo es. */
 function tryParseJson(text: string): unknown {
   try {
@@ -184,6 +201,7 @@ function buildApiError(res: Response, body: unknown, isPublic: boolean): ApiErro
     validationErrors: isRecord(errorBody.validationErrors)
       ? (errorBody.validationErrors as Record<string, string>)
       : undefined,
+    remainingAttempts: parseRemainingAttempts(errorBody.remainingAttempts),
     sessionExpired: status === 401 && !isPublic,
   });
 }

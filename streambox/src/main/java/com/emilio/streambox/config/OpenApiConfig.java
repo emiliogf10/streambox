@@ -15,6 +15,12 @@ import org.springframework.context.annotation.Configuration;
  * de autenticación mediante tokens JWT para que los endpoints
  * protegidos puedan probarse directamente desde Swagger UI.
  * </p>
+ *
+ * <p>
+ * También registra {@link ErrorResponseOpenApiCustomizer}, que hace que todas
+ * las respuestas 4xx/5xx documenten el cuerpo {@code ErrorResponse} en lugar
+ * del tipo de la respuesta correcta.
+ * </p>
  */
 @Configuration
 public class OpenApiConfig {
@@ -41,5 +47,21 @@ public class OpenApiConfig {
                                         .type(SecurityScheme.Type.HTTP)
                                         .scheme("bearer")
                                         .bearerFormat("JWT")));
+    }
+
+    /**
+     * Documenta {@code ErrorResponse} en todas las respuestas de error.
+     *
+     * <p>
+     * Se declara como bean aquí, junto al resto de la configuración de
+     * OpenAPI, y la clase no lleva {@code @Component}, para poder probarla
+     * con un simple {@code new} en los tests unitarios.
+     * </p>
+     *
+     * @return customizer que springdoc aplica al generar {@code /v3/api-docs}
+     */
+    @Bean
+    public ErrorResponseOpenApiCustomizer errorResponseOpenApiCustomizer() {
+        return new ErrorResponseOpenApiCustomizer();
     }
 }

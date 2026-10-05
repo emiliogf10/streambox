@@ -2,16 +2,18 @@
  * E2E de teclado y accesibilidad (humo, sin librerías externas).
  *
  * Comprueba en un navegador real lo que los tests con jsdom no pueden: el orden
- * real de tabulación, el `<dialog>` modal nativo atrapando el foco y la
- * devolución del foco al cerrar. Además hace una revisión estructural básica de
+ * real de tabulación, el `<dialog>` modal nativo atrapando el foco, la
+ * devolución del foco al cerrar y que el elemento enfocado no quede tapado por
+ * la barra superior (WCAG 2.4.11). Además hace una revisión estructural básica de
  * cada pantalla (idioma, un solo `h1`, `id` únicos, imágenes con `alt`, controles
  * con nombre accesible).
  *
  * NO sustituye a una auditoría con axe-core (contraste, ARIA avanzada...):
  * ver el informe de la tarea 24 para la propuesta.
  */
-import type { Page } from '@playwright/test';
-import { expect, movieCard, test } from './support/fixtures';
+import type { Locator, Page } from '@playwright/test';
+import { loginAdmin } from './support/api';
+import { expect, movieCard, test, waitForMovieForm } from './support/fixtures';
 
 test.describe('Teclado', () => {
   test('el primer Tab muestra «Saltar al contenido» y Intro lleva el foco al contenido principal', async ({
@@ -115,6 +117,143 @@ test.describe('Teclado', () => {
     await expect(nav.getByRole('link', { name: 'Mi lista' })).toBeFocused();
     await expect(nav.getByRole('link')).toHaveCount(2);
   });
+
+  test('para un administrador, «Administrar» es la siguiente parada de Tab tras «Mi lista»', async ({
+    page,
+    request,
+    signIn,
+  }) => {
+    await signIn({ token: await loginAdmin(request) });
+    await page.goto('/');
+    const nav = page.getByRole('navigation', { name: 'Principal' });
+    // Aparece cuando el servidor confirma el rol (no antes): se espera a él.
+    const admin = nav.getByRole('link', { name: 'Administrar' });
+    await expect(admin).toBeVisible();
+
+    await nav.getByRole('link', { name: 'Mi lista' }).focus();
+    await page.keyboard.press('Tab');
+    await expect(admin).toBeFocused();
+    await expect(nav.getByRole('link')).toHaveCount(3);
+  });
+
+  test('géneros del panel: Escape cancela el renombrado y devuelve el foco a «Renombrar X»', async ({
+    page,
+    request,
+    signIn,
+  }) => {
+    await signIn({ token: await loginAdmin(request) });
+    await page.goto('/admin/generos');
+
+    const rename = page.getByRole('button', { name: 'Renombrar Drama' });
+    await rename.focus();
+    await page.keyboard.press('Enter');
+    const input = page.getByRole('textbox', { name: 'Nuevo nombre para Drama' });
+    await expect(input).toBeFocused();
+    await page.keyboard.type('Algo distinto');
+    await page.keyboard.press('Escape');
+
+    await expect(input).toBeHidden();
+    await expect(rename).toBeFocused();
+  });
+});
+
+/**
+ * WCAG 2.2 · 2.4.11 (Foco no tapado): la barra superior está pegada arriba (`sticky`) y, al
+ * desplazar la página hasta el elemento enfocado, el navegador solo comprueba que quepa en la
+ * ventana, no que no lo tape la barra. El arreglo (`scroll-margin-top` en el contenido con la
+ * altura medida de la barra, ver `index.css`) se prueba a 375 px (barra de tres filas, 165 px) y a
+ * 1280 px (una fila, 57 px). 1280x800 es el tamaño de la captura en que se vio el fallo: el campo
+ * «Título» quedaba justo debajo de la barra.
+ */
+test.describe('El foco no queda tapado por la barra superior (WCAG 2.2 · 2.4.11)', () => {
+  const FOCUS_VIEWPORTS = [
+    { width: 375, height: 812 },
+    { width: 1280, height: 800 },
+  ];
+
+  for (const viewport of FOCUS_VIEWPORTS) {
+    test.describe(`a ${viewport.width}x${viewport.height}`, () => {
+      test.use({ viewport });
+
+      test('formulario de película: el primer campo con error y el control anterior (Shift+Tab) quedan a la vista', async ({
+        page,
+        request,
+        signIn,
+      }) => {
+        await signIn({ token: await loginAdmin(request) });
+        await page.goto('/admin/peliculas/nueva');
+        await waitForMovieForm(page);
+        const title = page.getByLabel('Título', { exact: true });
+
+        // Enviar vacío: el foco salta a «Título», que está más arriba, y el navegador desplaza la página.
+        await page.getByRole('button', { name: 'Crear película' }).click();
+        await expect(title).toBeFocused();
+        await expectBelowNavbar(page, title, 'campo «Título»');
+        // El margen extra (2rem) deja ver también la etiqueta del campo, no solo el campo.
+        await expectBelowNavbar(page, page.getByText('Título', { exact: true }), 'etiqueta «Título»');
+
+        // Tab hacia atrás: el control anterior está DENTRO de la ventana pero tapado por la barra.
+        // Sin el arreglo el navegador no desplaza nada (para él ya es visible) y el foco queda oculto.
+        const back = page.getByRole('link', { name: 'Volver al listado' });
+        const backBox = await back.boundingBox();
+        await page.evaluate((dy) => window.scrollBy(0, dy), backBox!.y - 8);
+        const hiddenBox = await back.boundingBox();
+        const navbarBox = await page.getByRole('banner').boundingBox();
+        expect(hiddenBox!.y + hiddenBox!.height, 'precondición: el enlace está debajo de la barra').toBeLessThanOrEqual(
+          navbarBox!.y + navbarBox!.height,
+        );
+        await expect(title).toBeFocused();
+
+        await page.keyboard.press('Shift+Tab');
+        await expect(back).toBeFocused();
+        await expectBelowNavbar(page, back, '«Volver al listado»');
+      });
+
+      test('enfocar los controles de la propia barra no desplaza la página', async ({ page, request, signIn }) => {
+        // Protege la elección de `scroll-margin-top` en el contenido frente a `scroll-padding-top` en
+        // <html>: con esa otra receta, enfocar el buscador o el menú desde abajo subía la página entera.
+        await signIn({ token: await loginAdmin(request) });
+        await page.goto('/admin/peliculas/nueva');
+        await waitForMovieForm(page);
+
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+        const scrolled = await page.evaluate(() => window.scrollY);
+        expect(scrolled, 'precondición: la página está desplazada').toBeGreaterThan(0);
+
+        await page.getByRole('combobox', { name: 'Buscar películas por título' }).focus();
+        await page.keyboard.press('Tab');
+        await expect(page.getByRole('button', { name: 'Menú de usuario' })).toBeFocused();
+        expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+      });
+    });
+  }
+});
+
+test.describe('Estructura accesible del panel de administración (humo)', () => {
+  const ADMIN_PAGES = [
+    { path: '/admin/peliculas', ready: (page: Page) => page.getByRole('table', { name: /^Películas del catálogo/ }) },
+    { path: '/admin/peliculas/nueva', ready: (page: Page) => page.getByRole('checkbox', { name: 'Drama' }) },
+    { path: '/admin/generos', ready: (page: Page) => page.getByRole('list', { name: 'Géneros' }) },
+  ];
+
+  for (const { path, ready } of ADMIN_PAGES) {
+    test(`${path}: estructura básica correcta`, async ({ page, request, signIn }) => {
+      await signIn({ token: await loginAdmin(request) });
+      await page.goto(path);
+      await expect(page.getByRole('heading', { level: 1, name: 'Administración' })).toBeVisible();
+      await expect(ready(page)).toBeVisible();
+      expect(await auditPage(page)).toEqual([]);
+    });
+  }
+
+  test('el formulario con todos los errores a la vista sigue siendo correcto', async ({ page, request, signIn }) => {
+    await signIn({ token: await loginAdmin(request) });
+    await page.goto('/admin/peliculas/nueva');
+    await waitForMovieForm(page);
+    await page.getByRole('button', { name: 'Crear película' }).click();
+    await expect(page.getByLabel('Título', { exact: true })).toBeFocused();
+    expect(await auditPage(page)).toEqual([]);
+  });
 });
 
 test.describe('Estructura accesible (humo)', () => {
@@ -150,6 +289,20 @@ test.describe('Estructura accesible (humo)', () => {
     expect(await auditPage(page)).toEqual([]);
   });
 });
+
+/**
+ * Comprueba que `target` se ve entero entre el borde inferior de la barra superior (el `banner`,
+ * pegado arriba) y el borde inferior de la ventana: ni tapado por la barra ni fuera de la pantalla.
+ */
+async function expectBelowNavbar(page: Page, target: Locator, label: string): Promise<void> {
+  const navbar = await page.getByRole('banner').boundingBox();
+  const box = await target.boundingBox();
+  const viewportHeight = page.viewportSize()?.height ?? 0;
+  expect(navbar, 'la barra superior no tiene caja').not.toBeNull();
+  expect(box, `${label} no tiene caja`).not.toBeNull();
+  expect(box!.y, `${label} queda tapado por la barra`).toBeGreaterThanOrEqual(navbar!.y + navbar!.height - 0.5);
+  expect(box!.y + box!.height, `${label} queda por debajo de la ventana`).toBeLessThanOrEqual(viewportHeight + 0.5);
+}
 
 /**
  * Si el foco está en un elemento de la página que NO pertenece al `<dialog>` abierto,

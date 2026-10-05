@@ -40,6 +40,10 @@ const email = () => screen.getByLabelText('Correo electrónico');
 const password = () => screen.getByLabelText('Contraseña');
 const submit = () => screen.getByRole('button', { name: 'Crear cuenta' });
 
+/** Ayuda permanente del campo de contraseña: anuncia la política (12-64) y las reglas que solo comprueba el servidor. */
+const PASSWORD_HINT =
+  'Entre 12 y 64 caracteres. Evita contraseñas comunes y no incluyas tu usuario ni tu correo.';
+
 describe('RegisterPage: validación en el cliente', () => {
   it('con todo vacío marca los tres campos como inválidos, no llama al servidor y enfoca el primero', async () => {
     const user = userEvent.setup();
@@ -53,7 +57,7 @@ describe('RegisterPage: validación en el cliente', () => {
     // El error sustituye a la ayuda (ya dice el requisito): se describe el campo solo con él.
     expect(username()).toHaveAccessibleDescription('El nombre de usuario debe tener entre 3 y 50 caracteres.');
     expect(email()).toHaveAccessibleDescription('Introduce tu correo electrónico.');
-    expect(password()).toHaveAccessibleDescription('La contraseña debe tener entre 8 y 100 caracteres.');
+    expect(password()).toHaveAccessibleDescription('La contraseña debe tener entre 12 y 64 caracteres.');
     expect(username()).toHaveFocus();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -64,7 +68,7 @@ describe('RegisterPage: validación en el cliente', () => {
 
     await user.type(username(), 'ana');
     await user.type(email(), 'no-es-un-correo');
-    await user.type(password(), '12345678');
+    await user.type(password(), 'Faro-nube-2026');
     await user.click(submit());
 
     const alert = screen.getByText('Introduce un correo electrónico válido.');
@@ -84,12 +88,48 @@ describe('RegisterPage: validación en el cliente', () => {
 
     await user.click(submit());
     expect(screen.queryByText('Entre 3 y 50 caracteres.')).not.toBeInTheDocument();
-    expect(screen.queryByText('Entre 8 y 100 caracteres.')).not.toBeInTheDocument();
+    expect(screen.queryByText(PASSWORD_HINT)).not.toBeInTheDocument();
     expect(screen.getByText('El nombre de usuario debe tener entre 3 y 50 caracteres.')).toBeVisible();
 
     await user.type(username(), 'a');
     expect(username()).toHaveAccessibleDescription('Entre 3 y 50 caracteres.');
     expect(screen.queryByText('El nombre de usuario debe tener entre 3 y 50 caracteres.')).not.toBeInTheDocument();
+  });
+
+  it('la ayuda de la contraseña anuncia la política nueva (12-64) y las reglas que comprueba el servidor', () => {
+    renderRegister();
+
+    expect(password()).toHaveAccessibleDescription(PASSWORD_HINT);
+  });
+
+  it('una contraseña de 11 caracteres (o de 8, como las antiguas) ya no basta y no llega al servidor', async () => {
+    const user = userEvent.setup();
+    renderRegister();
+    await user.type(username(), 'ana');
+    await user.type(email(), 'ana@example.com');
+
+    for (const tooShort of ['Faro-nube-7', 'secreta1']) {
+      await user.clear(password());
+      await user.type(password(), tooShort);
+      await user.click(submit());
+
+      expect(password()).toHaveAttribute('aria-invalid', 'true');
+      expect(password()).toHaveAccessibleDescription('La contraseña debe tener entre 12 y 64 caracteres.');
+      expect(password()).toHaveFocus();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('una contraseña de 65 caracteres también se rechaza en el cliente', async () => {
+    const user = userEvent.setup();
+    renderRegister();
+    await user.type(username(), 'ana');
+    await user.type(email(), 'ana@example.com');
+    await user.type(password(), 'x'.repeat(65));
+    await user.click(submit());
+
+    expect(password()).toHaveAccessibleDescription('La contraseña debe tener entre 12 y 64 caracteres.');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('empezar a corregir un campo borra su error al instante', async () => {
@@ -112,7 +152,7 @@ describe('RegisterPage: validación en el cliente', () => {
 
     await user.type(username(), '  ana  ');
     await user.type(email(), '  ana@example.com ');
-    await user.type(password(), '1234567 '); // 7 caracteres + 1 espacio = 8: válida solo si no se recorta
+    await user.type(password(), 'Faro-nube-7 '); // 11 caracteres + 1 espacio = 12: válida solo si no se recorta
     await user.click(submit());
 
     await screen.findByRole('heading', { name: 'Pantalla de login' });
@@ -122,7 +162,7 @@ describe('RegisterPage: validación en el cliente', () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       username: 'ana',
       email: 'ana@example.com',
-      password: '1234567 ',
+      password: 'Faro-nube-7 ',
     });
   });
 
@@ -132,7 +172,7 @@ describe('RegisterPage: validación en el cliente', () => {
 
     await user.type(username(), '  ab  ');
     await user.type(email(), 'ana@example.com');
-    await user.type(password(), '12345678');
+    await user.type(password(), 'Faro-nube-2026');
     await user.click(submit());
 
     expect(username()).toHaveAttribute('aria-invalid', 'true');
@@ -144,7 +184,7 @@ describe('RegisterPage: respuesta del servidor', () => {
   async function fillValid(user: ReturnType<typeof userEvent.setup>) {
     await user.type(username(), 'ana');
     await user.type(email(), 'ana@example.com');
-    await user.type(password(), '12345678');
+    await user.type(password(), 'Faro-nube-2026');
   }
 
   it('éxito: avisa con un toast y lleva a /login', async () => {
@@ -191,6 +231,31 @@ describe('RegisterPage: respuesta del servidor', () => {
     expect(email()).toHaveFocus();
     // Aviso general de formulario con instrucciones.
     expect(screen.getByText('Revisa los campos marcados.')).toBeInTheDocument();
+  });
+
+  it('contraseña común (o que contiene el usuario/correo): el MOTIVO del servidor va junto al campo de contraseña', async () => {
+    // El cliente no conoce la lista de contraseñas comunes: el servidor la rechaza y explica por qué.
+    const reason = 'La contraseña es demasiado común. Elige otra más difícil de adivinar.';
+    fetchMock.mockImplementation(async () =>
+      errorResponse(400, 'VALIDATION_ERROR', 'Datos no válidos', { validationErrors: { password: reason } }),
+    );
+    const user = userEvent.setup();
+    renderRegister();
+
+    await user.type(username(), 'ana');
+    await user.type(email(), 'ana@example.com');
+    await user.type(password(), 'contraseña123');
+    await user.click(submit());
+
+    expect(await screen.findByText(reason)).toHaveAttribute('role', 'alert');
+    expect(password()).toHaveAttribute('aria-invalid', 'true');
+    expect(password()).toHaveAccessibleDescription(reason);
+    expect(password()).toHaveFocus();
+    expect(username()).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByText('ruta:/registro')).toBeInTheDocument();
+    // Al corregirla, el error del servidor desaparece y vuelve la ayuda.
+    await user.type(password(), 'x');
+    expect(password()).toHaveAccessibleDescription(PASSWORD_HINT);
   });
 
   it('400 con un error de un campo que no existe en el formulario: se muestra como aviso del formulario', async () => {

@@ -55,6 +55,24 @@ public interface MovieRepository
     List<Movie> findAllByTitleIgnoreCase(String title);
 
     /**
+     * Cuenta cuántas películas tienen asignado un género.
+     *
+     * <p>
+     * Se usa antes de borrar un género para explicar por qué no se puede y a
+     * cuántas películas afecta. Es una consulta {@code COUNT} con un
+     * {@code JOIN} sobre {@code movie_genres} (que aprovecha el índice
+     * {@code idx_movie_genres_genre_id}): no carga ninguna película ni su
+     * colección de géneros. No hace falta {@code DISTINCT}, porque la clave
+     * primaria de {@code movie_genres} impide que una película tenga el mismo
+     * género dos veces.
+     * </p>
+     *
+     * @param genreId identificador del género
+     * @return número de películas que lo usan
+     */
+    long countByGenres_Id(Long genreId);
+
+    /**
      * Elimina una película de las listas de favoritos de todos los usuarios.
      *
      * <p>

@@ -10,15 +10,15 @@ import { describe, expect, it } from 'vitest';
 import { PASSWORD_MAX, PASSWORD_MIN, USERNAME_MAX, USERNAME_MIN, validateRegistration } from './validation';
 
 /** Datos válidos de partida; cada test cambia solo un campo. */
-const valid = { username: 'ana', email: 'ana@example.com', password: '12345678' };
+const valid = { username: 'ana', email: 'ana@example.com', password: 'Faro-nube-2026' };
 
 describe('validateRegistration', () => {
   it('unos datos correctos no producen errores', () => {
     expect(validateRegistration(valid)).toEqual({});
   });
 
-  it('los límites coinciden con los del backend (3-50 y 8-100)', () => {
-    expect([USERNAME_MIN, USERNAME_MAX, PASSWORD_MIN, PASSWORD_MAX]).toEqual([3, 50, 8, 100]);
+  it('los límites coinciden con los del backend (usuario 3-50, contraseña 12-64)', () => {
+    expect([USERNAME_MIN, USERNAME_MAX, PASSWORD_MIN, PASSWORD_MAX]).toEqual([3, 50, 12, 64]);
   });
 
   describe('nombre de usuario', () => {
@@ -52,12 +52,12 @@ describe('validateRegistration', () => {
 
     it('el mensaje indica el rango permitido', () => {
       expect(validateRegistration({ ...valid, password: '' }).password).toBe(
-        'La contraseña debe tener entre 8 y 100 caracteres.',
+        'La contraseña debe tener entre 12 y 64 caracteres.',
       );
     });
 
     it('los espacios cuentan como caracteres (no se recorta la contraseña)', () => {
-      expect(validateRegistration({ ...valid, password: '        ' }).password).toBeUndefined();
+      expect(validateRegistration({ ...valid, password: ' '.repeat(PASSWORD_MIN) }).password).toBeUndefined();
     });
   });
 

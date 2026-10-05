@@ -28,6 +28,9 @@ const FIELD_IDS: Record<keyof RegisterRequest, string> = {
  *
  * - Valida en el cliente con las mismas reglas que el backend ({@link validateRegistration})
  *   y, además, pinta junto a cada campo los `validationErrors` que devuelva el servidor.
+ *   Así llegan las reglas de contraseña que solo conoce el servidor (contraseña
+ *   común, o que contiene el usuario o el correo): su motivo se muestra junto al
+ *   campo y la ayuda las anuncia de antemano para no sorprender con el error.
  * - 409 (correo o usuario ya registrado): muestra el mensaje del servidor, que dice cuál es.
  * - 429: bloquea el botón con cuenta atrás según `Retry-After`.
  * - Éxito: lleva a `/login` con un toast. No hay inicio de sesión automático.
@@ -150,7 +153,7 @@ export function RegisterPage() {
           type="password"
           autoComplete="new-password"
           required
-          hint={`Entre ${PASSWORD_MIN} y ${PASSWORD_MAX} caracteres.`}
+          hint={`Entre ${PASSWORD_MIN} y ${PASSWORD_MAX} caracteres. Evita contraseñas comunes y no incluyas tu usuario ni tu correo.`}
           error={fieldErrors.password}
           value={values.password}
           onChange={(e) => setField('password', e.target.value)}
