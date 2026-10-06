@@ -132,6 +132,32 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
 </excludes>
 </configuration>
 </plugin>
+<!--
+  Archivos que NUNCA deben entrar en el JAR (target/*.jar).
+  application-local.properties contiene las credenciales de la base de datos
+  de desarrollo (Supabase) y vive en src/main/resources, asi que por defecto
+  Maven lo copiaria a target/classes y de ahi al JAR: cualquiera que recibiera
+  un JAR construido en local con "mvnw package" tendria la contrasena, y al
+  ejecutarlo se conectaria a esa base (application.properties lo importa
+  siempre con spring.config.import=optional:...).
+  Se excluye SOLO del empaquetado, no del proceso de recursos: sigue copiandose
+  a target/classes, que es lo que usan spring-boot:run, el IDE y los tests, asi
+  que el desarrollo local funciona igual. La imagen Docker ya lo dejaba fuera
+  con streambox/.dockerignore; esto cubre el JAR local.
+  La plantilla *.example no es secreta, pero no pinta nada en el JAR.
+  El repackage de spring-boot-maven-plugin parte de este JAR, asi que la
+  exclusion llega tambien al JAR ejecutable. Version gestionada por el parent.
+-->
+<plugin>
+<groupId>org.apache.maven.plugins</groupId>
+<artifactId>maven-jar-plugin</artifactId>
+<configuration>
+<excludes>
+<exclude>**/application-local*.properties</exclude>
+<exclude>**/*.example</exclude>
+</excludes>
+</configuration>
+</plugin>
 <plugin>
 <groupId>org.apache.maven.plugins</groupId>
 <artifactId>maven-compiler-plugin</artifactId>

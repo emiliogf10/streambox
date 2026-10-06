@@ -1,0 +1,432 @@
+# ===================================================================
+# Integración continua de StreamBox (GitHub Actions)
+#
+# En cada push a main, en cada pull request y a mano (pestaña Actions →
+# CI → "Run workflow") se ejecuta todo lo que hoy se comprueba a mano:
+#
+#   backend   tests del backend (H2 + PostgreSQL real con Testcontainers)
+#   frontend  build (tsc + Vite), lint (oxlint) y tests de Vitest
+#   e2e       suite de Playwright: navegador real + backend real (H2)
+#   docker    construye las dos imágenes y levanta el stack completo de
+#             docker compose para una prueba de humo con curl
+#
+# Los cuatro jobs son independientes y corren EN PARALELO: el tiempo total
+# es el del más lento (e2e o backend), no la suma.
+#
+# Ningún job necesita secretos del repositorio: el perfil "test" del
+# backend trae su propio JWT_SECRET, el E2E trae el suyo
+# (frontend/e2e/support/config.ts) y el job "docker" genera secretos
+# aleatorios de usar y tirar. Por eso el CI funciona igual en los pull
+# requests de Dependabot y de forks, que no reciben secretos.
+#
+# Versiones de las actions: fijadas por SHA del commit (con la versión en
+# un comentario) y no por etiqueta (@v7). Una etiqueta la puede mover
+# quien controle el repositorio de la action (es lo que pasó en 2025 con
+# tj-actions/changed-files: movieron las etiquetas a un commit que
+# imprimía los secretos de miles de proyectos); un SHA no se puede
+# cambiar. Dependabot (.github/dependabot.yml) actualiza el SHA y el
+# comentario en un pull request, así que fijarlas así no cuesta trabajo.
+# ===================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Si llega un push nuevo a la misma rama (o al mismo pull request) mientras
+# el anterior aún se está comprobando, se cancela el anterior: su resultado
+# ya no interesa y así no se gastan minutos de ejecución en balde.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Mínimo privilegio: el token automático (GITHUB_TOKEN) solo puede LEER el
+# repositorio. Ningún job publica nada (ni imágenes, ni comentarios, ni
+# releases); si un paso o una action se viera comprometido, no podría
+# escribir en el repositorio.
+permissions:
+  contents: read
+
+# "bash" explícito = bash -eo pipefail: un fallo en medio de una tubería
+# (cmd1 | cmd2) también para el paso. Sin indicarlo, GitHub usa bash -e,
+# que solo mira el último comando de la tubería.
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Misma versión mayor que el pom.xml (java.version) y que las imágenes
+  # de streambox/Dockerfile.
+  JAVA_VERSION: '21'
+  # Misma versión mayor que frontend/Dockerfile (node:24.x). Se fija solo la
+  # mayor: setup-node instala la 24.x más reciente, y el parche exacto lo
+  # mantiene Dependabot en el Dockerfile.
+  NODE_VERSION: '24'
+
+jobs:
+  # -----------------------------------------------------------------
+  # Backend: la suite completa en un solo job. Los runners ubuntu-latest
+  # traen Docker, así que los tests de PostgreSQL (Testcontainers) se
+  # ejecutan de verdad, en lugar de omitirse como en un equipo sin Docker.
+  # -----------------------------------------------------------------
+  backend:
+    name: Backend (Maven, H2 y PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: streambox
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # El token no se queda guardado en .git/config: ningún paso
+          # posterior lo necesita (nada hace git push).
+          persist-credentials: false
+
+      - name: Instalar Java ${{ env.JAVA_VERSION }} (Temurin) con caché de Maven
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          # Guarda ~/.m2/repository entre ejecuciones; la clave cambia cuando
+          # cambia el pom.xml. Este job es el único que ESCRIBE la caché (el
+          # E2E solo la lee): así la guarda el job que descarga todos los
+          # plugins (surefire, jar, repackage...).
+          cache: maven
+          cache-dependency-path: streambox/pom.xml
+
+      # streambox/mvnw está en git sin permiso de ejecución (se creó en
+      # Windows, que no lo tiene). En Linux, "./mvnw" daría "Permission
+      # denied". Se lo damos aquí (arreglo definitivo, en el repositorio:
+      # git update-index --chmod=+x streambox/mvnw).
+      - name: Dar permiso de ejecución al wrapper de Maven
+        run: chmod +x mvnw
+
+      # verify = compilar + todos los tests + empaquetar el JAR: también
+      # detecta un fallo al empaquetar, no solo en los tests.
+      # -B: modo no interactivo (sin colores raros en el log).
+      # -ntp: sin las miles de líneas de progreso de descarga.
+      # Sin JWT_SECRET a propósito: el perfil "test" ya trae uno fijo.
+      - name: Compilar y ejecutar los tests
+        run: ./mvnw -B -ntp verify
+
+      # Los informes de surefire dicen QUÉ test falló y con qué traza. Solo
+      # se suben si algo falla: si todo pasa no aportan nada.
+      - name: Subir los informes de tests (si falla)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backend-surefire-reports
+          path: streambox/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # -----------------------------------------------------------------
+  # Frontend: los mismos comandos que en local.
+  # -----------------------------------------------------------------
+  frontend:
+    name: Frontend (build, lint y Vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Node ${{ env.NODE_VERSION }} con caché de npm
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # Guarda la caché de descargas de npm (~/.npm), con clave del
+          # package-lock.json. No guarda node_modules: npm ci lo borra siempre.
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # npm ci: instala exactamente lo del lockfile y falla si no cuadra con
+      # package.json. --ignore-scripts, igual que frontend/Dockerfile: no
+      # ejecuta los scripts de instalación de las dependencias, la vía
+      # típica de los ataques a la cadena de suministro de npm (y el
+      # proyecto no los necesita).
+      - name: Instalar dependencias
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Compilar (tsc -b && vite build)
+        run: npm run build
+
+      # oxlint termina con código distinto de 0 si hay errores: el paso falla.
+      - name: Lint (oxlint)
+        run: npm run lint
+
+      - name: Tests (Vitest)
+        run: npm run test
+
+  # -----------------------------------------------------------------
+  # E2E: Playwright arranca SU PROPIO backend (spring-boot:run con H2 en
+  # memoria, puerto 8099) y su propio Vite (puerto 5199); ver
+  # frontend/playwright.config.ts. Por eso necesita Java y Maven además de
+  # Node. No usa PostgreSQL ni Docker.
+  # -----------------------------------------------------------------
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar Java ${{ env.JAVA_VERSION }} (Temurin) con caché de Maven
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+          cache-dependency-path: streambox/pom.xml
+          # Solo LEE la caché que guarda el job "backend". Los dos jobs usan
+          # la misma clave y gana el primero que termina; si fuera este, la
+          # caché se quedaría sin los plugins que solo usa "verify" (surefire,
+          # jar...) y el job backend los descargaría en cada ejecución hasta
+          # el siguiente cambio del pom.xml.
+          cache-read-only: true
+
+      - name: Instalar Node ${{ env.NODE_VERSION }} con caché de npm
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Mismo motivo que en el job backend. Aquí además es imprescindible:
+      # playwright.config.ts arranca el backend con "./mvnw" en Linux.
+      - name: Dar permiso de ejecución al wrapper de Maven
+        run: chmod +x streambox/mvnw
+
+      # Compila el backend ANTES de la suite. Playwright da 5 minutos al
+      # backend para arrancar (webServer.timeout); así ese tiempo no se va en
+      # descargar dependencias y compilar, y un error de compilación sale
+      # aquí, con un mensaje claro, y no como "timeout del webServer".
+      # spring-boot:run vuelve a comprobar la compilación, pero ya no hay
+      # nada que hacer.
+      - name: Compilar el backend
+        working-directory: streambox
+        run: ./mvnw -B -ntp test-compile
+
+      - name: Instalar dependencias del frontend
+        working-directory: frontend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # La caché de navegadores va por versión de Playwright: cada versión
+      # necesita su propia compilación de Chromium. Se lee del paquete
+      # instalado (no del package.json, que admite rangos como ^1.63.0).
+      - name: Averiguar la versión de Playwright
+        id: playwright
+        working-directory: frontend
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Caché de los navegadores de Playwright
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # Con la caché, Chromium ya está y no se descarga otra vez; las
+      # dependencias del sistema (--with-deps: librerías de Linux que
+      # Chromium necesita) no se pueden cachear y se instalan siempre con apt.
+      - name: Instalar Chromium y sus dependencias del sistema
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # CI=1: forbidOnly (un test.only olvidado hace fallar la suite en vez
+      # de ejecutar solo ese test) y 2 workers (los runners tienen 4 núcleos
+      # y el backend comparte máquina). GitHub ya define CI=true; se fija
+      # para no depender de ello.
+      - name: Ejecutar la suite E2E
+        working-directory: frontend
+        env:
+          CI: '1'
+        run: npm run test:e2e
+
+      # Informe HTML y, de cada test fallido, la traza y una captura
+      # (trace: retain-on-failure, screenshot: only-on-failure). La traza se abre con
+      # "npx playwright show-trace <zip>" o en https://trace.playwright.dev.
+      - name: Subir el informe de Playwright (si falla)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # -----------------------------------------------------------------
+  # Docker: construye las dos imágenes y comprueba que el stack de
+  # docker-compose.yml arranca y responde. Las imágenes NO se publican en
+  # ningún registro (push: false): solo se cargan en el Docker del runner.
+  # -----------------------------------------------------------------
+  docker:
+    name: Docker (imágenes y prueba de humo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Puerto del host en el que nginx publica la aplicación (el mismo
+      # valor por defecto que docker-compose.yml).
+      STREAMBOX_PORT: '8088'
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Buildx (BuildKit) permite guardar las capas de las imágenes en la
+      # caché de GitHub Actions (type=gha). Sin ella, cada ejecución
+      # descargaría otra vez todas las dependencias de Maven y npm dentro
+      # del Dockerfile (varios minutos); con ella, si solo cambia el código,
+      # se reutilizan las capas de dependencias.
+      - name: Preparar Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Etiquetas streambox-backend y streambox-frontend: son los nombres que
+      # docker compose da a las imágenes de este proyecto (name: streambox +
+      # nombre del servicio). Así "up --no-build" usa estas imágenes recién
+      # construidas en lugar de construirlas otra vez.
+      # load: true = dejar la imagen en el Docker del runner.
+      # mode=max = guardar también las capas de la etapa de compilación
+      # (las dependencias de Maven y npm), que son las que ahorran tiempo.
+      - name: Construir la imagen del backend
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./streambox
+          push: false
+          load: true
+          tags: streambox-backend:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Construir la imagen del frontend
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./frontend
+          push: false
+          load: true
+          tags: streambox-frontend:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      # docker-compose.yml exige POSTGRES_PASSWORD y JWT_SECRET (se niega a
+      # arrancar sin ellos). Se generan aleatorios en cada ejecución: NUNCA
+      # valores fijos en este archivo, que es público. Van a un archivo fuera
+      # del repositorio (RUNNER_TEMP) que desaparece con la máquina.
+      # ::add-mask:: hace que GitHub los sustituya por *** si aparecieran en
+      # el log. Hexadecimal: sin caracteres que el formato .env pudiera
+      # interpretar ("=", "#", comillas...).
+      # El administrador de prueba cumple la política de contraseñas: 32
+      # caracteres aleatorios (entre 12 y 64, no común) que no pueden
+      # contener "admin" (solo hay dígitos y letras de la "a" a la "f").
+      - name: Generar el .env de la prueba (secretos aleatorios)
+        run: |
+          env_file="$RUNNER_TEMP/streambox-ci.env"
+          postgres_password="$(openssl rand -hex 32)"
+          jwt_secret="$(openssl rand -hex 48)"
+          admin_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$postgres_password"
+          echo "::add-mask::$jwt_secret"
+          echo "::add-mask::$admin_password"
+          umask 077
+          {
+            echo "POSTGRES_PASSWORD=$postgres_password"
+            echo "JWT_SECRET=$jwt_secret"
+            echo "ADMIN_EMAIL=admin-ci@streambox.local"
+            echo "ADMIN_USERNAME=admin"
+            echo "ADMIN_PASSWORD=$admin_password"
+            echo "STREAMBOX_PORT=$STREAMBOX_PORT"
+          } > "$env_file"
+          echo "STREAMBOX_ENV_FILE=$env_file" >> "$GITHUB_ENV"
+
+      # --no-build: usa las imágenes de los pasos anteriores.
+      # --wait: no termina hasta que los tres contenedores están "healthy"
+      # (healthchecks de compose y de los Dockerfiles); si alguno no llega a
+      # estarlo en 3 minutos, el paso falla.
+      - name: Levantar el stack (db, backend y nginx)
+        run: docker compose --env-file "$STREAMBOX_ENV_FILE" up -d --no-build --wait --wait-timeout 180
+
+      # Tres comprobaciones con curl contra nginx, la única puerta de
+      # entrada, igual que un navegador:
+      #   1. "/" sirve la SPA (200) con la cabecera Content-Security-Policy.
+      #   2. "/api/movies" sin token: 401 con el error en JSON (el proxy
+      #      llega al backend y la seguridad funciona).
+      #   3. Login del administrador: devuelve un token (Flyway creó el
+      #      esquema en PostgreSQL y el administrador se creó al arrancar),
+      #      y con ese token /api/users/me dice que es ADMIN.
+      # Sin jq a propósito (grep y sed): el mismo script funciona en el
+      # Git Bash de Windows para reproducir la prueba en local.
+      - name: Prueba de humo con curl
+        run: |
+          base_url="http://127.0.0.1:${STREAMBOX_PORT}"
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          fail() { echo "::error::$1"; exit 1; }
+
+          echo "1/3 Portada"
+          status="$(curl -sS -o /dev/null -D "$tmp/home.headers" -w '%{http_code}' "$base_url/")"
+          [ "$status" = "200" ] || fail "GET / devolvió $status (se esperaba 200)"
+          grep -qi '^content-security-policy:' "$tmp/home.headers" \
+            || fail "GET / no lleva la cabecera Content-Security-Policy"
+
+          echo "2/3 API sin token"
+          status="$(curl -sS -o "$tmp/movies.json" -D "$tmp/movies.headers" -w '%{http_code}' "$base_url/api/movies")"
+          [ "$status" = "401" ] || fail "GET /api/movies sin token devolvió $status (se esperaba 401)"
+          grep -qi '^content-type: application/json' "$tmp/movies.headers" \
+            || fail "El 401 de /api/movies no es JSON"
+          grep -q '"code":"INVALID_CREDENTIALS"' "$tmp/movies.json" \
+            || fail "El 401 de /api/movies no trae el código de error esperado"
+
+          echo "3/3 Login del administrador"
+          admin_email="$(sed -n 's/^ADMIN_EMAIL=//p' "$STREAMBOX_ENV_FILE")"
+          admin_password="$(sed -n 's/^ADMIN_PASSWORD=//p' "$STREAMBOX_ENV_FILE")"
+          status="$(curl -sS -o "$tmp/login.json" -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            --data "{\"email\":\"$admin_email\",\"password\":\"$admin_password\"}" \
+            "$base_url/api/auth/login")"
+          [ "$status" = "200" ] || fail "El login del administrador devolvió $status (se esperaba 200)"
+          token="$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' "$tmp/login.json")"
+          [ -n "$token" ] || fail "El login del administrador no devolvió token"
+          echo "::add-mask::$token"
+          status="$(curl -sS -o "$tmp/me.json" -w '%{http_code}' \
+            -H "Authorization: Bearer $token" "$base_url/api/users/me")"
+          [ "$status" = "200" ] || fail "GET /api/users/me con el token devolvió $status (se esperaba 200)"
+          grep -q '"role":"ADMIN"' "$tmp/me.json" || fail "El usuario del token no es ADMIN"
+
+          echo "Prueba de humo superada."
+
+      # Si algo falla, el estado y los logs de los contenedores dicen por
+      # qué (el backend no arrancó, Flyway falló, nginx no encuentra al
+      # backend...). Los secretos están enmascarados y la aplicación no los
+      # escribe en el log.
+      - name: Estado y logs de los contenedores (si falla)
+        if: failure()
+        run: |
+          if [ -n "${STREAMBOX_ENV_FILE:-}" ] && [ -f "$STREAMBOX_ENV_FILE" ]; then
+            docker compose --env-file "$STREAMBOX_ENV_FILE" ps -a
+            docker compose --env-file "$STREAMBOX_ENV_FILE" logs --no-color --timestamps
+          fi
+
+      # Siempre, haya ido bien o mal. -v borra también el volumen de la base.
+      # compose necesita el archivo de variables incluso para "down" (valida
+      # las obligatorias); si el paso que lo genera no llegó a ejecutarse,
+      # tampoco se levantó nada y no hay nada que parar.
+      - name: Parar y borrar el stack
+        if: always()
+        run: |
+          if [ -n "${STREAMBOX_ENV_FILE:-}" ] && [ -f "$STREAMBOX_ENV_FILE" ]; then
+            docker compose --env-file "$STREAMBOX_ENV_FILE" down -v --remove-orphans
+          fi

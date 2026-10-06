@@ -18,6 +18,10 @@ build/
 *.local
 .env
 .env.*
+# La plantilla de variables de Docker Compose SÍ se versiona (sin valores reales)
+!.env.example
+# Override personal de Docker Compose (p. ej. publicar la base en 127.0.0.1 para depurar)
+docker-compose.override.yml
 application-local.properties
 **/application-local.properties
 

@@ -1,0 +1,37 @@
+# ===================================================================
+# Contexto de construcción de la imagen del backend (streambox/Dockerfile)
+#
+# Se usa una LISTA BLANCA: primero se excluye todo ("*") y después se
+# readmite solo lo imprescindible para compilar (pom.xml y src/main).
+# Así, cualquier archivo nuevo que aparezca en la carpeta (un .env, un
+# volcado de la base, un log...) queda fuera por defecto, en lugar de
+# depender de acordarse de añadirlo a una lista negra.
+# ===================================================================
+*
+!pom.xml
+!src/main/
+
+# ⚠ CRÍTICO: application-local.properties contiene las credenciales de la
+# base de datos de desarrollo (Supabase). Está dentro de src/main/resources,
+# es decir, dentro de lo readmitido arriba, así que hay que volver a
+# excluirlo de forma explícita. Si entrara en el contexto:
+#   - las credenciales quedarían grabadas en una capa de la imagen;
+#   - application.properties lo importa siempre
+#     (spring.config.import=optional:classpath:...), así que el contenedor
+#     intentaría conectarse a esa base en lugar de a la de docker compose.
+# Las reglas posteriores ganan a las anteriores: por eso va después de los "!".
+**/application-local.properties
+**/application-local*.properties
+
+# La plantilla .example no es secreta, pero no pinta nada en la imagen
+# (acabaría como recurso dentro del JAR).
+**/*.example
+
+# Por si alguien deja secretos o artefactos dentro de src/main.
+**/.env
+**/.env.*
+**/*.local
+**/*.log
+**/target/
+**/.DS_Store
+**/Thumbs.db

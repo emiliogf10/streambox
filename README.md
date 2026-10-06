@@ -1,5 +1,7 @@
 # 🎬 StreamBox — Backend API
 
+[![CI](https://github.com/emiliogf10/streambox/actions/workflows/ci.yml/badge.svg)](https://github.com/emiliogf10/streambox/actions/workflows/ci.yml)
+[![Docker](https://img.shields.io/badge/Docker-compose-2496ED.svg?logo=docker)](#-arrancar-con-docker-recomendado)
 [![Java 21](https://img.shields.io/badge/Java-21-orange.svg?logo=openjdk)](https://www.oracle.com/java/)
 [![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1.0-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-blue.svg?logo=postgresql)](https://www.postgresql.org/)
@@ -146,7 +148,41 @@ La base de todos los endpoints es `/api`.
 
 ---
 
-## ⚙️ Configuración y Ejecución
+## 🐳 Arrancar con Docker (recomendado)
+
+Levanta **la aplicación completa** (PostgreSQL + backend + frontend) con un solo comando. Solo necesitas [Docker Desktop](https://www.docker.com/products/docker-desktop/); no hace falta tener Java, Node ni PostgreSQL instalados.
+
+```bash
+cp .env.example .env          # en PowerShell: Copy-Item .env.example .env
+# Edita .env y rellena POSTGRES_PASSWORD y JWT_SECRET (y ADMIN_EMAIL/ADMIN_PASSWORD si quieres un administrador)
+docker compose up -d --build  # la primera vez tarda ~2 min en construir las imágenes
+```
+
+Abre **http://localhost:8088**. Comandos útiles:
+
+| Comando | Para qué |
+| :--- | :--- |
+| `docker compose ps` | Estado de los tres servicios (deben salir `healthy`) |
+| `docker compose logs -f backend` | Ver los logs del backend (también `frontend` o `db`) |
+| `docker compose down` | Parar todo **conservando** los datos |
+| `docker compose down -v` | Parar todo y **borrar** la base de datos |
+| `docker compose up -d --build` | Reconstruir tras cambiar el código |
+
+Cómo está montado:
+
+- **Tres contenedores.** `db` (PostgreSQL 16), `backend` (Spring Boot, perfil `prod`) y `frontend` (nginx, que sirve la SPA y reenvía `/api` al backend).
+- **Un único puerto publicado**, el de nginx, y solo en tu propio equipo (`127.0.0.1:8088`). La base de datos y el backend no se publican.
+- **Seguridad.** Los tres contenedores se ejecutan sin root, con el sistema de archivos de solo lectura. nginx añade la CSP y las cabeceras de seguridad.
+- **Puerto ocupado:** cámbialo con `STREAMBOX_PORT` en el `.env`.
+- **Tus credenciales de desarrollo no entran.** Las imágenes nunca incluyen `application-local.properties`, así que Docker no se conecta a tu base de Supabase: usa su propia base, que vive en el volumen `streambox_db-data`.
+
+> **⚠️ Si tienes `JWT_SECRET` definido en tu sistema** (variable de entorno de Windows), ese valor **gana** al del `.env`. Si no es el que quieres, bórralo de la terminal antes de arrancar: `Remove-Item Env:JWT_SECRET` en PowerShell o `unset JWT_SECRET` en bash.
+
+Más detalle en el [manual](docs/MANUAL_PROGRAMADOR.md), capítulo 4.6.
+
+---
+
+## ⚙️ Configuración y Ejecución (sin Docker, para desarrollar)
 
 ### Requisitos Previos
 - **JDK 21** o superior instalado y configurado en el `PATH`.
@@ -282,6 +318,19 @@ El proyecto cuenta con suites de pruebas de integración (`*IntegrationTest`) qu
 - Operaciones idempotentes y casos límite en listas de favoritos.
 - Paginación y búsqueda con casos límite (página fuera de rango, comodines, acentos y `ñ`, parámetros inválidos que nunca acaban en 500).
 - Comportamiento real de PostgreSQL (Testcontainers) y flujos completos del frontend (Vitest y Playwright), descritos arriba.
+
+### Integración continua (GitHub Actions)
+
+Cada `push` a `main` y cada pull request ejecutan [`.github/workflows/ci.yml`](.github/workflows/ci.yml), con cuatro trabajos en paralelo:
+
+| Job | Qué comprueba |
+| :--- | :--- |
+| `backend` | Toda la suite de Maven, **incluidos los tests contra PostgreSQL real** (los runners traen Docker) |
+| `frontend` | `build`, `lint` y Vitest |
+| `e2e` | Los flujos completos con Playwright (Chromium) |
+| `docker` | Construye las dos imágenes, levanta el stack con `docker compose` y hace una prueba de humo (CSP, 401 de la API, login del administrador) |
+
+Ningún job necesita secretos del repositorio. [Dependabot](.github/dependabot.yml) propone cada lunes las actualizaciones de Maven, npm, GitHub Actions e imágenes Docker, agrupadas y en pull requests que pasan por el mismo CI.
 
 ---
 

@@ -15,6 +15,8 @@ Plataforma de streaming tipo Netflix. Es un **proyecto de portfolio**: el objeti
 | `streambox/` | Backend: Java 21, Spring Boot 4.1, Maven (wrapper `mvnw`), PostgreSQL, Flyway |
 | `frontend/` | SPA: React 19, Vite, TypeScript, Tailwind v4 |
 | `docs/` | Plan de acción y documentación |
+| `.github/` | CI (`workflows/ci.yml`: backend, frontend, e2e y docker) y Dependabot |
+| raíz | `docker-compose.yml` (db + backend + frontend con nginx), `.env.example` (plantilla; `.env` está ignorado) |
 | `.claude/agents/` | Agentes especializados (ver abajo) |
 
 Paquete base del backend: `com.emilio.streambox` en `streambox/src/main/java/...`.
@@ -32,6 +34,8 @@ Backend (desde `streambox/`; en PowerShell `.\mvnw.cmd`, en bash `./mvnw`):
 
 Frontend (desde `frontend/`): `npm run dev` (puerto 5173, proxy de `/api` a `localhost:8080`), `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint), `npm run test` (Vitest, ~15 s) y `npm run test:e2e` (Playwright, ~60 s; levanta su propio backend en el 8099 y Vite en el 5199, aislados de la BD y los puertos del usuario).
 
+Docker (desde la raíz; ver cap. 4.6 del manual): `docker compose up -d --build` levanta todo en `http://localhost:8088` (necesita `.env`, copia de `.env.example` con `POSTGRES_PASSWORD` y `JWT_SECRET`); `docker compose down` para (con `-v` borra la base). Para probar sin tocar el `.env` del usuario: `docker compose --env-file <archivo temporal fuera del repo> ...`. **Ojo: las variables de la terminal ganan al `.env`** (la del usuario tiene `JWT_SECRET`; usa `env -u JWT_SECRET`). Validar el CI en local: `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12`.
+
 **Maven y Docker:** los tests del paquete `postgres` usan Testcontainers (`postgres:16`) y **se omiten solos si Docker no está en marcha**. Solo ellos: `.\mvnw.cmd test "-Dtest=Postgres*"`; sin ellos: `"-Dtest=!Postgres*"`. Dos procesos de Maven a la vez en `streambox/` se pisan (`target/`): un solo agente con Maven cada vez.
 
 ## Reglas de trabajo
@@ -41,6 +45,7 @@ Frontend (desde `frontend/`): `npm run dev` (puerto 5173, proxy de `/api` a `loc
 - **Idioma:** respuestas, documentación, mensajes de error de la API y OpenAPI en español.
 - No añadas dependencias al `pom.xml` o `package.json` sin justificarlo y avisar.
 - **Nunca toques la base de datos de desarrollo del usuario: es Supabase** (su `application-local.properties`, ignorado por git, la define; puede tener la app corriendo en el puerto 8080). **Arrancar la app sin más (`spring-boot:run`) se conecta a ella**, así que para cualquier prueba arranca con otro puerto (`--server.port=8099`) **y sobrescribe la conexión con variables de entorno** (`SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, que ganan a ese archivo) apuntando a una base temporal: H2 en memoria como hace el E2E (`frontend/playwright.config.ts`) o una base `streambox_check` en un PostgreSQL local, que se borra al terminar. Los tests no la necesitan: usan H2 y Testcontainers, nunca ese archivo (comprobado con una conexión falsa).
+- **Nunca leas, busques ni imprimas `streambox/src/main/resources/application-local.properties`** (contiene las credenciales de Supabase). Nada de `grep`/`cat` con comodines sobre `src/main/resources/*.properties`: nombra los archivos uno a uno. Ya ocurrió una vez y obligó al usuario a cambiar la contraseña. Ese archivo tampoco debe entrar nunca en una imagen Docker ni en un JAR (lo impiden `streambox/.dockerignore` y `pom.xml`; si tocas cualquiera de los dos, compruébalo).
 - Entorno Windows: el tool Bash rechaza scripts largos con muchas comillas/heredocs; para ficheros usa las herramientas Write/Edit.
 - No inventes datos ni "arregles" tests debilitándolos: si un test falla, entiende la causa.
 
@@ -83,7 +88,7 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 - Cada bug corregido deja un test que falla sin el arreglo.
 - Lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia real) se prueba también contra PostgreSQL real en `src/test/.../postgres/` (extiende `PostgresIntegrationTestSupport`); H2 puede ocultar diferencias (ya ocultó un bug de búsqueda).
 - Frontend: lógica y componentes con Vitest + Testing Library (`*.test.ts(x)` junto al código, utilidades en `src/test/`); flujos completos con Playwright en `frontend/e2e/`. Localiza por rol/etiqueta, no con `data-testid`.
-- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 1264 con Docker —1145 con H2 y 119 contra PostgreSQL real—; sin Docker salen 1240 ejecutados con 95 omitidos, porque cada parametrizado omitido cuenta como uno; 729 de Vitest y 135 E2E + 24 de capturas omitidas).
+- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 1272 con Docker —1153 con H2 y 119 contra PostgreSQL real—; sin Docker salen 1248 ejecutados con 95 omitidos, porque cada parametrizado omitido cuenta como uno; 729 de Vitest y 135 E2E + 24 de capturas omitidas).
 - Vitest no espera tiempo real: los debounces se prueban con `src/test/fakeTimers.ts`. Los E2E que modifican el catálogo van en el proyecto `catalogo-mutable` de Playwright, que corre al final.
 
 ## Frontend: estado actual

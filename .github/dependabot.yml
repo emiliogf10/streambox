@@ -1,0 +1,189 @@
+# ===================================================================
+# Dependabot: pull requests automáticos para mantener al día las
+# dependencias de StreamBox. Cada PR pasa por el CI (.github/workflows/
+# ci.yml) antes de que nadie lo apruebe: si una actualización rompe algo,
+# los tests lo dicen.
+#
+# Criterios comunes:
+#   - Revisión SEMANAL, los lunes a las 07:00 (hora de Madrid): un único
+#     momento de la semana para revisar y fusionar, en vez de PRs sueltos
+#     cada día.
+#   - Las subidas MENORES y de PARCHE de cada ecosistema van AGRUPADAS en un
+#     solo PR (con semver no deberían romper nada, y el CI lo confirma). Las
+#     MAYORES llegan en PRs separados, porque suelen exigir cambios en el
+#     código y hay que leer su guía de migración: el PR es el aviso, y el
+#     CI dice cuánto se rompe.
+#   - Las mayores solo se ignoran cuando el CI NO puede validarlas (PostgreSQL)
+#     o cuando la versión está repetida en otros archivos que Dependabot no
+#     toca (Java, Node, Maven): un PR que cambiara solo una copia dejaría el
+#     proyecto incoherente. Esas se suben a mano, todas a la vez.
+#   - "cooldown": no proponer una versión hasta que lleve unos días
+#     publicada. Los paquetes secuestrados (un atacante publica una versión
+#     con malware en npm o en Maven Central) suelen detectarse y retirarse en
+#     horas o pocos días; esperar evita ser de los primeros en instalarlos.
+#     No retrasa las actualizaciones DE SEGURIDAD (las de los avisos de
+#     GitHub), que llegan en cuanto se publican.
+#   - Mensajes de commit "chore(deps): ..." como el resto del historial.
+# ===================================================================
+version: 2
+
+updates:
+  # -----------------------------------------------------------------
+  # Backend: dependencias y plugins de Maven (streambox/pom.xml),
+  # incluido el padre spring-boot-starter-parent, que arrastra las
+  # versiones de casi todo lo demás.
+  # -----------------------------------------------------------------
+  - package-ecosystem: maven
+    directory: /streambox
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      # Spring Boot 4.1.0 → 4.1.x / 4.2, jjwt 0.12.x, springdoc 3.x...
+      # Las mayores (Spring Boot 5, springdoc 4...) quedan fuera del grupo y
+      # llegan solas, para revisarlas con su guía de migración.
+      maven-menores-y-parches:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # -----------------------------------------------------------------
+  # Frontend: paquetes de npm (frontend/package.json y package-lock.json).
+  # -----------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    # @types/node describe la API de la versión de Node que se usa (24 en
+    # frontend/Dockerfile y en el CI). Subirlo a 25 o 26 dejaría a
+    # TypeScript aceptar funciones que Node 24 no tiene. Sube de mayor
+    # cuando suba Node, a mano.
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+    groups:
+      # Mayores de paquetes que SOLO funcionan juntos: si llegaran en PRs
+      # separados, cada uno fallaría en el CI por culpa del otro. Van
+      # antes que el grupo general porque un paquete entra en el primer
+      # grupo que encaja (y estos solo encajan con las mayores).
+      react-mayor:
+        patterns: ['react', 'react-dom', '@types/react', '@types/react-dom']
+        update-types: [major]
+      vite-mayor:
+        patterns: ['vite', 'vitest', '@vitejs/plugin-react']
+        update-types: [major]
+      tailwind-mayor:
+        patterns: ['tailwindcss', '@tailwindcss/postcss']
+        update-types: [major]
+      # Todo lo demás que sea menor o parche, en un solo PR semanal.
+      npm-menores-y-parches:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # -----------------------------------------------------------------
+  # Actions de los workflows (.github/workflows/). Están fijadas por SHA
+  # con la versión en un comentario; Dependabot actualiza las dos cosas.
+  # Todas en un solo PR, mayores incluidas: sus mayores suelen ser cambios
+  # internos (versión de Node con la que se ejecutan) y el propio CI del PR
+  # comprueba que el workflow sigue funcionando.
+  # -----------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  # -----------------------------------------------------------------
+  # Imágenes base de los Dockerfile (FROM ...): Maven + JDK, JRE, Node y
+  # nginx. Las versiones están fijadas hasta el parche; Dependabot propone
+  # los parches nuevos, que suelen traer arreglos de seguridad del sistema
+  # base (por eso sin cooldown: son imágenes oficiales y lo urgente es
+  # tener el parche).
+  # -----------------------------------------------------------------
+  - package-ecosystem: docker
+    directories:
+      - /streambox
+      - /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore(deps)
+    ignore:
+      # Java 21 → 25 y Node 24 → 26 se deciden a mano: la versión está
+      # también en el pom.xml (java.version), en el CI (JAVA_VERSION,
+      # NODE_VERSION) y en @types/node, que Dependabot no cambiaría a la vez.
+      - dependency-name: eclipse-temurin
+        update-types: ['version-update:semver-major']
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
+      # Maven 3 → 4 cambia el modelo del pom y debe ir junto al wrapper
+      # (.mvn/wrapper/maven-wrapper.properties, que fija 3.9.16).
+      - dependency-name: maven
+        update-types: ['version-update:semver-major']
+      # nginx numera sus ramas por la versión MENOR: las pares (1.28, 1.30)
+      # son la estable y las impares (1.29, 1.31) la "mainline", con
+      # novedades y menos rodaje. Dependabot no distingue y propondría pasar
+      # de 1.30 a 1.31. Solo se aceptan parches automáticos (1.30.x); el
+      # salto a la estable siguiente (1.32, cada abril) se hace a mano.
+      - dependency-name: nginxinc/nginx-unprivileged
+        update-types: ['version-update:semver-minor', 'version-update:semver-major']
+    groups:
+      imagenes-docker:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # -----------------------------------------------------------------
+  # docker-compose.yml: la imagen de PostgreSQL (servicio db).
+  # -----------------------------------------------------------------
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore(deps)
+    ignore:
+      # Solo parches dentro de la 16 (16.15 → 16.16...), que PostgreSQL
+      # publica cada trimestre con arreglos y se aplican con solo cambiar la
+      # imagen. NUNCA la mayor automática (16 → 17 o 18): el formato de los
+      # archivos de datos cambia entre versiones mayores, así que el volumen
+      # existente no arrancaría con la imagen nueva y hay que migrarlo
+      # (pg_upgrade, o pg_dump + restaurar); la 18 además cambia la ruta de
+      # PGDATA dentro de la imagen. Y el CI no lo detectaría: arranca
+      # siempre con un volumen vacío, así que el PR saldría en verde y el
+      # problema aparecería con los datos de verdad.
+      # La versión de los tests (Testcontainers, PostgresIntegrationTestSupport)
+      # debe subir a la vez.
+      - dependency-name: postgres
+        update-types: ['version-update:semver-major']

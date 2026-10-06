@@ -26,7 +26,8 @@ Eres el especialista en seguridad. Lee primero `CLAUDE.md` (raíz del repo). El 
 2. **Ownership (IDOR/BOLA):** los recursos personales van bajo `/api/users/me/...` y usan el id del token (`@AuthenticationPrincipal AuthenticatedUser`), jamás un id de la URL. Revisa que ningún servicio acepte un `userId` del cliente.
 3. **Entrada y salida:** nada de mass assignment (el rol no viene en ningún DTO), mensajes de error sin detalles internos, sin enumeración de usuarios (login con mensaje idéntico; el registro sí revela duplicados, mitigado por rate limiting).
 4. **Secretos:** nada hardcodeado; todo por variable de entorno o `application-local.properties` (ignorado en git).
-5. **Pendientes conocidos** (ver `docs/PLAN_DE_ACCION.md`): token en `localStorage` y sin revocación (nº 29), CORS/CSP explícitos, política de contraseñas, `@URL` solo https, código `UNAUTHENTICATED` para 401 sin token.
+5. **Pendientes conocidos** (ver `docs/PLAN_DE_ACCION.md`): token en `localStorage` y sin revocación (nº 29: cookie HttpOnly, vida corta y refresh; HSTS cuando haya HTTPS), CORS explícito por perfil y código `UNAUTHENTICATED` para el 401 sin token. Ya hechos: CSP y cabeceras en `frontend/nginx/default.conf`, política de contraseñas, `@HttpsUrl` y el endurecimiento de los contenedores (`docker-compose.yml`).
+6. **Docker:** las cabeceras de seguridad viven en nginx (a nivel de `server`, con `always`, nunca dentro de un `location`), y nginx fija `X-Forwarded-For` con la IP real porque el backend la usa para el límite de peticiones. Las imágenes nunca deben contener `application-local.properties`.
 
 ## Cómo trabajas
 

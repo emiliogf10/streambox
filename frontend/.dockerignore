@@ -1,0 +1,52 @@
+# ===================================================================
+# Contexto de construcción de la imagen del frontend (frontend/Dockerfile)
+#
+# LISTA BLANCA, igual que en el backend: primero se excluye todo ("*") y
+# después se readmite solo lo que hace falta para compilar. Cualquier
+# archivo nuevo que aparezca en la carpeta (node_modules, dist, informes de
+# Playwright, un .env...) queda fuera por defecto.
+#
+# Por qué importa en un frontend: Vite mete en el JavaScript final las
+# variables VITE_* que encuentre en los archivos .env de esta carpeta. Si un
+# .env.local entrara en el contexto, su contenido acabaría publicado en el
+# navegador de cualquiera que abra la aplicación.
+# ===================================================================
+*
+
+# Dependencias: solo el manifiesto y el lockfile (npm ci instala
+# exactamente lo que dice el lockfile; node_modules se crea dentro de la
+# imagen, para Linux, y nunca se copia el de Windows).
+!package.json
+!package-lock.json
+
+# Lo que necesita "npm run build" (tsc -b && vite build).
+!index.html
+!vite.config.ts
+!postcss.config.js
+!tsconfig*.json
+!src/
+!public/
+
+# e2e/ y playwright.config.ts NO se ejecutan en la imagen, pero tsconfig.json
+# los referencia (tsconfig.e2e.json) y "tsc -b" falla si no los encuentra.
+# Se incluyen (pocos KB) para que la imagen se compile con el mismo comando
+# exacto que en local y en la integración continua.
+!e2e/
+!playwright.config.ts
+
+# Configuración de nginx de la etapa de ejecución.
+!nginx/
+
+# Las reglas posteriores ganan a las anteriores: aunque estén dentro de lo
+# readmitido, estos archivos nunca entran.
+**/.env
+**/.env.*
+**/*.local
+**/*.log
+**/node_modules/
+**/dist/
+**/test-results/
+**/playwright-report/
+**/blob-report/
+**/.DS_Store
+**/Thumbs.db

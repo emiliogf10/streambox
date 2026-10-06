@@ -150,6 +150,21 @@ class AdminAccountInitializerEdgeCasesTest {
     }
 
     /**
+     * El {@code toString()} de {@link AdminProperties} no muestra
+     * {@code ADMIN_PASSWORD}: el que genera Java para un {@code record} sí la
+     * incluiría si alguien registrase el objeto en un log.
+     */
+    @Test
+    void toStringDeLasPropiedadesNoMuestraLaContrasena() {
+        String password = "contrasena-que-no-debe-salir-en-logs";
+
+        String text = new AdminProperties("admin@test.com", "admin", password).toString();
+
+        assertFalse(text.contains(password));
+        assertTrue(text.contains("admin@test.com"));
+    }
+
+    /**
      * Ejecuta la acción capturando lo que escribe el logger de
      * {@link AdminAccountInitializer} (con un appender de Logback en memoria,
      * independiente de la configuración de consola).

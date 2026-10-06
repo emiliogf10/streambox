@@ -1,0 +1,225 @@
+# ===================================================================
+# StreamBox con Docker Compose
+#
+# Levantar todo:   1) cp .env.example .env   y rellena los valores
+#                  2) docker compose up -d --build
+#                  3) abre http://localhost:8088 (o el STREAMBOX_PORT del .env)
+# Ver el estado:   docker compose ps          (los tres deben salir "healthy")
+# Ver los logs:    docker compose logs -f backend
+# Parar:           docker compose down        (los datos se conservan)
+# Borrar datos:    docker compose down -v     (⚠ borra el volumen de la base)
+#
+# Los valores ${...} salen del archivo .env de esta carpeta (ignorado por
+# git; la plantilla es .env.example) o de las variables de tu terminal, que
+# tienen prioridad sobre el .env. Ningún secreto se escribe en este archivo.
+# Sintaxis: ${VAR:?mensaje} = obligatoria (compose se niega a arrancar y
+# muestra el mensaje); ${VAR:-valor} = opcional con valor por defecto.
+#
+# Puertos: ni la base de datos ni el backend se publican en tu máquina.
+# Solo se puede llegar a ellos desde dentro de la red de Docker. El único
+# puerto publicado es el de nginx (servicio "frontend"), que sirve la web y
+# reenvía /api/ al backend. Y así tiene que ser: el perfil prod confía en
+# la cabecera X-Forwarded-For (server.forward-headers-strategy=native) para
+# el límite por IP, y eso solo es seguro si nadie puede hablar con el
+# backend saltándose el proxy (nginx la fija con la IP real del cliente).
+# ===================================================================
+
+# Nombre fijo del proyecto: los contenedores, la red y el volumen se llaman
+# streambox-... aunque el repositorio se clone en otra carpeta.
+name: streambox
+
+services:
+
+  # ---------------------------------------------------------------
+  # PostgreSQL. Misma versión mayor (16) que los tests con
+  # Testcontainers, para probar contra el mismo motor que se despliega.
+  # Versión fijada hasta el parche y la base (Debian 13 "trixie", la misma
+  # que usa la etiqueta "16" y los tests; no Alpine, cuya libc musl ordena
+  # el texto de otra forma), como las otras dos imágenes. Dependabot
+  # propone las subidas de parche (16.x); las de versión mayor están
+  # ignoradas a propósito (ver .github/dependabot.yml): de 16 a 17 hace
+  # falta migrar los datos del volumen (pg_upgrade o volcado y carga).
+  # ---------------------------------------------------------------
+  db:
+    image: postgres:16.15-trixie
+    restart: unless-stopped
+    environment:
+      # La imagen oficial crea la base y el usuario la primera vez que
+      # arranca con el volumen vacío. Si cambias estos valores después,
+      # no se aplican: el volumen ya existe (habría que borrarlo con -v).
+      POSTGRES_DB: ${POSTGRES_DB:-streambox}
+      POSTGRES_USER: ${POSTGRES_USER:-streambox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD. Copia .env.example como .env y rellénalo.}
+    volumes:
+      # Volumen con nombre: los datos sobreviven a "docker compose down" y
+      # a reconstruir la imagen; solo se borran con "down -v".
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready responde cuando PostgreSQL acepta conexiones. El "$$"
+      # hace que la variable la expanda el shell DEL CONTENEDOR y no compose.
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # Endurecimiento, como en los otros dos servicios. La imagen oficial
+    # arranca como root solo para preparar carpetas y luego cambia al
+    # usuario postgres (UID 999); para eso necesita capacidades del kernel
+    # (CHOWN, SETUID...). Arrancando directamente como postgres (modo que la
+    # imagen admite) no hace falta ninguna: cap_drop ALL sin excepciones.
+    # Funciona porque el volumen con nombre se crea con la carpeta de datos
+    # ya propiedad de postgres (la copia Docker desde la imagen).
+    user: postgres
+    # Solo se escribe en el volumen de datos; el resto del sistema de
+    # archivos, de solo lectura. PostgreSQL necesita además /var/run/postgresql
+    # (socket local y archivo de bloqueo) y /tmp: en memoria.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Con la configuración por defecto (shared_buffers 128 MB) y pocas
+    # conexiones (el pool del backend es de 10), le sobra.
+    mem_limit: 512m
+    networks:
+      - db-network
+    # Sin "ports": la base no es accesible desde tu máquina. Para depurar
+    # con un cliente SQL (DBeaver, psql...), crea un docker-compose.override.yml
+    # (compose lo lee solo; está en .gitignore) con:
+    #
+    #   services:
+    #     db:
+    #       ports:
+    #         - "127.0.0.1:15432:5432"
+    #       networks:
+    #         - db-network
+    #         - db-debug
+    #   networks:
+    #     db-debug: {}
+    #
+    # y conecta a localhost:15432. "127.0.0.1" = solo desde tu máquina, nunca
+    # desde la red local. Hace falta la red extra porque db-network es
+    # "internal" y en esas redes Docker no publica puertos. 15432 y no 5432
+    # (ni 5433) para no chocar con un PostgreSQL instalado en tu equipo; si
+    # está ocupado, usa cualquier otro libre.
+    # Más rápido, sin override: docker compose exec db psql -U streambox
+
+  # ---------------------------------------------------------------
+  # Backend Spring Boot (imagen construida con streambox/Dockerfile).
+  # Escucha en el puerto 8080 DENTRO de la red de Docker.
+  # ---------------------------------------------------------------
+  backend:
+    build: ./streambox
+    restart: unless-stopped
+    depends_on:
+      db:
+        # Espera a que el healthcheck de PostgreSQL dé OK, no solo a que el
+        # contenedor exista: si no, Flyway fallaría al no poder conectar.
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      # "db" es el nombre del servicio de arriba: Docker lo resuelve a la IP
+      # del contenedor dentro de la red. Usuario y contraseña son los mismos
+      # que crea PostgreSQL, así que se definen una sola vez en el .env.
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-streambox}
+      DB_USERNAME: ${POSTGRES_USER:-streambox}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD. Copia .env.example como .env y rellénalo.}
+      JWT_SECRET: ${JWT_SECRET:?Falta JWT_SECRET (mínimo 32 caracteres). Genera uno con openssl rand -base64 48 y ponlo en .env.}
+      JWT_EXPIRATION_HOURS: ${JWT_EXPIRATION_HOURS:-24}
+      # Administrador inicial (opcional): si ADMIN_EMAIL y ADMIN_PASSWORD
+      # están vacíos, no se crea ninguno.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    # Límite de memoria del contenedor. La JVM ajusta su heap a él
+    # (-XX:MaxRAMPercentage=75 en el Dockerfile → ~768 MB de heap); sin
+    # límite, lo calcularía sobre toda la memoria de la máquina.
+    mem_limit: 1g
+    # Spring termina las peticiones en curso al apagar (server.shutdown=
+    # graceful, hasta 30 s). Docker, por defecto, espera solo 10 s antes de
+    # matar el proceso; se le da algo más de margen.
+    stop_grace_period: 40s
+    # Endurecimiento: la aplicación no necesita escribir en su propio
+    # sistema de archivos (solo en /tmp, que va en memoria), ni privilegios
+    # especiales del kernel, ni ganar privilegios con binarios setuid.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - db-network
+      - app-network
+    # Sin "ports" a propósito (ver la cabecera). El HEALTHCHECK lo define
+    # el Dockerfile: /actuator/health/readiness.
+
+  # ---------------------------------------------------------------
+  # Frontend: nginx con la SPA compilada (imagen de frontend/Dockerfile).
+  # Es la ÚNICA puerta de entrada: sirve la web y hace de proxy de /api/
+  # al backend (mismo origen, sin CORS). Configuración en
+  # frontend/nginx/default.conf.
+  # ---------------------------------------------------------------
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        # No se abre la puerta hasta que el backend está listo (readiness:
+        # arrancado, con Flyway aplicado y la base accesible). Así el
+        # primer usuario no ve errores 502 mientras Spring arranca.
+        condition: service_healthy
+    ports:
+      # Formato IP:puerto_del_host:puerto_del_contenedor. Dentro, nginx
+      # escucha en el 8080 (imagen sin privilegios); fuera, por defecto en
+      # el 8088. NUNCA 8080 ni 5173: son los del backend y el Vite de
+      # desarrollo, que pueden estar en marcha a la vez.
+      # 127.0.0.1 por defecto = solo desde tu propio equipo. Todo va por
+      # HTTP sin cifrar (contraseñas y tokens incluidos), así que abrirlo a
+      # la red local (STREAMBOX_BIND_ADDRESS=0.0.0.0) debe ser una decisión
+      # consciente, p. ej. para probar desde el móvil en una red de confianza.
+      - "${STREAMBOX_BIND_ADDRESS:-127.0.0.1}:${STREAMBOX_PORT:-8088}:8080"
+    # nginx sirve archivos estáticos: con 128 MB le sobra (usa ~10 MB).
+    mem_limit: 128m
+    # Mismo endurecimiento que el backend. La imagen nginx-unprivileged
+    # funciona sin root y sin ninguna capacidad del kernel; solo escribe el
+    # pid y los temporales (cuerpos de petición grandes, respuestas del
+    # proxy que no caben en memoria) en /tmp, que va en memoria.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      # app-network: nginx habla con el backend, NUNCA con la base de datos
+      # (db-network). Si alguien comprometiera nginx, PostgreSQL ni
+      # siquiera sería resoluble desde aquí.
+      # edge: la única red NO interna, necesaria para publicar el puerto.
+      - app-network
+      - edge
+    # El HEALTHCHECK lo define el Dockerfile: /healthz, respondido por nginx.
+
+networks:
+  # Red solo entre backend y base de datos. "internal" = sin salida a
+  # Internet ni puertos publicados: aunque se añadiera un servicio a la
+  # otra red (nginx), no podría hablar con PostgreSQL.
+  db-network:
+    internal: true
+  # Red entre backend y frontend (nginx). También "internal": el backend
+  # no llama a ningún servicio externo, así que se le quita la salida a
+  # Internet. Si alguien lograra ejecutar código en él, no podría
+  # descargar herramientas ni enviar datos a un servidor suyo.
+  app-network:
+    internal: true
+  # Red de entrada, solo para nginx. Docker solo publica puertos en redes
+  # no internas: por eso nginx necesita esta además de app-network.
+  edge: {}
+
+volumes:
+  db-data:

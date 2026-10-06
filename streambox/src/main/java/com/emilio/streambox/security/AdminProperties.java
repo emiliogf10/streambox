@@ -34,4 +34,22 @@ public record AdminProperties(
         return email != null && !email.isBlank()
                 && password != null && !password.isBlank();
     }
+
+    /**
+     * Representación sin la contraseña.
+     *
+     * <p>
+     * El {@code toString()} que Java genera para los {@code record} incluye
+     * todos los campos, así que registrar este objeto en un log (o meterlo en
+     * el mensaje de una excepción) publicaría {@code ADMIN_PASSWORD}. Hoy
+     * nadie lo hace; esto evita que un cambio futuro lo provoque sin darse
+     * cuenta.
+     * </p>
+     *
+     * @return texto con el email y el usuario, y la contraseña enmascarada
+     */
+    @Override
+    public String toString() {
+        return "AdminProperties[email=" + email + ", username=" + username + ", password=******]";
+    }
 }

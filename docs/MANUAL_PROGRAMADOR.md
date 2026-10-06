@@ -15,7 +15,7 @@ No sustituye al código ni a su Javadoc: los complementa. El Javadoc explica cad
 1. [Visión general](#1-visión-general)
 2. [Recorrido completo de una petición](#2-recorrido-completo-de-una-petición)
 3. [Qué pasa al arrancar el backend](#3-qué-pasa-al-arrancar-el-backend)
-4. [Configuración, perfiles y variables de entorno](#4-configuración-perfiles-y-variables-de-entorno)
+4. [Configuración, perfiles y variables de entorno](#4-configuración-perfiles-y-variables-de-entorno) (incluye 4.6 Docker y CI)
 5. [Base de datos y Flyway](#5-base-de-datos-y-flyway)
 6. [Entidades JPA](#6-entidades-jpa)
 7. [Repositorios: cómo se generan las consultas](#7-repositorios-cómo-se-generan-las-consultas)
@@ -157,7 +157,9 @@ Cuando ejecutas `.\mvnw.cmd spring-boot:run` desde `streambox/`, ocurre esto, en
 
 2. **Se carga la configuración.** Primero `application.properties` (común), luego el del perfil activo (`application-dev.properties` por defecto) y, si existe, `application-local.properties` con tus credenciales (capítulo 4).
 
-3. **Se valida la configuración.** `JwtProperties` lleva `@Validated`: si `JWT_SECRET` falta o tiene menos de 32 caracteres, **la aplicación no arranca** y el error dice exactamente qué propiedad falla. Es mejor fallar al arrancar que descubrir el problema al primer login.
+3. **Se valida la configuración.** Si `JWT_SECRET` falta, está vacío, es un marcador sin resolver (`${JWT_SECRET}`) o tiene menos de 32 caracteres, **la aplicación no arranca**, y el error explica en español qué falta y cómo generarlo (`openssl rand -base64 48`). Es mejor fallar al arrancar que descubrir el problema al primer login.
+
+   La comprobación está en el constructor del `record` `JwtProperties` y **no** con Bean Validation (`@Size`). Con `@Size`, Spring Boot imprimía el valor rechazado en el log (`Value: "..."`), y ese valor podía ser un secreto real mal copiado; los logs suelen acabar en sistemas con más acceso que el propio secreto. El mensaje nunca incluye el valor ni su longitud. Por la misma razón, `JwtProperties` y `AdminProperties` ocultan los secretos en `toString()`.
 
 4. **Se conecta a la base de datos** y **Flyway** aplica las migraciones pendientes (`V1`, `V2`…). Ver capítulo 5.
 
@@ -247,6 +249,76 @@ Puntos que conviene entender:
 - **El esquema lo crea Flyway** al arrancar contra la base vacía (aplica `V1` y `V2`), igual que en local.
 - **Seguridad: la API pública de Supabase.** Supabase publica automáticamente una API REST sobre el esquema `public`, accesible con una clave pública. Como las tablas viven ahí, **hay que cerrarla** ejecutando [`docs/supabase-seguridad.sql`](supabase-seguridad.sql) una vez creadas las tablas (activa RLS sin políticas y retira permisos a `anon` y `authenticated`). La aplicación no se ve afectada porque conecta con el rol `postgres`, que se salta RLS. No es una migración de Flyway porque `ENABLE ROW LEVEL SECURITY` es específico de PostgreSQL y H2 (los tests) no lo entiende. Si una migración futura crea tablas nuevas, hay que añadirlas a ese script.
 - **Mover los datos** de una base a otra: ver `docs/PLAN_DE_ACCION.md` (migración a Supabase). Los `id` se conservan, y por eso hay que comprobar que las secuencias de identidad quedan por encima del mayor `id` (si no, el siguiente `INSERT` chocaría con una fila existente).
+
+### 4.6 Docker y CI
+
+Con Docker, `docker compose up -d --build` levanta la aplicación completa en `http://localhost:8088`. Uso básico en el README; aquí, cómo está montado y por qué.
+
+#### Las imágenes
+
+- **Backend** (`streambox/Dockerfile`), en dos etapas:
+  1. **Compilación** con Maven + JDK 21. Primero se copia solo `pom.xml` y se descargan las dependencias en una capa propia (`dependency:go-offline`); así, un cambio de código no vuelve a descargarlas. Se compila **sin tests** (`-Dmaven.test.skip=true`), porque los tests van en el CI.
+  2. **Ejecución** con un JRE 21 Alpine. El JAR se extrae en capas (`-Djarmode=tools extract`): `lib/`, 65 MB que casi nunca cambian, y `app.jar`, 185 kB. Un cambio de código solo cambia una capa pequeña.
+
+  La aplicación corre con un **usuario sin privilegios** (UID 10001), perfil `prod`, `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError` y un `HEALTHCHECK` contra `/actuator/health/readiness`. Imagen: unos 270 MB.
+- **Frontend** (`frontend/Dockerfile`):
+  1. Compila con Node 24. Usa `npm ci --ignore-scripts`: los `postinstall` son la vía típica de los ataques a la cadena de suministro y aquí no hacen falta. Después, `npm run build`.
+  2. Copia `dist/`, con las portadas, a `nginxinc/nginx-unprivileged`: sin root (UID 101) y en el puerto 8080. La imagen oficial de nginx arranca como root y no funcionaría con `cap_drop: ALL`. Imagen: unos 80 MB.
+- **Listas blancas en `.dockerignore`.** Solo entra lo imprescindible (`pom.xml` y `src/main`; las fuentes del frontend). Sobre todo, **`application-local.properties` queda fuera**, porque tiene las credenciales de Supabase. Si entrara en la imagen, el contenedor llevaría tus credenciales y se conectaría a tu base de desarrollo. Se comprobó listando el JAR y el sistema de archivos de la imagen. Por la misma razón, `pom.xml` lo excluye también del JAR que genera un `mvnw package` en local (`maven-jar-plugin`), aunque sigue en `target/classes` para `spring-boot:run`, el IDE y los tests.
+
+#### `docker-compose.yml`
+
+- **Servicios:**
+  - `db`: `postgres:16.15-trixie`, la misma versión mayor que los tests con Testcontainers. Datos en el volumen `streambox_db-data`, que `docker compose down -v` borra.
+  - `backend`: espera a que `db` esté sano.
+  - `frontend`: nginx; espera a que el backend esté sano.
+- **Redes** (mínimo privilegio):
+  - `db-network` (interna): solo `db` y `backend`.
+  - `app-network` (interna): `backend` y nginx. Al ser interna, **el backend no tiene salida a Internet**, que no necesita.
+  - `edge`: solo nginx, la única no interna, porque Docker solo publica puertos en ese tipo de red.
+- **Puertos.** El único publicado es el de nginx: `STREAMBOX_PORT` (8088 por defecto), solo en `127.0.0.1` salvo que cambies `STREAMBOX_BIND_ADDRESS`. No se usan el 8080 ni el 5173, así que no chocan con tu entorno de desarrollo. Para depurar la base, un `docker-compose.override.yml` (ignorado por git) puede publicarla en `127.0.0.1:15432`; hay un ejemplo comentado en el compose.
+- **Endurecimiento** de los tres servicios: sin root (`db` con `user: postgres`), `read_only` con `tmpfs` donde hace falta escribir, `cap_drop: ALL`, `no-new-privileges` y límite de memoria.
+- **Variables.** Salen de `.env` (ignorado por git; plantilla `.env.example`). Las obligatorias, `POSTGRES_PASSWORD` y `JWT_SECRET`, van **vacías a propósito** en la plantilla: si se copia sin rellenar, compose se niega a arrancar (`${VAR:?mensaje}`) en lugar de arrancar con un secreto público. `DB_URL`, `DB_USERNAME` y `DB_PASSWORD` se construyen a partir de `POSTGRES_*`. **Las variables de la terminal ganan al `.env`.** Los secretos se ven en `docker inspect`; la mejora sería usar *Docker secrets*.
+
+#### nginx (`frontend/nginx/default.conf`)
+
+Es la única puerta de entrada.
+
+- **SPA:** fallback a `index.html`, para que recargar `/series/7` funcione.
+- **Proxy de `/api/`** a `backend:8080`. Es el mismo origen, así que no hace falta CORS, igual que con el proxy de Vite en desarrollo. Usa `resolve`, para seguir funcionando si el backend se reinicia y cambia de IP, y `proxy_connect_timeout 5s`, para que un backend caído dé error enseguida y no a los 60 s.
+- **`X-Forwarded-For` se fija con la IP real** (`$remote_addr`). El backend, en el perfil `prod` con `forward-headers-strategy=native`, limita los logins por esa IP. Si se usara `$proxy_add_x_forwarded_for`, un atacante podría inventarse una IP en cada petición. Se comprobó:
+  - directo al backend, con una IP falsa distinta en cada petición, 13 de 13 intentos se saltan el límite;
+  - a través de nginx, el 10.º intento ya da 429.
+- **Caché:** `index.html` con `no-cache`; `/assets/` (nombres con hash) un año e `immutable`; `/covers/` un día. Un recurso que no existe da 404, no `index.html`.
+- **No se publica:** `/actuator` no es accesible desde fuera, y las rutas con `;` dan 400. El `;` es un truco clásico para saltarse reglas de seguridad por ruta en Java.
+- **Cabeceras de seguridad**, en todas las respuestas (`always`), declaradas una sola vez en el `server`. Si un `location` tuviera su propio `add_header`, dejaría de heredarlas.
+  - Una **CSP** estricta: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`. Es la segunda línea de defensa contra XSS: aunque se colara HTML, el navegador no ejecutaría scripts en línea, y un script colado no podría mandar el token de `localStorage` a otro servidor.
+  - `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, una `Permissions-Policy` restrictiva y `Cross-Origin-Opener/Resource-Policy: same-origin`.
+  
+  Se comprobó recorriendo toda la app en Chromium: **0 violaciones**, y un script en línea de control quedó bloqueado. La CSP no se aplica en `npm run dev`, porque Vite inyecta código en línea. HSTS está comentado porque por HTTP los navegadores lo ignoran; se activará cuando haya HTTPS.
+
+#### CI (`.github/workflows/ci.yml`)
+
+Se ejecuta en cada `push` a `main`, en cada pull request y a mano. Lanza cuatro jobs en paralelo en `ubuntu-latest`:
+
+| Job | Qué hace |
+| :--- | :--- |
+| `backend` | `./mvnw -B -ntp verify` con Temurin 21. Los runners traen Docker, así que **los tests de PostgreSQL se ejecutan siempre**. Si falla, sube los informes de surefire |
+| `frontend` | `npm ci --ignore-scripts`, `build`, `lint` y `test` con Node 24 |
+| `e2e` | Playwright con su propio backend H2 (8099) y Vite (5199), y caché de los navegadores. Si falla, sube el informe |
+| `docker` | Construye las dos imágenes (caché `type=gha`, sin publicarlas en ningún registro), levanta el stack con un `.env` de secretos aleatorios (`openssl rand`, enmascarados en el log) y comprueba con `curl` la CSP, el 401 de la API y el login del administrador. Siempre termina con `down -v` |
+
+Ningún job usa secretos del repositorio y el token solo tiene `contents: read`. Las *actions* van fijadas **por SHA** y no por etiqueta, porque una etiqueta se puede mover a código malicioso (ocurrió con `tj-actions` en 2025); Dependabot actualiza el SHA y su comentario. La sintaxis se validó con `actionlint`.
+
+#### Dependabot (`.github/dependabot.yml`)
+
+Cada lunes revisa Maven, npm, las *actions*, las imágenes de los Dockerfile y la de PostgreSQL del compose.
+
+- **Agrupa** las versiones menores y los parches para no llenar el repositorio de pull requests. Las mayores llegan en su propio pull request, y el CI dice cuánto rompen.
+- **Ignora las mayores** que el CI no puede validar o que exigen cambios coordinados:
+  - **PostgreSQL**: el CI arranca con una base vacía y daría verde mientras tu volumen real no arrancaría, porque pasar de una mayor a otra exige `pg_upgrade`.
+  - **Java, Node, Maven y `@types/node`**: su versión está repetida en varios archivos.
+- Espera **7 días** antes de proponer una versión nueva de npm, Maven o una *action*, por si la versión resulta secuestrada.
 
 ---
 
@@ -1240,6 +1312,8 @@ Spring Boot Actuator expone endpoints de operación. Solo se exponen dos:
 | `/actuator/health/readiness` | Público | «Puede recibir tráfico» (base de datos lista) |
 | `/actuator/info` | Con token | Información de la aplicación |
 
+En Docker, el `HEALTHCHECK` del contenedor del backend usa `/actuator/health/readiness`. nginx **no publica `/actuator`**: desde fuera solo se llega a `/api/` (capítulo 4.6).
+
 El resto (`env`, `beans`, `heapdump`…) **no se exponen**: algunos mostrarían variables de entorno y secretos.
 
 ### 17.2 Swagger / OpenAPI
@@ -1622,8 +1696,8 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1145 | `.\mvnw.cmd test` (desde `streambox/`) |
-| Backend (PostgreSQL real) | Testcontainers | 119 | Se ejecutan con el anterior (1264 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos es menor (95) |
+| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1153 | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (PostgreSQL real) | Testcontainers | 119 | Se ejecutan con el anterior (1272 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos es menor (95) |
 | Frontend (lógica y componentes) | Vitest, Testing Library | 729 | `npm run test` (desde `frontend/`) |
 | Frontend (flujos completos) | Playwright (Chromium) | 135 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 

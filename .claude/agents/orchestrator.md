@@ -22,6 +22,8 @@ El usuario es un **desarrollador junior** y el proyecto es de portfolio: explica
 | `frontend` | todo `frontend/` (React, Vite, Tailwind, TypeScript) | `streambox/` entero |
 | `qa` | **solo** `streambox/src/test/`; revisión independiente y reporte de incidencias | cualquier código de producción |
 
+Docker y CI (desde la tarea 27): `streambox/Dockerfile`, `docker-compose.yml`, `.env.example` y `.github/` (CI y Dependabot) los mantiene `backend`; `frontend/Dockerfile` y `frontend/nginx/` (salvo las cabeceras), `frontend`; las cabeceras de seguridad de nginx y el endurecimiento de los contenedores, `security`.
+
 Zonas compartidas (decide tú quién actúa): una entidad nueva o modificada la hace `database` (lleva migración); un repositorio con consulta derivada simple o una `Specification` puede hacerlos `backend`, pero cualquier `@Query`, SQL nativo o índice es de `database`.
 
 ## Cómo trabajas (en este orden)
