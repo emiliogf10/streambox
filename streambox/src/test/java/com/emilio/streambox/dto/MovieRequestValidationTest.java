@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -18,10 +20,12 @@ import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 
 /**
- * Tests unitarios de las reglas de {@code imageUrl} y {@code videoUrl} de
- * {@link MovieRequest} tal como están anotadas (sin Spring).
+ * Tests unitarios de las reglas de {@code imageUrl} y {@code videoUrl} (y del
+ * tope de {@code genreIds}) de {@link MovieRequest} tal como están anotadas
+ * (sin Spring).
  *
  * <p>
  * Comprueban lo que no se ve probando {@code @HttpsUrl} por separado: que cada
@@ -38,6 +42,7 @@ class MovieRequestValidationTest {
     private static final String IMAGE_SIZE = "La URL de la imagen no puede superar los 500 caracteres";
     private static final String VIDEO_FORMAT = "La URL del vídeo debe empezar por https://";
     private static final String VIDEO_SIZE = "La URL del vídeo no puede superar los 500 caracteres";
+    private static final String GENRES_SIZE = "Una película puede tener como máximo 20 géneros";
 
     private static final String VALID_IMAGE = "https://image.tmdb.org/t/p/w500/x.jpg";
     private static final String VALID_VIDEO = "https://videos.streambox.example/watch/dune";
@@ -166,11 +171,42 @@ class MovieRequestValidationTest {
     }
 
     // ------------------------------------------------------------------
+    // Número de géneros
+    // ------------------------------------------------------------------
+
+    @Test
+    void veinteGenerosEsElMaximoAdmitido() {
+        assertTrue(validator.validate(withGenres(20)).isEmpty());
+        assertEquals(20, MovieRequest.MAX_GENRES);
+    }
+
+    @Test
+    void veintiunGenerosDaElMensajeDelTope() {
+        assertEquals(List.of(GENRES_SIZE), messagesFor(withGenres(21), "genreIds"));
+    }
+
+    /** El tope no tapa a {@code @NotEmpty}: una lista vacía sigue dando un único error. */
+    @Test
+    void sinGenerosSoloInformaNotEmpty() {
+        List<ConstraintViolation<MovieRequest>> violations = violationsFor(withGenres(0), "genreIds");
+
+        assertEquals(1, violations.size(), violations::toString);
+        assertEquals(NotEmpty.class,
+                violations.get(0).getConstraintDescriptor().getAnnotation().annotationType());
+    }
+
+    // ------------------------------------------------------------------
     // Utilidades
     // ------------------------------------------------------------------
 
     private static MovieRequest request(String imageUrl, String videoUrl) {
         return new MovieRequest("Dune", "Sinopsis", 155, 2021, imageUrl, videoUrl, Set.of(1L));
+    }
+
+    /** Petición válida con {@code count} ids de género distintos (1..count). */
+    private static MovieRequest withGenres(int count) {
+        Set<Long> genreIds = LongStream.rangeClosed(1, count).boxed().collect(Collectors.toSet());
+        return new MovieRequest("Dune", "Sinopsis", 155, 2021, VALID_IMAGE, VALID_VIDEO, genreIds);
     }
 
     private static String httpsUrlOfLength(int length) {

@@ -83,4 +83,30 @@ class EntityEqualityTest {
         assertEquals(g1, g2);
         assertEquals(u1, u2);
     }
+
+    @Test
+    void seriesYEpisodiosTambienUsanElIdYNoSeConfundenConPeliculas() {
+        Series s1 = new Series();
+        s1.setId(7L);
+        Series s2 = new Series();
+        s2.setId(7L);
+        Episode e1 = new Episode();
+        e1.setId(7L);
+        Episode e2 = new Episode();
+        e2.setId(7L);
+
+        assertEquals(s1, s2);
+        assertEquals(s1.hashCode(), s2.hashCode());
+        assertEquals(e1, e2);
+        assertNotEquals(s1, e1);
+        assertNotEquals(s1, movie(7L));
+        assertNotEquals(new Series(), new Series());
+
+        // El hashCode no cambia al recibir el id (la serie sigue en el Set)
+        Series unsaved = new Series();
+        Set<Series> set = new HashSet<>();
+        set.add(unsaved);
+        unsaved.setId(9L);
+        assertTrue(set.contains(unsaved));
+    }
 }

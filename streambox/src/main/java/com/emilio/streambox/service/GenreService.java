@@ -1,5 +1,6 @@
 package com.emilio.streambox.service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -19,6 +20,7 @@ import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.mapper.GenreMapper;
 import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
+import com.emilio.streambox.repository.SeriesRepository;
 
 /**
  * Servicio con la lógica de negocio de los géneros cinematográficos.
@@ -34,7 +36,7 @@ import com.emilio.streambox.repository.MovieRepository;
  * género está en uso, para responder con un error claro. Pero entre esa
  * comprobación y la escritura otra petición puede adelantarse, así que la
  * garantía real son las restricciones de la base de datos ({@code UNIQUE} del
- * nombre y clave foránea de {@code movie_genres}). Cuando una de ellas salta,
+ * nombre y claves foráneas de {@code movie_genres} y {@code series_genres}). Cuando una de ellas salta,
  * su {@link DataIntegrityViolationException} se traduce a la misma excepción
  * de dominio que la comprobación previa, para que el cliente reciba el mismo
  * 409 gane quien gane la carrera.
@@ -56,16 +58,22 @@ public class GenreService {
 
     private final GenreRepository genreRepository;
     private final MovieRepository movieRepository;
+    private final SeriesRepository seriesRepository;
 
     /**
      * Crea el servicio de géneros.
      *
-     * @param genreRepository repositorio de géneros
-     * @param movieRepository repositorio de películas (para saber si un género está en uso)
+     * @param genreRepository  repositorio de géneros
+     * @param movieRepository  repositorio de películas (para saber si un género está en uso)
+     * @param seriesRepository repositorio de series (ídem: el catálogo de géneros es común)
      */
-    public GenreService(GenreRepository genreRepository, MovieRepository movieRepository) {
+    public GenreService(
+            GenreRepository genreRepository,
+            MovieRepository movieRepository,
+            SeriesRepository seriesRepository) {
         this.genreRepository = genreRepository;
         this.movieRepository = movieRepository;
+        this.seriesRepository = seriesRepository;
     }
 
     /**
@@ -149,22 +157,23 @@ public class GenreService {
     }
 
     /**
-     * Borra un género que ninguna película tenga asignado.
+     * Borra un género que ninguna película ni serie tenga asignado.
      *
      * <p>
-     * Si alguna película lo usa, se rechaza con un mensaje que dice cuántas,
-     * en lugar de quitárselo en cascada (ver {@link GenreInUseException}).
-     * El recuento es una consulta {@code COUNT}: no se cargan las películas.
+     * Si alguna lo usa, se rechaza con un mensaje que dice cuántas películas
+     * y cuántas series, en lugar de quitárselo en cascada (ver
+     * {@link GenreInUseException}). Los recuentos son dos consultas
+     * {@code COUNT}: no se carga ninguna película ni serie.
      * </p>
      *
      * <p>
      * <strong>Carrera:</strong> si entre el recuento y el borrado otra
-     * petición asigna el género a una película, la clave foránea de
-     * {@code movie_genres} rechaza el {@code DELETE}. Se fuerza el
-     * {@code flush} aquí dentro para que esa violación salte en este método,
-     * donde se puede traducir, y no al confirmar la transacción después de
-     * salir de él (fuera de nuestro control, como un 409 genérico de
-     * integridad). Se traduce <em>cualquier</em>
+     * petición asigna el género a una película o serie, la clave foránea de
+     * {@code movie_genres} o {@code series_genres} rechaza el {@code DELETE}.
+     * Se fuerza el {@code flush} aquí dentro para que esa violación salte en
+     * este método, donde se puede traducir, y no al confirmar la transacción
+     * después de salir de él (fuera de nuestro control, como un 409 genérico
+     * de integridad). Se traduce <em>cualquier</em>
      * {@link DataIntegrityViolationException} porque un {@code DELETE} sobre
      * {@code genres} no puede violar otra cosa que una clave foránea que apunta
      * a él (no inserta valores, así que no hay unicidad, nulos ni longitudes
@@ -173,7 +182,7 @@ public class GenreService {
      *
      * @param id identificador del género
      * @throws GenreNotFoundException si el género no existe
-     * @throws GenreInUseException    si alguna película lo tiene asignado
+     * @throws GenreInUseException    si alguna película o serie lo tiene asignado
      */
     @Transactional
     public void deleteGenre(Long id) {
@@ -181,8 +190,9 @@ public class GenreService {
         Genre genre = findGenre(id);
 
         long movies = movieRepository.countByGenres_Id(id);
-        if (movies > 0) {
-            throw new GenreInUseException(inUseMessage(genre.getName(), movies));
+        long series = seriesRepository.countByGenres_Id(id);
+        if (movies > 0 || series > 0) {
+            throw new GenreInUseException(inUseMessage(genre.getName(), movies, series));
         }
 
         try {
@@ -191,10 +201,10 @@ public class GenreService {
         } catch (DataIntegrityViolationException e) {
             // Tras un fallo de flush la transacción queda inservible (en
             // PostgreSQL, abortada), así que no se puede repetir el recuento:
-            // el mensaje no da la cifra.
+            // el mensaje no da la cifra ni sabe si fue una película o una serie.
             throw new GenreInUseException("No se puede eliminar el género \"" + genre.getName()
-                    + "\": alguna película lo tiene asignado. "
-                    + "Quítalo de esas películas antes de borrarlo.");
+                    + "\": alguna película o serie lo tiene asignado. "
+                    + "Quítalo de esas películas o series antes de borrarlo.");
         }
     }
 
@@ -342,14 +352,38 @@ public class GenreService {
     }
 
     /**
-     * Construye el mensaje del 409 de borrado, con el recuento y la
+     * Construye el mensaje del 409 de borrado, con los recuentos y la
      * concordancia en singular o plural.
+     *
+     * <p>
+     * Ejemplos: «lo usa 1 película. Quítalo de esa película», «lo usan 3
+     * películas y 2 series. Quítalo de esas películas y de esas series», «lo
+     * usan 2 series. Quítalo de esas series». La parte que vale 0 se omite, y
+     * el verbo va en singular solo si en total es una única película o serie.
+     * Con solo películas el texto es exactamente el que había antes de existir
+     * las series (el frontend y los tests ya lo conocen).
+     * </p>
+     *
+     * @param name   nombre del género
+     * @param movies películas que lo usan
+     * @param series series que lo usan (al menos uno de los dos recuentos es mayor que 0)
+     * @return mensaje completo del error
      */
-    private static String inUseMessage(String name, long movies) {
+    private static String inUseMessage(String name, long movies, long series) {
 
-        String usage = movies == 1
-                ? "lo usa 1 película. Quítalo de esa película"
-                : "lo usan " + movies + " películas. Quítalo de esas películas";
-        return "No se puede eliminar el género \"" + name + "\": " + usage + " antes de borrarlo.";
+        List<String> counts = new ArrayList<>();
+        List<String> targets = new ArrayList<>();
+        if (movies > 0) {
+            counts.add(movies == 1 ? "1 película" : movies + " películas");
+            targets.add(movies == 1 ? "esa película" : "esas películas");
+        }
+        if (series > 0) {
+            counts.add(series == 1 ? "1 serie" : series + " series");
+            targets.add(series == 1 ? "esa serie" : "esas series");
+        }
+
+        String verb = movies + series == 1 ? "lo usa " : "lo usan ";
+        return "No se puede eliminar el género \"" + name + "\": " + verb + String.join(" y ", counts)
+                + ". Quítalo de " + String.join(" y de ", targets) + " antes de borrarlo.";
     }
 }

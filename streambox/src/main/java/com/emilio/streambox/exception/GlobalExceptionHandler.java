@@ -84,6 +84,34 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 exception.getMessage(), request);
     }
 
+    /**
+     * 404 específico de "Mi lista" de series: la serie existe pero no estaba
+     * en la lista. Spring lo elige antes que el de
+     * {@link ResourceNotFoundException} por ser la clase más concreta.
+     */
+    @ExceptionHandler(SeriesNotInFavoritesException.class)
+    public ResponseEntity<ErrorResponse> handleSeriesNotInFavorites(
+            SeriesNotInFavoritesException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.NOT_FOUND, ErrorCode.SERIES_NOT_IN_FAVORITES,
+                exception.getMessage(), request);
+    }
+
+    /** 409 de "Mi lista" de series: la serie ya estaba (también si dos altas se cruzan). */
+    @ExceptionHandler(SeriesAlreadyInFavoritesException.class)
+    public ResponseEntity<ErrorResponse> handleSeriesAlreadyInFavorites(
+            SeriesAlreadyInFavoritesException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.CONFLICT, ErrorCode.SERIES_ALREADY_IN_FAVORITES,
+                exception.getMessage(), request);
+    }
+
+    /** 409 al crear o mover un episodio a una temporada y número ya ocupados en la serie. */
+    @ExceptionHandler(EpisodeAlreadyExistsException.class)
+    public ResponseEntity<ErrorResponse> handleEpisodeAlreadyExists(
+            EpisodeAlreadyExistsException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.CONFLICT, ErrorCode.EPISODE_ALREADY_EXISTS,
+                exception.getMessage(), request);
+    }
+
     @ExceptionHandler(UserAlreadyExistsException.class)
     public ResponseEntity<ErrorResponse> handleUserAlreadyExists(
             UserAlreadyExistsException exception, HttpServletRequest request) {

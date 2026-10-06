@@ -124,12 +124,18 @@ public class SecurityConfig {
          * <li>Permite el acceso sin autenticación a los endpoints
          * de usuarios y autenticación, a las comprobaciones de salud
          * ({@code /actuator/health}) y a la documentación OpenAPI.</li>
-         * <li>En el catálogo ({@code /api/movies/**} y {@code /api/genres/**})
-         * la lectura ({@code GET}/{@code HEAD}) es para cualquier usuario
-         * autenticado y cualquier otro método queda reservado a
-         * {@code ADMIN}, de modo que un endpoint de escritura nuevo nace
-         * protegido.</li>
-         * <li>Exige autenticación para cualquier otro endpoint.</li>
+         * <li>Las vistas de gestión ({@code /api/admin/**}) quedan reservadas a
+         * {@code ADMIN} con cualquier método, también la lectura: muestran
+         * datos que los usuarios no deben ver (p. ej. series sin
+         * episodios).</li>
+         * <li>En el catálogo ({@code /api/movies/**}, {@code /api/genres/**} y
+         * {@code /api/series/**}, episodios incluidos) la lectura
+         * ({@code GET}/{@code HEAD}) es para cualquier usuario autenticado y
+         * cualquier otro método queda reservado a {@code ADMIN}, de modo que
+         * un endpoint de escritura nuevo nace protegido.</li>
+         * <li>Exige autenticación para cualquier otro endpoint, incluidos los
+         * personales de {@code /api/users/me/**} (como los favoritos de
+         * series), que usan el id del token y nunca uno de la URL.</li>
          * <li>Registra {@link JwtAuthenticationFilter} antes del filtro
          * estándar {@link UsernamePasswordAuthenticationFilter}.</li>
          * </ul>
@@ -173,6 +179,16 @@ public class SecurityConfig {
                                                                 RateLimitingFilter.LOGIN_PATH)
                                                 .permitAll()
 
+                                                // Vistas de gestion (p. ej. /api/admin/series, que
+                                                // incluye series sin episodios, ocultas a los
+                                                // usuarios): cualquier metodo, incluida la lectura,
+                                                // es solo para ADMIN. Va antes de las reglas del
+                                                // catalogo para que ninguna regla de lectura
+                                                // "autenticada" pueda capturarla si algun dia se
+                                                // amplia un patron.
+                                                .requestMatchers("/api/admin/**")
+                                                .hasRole("ADMIN")
+
                                                 // Solo ADMIN puede listar todos los usuarios.
                                                 .requestMatchers(HttpMethod.GET, "/api/users")
                                                 .hasRole("ADMIN")
@@ -212,6 +228,25 @@ public class SecurityConfig {
                                                 .requestMatchers(HttpMethod.DELETE, "/api/genres/**")
                                                 .hasRole("ADMIN")
 
+                                                // Cualquier usuario autenticado puede consultar series
+                                                // (listado, busqueda y detalle; el servicio oculta las
+                                                // que no tienen episodios).
+                                                .requestMatchers(HttpMethod.GET, "/api/series/**")
+                                                .authenticated()
+                                                .requestMatchers(HttpMethod.HEAD, "/api/series/**")
+                                                .authenticated()
+
+                                                // Solo ADMIN puede crear, modificar o eliminar series
+                                                // y sus episodios (/api/series/{id}/episodes/**).
+                                                .requestMatchers(HttpMethod.POST, "/api/series/**")
+                                                .hasRole("ADMIN")
+                                                .requestMatchers(HttpMethod.PUT, "/api/series/**")
+                                                .hasRole("ADMIN")
+                                                .requestMatchers(HttpMethod.PATCH, "/api/series/**")
+                                                .hasRole("ADMIN")
+                                                .requestMatchers(HttpMethod.DELETE, "/api/series/**")
+                                                .hasRole("ADMIN")
+
                                                 // Red de seguridad del catalogo: cualquier otro metodo
                                                 // (OPTIONS, TRACE o uno que se use en el futuro) es
                                                 // solo para ADMIN. Asi, un endpoint de escritura nuevo
@@ -220,7 +255,11 @@ public class SecurityConfig {
                                                 // a cualquier USER. Las preflight de CORS no se ven
                                                 // afectadas: si algun dia se configura CORS, su filtro
                                                 // las responde antes de llegar a la autorizacion.
-                                                .requestMatchers("/api/movies/**", "/api/genres/**")
+                                                // Los favoritos de series (/api/users/me/favorites/series)
+                                                // no cuelgan de aqui: son personales y caen en
+                                                // anyRequest().authenticated().
+                                                .requestMatchers("/api/movies/**", "/api/genres/**",
+                                                                "/api/series/**")
                                                 .hasRole("ADMIN")
 
                                                 // Comprobaciones de salud (Actuator) para balanceadores,

@@ -34,7 +34,8 @@
   - Registro e inicio de sesión (JWT), rutas protegidas con React Router y "Mi lista" de favoritos con actualización optimista.
   - **Panel de administración** (`/admin`, solo `ADMIN`): películas en tabla con buscador y paginación, alta y edición en un formulario con vista previa de la portada, borrado con confirmación, y gestión de géneros (crear, renombrar en línea y borrar si ninguna película lo usa). El enlace «Administrar» solo lo ven los administradores; el rol se consulta al servidor (`GET /api/users/me`) en cada sesión.
   - Login que avisa de los intentos que quedan antes del bloqueo de la cuenta y muestra la cuenta atrás cuando está bloqueada.
-  - Navegación con las secciones "Películas" y "Series" ya reservadas en el menú (marcadas como "próximamente" hasta que existan sus páginas).
+  - **Series** con temporadas y episodios: página `/series` (banner, filas por género), página propia de cada serie con selector de temporada y lista de episodios, fila «Series» en la portada, buscador que encuentra películas y series, y «Mi lista» con dos secciones. Las series sin episodios no las ven los usuarios hasta que el administrador les añade el primero. El panel de administración gestiona series y episodios.
+  - **Página «Películas»** (`/peliculas`): banner y filas por género como en Series, más filtros por género, año y orden que se guardan en la URL (se pueden compartir y «Atrás» vuelve al filtro anterior).
   - Cliente HTTP único (`apiFetch`) con manejo uniforme de 401, 403 y 429 (cuenta atrás con `Retry-After`) y avisos (toasts) en cada acción.
   - Accesible (teclado, foco visible, modales con `<dialog>`, buscador tipo combobox, contrastes WCAG AA) y responsive (móvil, tablet y escritorio) con Tailwind v4.
   - Llamadas a la API intermediadas mediante Proxy Vite para prevenir CORS.
@@ -120,9 +121,25 @@ La base de todos los endpoints es `/api`.
 | `GET` | `/api/genres` | `USER`, `ADMIN` | Lista completa de géneros disponibles |
 | `POST` | `/api/genres` | `ADMIN` | Alta de nuevo género cinematográfico (409 `GENRE_ALREADY_EXISTS` si el nombre ya existe) |
 | `PUT` | `/api/genres/{id}` | `ADMIN` | Renombrar un género (mismas reglas de nombre que el alta) |
-| `DELETE` | `/api/genres/{id}` | `ADMIN` | Eliminar un género (409 `GENRE_IN_USE` si alguna película lo usa) |
+| `DELETE` | `/api/genres/{id}` | `ADMIN` | Eliminar un género (409 `GENRE_IN_USE` si alguna película o serie lo usa) |
 
-### 5. Operación
+### 5. Series y episodios
+| Método | Endpoint | Acceso | Descripción |
+| :--- | :--- | :---: | :--- |
+| `GET` | `/api/series` | `USER`, `ADMIN` | Catálogo paginado de series **con episodios** (`page`, `size`, `sort` = `title`/`releaseYear`/`createdAt`/`id`, `direction`) |
+| `GET` | `/api/series/search` | `USER`, `ADMIN` | Búsqueda por `title`, `genreId` y `releaseYear`, paginada |
+| `GET` | `/api/series/{id}` | `USER`, `ADMIN` | Detalle con temporadas y episodios ordenados (404 si no existe o no tiene episodios) |
+| `POST` | `/api/series` | `ADMIN` | Alta de una serie (título, sinopsis, años, portada `https://` o `/covers/...`, géneros) |
+| `PUT` / `DELETE` | `/api/series/{id}` | `ADMIN` | Edición / borrado (el borrado arrastra episodios y listas de favoritos) |
+| `POST` | `/api/series/{id}/episodes` | `ADMIN` | Alta de un episodio (409 `EPISODE_ALREADY_EXISTS` si la temporada y el número ya existen) |
+| `PUT` / `DELETE` | `/api/series/{id}/episodes/{episodeId}` | `ADMIN` | Edición / borrado de un episodio |
+| `GET` | `/api/admin/series`, `/api/admin/series/{id}` | `ADMIN` | Vistas de gestión: incluyen las series aún sin episodios |
+| `GET` / `DELETE` | `/api/users/me/favorites/series` | `USER`, `ADMIN` | Series de «Mi lista» / vaciarlas |
+| `POST` / `DELETE` | `/api/users/me/favorites/series/{seriesId}` | `USER`, `ADMIN` | Añadir / quitar una serie de «Mi lista» |
+
+> **Si usas Supabase:** al arrancar la app, Flyway aplica `V3` (crea las tablas de series). Después vuelve a ejecutar `docs/supabase-seguridad.sql` para cerrar también esas tablas a la API pública de Supabase.
+
+### 6. Operación
 | Método | Endpoint | Acceso | Descripción |
 | :--- | :--- | :---: | :--- |
 | `GET` | `/actuator/health` | Público | Estado de la aplicación y de la base de datos |

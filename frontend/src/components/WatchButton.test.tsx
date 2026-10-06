@@ -61,3 +61,36 @@ describe('WatchButton: URL no utilizable', () => {
     expect(button).toHaveFocus();
   });
 });
+
+describe('WatchButton: variante de episodio («Ver»)', () => {
+  const episodeProps = {
+    title: 'El regreso',
+    label: 'Ver',
+    accessibleName: 'Ver T1:E3 El regreso',
+    unavailableSubject: 'este episodio',
+    variant: 'outline' as const,
+  };
+
+  it('texto visible «Ver» y nombre accesible único (que empieza por el texto visible), igual de seguro', () => {
+    render(<WatchButton videoUrl="https://video.example/s1e3" {...episodeProps} />);
+
+    const link = screen.getByRole('link', { name: 'Ver T1:E3 El regreso (se abre en una pestaña nueva)' });
+    expect(link).toHaveTextContent(/^Ver$/);
+    expect(link).toHaveAttribute('href', 'https://video.example/s1e3');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    // Variante secundaria (borde), no la blanca de la acción principal.
+    expect(link).toHaveClass('border');
+    expect(link).not.toHaveClass('bg-white');
+  });
+
+  it('con URL insegura: botón desactivado con el nombre del episodio y el motivo referido al episodio', () => {
+    render(<WatchButton videoUrl="javascript:alert(1)" {...episodeProps} />);
+
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Ver T1:E3 El regreso' });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).toHaveAccessibleDescription('No disponible: este episodio no tiene un vídeo al que se pueda acceder.');
+    expect(button).toHaveAttribute('title', 'Este episodio no tiene un vídeo disponible');
+  });
+});

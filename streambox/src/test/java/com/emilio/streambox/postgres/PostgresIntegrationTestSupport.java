@@ -14,12 +14,16 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import com.emilio.streambox.entity.Episode;
 import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.entity.Role;
+import com.emilio.streambox.entity.Series;
 import com.emilio.streambox.entity.User;
+import com.emilio.streambox.repository.EpisodeRepository;
 import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
+import com.emilio.streambox.repository.SeriesRepository;
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.JwtService;
 
@@ -81,6 +85,8 @@ public abstract class PostgresIntegrationTestSupport {
     @Autowired protected MovieRepository movieRepository;
     @Autowired protected GenreRepository genreRepository;
     @Autowired protected UserRepository userRepository;
+    @Autowired protected SeriesRepository seriesRepository;
+    @Autowired protected EpisodeRepository episodeRepository;
     @Autowired protected JwtService jwtService;
     @Autowired protected PasswordEncoder passwordEncoder;
 
@@ -157,12 +163,37 @@ public abstract class PostgresIntegrationTestSupport {
         return movieRepository.save(movie);
     }
 
+    /** Guarda una serie (sin fecha de fin) con los géneros indicados. */
+    protected Series saveSeries(String title, int year, Genre... genres) {
+        Series series = new Series();
+        series.setTitle(title);
+        series.setDescription("Sinopsis de " + title);
+        series.setReleaseYear(year);
+        series.setImageUrl("https://example.com/serie.jpg");
+        series.setGenres(new HashSet<>(List.of(genres)));
+        return seriesRepository.save(series);
+    }
+
+    /** Guarda un episodio de 45 minutos en la posición temporada × número. */
+    protected Episode saveEpisode(Series series, int season, int number) {
+        Episode episode = new Episode();
+        episode.setSeries(series);
+        episode.setSeasonNumber(season);
+        episode.setEpisodeNumber(number);
+        episode.setTitle("Episodio " + season + "x" + number);
+        episode.setDuration(45);
+        episode.setVideoUrl("https://example.com/episodio.mp4");
+        return episodeRepository.save(episode);
+    }
+
     /**
-     * Vacía las tablas en el orden que exigen las claves foráneas: usuarios
-     * (arrastra {@code user_favorite_movies}), películas (arrastra
-     * {@code movie_genres}) y por último géneros.
+     * Vacía las tablas en el orden que exigen las claves foráneas: series
+     * (arrastran episodios, {@code series_genres} y {@code user_favorite_series}),
+     * usuarios (arrastra {@code user_favorite_movies}), películas (arrastra
+     * {@code movie_genres}) y por último géneros, que ya nadie usa.
      */
     protected void cleanDatabase() {
+        seriesRepository.deleteAll();
         userRepository.deleteAll();
         movieRepository.deleteAll();
         genreRepository.deleteAll();

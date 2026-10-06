@@ -167,8 +167,11 @@ export function getPreviewImageUrl(raw: string): string | null {
   return validateImageUrl(value) === undefined ? value : null;
 }
 
-/** Convierte un texto de solo dígitos a número; `null` si no es un entero que quepa en un `Integer`. */
-function parseWholeNumber(raw: string): number | null {
+/**
+ * Convierte un texto de solo dígitos a número; `null` si no es un entero que quepa en un `Integer`.
+ * Exportada para que la validación de series (`seriesValidation.ts`) lea los años igual.
+ */
+export function parseWholeNumber(raw: string): number | null {
   const value = raw.trim();
   if (!/^\d+$/.test(value)) return null;
   const number = Number(value);

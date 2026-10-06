@@ -43,6 +43,13 @@ ALTER TABLE public.movies                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.movie_genres          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_favorite_movies  ENABLE ROW LEVEL SECURITY;
 
+-- Series (V3__create_series.sql, 2026-10). Tras arrancar la app con V3,
+-- vuelve a ejecutar este script entero: las tablas nuevas nacen sin RLS.
+ALTER TABLE public.series                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.series_genres         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.episodes              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_favorite_series  ENABLE ROW LEVEL SECURITY;
+
 -- Historial de Flyway (lo crea Flyway en `public`): tambien se cierra.
 ALTER TABLE public.flyway_schema_history ENABLE ROW LEVEL SECURITY;
 
@@ -52,5 +59,9 @@ REVOKE ALL ON TABLE
     public.movies,
     public.movie_genres,
     public.user_favorite_movies,
+    public.series,
+    public.series_genres,
+    public.episodes,
+    public.user_favorite_series,
     public.flyway_schema_history
 FROM anon, authenticated;

@@ -13,8 +13,8 @@
  */
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { addFavoritesByTitle, loginAdmin } from './support/api';
-import { HERO_TITLE } from './support/catalog';
+import { addFavoritesByTitle, findSeriesIdAsAdmin, loginAdmin } from './support/api';
+import { HERO_TITLE, SERIES_HERO } from './support/catalog';
 import { expect, movieCard, test, waitForMovieForm } from './support/fixtures';
 
 const OUT_DIR = process.env.E2E_SCREENSHOTS_DIR;
@@ -93,6 +93,64 @@ for (const viewport of VIEWPORTS) {
       await shot(page, '08-toast-en-modal');
     });
 
+    test('Películas: sin filtros, con filtros, error del año y sin resultados', async ({ page, user, signIn }) => {
+      await signIn(user);
+      await page.goto('/peliculas');
+      const banner = page.getByRole('region', { name: HERO_TITLE });
+      await expect(banner).toBeVisible();
+      await expect.poll(() => banner.locator('img').first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+      await page.waitForLoadState('networkidle');
+      await shot(page, '24-peliculas-arriba');
+      // Igual que en la portada: bajar antes de la captura completa para que lleguen las portadas diferidas.
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForLoadState('networkidle');
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await shot(page, '25-peliculas-completa', true);
+
+      // Con filtros: Acción por título (11 resultados, cuadrícula con varias filas y «Quitar filtros»).
+      const form = page.getByRole('form', { name: 'Filtrar películas' });
+      await form.getByRole('combobox', { name: 'Género' }).selectOption({ label: 'Acción' });
+      await form.getByRole('combobox', { name: 'Ordenar por' }).selectOption({ label: 'Título A–Z' });
+      await expect(page).toHaveURL(/\?genero=\d+&orden=titulo-asc$/);
+      const results = page.getByRole('region', { name: 'Resultados' });
+      await expect(results.getByRole('status').first()).toHaveText('11 películas');
+      await page.waitForLoadState('networkidle');
+      await shot(page, '26-peliculas-con-filtros', true);
+
+      // El error del campo «Año» (el más estrecho de la barra).
+      const year = form.getByRole('textbox', { name: 'Año' });
+      await year.fill('99');
+      await year.press('Tab');
+      await expect(page.getByText('Escribe un año entre 1888 y 2100.')).toBeVisible();
+      await shot(page, '27-peliculas-error-anio');
+
+      // Sin resultados: Acción de 1982 («Blade Runner» es solo Ciencia ficción).
+      await year.fill('1982');
+      await expect(results.getByRole('heading', { name: 'No hay películas con estos filtros' })).toBeVisible();
+      await shot(page, '28-peliculas-sin-resultados');
+    });
+
+    test('Series: listado y página de una serie', async ({ page, user, signIn }) => {
+      await signIn(user);
+      await page.goto('/series');
+      const banner = page.getByRole('region', { name: SERIES_HERO.title });
+      await expect(banner).toBeVisible();
+      await expect.poll(() => banner.locator('img').first().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+      await page.waitForLoadState('networkidle');
+      await shot(page, '29-series-arriba');
+      await shot(page, '30-series-completa', true);
+
+      await banner.getByRole('link', { name: /^Ver episodios/ }).click();
+      await expect(page.getByRole('heading', { level: 1, name: SERIES_HERO.title })).toBeVisible();
+      await expect(page.getByRole('list', { name: 'Episodios de la temporada 1' })).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      await shot(page, '31-serie-detalle', true);
+
+      await page.getByRole('navigation', { name: 'Temporadas' }).getByRole('link', { name: 'Temporada 2' }).click();
+      await expect(page.getByRole('list', { name: 'Episodios de la temporada 2' })).toBeVisible();
+      await shot(page, '32-serie-temporada-2');
+    });
+
     test('banner sin portada (respaldo)', async ({ page, user, signIn }) => {
       // La portada del banner da 404: se ve el respaldo de MoviePoster en el fondo y en la tarjeta.
       await page.route('**/covers/dune-parte-dos.webp', (route) => route.fulfill({ status: 404, body: '' }));
@@ -155,6 +213,46 @@ for (const viewport of VIEWPORTS) {
       await page.getByRole('button', { name: 'Renombrar Drama' }).click();
       await shot(page, '16-admin-generos-renombrar', true);
       await page.keyboard.press('Escape');
+    });
+
+    test('panel de series (solo lectura)', async ({ page, request, signIn }) => {
+      const adminToken = await loginAdmin(request);
+      await signIn({ token: adminToken });
+      await page.goto('/admin/series');
+      await expect(page.getByRole('table', { name: /^Series del catálogo/ })).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      await shot(page, '17-admin-series', true);
+
+      await page.goto('/admin/series/nueva');
+      await waitForMovieForm(page);
+      await page.getByLabel('Año de fin (opcional)').fill('1500');
+      await page.getByRole('button', { name: 'Crear serie' }).click();
+      await expect(page.getByText('Indica al menos un género')).toBeVisible();
+      await shot(page, '18-admin-serie-formulario-errores', true);
+
+      // Edición de una serie sembrada con episodios: la lista por temporadas y el diálogo de episodio
+      // (abierto con los valores propuestos y después con errores; no se guarda nada).
+      await page.goto(`/admin/series/${await findSeriesIdAsAdmin(request, adminToken, SERIES_HERO.title)}/editar`);
+      const episodes = page.getByRole('region', { name: 'Episodios', exact: true });
+      await expect(episodes.getByRole('list', { name: /^Temporada 1 · / })).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      await shot(page, '19-admin-serie-edicion-episodios', true);
+      await episodes.scrollIntoViewIfNeeded();
+      await shot(page, '20-admin-serie-episodios');
+
+      await episodes.getByRole('button', { name: 'Añadir episodio' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Añadir episodio' });
+      await expect(dialog.getByLabel('Título', { exact: true })).toBeFocused();
+      await shot(page, '21-admin-episodio-modal');
+      await dialog.getByRole('button', { name: 'Añadir episodio' }).click();
+      await expect(dialog.getByLabel('Título', { exact: true })).toHaveAccessibleDescription('El título es obligatorio');
+      await shot(page, '22-admin-episodio-modal-errores');
+      await page.keyboard.press('Escape');
+
+      await episodes.getByRole('button', { name: /^Borrar episodio T1:E1 / }).click();
+      await expect(page.getByRole('alertdialog')).toBeVisible();
+      await shot(page, '23-admin-episodio-confirmar-borrado');
+      await page.getByRole('alertdialog').getByRole('button', { name: 'Cancelar' }).click();
     });
   });
 }

@@ -52,7 +52,7 @@ const isWindows = process.platform === 'win32';
 const reuseServers = process.env.E2E_REUSE_SERVERS === '1';
 
 /**
- * Specs que MODIFICAN el catálogo compartido (crean y borran películas desde el panel).
+ * Specs que MODIFICAN el catálogo compartido (crean y borran películas y series desde el panel).
  *
  * Todos los tests usan el mismo catálogo sembrado y muchos comprueban cosas que dependen de él: la
  * película del banner es la más reciente, la portada dice "Mostrando 25 de 25"... Mientras existe una
@@ -61,9 +61,13 @@ const reuseServers = process.env.E2E_REUSE_SERVERS === '1';
  * principal: Playwright no lo empieza hasta que el resto ha terminado.
  *
  * Contrapartida conocida: si falla algún test del proyecto principal, este se omite. Para ejecutarlo
- * solo: `npx playwright test admin-peliculas --no-deps`.
+ * solo: `npx playwright test admin-peliculas --no-deps` (o `admin-series`).
+ *
+ * `admin-series.spec.ts` va aquí porque crea, edita y borra series y episodios: una serie con episodios es
+ * visible para todos (banner de `/series`, fila «Series» de la portada, buscador) y cambiaría lo que comprueban
+ * los demás tests.
  */
-const CATALOG_MUTATING_SPECS = /admin-peliculas\.spec\.ts$/;
+const CATALOG_MUTATING_SPECS = /admin-(peliculas|series)\.spec\.ts$/;
 
 export default defineConfig({
   testDir: './e2e',

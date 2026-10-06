@@ -32,6 +32,13 @@ interface ToastApi {
    * Traslada la zona de avisos a `element` (o la devuelve a la página con `null`).
    * Lo usa `Modal`: un `<dialog>` modal vuelve inerte —y tapa— todo lo que hay
    * fuera de él, así que mientras está abierto los avisos tienen que vivir dentro.
+   *
+   * Solo se trasladan los avisos que nacen **con el diálogo ya abierto**. Los
+   * anteriores (que ya se vieron y se anunciaron) se quedan en la página, detrás
+   * del fondo, hasta que caducan: si se movieran dentro, el aviso de la acción
+   * anterior taparía los botones del diálogo recién abierto (abajo a la
+   * derecha, donde están «Cancelar» y «Guardar») durante sus 5 segundos. Pasaba
+   * al añadir episodios seguidos: «Añadido» tapaba el «Añadir episodio» del siguiente.
    */
   registerHost: (element: HTMLElement | null) => void;
 }
@@ -48,8 +55,9 @@ const ToastContext = createContext<ToastApi | null>(null);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(1);
-  // Contenedor alternativo de los avisos (el interior de un modal abierto), si lo hay.
-  const [host, setHost] = useState<HTMLElement | null>(null);
+  // Contenedor alternativo de los avisos (el interior de un modal abierto), si lo hay, y el id del primer
+  // aviso que le corresponde: los de id menor ya existían al abrirse el diálogo y se quedan en la página.
+  const [host, setHost] = useState<{ element: HTMLElement; firstId: number } | null>(null);
 
   const dismiss = useCallback((id: number) => {
     setToasts((current) => current.filter((t) => t.id !== id));
@@ -72,17 +80,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         if (error instanceof ApiError && error.sessionExpired) return;
         push('error', getErrorMessage(error, fallback));
       },
-      registerHost: setHost,
+      registerHost: (element) => setHost(element ? { element, firstId: nextId.current } : null),
     }),
     [push],
   );
 
-  const viewport = <ToastViewport toasts={toasts} onDismiss={dismiss} />;
+  const inHost = host ? toasts.filter((t) => t.id >= host.firstId) : [];
+  const onPage = host ? toasts.filter((t) => t.id < host.firstId) : toasts;
 
   return (
     <ToastContext.Provider value={api}>
       {children}
-      {host ? createPortal(viewport, host) : viewport}
+      <ToastViewport toasts={onPage} onDismiss={dismiss} />
+      {host && createPortal(<ToastViewport toasts={inHost} onDismiss={dismiss} />, host.element)}
     </ToastContext.Provider>
   );
 }

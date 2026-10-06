@@ -172,6 +172,17 @@ export async function listGenres(request: APIRequestContext, token: string): Pro
 }
 
 /**
+ * Id de un género por su nombre (`GET /api/genres`). Lo usan los tests de
+ * `/peliculas` para abrir una URL ya filtrada (`?genero=<id>`), como haría un
+ * enlace compartido: el id lo asigna la base de datos y no se conoce de antemano.
+ */
+export async function genreIdByName(request: APIRequestContext, token: string, name: string): Promise<number> {
+  const genre = (await listGenres(request, token)).find((item) => item.name === name);
+  if (!genre) throw new Error(`No existe el género «${name}»`);
+  return genre.id;
+}
+
+/**
  * Borra (administrador) los géneros con alguno de estos nombres, si existen. Limpieza de los tests
  * que crean géneros desde la interfaz; un género que ya no está (404) cuenta como hecho.
  */
@@ -183,6 +194,126 @@ export async function deleteGenresNamed(
   for (const genre of (await listGenres(request, adminToken)).filter((item) => names.includes(item.name))) {
     const deleted = await request.delete(`${BACKEND_URL}/api/genres/${genre.id}`, { headers: bearer(adminToken) });
     if (deleted.status() !== 404) await expectOk(deleted, `Borrar el género «${genre.name}»`);
+  }
+}
+
+/** Datos para crear una serie (los mismos campos que `SeriesRequest`). */
+export interface NewSeries {
+  title: string;
+  description: string;
+  releaseYear: number;
+  endYear: number | null;
+  imageUrl: string;
+  genreIds: number[];
+}
+
+/** Datos para crear un episodio (los mismos campos que `EpisodeRequest`). */
+export interface NewEpisode {
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string;
+  description: string | null;
+  duration: number;
+  videoUrl: string;
+}
+
+/** Crea una serie (administrador) y devuelve su id. Nace sin episodios. */
+export async function createSeries(request: APIRequestContext, adminToken: string, series: NewSeries): Promise<number> {
+  const response = await request.post(`${BACKEND_URL}/api/series`, { headers: bearer(adminToken), data: series });
+  await expectOk(response, `Crear la serie «${series.title}»`);
+  return ((await response.json()) as { id: number }).id;
+}
+
+/** Añade un episodio a una serie (administrador). */
+export async function createEpisode(
+  request: APIRequestContext,
+  adminToken: string,
+  seriesId: number,
+  episode: NewEpisode,
+): Promise<void> {
+  const response = await request.post(`${BACKEND_URL}/api/series/${seriesId}/episodes`, {
+    headers: bearer(adminToken),
+    data: episode,
+  });
+  await expectOk(response, `Crear el episodio T${episode.seasonNumber}:E${episode.episodeNumber} de la serie ${seriesId}`);
+}
+
+/**
+ * Número total de series, INCLUIDAS las que no tienen episodios (vista de gestión
+ * `GET /api/admin/series`, solo administrador). Sirve para no sembrar dos veces:
+ * el listado público no contaría la serie vacía.
+ */
+export async function seriesCatalogSize(request: APIRequestContext, adminToken: string): Promise<number> {
+  const response = await request.get(`${BACKEND_URL}/api/admin/series`, {
+    headers: bearer(adminToken),
+    params: { size: 1 },
+  });
+  await expectOk(response, 'Consultar el número de series');
+  return ((await response.json()) as { totalElements: number }).totalElements;
+}
+
+/**
+ * Id de una serie por título exacto, mirando la vista de gestión del
+ * administrador (así también encuentra la serie SIN episodios, que el listado
+ * público oculta). Lo usan los tests que necesitan su URL.
+ */
+export async function findSeriesIdAsAdmin(request: APIRequestContext, adminToken: string, title: string): Promise<number> {
+  const response = await request.get(`${BACKEND_URL}/api/admin/series`, {
+    headers: bearer(adminToken),
+    params: { title, size: 100 },
+  });
+  await expectOk(response, `Buscar la serie «${title}»`);
+  const page = (await response.json()) as ApiPage<ApiMovie>;
+  const match = page.content.find((series) => series.title === title);
+  if (!match) throw new Error(`La serie «${title}» no existe en el catálogo sembrado`);
+  return match.id;
+}
+
+/**
+ * Borra (administrador) todas las series cuyo título contiene `text`, también las que no tienen
+ * episodios (las busca en la vista de gestión `GET /api/admin/series`). Es la LIMPIEZA de los tests
+ * que crean series desde el panel: si un test falla a mitad, la serie no se queda en el catálogo
+ * compartido. Un 404 cuenta como hecho.
+ */
+export async function deleteSeriesMatching(request: APIRequestContext, adminToken: string, text: string): Promise<void> {
+  const response = await request.get(`${BACKEND_URL}/api/admin/series`, {
+    headers: bearer(adminToken),
+    params: { title: text, size: 100 },
+  });
+  await expectOk(response, `Buscar series con «${text}»`);
+  const page = (await response.json()) as ApiPage<ApiMovie>;
+  for (const series of page.content.filter((item) => item.title.includes(text))) {
+    const deleted = await request.delete(`${BACKEND_URL}/api/series/${series.id}`, { headers: bearer(adminToken) });
+    if (deleted.status() !== 404) await expectOk(deleted, `Borrar la serie «${series.title}»`);
+  }
+}
+
+/** Número de series que ve un USUARIO al buscar `title` (`GET /api/series/search`: solo las que tienen episodios). */
+export async function publicSeriesSearchCount(request: APIRequestContext, token: string, title: string): Promise<number> {
+  const response = await request.get(`${BACKEND_URL}/api/series/search`, {
+    headers: bearer(token),
+    params: { title, size: 1 },
+  });
+  await expectOk(response, `Buscar series públicas con «${title}»`);
+  return ((await response.json()) as { totalElements: number }).totalElements;
+}
+
+/** Añade series (por título) a la lista del usuario, directamente por API. */
+export async function addSeriesFavoritesByTitle(
+  request: APIRequestContext,
+  token: string,
+  titles: readonly string[],
+): Promise<void> {
+  for (const title of titles) {
+    const response = await request.get(`${BACKEND_URL}/api/series/search`, {
+      headers: bearer(token),
+      params: { title, size: 100 },
+    });
+    await expectOk(response, `Buscar la serie «${title}»`);
+    const match = ((await response.json()) as ApiPage<ApiMovie>).content.find((series) => series.title === title);
+    if (!match) throw new Error(`La serie «${title}» no está en el listado público`);
+    const added = await request.post(`${BACKEND_URL}/api/users/me/favorites/series/${match.id}`, { headers: bearer(token) });
+    await expectOk(added, `Añadir la serie «${title}» a favoritos`);
   }
 }
 

@@ -3,13 +3,26 @@
  *
  * Protegen los tres estados obligatorios (cargando, vacío, error con reintento),
  * que la película del banner no se repita en las filas, el reparto en filas por
- * género y que un fallo de "Cargar más" no destruya lo que ya se ve.
+ * género y que un fallo de "Cargar más" no destruya lo que ya se ve. Y que lo
+ * vacío diga la verdad a cada rol: sin películas no se da el catálogo por vacío
+ * si hay series, y un administrador sabe por qué no ve la fila «Series».
  */
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FavoritesProvider } from '../context/FavoritesContext';
-import { errorResponse, jsonResponse, makeMovie, makePage, renderWithProviders, routeFetch } from '../test/helpers';
+import {
+  CURRENT_USER,
+  errorResponse,
+  jsonResponse,
+  makeMovie,
+  makePage,
+  makeSeries,
+  makeUser,
+  renderWithProviders,
+  routeFetch,
+} from '../test/helpers';
+import { UserStatusProbe } from '../test/UserStatusProbe';
 import { HomePage } from './HomePage';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -37,13 +50,24 @@ function renderHome() {
   renderWithProviders(
     <FavoritesProvider>
       <HomePage />
+      <UserStatusProbe />
     </FavoritesProvider>,
     { token: 'jwt' },
   );
   return user;
 }
 
-const FAVORITES = { 'GET /api/users/me/favorites': () => jsonResponse([]) };
+/** La fila «Series» de la portada: las 12 series más recientes. */
+const SERIES_ROW = 'GET /api/series?page=0&size=12&sort=createdAt&direction=desc';
+
+/**
+ * Lo que la portada pide además del catálogo: la lista (para «Mi lista») y la
+ * fila «Series», vacía por defecto (así no aparece y los tests de películas no cambian).
+ */
+const FAVORITES = {
+  'GET /api/users/me/favorites': () => jsonResponse([]),
+  [SERIES_ROW]: () => jsonResponse(makePage([])),
+};
 
 describe('HomePage: estados', () => {
   it('muestra "cargando" (con role="status") mientras espera y siempre tiene un único h1', () => {
@@ -55,13 +79,48 @@ describe('HomePage: estados', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 
-  it('catálogo vacío: mensaje explicativo, sin banner', async () => {
+  it('sin películas ni series, a un usuario: «El catálogo está vacío» (las dos cosas), sin banner ni botón', async () => {
     routeFetch(fetchMock, { ...FAVORITES, [PAGE_0]: () => jsonResponse(makePage([])) });
 
     renderHome();
 
+    expect(await screen.findByText('estado:ready')).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'El catálogo está vacío' })).toBeInTheDocument();
+    expect(screen.getByText('Todavía no hay películas ni series. Vuelve más tarde.')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(screen.queryByText('Estreno reciente')).not.toBeInTheDocument();
+  });
+
+  it('sin películas PERO con series: no dice que el catálogo esté vacío, enseña la fila «Series»', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([])),
+      [SERIES_ROW]: () => jsonResponse(makePage([makeSeries({ id: 10, title: 'Serie nueva' })])),
+    });
+
+    renderHome();
+
+    const row = await screen.findByRole('region', { name: 'Series' });
+    expect(within(row).getByRole('link', { name: /^Serie nueva/ })).toHaveAttribute('href', '/series/10');
+    expect(screen.queryByRole('heading', { name: 'El catálogo está vacío' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('sin películas ni series visibles, a un administrador: qué hace visible cada cosa y «Gestionar catálogo»', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })),
+      [PAGE_0]: () => jsonResponse(makePage([])),
+    });
+
+    renderHome();
+
+    expect(await screen.findByRole('link', { name: 'Gestionar catálogo' })).toHaveAttribute('href', '/admin/peliculas');
+    expect(screen.getByRole('heading', { level: 2, name: 'Todavía no hay nada visible en el catálogo' })).toBeInTheDocument();
+    expect(screen.getByText(/las series, cuando tienen al menos un episodio/)).toBeInTheDocument();
+    // «Vacío» sería falso si tiene series ocultas; y el aviso pequeño de la fila no se suma al grande.
+    expect(screen.queryByRole('heading', { name: 'El catálogo está vacío' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Gestionar series' })).not.toBeInTheDocument();
   });
 
   it('error: muestra el mensaje y "Reintentar" recupera el catálogo', async () => {
@@ -170,5 +229,102 @@ describe('HomePage: cargar más', () => {
     expect(screen.getByText(/El servidor ha tenido un problema/)).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Estreno estrella' })).toBeInTheDocument();
     expect(screen.getByText('Mostrando 4 de 5 películas')).toBeInTheDocument();
+  });
+});
+
+describe('HomePage: fila «Series»', () => {
+  const latest = [
+    makeSeries({ id: 10, title: 'Serie nueva', endYear: null, seasonCount: 1 }),
+    makeSeries({ id: 11, title: 'Serie antigua' }),
+  ];
+
+  it('con series, aparece justo después de «Novedades», con tarjetas-enlace a cada serie y «Ver todas»', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+      [SERIES_ROW]: () => jsonResponse(makePage(latest)),
+    });
+    renderHome();
+
+    const row = await screen.findByRole('region', { name: 'Series' });
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Estreno estrella',
+      'Novedades',
+      'Series',
+      'Terror',
+    ]);
+    const cards = within(row).getAllByRole('link', { name: /^Serie/ });
+    expect(cards.map((card) => card.getAttribute('href'))).toEqual(['/series/10', '/series/11']);
+    expect(cards[0]).toHaveAccessibleName('Serie nueva 2019– · 1 temporada');
+    expect(within(row).getByRole('link', { name: /^Ver todas\s*las series$/ })).toHaveAttribute('href', '/series');
+  });
+
+  it('sin series, a un usuario no le aparece (ni un hueco ni un aviso)', async () => {
+    routeFetch(fetchMock, { ...FAVORITES, [PAGE_0]: () => jsonResponse(makePage([hero, ...others])) });
+    renderHome();
+
+    await screen.findByRole('region', { name: 'Novedades' });
+    // Espera a que termine la carga de la fila (su esqueleto anuncia «Cargando series...») y a que se sepa el rol.
+    await waitFor(() => expect(screen.queryByText('Cargando series...')).not.toBeInTheDocument());
+    expect(await screen.findByText('estado:ready')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Series' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Series' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Gestionar series' })).not.toBeInTheDocument();
+  });
+
+  it('sin series visibles, a un administrador le deja un aviso de una línea con el motivo y «Gestionar series»', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })),
+      [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+    });
+    renderHome();
+
+    const row = await screen.findByRole('region', { name: 'Series' });
+    expect(row).toHaveTextContent(
+      'Todavía no hay series visibles, así que los usuarios no ven esta fila. Una serie aparece en cuanto tiene al menos un episodio.',
+    );
+    expect(within(row).getByRole('link', { name: 'Gestionar series' })).toHaveAttribute('href', '/admin/series');
+    // En su sitio de siempre (tras «Novedades») y sin tapar el resto de la portada.
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Estreno estrella',
+      'Novedades',
+      'Series',
+      'Terror',
+    ]);
+  });
+
+  it('si falla, la fila lo dice con «Reintentar» sin tapar el resto de la portada, y reintentar la recupera', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+      [SERIES_ROW]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+    });
+    const user = renderHome();
+
+    const row = await screen.findByRole('region', { name: 'Series' });
+    expect(within(row).getByRole('alert')).toHaveTextContent(/No se pudieron cargar las series\./);
+    expect(screen.getByRole('region', { name: 'Novedades' })).toBeInTheDocument();
+
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+      [SERIES_ROW]: () => jsonResponse(makePage(latest)),
+    });
+    await user.click(within(row).getByRole('button', { name: 'Reintentar' }));
+
+    expect(await screen.findByRole('link', { name: /^Serie nueva/ })).toBeInTheDocument();
+  });
+
+  it('mientras carga, la fila reserva su hueco con un esqueleto (las filas de debajo no saltan al llegar)', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+      [SERIES_ROW]: () => new Promise<Response>(() => {}),
+    });
+    renderHome();
+
+    await screen.findByRole('region', { name: 'Novedades' });
+    expect(screen.getByText('Cargando series...')).toBeInTheDocument();
   });
 });

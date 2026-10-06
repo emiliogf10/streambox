@@ -12,7 +12,8 @@
  * ver el informe de la tarea 24 para la propuesta.
  */
 import type { Locator, Page } from '@playwright/test';
-import { loginAdmin } from './support/api';
+import { findSeriesIdAsAdmin, loginAdmin } from './support/api';
+import { EMPTY_SERIES, SERIES_HERO } from './support/catalog';
 import { expect, movieCard, test, waitForMovieForm } from './support/fixtures';
 
 test.describe('Teclado', () => {
@@ -102,7 +103,7 @@ test.describe('Teclado', () => {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 
-  test('«Películas» y «Series» son texto reservado: no entran en el orden de tabulación', async ({
+  test('la navegación principal se recorre con Tab en orden: Inicio → Películas → Series → Mi lista', async ({
     page,
     user,
     signIn,
@@ -110,15 +111,20 @@ test.describe('Teclado', () => {
     await signIn(user);
     await page.goto('/');
     const nav = page.getByRole('navigation', { name: 'Principal' });
+    // Espera a que se resuelva el rol: hasta entonces no se sabe si habrá un quinto enlace.
+    await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
 
-    // Recorre la navegación con Tab: solo se detiene en «Inicio» y «Mi lista».
+    // Las cuatro secciones son enlaces de verdad (ninguna queda como texto reservado) y en este orden.
     await nav.getByRole('link', { name: 'Inicio' }).focus();
-    await page.keyboard.press('Tab');
-    await expect(nav.getByRole('link', { name: 'Mi lista' })).toBeFocused();
-    await expect(nav.getByRole('link')).toHaveCount(2);
+    for (const name of ['Películas', 'Series', 'Mi lista']) {
+      await page.keyboard.press('Tab');
+      await expect(nav.getByRole('link', { name }), `Tab debe llegar a «${name}»`).toBeFocused();
+    }
+    // Un usuario normal no tiene «Administrar»: son exactamente cuatro.
+    await expect(nav.getByRole('link')).toHaveText(['Inicio', 'Películas', 'Series', 'Mi lista']);
   });
 
-  test('para un administrador, «Administrar» es la siguiente parada de Tab tras «Mi lista»', async ({
+  test('para un administrador, Tab recorre Inicio → Películas → Series → Mi lista → Administrar', async ({
     page,
     request,
     signIn,
@@ -130,10 +136,12 @@ test.describe('Teclado', () => {
     const admin = nav.getByRole('link', { name: 'Administrar' });
     await expect(admin).toBeVisible();
 
-    await nav.getByRole('link', { name: 'Mi lista' }).focus();
-    await page.keyboard.press('Tab');
-    await expect(admin).toBeFocused();
-    await expect(nav.getByRole('link')).toHaveCount(3);
+    await nav.getByRole('link', { name: 'Inicio' }).focus();
+    for (const name of ['Películas', 'Series', 'Mi lista', 'Administrar']) {
+      await page.keyboard.press('Tab');
+      await expect(nav.getByRole('link', { name }), `Tab debe llegar a «${name}»`).toBeFocused();
+    }
+    await expect(nav.getByRole('link')).toHaveCount(5);
   });
 
   test('géneros del panel: Escape cancela el renombrado y devuelve el foco a «Renombrar X»', async ({
@@ -220,7 +228,7 @@ test.describe('El foco no queda tapado por la barra superior (WCAG 2.2 · 2.4.11
         const scrolled = await page.evaluate(() => window.scrollY);
         expect(scrolled, 'precondición: la página está desplazada').toBeGreaterThan(0);
 
-        await page.getByRole('combobox', { name: 'Buscar películas por título' }).focus();
+        await page.getByRole('combobox', { name: 'Buscar películas y series por título' }).focus();
         await page.keyboard.press('Tab');
         await expect(page.getByRole('button', { name: 'Menú de usuario' })).toBeFocused();
         expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
@@ -233,6 +241,8 @@ test.describe('Estructura accesible del panel de administración (humo)', () => 
   const ADMIN_PAGES = [
     { path: '/admin/peliculas', ready: (page: Page) => page.getByRole('table', { name: /^Películas del catálogo/ }) },
     { path: '/admin/peliculas/nueva', ready: (page: Page) => page.getByRole('checkbox', { name: 'Drama' }) },
+    { path: '/admin/series', ready: (page: Page) => page.getByRole('table', { name: /^Series del catálogo/ }) },
+    { path: '/admin/series/nueva', ready: (page: Page) => page.getByRole('checkbox', { name: 'Drama' }) },
     { path: '/admin/generos', ready: (page: Page) => page.getByRole('list', { name: 'Géneros' }) },
   ];
 
@@ -253,6 +263,58 @@ test.describe('Estructura accesible del panel de administración (humo)', () => 
     await page.getByRole('button', { name: 'Crear película' }).click();
     await expect(page.getByLabel('Título', { exact: true })).toBeFocused();
     expect(await auditPage(page)).toEqual([]);
+  });
+
+  test('la edición de una serie sin episodios (formulario + sección «Episodios») es correcta, también con errores', async ({
+    page,
+    request,
+    signIn,
+  }) => {
+    const adminToken = await loginAdmin(request);
+    await signIn({ token: adminToken });
+    await page.goto(`/admin/series/${await findSeriesIdAsAdmin(request, adminToken, EMPTY_SERIES.title)}/editar`);
+    await waitForMovieForm(page);
+    await expect(page.getByRole('region', { name: 'Episodios', exact: true })).toContainText('los usuarios no la ven');
+    expect(await auditPage(page)).toEqual([]);
+
+    // Solo errores de cliente (no se envía nada: la serie sembrada no cambia).
+    await page.getByLabel('Título', { exact: true }).fill('');
+    await page.getByLabel('Año de fin (opcional)').fill('1500');
+    await page.getByRole('button', { name: 'Guardar cambios' }).click();
+    await expect(page.getByLabel('Título', { exact: true })).toBeFocused();
+    await expect(page.getByLabel('Año de fin (opcional)')).toHaveAccessibleDescription(
+      'El año de finalización debe estar entre 1888 y 2100',
+    );
+    expect(await auditPage(page)).toEqual([]);
+  });
+
+  test('la edición de una serie con episodios y el diálogo de episodio (con errores) son correctos; Escape devuelve el foco', async ({
+    page,
+    request,
+    signIn,
+  }) => {
+    const adminToken = await loginAdmin(request);
+    await signIn({ token: adminToken });
+    await page.goto(`/admin/series/${await findSeriesIdAsAdmin(request, adminToken, SERIES_HERO.title)}/editar`);
+    const episodes = page.getByRole('region', { name: 'Episodios', exact: true });
+    await expect(episodes.getByRole('list', { name: /^Temporada 1 · / })).toBeVisible();
+    expect(await auditPage(page)).toEqual([]);
+
+    // Solo errores de cliente: no se envía nada y la serie sembrada no cambia.
+    const add = episodes.getByRole('button', { name: 'Añadir episodio' });
+    await add.click();
+    const dialog = page.getByRole('dialog', { name: 'Añadir episodio' });
+    await expect(dialog.getByLabel('Título', { exact: true })).toBeFocused();
+    await dialog.getByRole('button', { name: 'Añadir episodio' }).click();
+    await expect(dialog.getByLabel('Título', { exact: true })).toHaveAccessibleDescription('El título es obligatorio');
+    expect(await auditPage(page)).toEqual([]);
+    // El foco no se escapa del diálogo con Tab.
+    for (let i = 0; i < 12; i += 1) await page.keyboard.press('Tab');
+    expect(await focusedOutsideDialog(page)).toBeNull();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(add).toBeFocused();
   });
 });
 
@@ -280,6 +342,18 @@ test.describe('Estructura accesible (humo)', () => {
       expect(await auditPage(page)).toEqual([]);
     });
   }
+
+  test('/series y la página de una serie: estructura básica correcta', async ({ page, user, signIn }) => {
+    await signIn(user);
+    await page.goto('/series');
+    await expect(page.getByRole('heading', { level: 1, name: 'Series' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
+    expect(await auditPage(page)).toEqual([]);
+
+    await page.getByRole('link', { name: /^Ver episodios/ }).click();
+    await expect(page.getByRole('list', { name: 'Episodios de la temporada 1' })).toBeVisible();
+    expect(await auditPage(page)).toEqual([]);
+  });
 
   test('con un modal abierto la estructura sigue siendo correcta', async ({ page, user, signIn }) => {
     await signIn(user);

@@ -245,6 +245,10 @@ describe('AdminMoviesPage: búsqueda', () => {
     renderList('/admin/peliculas?q=zzz');
 
     expect(await screen.findByRole('heading', { name: 'Sin resultados para «zzz»' })).toBeInTheDocument();
+    // Borrar la búsqueda muestra las películas, no "todo el catálogo" (las series están en otra pestaña).
+    expect(
+      screen.getByText('Prueba con otra parte del título o borra la búsqueda para ver todas las películas.'),
+    ).toBeInTheDocument();
     // El campo refleja la búsqueda de la URL.
     expect(screen.getByRole('searchbox', { name: 'Buscar por título' })).toHaveValue('zzz');
 

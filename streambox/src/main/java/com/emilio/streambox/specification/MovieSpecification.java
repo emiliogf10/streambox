@@ -20,9 +20,6 @@ import jakarta.persistence.criteria.Subquery;
  */
 public final class MovieSpecification {
 
-    /** Carácter de escape usado en las búsquedas {@code LIKE}. */
-    private static final char LIKE_ESCAPE = '\\';
-
     private MovieSpecification() {
         // Clase de utilidad: no se instancia
     }
@@ -52,7 +49,8 @@ public final class MovieSpecification {
      * <p>
      * {@code lower()} no altera la barra de escape ni los comodines
      * ({@code \}, {@code %}, {@code _} no tienen mayúsculas), así que el escapado
-     * de {@link #escapeLike(String)} se mantiene intacto.
+     * se mantiene intacto. La implementación está en
+     * {@link LikePatterns#containsIgnoreCase}, compartida con las series.
      * </p>
      *
      * @param title texto que debe contener el título
@@ -60,12 +58,8 @@ public final class MovieSpecification {
      */
     public static Specification<Movie> hasTitle(String title) {
 
-        String pattern = "%" + escapeLike(title) + "%";
-
-        return (root, query, criteriaBuilder) -> criteriaBuilder.like(
-                criteriaBuilder.lower(root.get("title")),
-                criteriaBuilder.lower(criteriaBuilder.literal(pattern)),
-                LIKE_ESCAPE);
+        return (root, query, criteriaBuilder) ->
+                LikePatterns.containsIgnoreCase(criteriaBuilder, root.get("title"), title);
     }
 
     /**
@@ -109,19 +103,5 @@ public final class MovieSpecification {
         return (root, query, criteriaBuilder) -> criteriaBuilder.equal(
                 root.get("releaseYear"),
                 releaseYear);
-    }
-
-    /**
-     * Escapa los caracteres con significado especial en {@code LIKE}.
-     *
-     * @param text texto introducido por el usuario
-     * @return texto con {@code \}, {@code %} y {@code _} escapados
-     */
-    private static String escapeLike(String text) {
-
-        return text
-                .replace("\\", "\\\\")
-                .replace("%", "\\%")
-                .replace("_", "\\_");
     }
 }

@@ -228,4 +228,51 @@ describe('Modal: foco y avisos', () => {
     const dialog = screen.getByRole('dialog', { name: 'Diálogo' });
     expect(within(dialog).getByText('No se pudo vaciar')).toBeInTheDocument();
   });
+
+  it('un aviso que ya estaba antes de abrir el diálogo se queda en la página: no tapa los botones del diálogo', async () => {
+    function Page() {
+      const toast = useToast();
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => toast.success('Episodio añadido')}>
+            Guardar
+          </button>
+          <button type="button" onClick={() => setOpen(true)}>
+            Abrir
+          </button>
+          {open && (
+            <Modal onClose={() => setOpen(false)} labelledBy="t">
+              <h2 id="t">Diálogo</h2>
+              <button type="button" onClick={() => toast.info('Aviso nuevo')}>
+                Avisar
+              </button>
+            </Modal>
+          )}
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(
+      <ToastProvider>
+        <Page />
+      </ToastProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Guardar' }));
+    await user.click(screen.getByRole('button', { name: 'Abrir' }));
+    const dialog = screen.getByRole('dialog', { name: 'Diálogo' });
+    await user.click(within(dialog).getByRole('button', { name: 'Avisar' }));
+
+    // El anterior sigue en la página (detrás del fondo); el que nace con el diálogo abierto, dentro.
+    expect(screen.getByText('Episodio añadido')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Episodio añadido')).not.toBeInTheDocument();
+    expect(within(dialog).getByText('Aviso nuevo')).toBeInTheDocument();
+
+    // Al cerrar, los dos vuelven a la página.
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Episodio añadido')).toBeInTheDocument();
+    expect(screen.getByText('Aviso nuevo')).toBeInTheDocument();
+  });
 });

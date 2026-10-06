@@ -16,6 +16,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TimeZone;
 import java.util.UUID;
 
@@ -37,6 +38,7 @@ import com.emilio.streambox.StreamboxApplication;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.repository.MovieRepository;
+import com.emilio.streambox.repository.SeriesRepository;
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.service.MovieService;
 
@@ -112,19 +114,19 @@ class PostgresBaselineAdoptionIntegrationTest {
 
     /**
      * La historia queda registrada: baseline en la versión 0 (por eso V1 SÍ se
-     * ejecuta), luego V1 y V2, todas correctas. Una segunda ejecución no hace
-     * nada y {@code validate} pasa (los checksums coinciden).
+     * ejecuta), luego V1, V2 y V3, todas correctas. Una segunda ejecución no
+     * hace nada y {@code validate} pasa (los checksums coinciden).
      */
     @Test
-    void laAdopcionRegistraBaselineV1YV2YEsRepetible() throws Exception {
+    void laAdopcionRegistraBaselineYTodasLasMigracionesYEsRepetible() throws Exception {
         String db = createDatabase(true);
 
         MigrateResult first = flyway(db).migrate();
 
-        assertEquals(2, first.migrationsExecuted, "deben ejecutarse V1 y V2");
+        assertEquals(3, first.migrationsExecuted, "deben ejecutarse V1, V2 y V3");
         List<Map<String, Object>> history = jdbc(db).queryForList(
                 "SELECT version, description, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertEquals(List.of("0", "1", "2"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
+        assertEquals(List.of("0", "1", "2", "3"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
         assertEquals("BASELINE", history.get(0).get("type"));
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
 
@@ -158,8 +160,9 @@ class PostgresBaselineAdoptionIntegrationTest {
 
     /**
      * V1 completa lo que falta en la base heredada: los tres índices del
-     * catálogo (ver {@code idx_*}); {@code CREATE INDEX IF NOT EXISTS} es lo
-     * único que V1 llega a añadir sobre tablas que ya existían.
+     * catálogo de películas (ver {@code idx_*}); {@code CREATE INDEX IF NOT
+     * EXISTS} es lo único que V1 llega a añadir sobre tablas que ya existían.
+     * Los otros tres índices son los de las tablas de series que crea V3.
      */
     @Test
     void laAdopcionAnadeLosIndicesQueFaltaban() throws Exception {
@@ -170,9 +173,11 @@ class PostgresBaselineAdoptionIntegrationTest {
 
         flyway(db).migrate();
 
-        assertEquals(List.of("idx_favorites_movie_id", "idx_movie_genres_genre_id", "idx_movies_release_year"),
-                jdbc.queryForList("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
-                        + " AND indexname LIKE 'idx\\_%' ORDER BY indexname", String.class));
+        // Se compara como conjunto: el orden de ORDER BY depende de la collation del servidor
+        assertEquals(Set.of("idx_favorites_movie_id", "idx_movie_genres_genre_id", "idx_movies_release_year",
+                        "idx_series_genres_genre_id", "idx_favorite_series_series_id", "idx_series_release_year"),
+                Set.copyOf(jdbc.queryForList("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
+                        + " AND indexname LIKE 'idx\\_%'", String.class)));
     }
 
     /**
@@ -230,9 +235,11 @@ class PostgresBaselineAdoptionIntegrationTest {
         flyway(db).migrate();
         JdbcTemplate jdbc = jdbc(db);
 
+        // Solo las cuatro claves foráneas heredadas (las de V3 son nuevas y sí cascadan)
         assertEquals(List.of("NO ACTION", "NO ACTION", "NO ACTION", "NO ACTION"), jdbc.queryForList(
                 "SELECT delete_rule FROM information_schema.referential_constraints"
-                        + " WHERE constraint_schema = 'public' ORDER BY constraint_name", String.class));
+                        + " WHERE constraint_schema = 'public' AND constraint_name LIKE 'fklegacy%'"
+                        + " ORDER BY constraint_name", String.class));
 
         // Borrar una película con favoritos falla en la base heredada (en una nueva se encadena)
         DataIntegrityViolationException error = assertThrows(DataIntegrityViolationException.class,
@@ -246,8 +253,58 @@ class PostgresBaselineAdoptionIntegrationTest {
     }
 
     /**
-     * Contraste: una base vacía NO recibe fila de baseline (solo V1 y V2) y sí
-     * tiene cascadas y CHECK. Garantiza que los dos caminos de arranque
+     * A diferencia de las tablas de películas, las de series (V3) son nuevas
+     * también en una base adoptada: se crean completas, con sus cascadas y sus
+     * CHECK. Por eso, para series, no hace falta el equivalente de
+     * {@code MovieRepository.deleteFromAllFavorites}: borrar una serie arrastra
+     * episodios, géneros de la serie y favoritos aunque la base sea heredada, y
+     * un género que use una serie sigue sin poder borrarse.
+     */
+    @Test
+    void laBaseAdoptadaRecibeLasTablasDeSeriesCompletasConSusCascadas() throws Exception {
+        String db = createDatabase(true);
+        flyway(db).migrate();
+        JdbcTemplate jdbc = jdbc(db);
+
+        Map<String, String> rules = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT constraint_name, delete_rule FROM information_schema.referential_constraints"
+                        + " WHERE constraint_schema = 'public'")
+                .forEach(r -> rules.put((String) r.get("constraint_name"), (String) r.get("delete_rule")));
+        assertEquals("CASCADE", rules.get("fk_series_genres_series"));
+        assertEquals("NO ACTION", rules.get("fk_series_genres_genre"));
+        assertEquals("CASCADE", rules.get("fk_episodes_series"));
+        assertEquals("CASCADE", rules.get("fk_favorite_series_user"));
+        assertEquals("CASCADE", rules.get("fk_favorite_series_series"));
+
+        long seriesId = jdbc.queryForObject("INSERT INTO series (title, description, release_year, image_url, created_at)"
+                + " VALUES ('Heredada', 'd', 2010, 'u', now()) RETURNING id", Long.class);
+        jdbc.update("INSERT INTO episodes (series_id, season_number, episode_number, title, duration, video_url, created_at)"
+                + " VALUES (?, 1, 1, 't', 40, 'v', now())", seriesId);
+        jdbc.update("INSERT INTO series_genres (series_id, genre_id) SELECT ?, id FROM genres WHERE name = 'Drama'", seriesId);
+        jdbc.update("INSERT INTO user_favorite_series (user_id, series_id) SELECT id, ? FROM users WHERE username = 'alice'",
+                seriesId);
+
+        // El género Drama (de la base heredada) ya no se puede borrar: lo usa la serie
+        DataIntegrityViolationException error = assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("DELETE FROM genres WHERE name = 'Drama'"));
+        assertEquals("23503", PostgresIntegrationTestSupport.sqlState(error));
+
+        // Borrar la serie arrastra todo lo suyo, sin tocar a alice ni el género
+        jdbc.update("DELETE FROM series WHERE id = ?", seriesId);
+        assertEquals(0, count(jdbc, "episodes"));
+        assertEquals(0, count(jdbc, "series_genres"));
+        assertEquals(0, count(jdbc, "user_favorite_series"));
+        assertEquals(2, count(jdbc, "users"));
+        assertEquals(2, count(jdbc, "genres"));
+        // Y el CHECK de año de V3 también existe en la base adoptada
+        assertEquals("23514", PostgresIntegrationTestSupport.sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("INSERT INTO series (title, description, release_year, image_url, created_at)"
+                        + " VALUES ('Antigua', 'd', 1700, 'u', now())"))));
+    }
+
+    /**
+     * Contraste: una base vacía NO recibe fila de baseline (solo V1, V2 y V3) y
+     * sí tiene cascadas y CHECK. Garantiza que los dos caminos de arranque
      * producen lo que describe cada test.
      */
     @Test
@@ -257,10 +314,12 @@ class PostgresBaselineAdoptionIntegrationTest {
         flyway(db).migrate();
 
         JdbcTemplate jdbc = jdbc(db);
-        assertEquals(List.of("1", "2"), jdbc.queryForList(
+        assertEquals(List.of("1", "2", "3"), jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history ORDER BY installed_rank", String.class));
-        // Tres claves foráneas en cascada: géneros->película y favoritos->usuario y favoritos->película
-        assertEquals(3, jdbc.queryForObject(
+        // Siete claves foráneas en cascada. V1: géneros->película, favoritos->usuario y
+        // favoritos->película. V3: géneros->serie, episodios->serie, favoritos de
+        // series->usuario y favoritos de series->serie.
+        assertEquals(7, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.referential_constraints"
                         + " WHERE constraint_schema = 'public' AND delete_rule = 'CASCADE'", Integer.class));
         assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
@@ -301,6 +360,10 @@ class PostgresBaselineAdoptionIntegrationTest {
             User alice = users.findByEmail("alice@test.com").orElseThrow();
             assertNotNull(alice.getCreatedAt());
             assertEquals(2, users.findFavoriteMovies(alice.getId()).size());
+            // Las entidades de V3 (Series, Episode) también validan contra la base adoptada
+            SeriesRepository series = context.getBean(SeriesRepository.class);
+            assertEquals(0, series.count());
+            assertEquals(List.of(), series.findFavoritesByUserId(alice.getId()));
             Movie manana = movies.findAllByTitleIgnoreCase("MAÑANA").get(0);
             assertEquals(1999, manana.getReleaseYear());
 

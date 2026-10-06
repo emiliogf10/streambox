@@ -4,14 +4,24 @@
  * Protegen la actualización optimista de "Mi lista": la interfaz cambia al
  * instante, se vuelve atrás si el servidor falla (solo esa película y en su
  * posición), y 409 al añadir / 404 al quitar se tratan como "el estado ya era
- * el correcto" (aviso informativo, sin revertir). `fetch` está simulado.
+ * el correcto" (aviso informativo, sin revertir). Lo mismo para las series, que
+ * son una lista aparte (y no se confunden con una película del mismo id), y el
+ * vaciado de las dos con su fallo parcial. `fetch` está simulado.
  */
 import { act, renderHook, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FavoriteButton } from '../components/FavoriteButton';
-import { errorResponse, jsonResponse, makeMovie, noContentResponse, renderWithProviders, routeFetch } from '../test/helpers';
+import {
+  errorResponse,
+  jsonResponse,
+  makeMovie,
+  makeSeries,
+  noContentResponse,
+  renderWithProviders,
+  routeFetch,
+} from '../test/helpers';
 import { FavoritesProvider, useFavorites } from './FavoritesContext';
 import { AuthProvider } from './AuthContext';
 import { ToastProvider } from './ToastContext';
@@ -271,7 +281,10 @@ describe('useFavorites (estado compartido)', () => {
   describe('clear (vaciar la lista)', () => {
     it('no es optimista: la lista se vacía solo cuando el servidor confirma, y devuelve true', async () => {
       const pending = deferred<Response>();
-      const { result } = await renderLoaded([m1, m2], { 'DELETE /api/users/me/favorites': () => pending.promise });
+      const { result } = await renderLoaded([m1, m2], {
+        'DELETE /api/users/me/favorites': () => pending.promise,
+        'DELETE /api/users/me/favorites/series': () => noContentResponse(),
+      });
 
       let outcome!: Promise<boolean>;
       await act(async () => {
@@ -292,6 +305,7 @@ describe('useFavorites (estado compartido)', () => {
     it('si falla conserva la lista, avisa y devuelve false', async () => {
       const { result } = await renderLoaded([m1, m2], {
         'DELETE /api/users/me/favorites': () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+        'DELETE /api/users/me/favorites/series': () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
       });
 
       let ok: boolean | undefined;
@@ -309,5 +323,229 @@ describe('useFavorites (estado compartido)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     expect(() => renderHook(() => useFavorites())).toThrow('useFavorites debe usarse dentro de <FavoritesProvider>.');
+  });
+});
+
+/**
+ * Series en "Mi lista": su propia lista en el servidor (`/users/me/favorites/series`)
+ * con el MISMO comportamiento que las películas (optimista, 409/404 = estado ya
+ * correcto) y sin mezclarse con ellas aunque compartan id.
+ */
+describe('useFavorites: series', () => {
+  const SERIES_LIST = 'GET /api/users/me/favorites/series';
+  const s1 = makeSeries({ id: 1, title: 'Serie Uno' });
+  const s2 = makeSeries({ id: 2, title: 'Serie Dos' });
+
+  function wrapper({ children }: { children: ReactNode }) {
+    return (
+      <ToastProvider>
+        <AuthProvider>
+          <FavoritesProvider>{children}</FavoritesProvider>
+        </AuthProvider>
+      </ToastProvider>
+    );
+  }
+
+  /** Monta el hook con ambas listas cargadas (películas y series). */
+  async function renderLoaded(
+    movies = [m1],
+    series = [s1],
+    extra: Parameters<typeof routeFetch>[1] = {},
+  ) {
+    routeFetch(fetchMock, {
+      [LIST]: () => jsonResponse(movies),
+      [SERIES_LIST]: () => jsonResponse(series),
+      ...extra,
+    });
+    const hook = renderHook(() => useFavorites(), { wrapper });
+    await waitFor(() => expect(hook.result.current.status).toBe('ready'));
+    return hook;
+  }
+
+  it('carga las dos listas, y una película y una serie con el mismo id no se confunden', async () => {
+    const { result } = await renderLoaded([m1], [s2]);
+
+    expect(result.current.movies.map((m) => m.id)).toEqual([1]);
+    expect(result.current.series.map((s) => s.id)).toEqual([2]);
+    expect(result.current.isFavorite(1)).toBe(true); // sin tipo = película
+    expect(result.current.isFavorite(1, 'series')).toBe(false);
+    expect(result.current.isFavorite(2, 'series')).toBe(true);
+    expect(result.current.isFavorite(2, 'movie')).toBe(false);
+  });
+
+  it('si falla la carga de las series la lista entera queda en error (no se enseña media lista) y reload pide las dos', async () => {
+    routeFetch(fetchMock, {
+      [LIST]: () => jsonResponse([m1]),
+      [SERIES_LIST]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+    });
+    const { result } = renderHook(() => useFavorites(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current.errorMessage).toMatch(/El servidor ha tenido un problema/);
+
+    routeFetch(fetchMock, { [LIST]: () => jsonResponse([m1]), [SERIES_LIST]: () => jsonResponse([s1]) });
+    act(() => result.current.reload());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    expect(result.current.movies).toHaveLength(1);
+    expect(result.current.series).toHaveLength(1);
+  });
+
+  it('añadir una serie es optimista, va la primera y usa el endpoint de series', async () => {
+    const pending = deferred<Response>();
+    const { result } = await renderLoaded([], [s1], { 'POST /api/users/me/favorites/series/2': () => pending.promise });
+
+    let toggling!: Promise<void>;
+    await act(async () => {
+      toggling = result.current.toggleSeries(s2);
+    });
+    // El servidor aún no ha respondido, pero la lista ya la incluye (y bloquea su botón).
+    expect(result.current.series.map((s) => s.id)).toEqual([2, 1]);
+    expect(result.current.isPending(2, 'series')).toBe(true);
+    expect(result.current.isPending(2, 'movie')).toBe(false);
+
+    await act(async () => {
+      pending.resolve(noContentResponse());
+      await toggling;
+    });
+    expect(result.current.isPending(2, 'series')).toBe(false);
+    expect(screen.getByText('«Serie Dos» se ha añadido a tu lista.')).toBeInTheDocument();
+  });
+
+  it('409 SERIES_ALREADY_IN_FAVORITES al añadir = ya estaba: se queda, con aviso informativo', async () => {
+    const { result } = await renderLoaded([], [], {
+      'POST /api/users/me/favorites/series/1': () =>
+        errorResponse(409, 'SERIES_ALREADY_IN_FAVORITES', 'La serie ya está en favoritos'),
+    });
+
+    await act(() => result.current.toggleSeries(s1));
+
+    expect(result.current.isFavorite(1, 'series')).toBe(true);
+    expect(screen.getByText('«Serie Uno» ya estaba en tu lista.')).toBeInTheDocument();
+  });
+
+  it('404 SERIES_NOT_IN_FAVORITES al quitar = ya no estaba: se queda fuera, sin revertir', async () => {
+    const { result } = await renderLoaded([], [s1], {
+      'DELETE /api/users/me/favorites/series/1': () =>
+        errorResponse(404, 'SERIES_NOT_IN_FAVORITES', 'La serie no está en favoritos'),
+    });
+
+    await act(() => result.current.toggleSeries(s1));
+
+    expect(result.current.series).toEqual([]);
+    expect(screen.getByText('«Serie Uno» ya no estaba en tu lista.')).toBeInTheDocument();
+  });
+
+  it('un 404 al AÑADIR (serie inexistente o sin episodios) NO es "ya estaba": se revierte y avisa', async () => {
+    const { result } = await renderLoaded([], [], {
+      'POST /api/users/me/favorites/series/1': () => errorResponse(404, 'RESOURCE_NOT_FOUND', 'La serie no existe'),
+    });
+
+    await act(() => result.current.toggleSeries(s1));
+
+    expect(result.current.series).toEqual([]);
+    expect(screen.getByText('La serie no existe')).toBeInTheDocument();
+  });
+
+  it('si quitar una serie falla (500), vuelve a su posición', async () => {
+    const { result } = await renderLoaded([], [s1, s2], {
+      'DELETE /api/users/me/favorites/series/1': () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+    });
+
+    await act(() => result.current.toggleSeries(s1));
+
+    expect(result.current.series.map((s) => s.id)).toEqual([1, 2]);
+    expect(screen.getByText(/El servidor ha tenido un problema/)).toBeInTheDocument();
+  });
+
+  it('quitar una serie no toca la película con el mismo id', async () => {
+    const { result } = await renderLoaded([m1], [s1], {
+      'DELETE /api/users/me/favorites/series/1': () => noContentResponse(),
+    });
+
+    await act(() => result.current.toggleSeries(s1));
+
+    expect(result.current.series).toEqual([]);
+    expect(result.current.movies.map((m) => m.id)).toEqual([1]);
+  });
+
+  describe('clear con películas y series', () => {
+    it('envía los DOS DELETE (aunque una lista parezca vacía) y, si van bien, vacía ambas', async () => {
+      const { result } = await renderLoaded([m1], [], {
+        'DELETE /api/users/me/favorites': () => noContentResponse(),
+        'DELETE /api/users/me/favorites/series': () => noContentResponse(),
+      });
+
+      let ok: boolean | undefined;
+      await act(async () => {
+        ok = await result.current.clear();
+      });
+
+      expect(ok).toBe(true);
+      const deletes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE').map(([url]) => String(url));
+      expect(deletes.sort()).toEqual(['/api/users/me/favorites', '/api/users/me/favorites/series']);
+      expect(result.current.movies).toEqual([]);
+      expect(result.current.series).toEqual([]);
+      expect(screen.getByText('Tu lista se ha vaciado.')).toBeInTheDocument();
+    });
+
+    it('si solo fallan las series: quita las películas, conserva las series, lo explica y devuelve false', async () => {
+      const { result } = await renderLoaded([m1, m2], [s1], {
+        'DELETE /api/users/me/favorites': () => noContentResponse(),
+        'DELETE /api/users/me/favorites/series': () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+      });
+
+      let ok: boolean | undefined;
+      await act(async () => {
+        ok = await result.current.clear();
+      });
+
+      expect(ok).toBe(false);
+      expect(result.current.movies).toEqual([]);
+      expect(result.current.series.map((s) => s.id)).toEqual([1]);
+      expect(
+        screen.getByText(/^Se han quitado las películas de tu lista, pero no las series\. El servidor ha tenido un problema/),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Tu lista se ha vaciado.')).not.toBeInTheDocument();
+    });
+
+    it('si solo fallan las películas: quita las series y conserva las películas', async () => {
+      const { result } = await renderLoaded([m1], [s1], {
+        'DELETE /api/users/me/favorites': () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+        'DELETE /api/users/me/favorites/series': () => noContentResponse(),
+      });
+
+      await act(async () => {
+        await result.current.clear();
+      });
+
+      expect(result.current.movies.map((m) => m.id)).toEqual([1]);
+      expect(result.current.series).toEqual([]);
+      expect(screen.getByText(/^Se han quitado las series de tu lista, pero no las películas\./)).toBeInTheDocument();
+    });
+  });
+});
+
+describe('FavoriteButton de una serie', () => {
+  it('refleja el estado de la serie (no el de la película con el mismo id) y añade por el endpoint de series', async () => {
+    const series = makeSeries({ id: 1, title: 'Serie Uno' });
+    routeFetch(fetchMock, {
+      [LIST]: () => jsonResponse([m1]), // la PELÍCULA 1 está en la lista...
+      'GET /api/users/me/favorites/series': () => jsonResponse([]), // ...pero la SERIE 1 no
+      'POST /api/users/me/favorites/series/1': () => noContentResponse(),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <FavoritesProvider>
+        <FavoriteButton series={series} />
+      </FavoritesProvider>,
+      { token: 'jwt' },
+    );
+
+    const button = await screen.findByRole('button', { name: /^Mi lista\s*—\s*Serie Uno$/ });
+    await user.click(button);
+
+    expect(await screen.findByText('«Serie Uno» se ha añadido a tu lista.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^En mi lista\s*—\s*Serie Uno$/ })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/users/me/favorites/series/1' && init?.method === 'POST')).toBe(true);
   });
 });

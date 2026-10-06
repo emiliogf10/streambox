@@ -122,14 +122,15 @@ public class GenreController {
     }
 
     /**
-     * Elimina un género que ninguna película tenga asignado (solo administradores).
+     * Elimina un género que ninguna película ni serie tenga asignado (solo administradores).
      *
      * @param id identificador del género
      */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "Elimina un género", description = "Elimina el género indicado. Solo se puede borrar "
-            + "si ninguna película lo tiene asignado; si no, hay que quitarlo antes de esas películas. "
+            + "si ninguna película ni serie lo tiene asignado; si no, hay que quitarlo antes de esas "
+            + "películas y series. "
             + "Requiere rol ADMIN.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Género eliminado correctamente"),
@@ -137,8 +138,8 @@ public class GenreController {
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
             @ApiResponse(responseCode = "404", description = "Género no encontrado"),
-            @ApiResponse(responseCode = "409", description = "Alguna película tiene asignado el género; "
-                    + "el mensaje indica cuántas (código GENRE_IN_USE)")
+            @ApiResponse(responseCode = "409", description = "Alguna película o serie tiene asignado el "
+                    + "género; el mensaje indica cuántas de cada (código GENRE_IN_USE)")
     })
     public void deleteGenre(@PathVariable Long id) {
 

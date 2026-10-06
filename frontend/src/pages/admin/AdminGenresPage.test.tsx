@@ -72,6 +72,10 @@ describe('AdminGenresPage: listado', () => {
     renderGenres({ 'GET /api/genres': () => jsonResponse([]) });
 
     expect(await screen.findByRole('heading', { name: 'Todavía no hay géneros' })).toBeInTheDocument();
+    // Las series también los necesitan: el texto no puede hablar solo de películas.
+    expect(
+      screen.getByText('Crea el primero con el formulario de arriba. Cada película o serie necesita al menos un género.'),
+    ).toBeInTheDocument();
     expect(newNameInput()).toBeInTheDocument();
   });
 
@@ -232,6 +236,8 @@ describe('AdminGenresPage: borrar', () => {
 
     await user.click(screen.getByRole('button', { name: 'Borrar Acción' }));
     const dialog = screen.getByRole('alertdialog', { name: '¿Borrar el género «Acción»?' });
+    // La regla real del servidor: ni películas NI series (antes solo nombraba las películas).
+    expect(dialog).toHaveTextContent('Solo se puede borrar un género que no tenga ninguna película ni serie.');
     expect(within(dialog).getByRole('button', { name: 'Cancelar' })).toHaveFocus();
     await user.click(within(dialog).getByRole('button', { name: 'Sí, borrar género' }));
 

@@ -49,7 +49,8 @@ import jakarta.validation.constraints.Size;
  * @param imageUrl    URL de la portada (obligatoria, máximo 500 caracteres,
  *                    {@code https://} o {@code /covers/<archivo>})
  * @param videoUrl    URL del vídeo (obligatoria, máximo 500 caracteres, {@code https://})
- * @param genreIds    identificadores de los géneros de la película (al menos uno)
+ * @param genreIds    identificadores de los géneros de la película (entre 1 y
+ *                    {@value #MAX_GENRES})
  */
 public record MovieRequest(
 
@@ -92,7 +93,26 @@ public record MovieRequest(
         String videoUrl,
 
         @NotEmpty
+        @Size(max = MovieRequest.MAX_GENRES, message = MovieRequest.GENRES_SIZE_MESSAGE)
         Set<Long> genreIds) {
+
+    /**
+     * Máximo de géneros por título (películas y series).
+     *
+     * <p>
+     * Sin tope, un administrador (o un token de administrador robado) podía
+     * mandar miles de ids: el servicio los busca con un único
+     * {@code WHERE id IN (...)}, que crece con la lista (PostgreSQL rechaza
+     * además más de 32767 parámetros en una consulta, con un 500), y la
+     * petición entera se procesaba antes de fallar. 20 queda muy por encima de
+     * cualquier título real y del número de géneros que maneja el catálogo.
+     * </p>
+     */
+    public static final int MAX_GENRES = 20;
+
+    /** Error de cardinalidad de {@code genreIds} (contrato con el frontend). */
+    public static final String GENRES_SIZE_MESSAGE =
+            "Una película puede tener como máximo " + MAX_GENRES + " géneros";
 
     /**
      * Longitud máxima de {@code imageUrl} y {@code videoUrl}. Coincide con las

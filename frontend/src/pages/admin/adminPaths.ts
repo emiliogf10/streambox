@@ -10,12 +10,21 @@
 export const ADMIN_MOVIES_PATH = '/admin/peliculas';
 /** Alta de una película. */
 export const ADMIN_NEW_MOVIE_PATH = `${ADMIN_MOVIES_PATH}/nueva`;
+/** Listado de series del panel (incluye las que aún no tienen episodios). */
+export const ADMIN_SERIES_PATH = '/admin/series';
+/** Alta de una serie. */
+export const ADMIN_NEW_SERIES_PATH = `${ADMIN_SERIES_PATH}/nueva`;
 /** Pestaña de géneros. */
 export const ADMIN_GENRES_PATH = '/admin/generos';
 
 /** Edición de la película `id`. */
 export function adminEditMoviePath(id: number): string {
   return `${ADMIN_MOVIES_PATH}/${id}/editar`;
+}
+
+/** Edición de la serie `id` (datos de la serie y, debajo, sus episodios). */
+export function adminEditSeriesPath(id: number): string {
+  return `${ADMIN_SERIES_PATH}/${id}/editar`;
 }
 
 /** Estado de navegación que el listado pasa al formulario (ver {@link getReturnTo}). */
@@ -33,16 +42,15 @@ export interface ReturnToState {
  * navegar es una costumbre barata que evita redirecciones a cualquier sitio.
  *
  * @param state `location.state` (puede ser cualquier cosa, o nada si se entró escribiendo la URL)
+ * @param listPath listado al que pertenece el formulario (por defecto, el de películas); es
+ *   también el destino si el estado no sirve
  */
-export function getReturnTo(state: unknown): string {
+export function getReturnTo(state: unknown, listPath: string = ADMIN_MOVIES_PATH): string {
   if (typeof state === 'object' && state !== null && 'returnTo' in state) {
     const { returnTo } = state as { returnTo: unknown };
-    if (
-      typeof returnTo === 'string' &&
-      (returnTo === ADMIN_MOVIES_PATH || returnTo.startsWith(`${ADMIN_MOVIES_PATH}?`))
-    ) {
+    if (typeof returnTo === 'string' && (returnTo === listPath || returnTo.startsWith(`${listPath}?`))) {
       return returnTo;
     }
   }
-  return ADMIN_MOVIES_PATH;
+  return listPath;
 }

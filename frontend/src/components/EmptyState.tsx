@@ -14,13 +14,18 @@ interface EmptyStateProps {
   description: string;
   /** Acción opcional (un enlace o botón), p. ej. "Explorar catálogo". */
   action?: ReactNode;
+  /**
+   * Nivel del título: `h2` (por defecto) cuando la página ya tiene su `<h1>`;
+   * `h1` cuando el estado ES la página entera (p. ej. «Serie no encontrada»).
+   */
+  titleAs?: 'h1' | 'h2';
 }
 
 /**
  * Estado "vacío": explica por qué no hay nada que mostrar y, si procede, qué
  * hacer a continuación. Evita pantallas en blanco que parecen un fallo.
  */
-export function EmptyState({ icon, visual, title, description, action }: EmptyStateProps) {
+export function EmptyState({ icon, visual, title, description, action, titleAs: Title = 'h2' }: EmptyStateProps) {
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-6 px-4 text-center">
       {visual ? (
@@ -36,7 +41,7 @@ export function EmptyState({ icon, visual, title, description, action }: EmptySt
         )
       )}
       <div className="max-w-sm">
-        <h2 className="mb-1.5 text-lg font-semibold tracking-tight text-balance text-white">{title}</h2>
+        <Title className="mb-1.5 text-lg font-semibold tracking-tight text-balance text-white">{title}</Title>
         <p className="text-sm leading-relaxed text-pretty text-muted">{description}</p>
       </div>
       {action}

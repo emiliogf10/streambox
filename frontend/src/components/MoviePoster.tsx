@@ -4,7 +4,7 @@ import { posterFallbackGradient } from '../lib/posterFallback';
 
 /** Propiedades de {@link MoviePoster}. */
 interface MoviePosterProps {
-  /** Título de la película: texto del hueco si la imagen no carga. */
+  /** Título de la película o serie: texto del hueco si la imagen no carga. */
   title: string;
   /** `imageUrl` de la API. Puede venir vacía o apuntar a algo que no existe. */
   src: string | null | undefined;
@@ -36,7 +36,9 @@ interface MoviePosterProps {
 }
 
 /**
- * Póster de una película: SIEMPRE la imagen que indica la API (`imageUrl`).
+ * Póster de un título del catálogo (película o serie): SIEMPRE la imagen que
+ * indica la API (`imageUrl`). Conserva el nombre de cuando solo había películas;
+ * solo recibe título y URL, así que ya servía igual para las series sin cambios.
  *
  * - **Sin saltos de diseño**: el contenedor tiene tamaño propio (lo da quien lo
  *   usa) y la `<img>` lleva `width`/`height` (las portadas son 2:3), de modo

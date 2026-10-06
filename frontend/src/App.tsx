@@ -8,22 +8,30 @@ import { AdminGenresPage } from './pages/admin/AdminGenresPage';
 import { AdminLayout } from './pages/admin/AdminLayout';
 import { AdminMoviesPage } from './pages/admin/AdminMoviesPage';
 import { ADMIN_MOVIES_PATH } from './pages/admin/adminPaths';
+import { AdminSeriesPage } from './pages/admin/AdminSeriesPage';
 import { MovieFormPage } from './pages/admin/MovieFormPage';
+import { SeriesFormPage } from './pages/admin/SeriesFormPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
+import { MoviesPage } from './pages/MoviesPage';
 import { MyListPage } from './pages/MyListPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { SeriesDetailPage } from './pages/SeriesDetailPage';
+import { SeriesPage } from './pages/SeriesPage';
 
 /**
  * Mapa de rutas de la aplicación.
  *
  * - `/login` y `/registro`: públicas; si ya hay sesión redirigen a `/`.
- * - `/` y `/favorites`: privadas, dentro de `AppShell` (barra + contenido).
+ * - `/`, `/peliculas` (con `?genero=&anio=&orden=`), `/series`, `/series/:id`
+ *   (con `?temporada=N`) y `/favorites`: privadas, dentro de `AppShell` (barra + contenido).
  * - `/admin/*`: panel de administración, también dentro de `AppShell` y además
  *   tras `RequireAdmin` (espera a conocer el rol; si no es `ADMIN`, a `/`).
  *   `/admin` lleva a `/admin/peliculas`; el resto de rutas del panel son el
- *   listado, el alta (`peliculas/nueva`), la edición (`peliculas/:id/editar`)
- *   y los géneros (`generos`). Una ruta desconocida del panel vuelve al listado.
+ *   listado, el alta (`peliculas/nueva`) y la edición (`peliculas/:id/editar`)
+ *   de películas, lo mismo para series (`series`, `series/nueva`,
+ *   `series/:id/editar`) y los géneros (`generos`). Una ruta desconocida del
+ *   panel vuelve al listado de películas.
  *
  * Está separado de {@link App} (que añade el enrutador del navegador y los
  * proveedores) para que los tests puedan montar estas MISMAS rutas con un
@@ -56,6 +64,9 @@ export function AppRoutes() {
         }
       >
         <Route path="/" element={<HomePage />} />
+        <Route path="/peliculas" element={<MoviesPage />} />
+        <Route path="/series" element={<SeriesPage />} />
+        <Route path="/series/:id" element={<SeriesDetailPage />} />
         <Route path="/favorites" element={<MyListPage />} />
         {/* Alias /my-list → /favorites por compatibilidad con enunciado */}
         <Route path="/my-list" element={<Navigate to="/favorites" replace />} />
@@ -73,6 +84,9 @@ export function AppRoutes() {
           <Route path="peliculas" element={<AdminMoviesPage />} />
           <Route path="peliculas/nueva" element={<MovieFormPage />} />
           <Route path="peliculas/:id/editar" element={<MovieFormPage />} />
+          <Route path="series" element={<AdminSeriesPage />} />
+          <Route path="series/nueva" element={<SeriesFormPage />} />
+          <Route path="series/:id/editar" element={<SeriesFormPage />} />
           <Route path="generos" element={<AdminGenresPage />} />
           <Route path="*" element={<Navigate to={ADMIN_MOVIES_PATH} replace />} />
         </Route>

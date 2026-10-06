@@ -114,11 +114,124 @@ function slug(text: string): string {
  * Las películas "sin portada" apuntan a un archivo que cumple el formato pero no existe
  * (`/covers/no-existe-<título>.webp`): el navegador recibe un 404 y se ve el hueco de respaldo.
  */
-export function coverUrl(movie: SeedMovie): string {
+export function coverUrl(movie: Pick<SeedMovie, 'title' | 'cover'>): string {
   return movie.cover ? `/covers/${movie.cover}` : `/covers/no-existe-${slug(movie.title)}.webp`;
 }
 
 /** Enlace de vídeo de ejemplo (`https`). El test nunca lo abre: solo comprueba el `href`. */
 export function videoUrl(movie: SeedMovie): string {
   return `https://videos.streambox.example/watch/${encodeURIComponent(movie.title)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Series
+// ---------------------------------------------------------------------------
+
+/** Serie de ejemplo. Las temporadas se dan como número de episodios de cada una. */
+export interface SeedSeries {
+  title: string;
+  description: string;
+  releaseYear: number;
+  /** `null` = en emisión. */
+  endYear: number | null;
+  /** Igual que en las películas: archivo de `public/covers` o `null` para una portada inexistente (respaldo). */
+  cover: string | null;
+  genres: string[];
+  /**
+   * Episodios de cada temporada, en orden (`[3, 2]` = temporada 1 con 3 y
+   * temporada 2 con 2). Vacío = serie SIN episodios, que los usuarios no deben ver.
+   */
+  seasons: number[];
+}
+
+/**
+ * Series que se siembran DESPUÉS de las películas (tablas aparte: no cambian el
+ * banner de la portada ni el "Mostrando 25 de 25"). Pensadas para ejercitar:
+ *  - **Varias temporadas** (selector y `?temporada=`) y **una sola** (sin selector).
+ *  - **En emisión** (`endYear: null`) y terminadas.
+ *  - **Portada real y portada inexistente** (respaldo del póster).
+ *  - **Fila de género en `/series`**: las cuatro con episodios comparten «Drama».
+ *    Hacen falta CUATRO y no tres porque, igual que en la portada, las filas se
+ *    construyen SIN la serie del banner (`SeriesPage` pasa `series.slice(1)` a
+ *    `buildCatalogRows`) y una fila de género exige ≥ 3 títulos
+ *    (`MIN_MOVIES_PER_GENRE_ROW`): con tres, bajo el banner solo quedaban dos y
+ *    la fila «Drama» no existía (así falló la primera ejecución de `series.spec.ts`).
+ *  - **Una serie sin episodios**, creada la ÚLTIMA: si se colara en el listado
+ *    sería la más reciente (el banner de `/series` y la primera de la fila de la
+ *    portada), así que su ausencia se nota. Tampoco debe salir en el buscador
+ *    ni tener página (404).
+ *
+ * Los títulos NO contienen «blade», «dune», «interstellar», «mad» ni «zzz» (el
+ * buscador ahora busca también series y cambiaría lo que comprueba `search.spec.ts`),
+ * ni «faro» ni «fantasma» salvo en la serie que los usa (`series.spec.ts` espera
+ * exactamente un resultado para «faro» y ninguno para «fantasma»).
+ *
+ * El ORDEN es el de creación: la última CON episodios es la del banner de `/series`.
+ */
+export const SERIES: readonly SeedSeries[] = [
+  {
+    title: 'Estación Polar',
+    description: SHORT,
+    releaseYear: 2023,
+    endYear: null,
+    cover: null,
+    genres: [DRAMA, SCI_FI],
+    seasons: [2],
+  },
+  {
+    title: 'Los Archivos de Niebla',
+    description: SHORT,
+    releaseYear: 2016,
+    endYear: 2019,
+    cover: 'el-marciano.webp',
+    genres: [DRAMA],
+    seasons: [2, 2, 1],
+  },
+  {
+    // Miniserie (una temporada, terminada). Va ANTES de «Crónicas del Faro» para no quitarle el banner.
+    title: 'Herederos del Silencio',
+    description: SHORT,
+    releaseYear: 2021,
+    endYear: 2021,
+    cover: 'interstellar.webp',
+    genres: [DRAMA],
+    seasons: [4],
+  },
+  {
+    title: 'Crónicas del Faro',
+    description: LONG,
+    releaseYear: 2019,
+    endYear: 2022,
+    cover: 'ex-machina.webp',
+    genres: [DRAMA, ACTION],
+    seasons: [3, 2],
+  },
+  {
+    title: 'Serie Fantasma Sin Episodios',
+    description: SHORT,
+    releaseYear: 2025,
+    endYear: null,
+    cover: null,
+    genres: [DRAMA],
+    seasons: [],
+  },
+];
+
+/** Series que SÍ ven los usuarios (las que tienen episodios), en orden de creación. */
+export const VISIBLE_SERIES = SERIES.filter((series) => series.seasons.length > 0);
+
+/** La serie más reciente con episodios: banner de `/series` y primera de la fila de la portada. */
+export const SERIES_HERO = VISIBLE_SERIES[VISIBLE_SERIES.length - 1];
+
+/** La serie sin episodios (no debe aparecer en ningún sitio para un usuario). */
+export const EMPTY_SERIES = SERIES.find((series) => series.seasons.length === 0)!;
+
+/** Título del episodio `n` de la temporada `season` (sembrado así para poder buscarlo en los tests). */
+export function episodeTitle(season: number, episode: number): string {
+  return `Capítulo ${season}.${episode}`;
+}
+
+/** Enlace de vídeo de un episodio (`https`); los tests solo comprueban el `href`. */
+export function episodeVideoUrl(series: SeedSeries, season: number, episode: number): string {
+  return `https://videos.streambox.example/series/${slug(series.title)}/t${season}e${episode}`;
 }

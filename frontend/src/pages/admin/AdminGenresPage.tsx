@@ -51,7 +51,7 @@ function nameErrorFrom(error: unknown): string | null {
  *   tras guardar, al botón del género ya renombrado. Solo una fila a la vez.
  * - **Borrar**: con confirmación y esperando al servidor. Si el género está en
  *   uso (409 `GENRE_IN_USE`), el mensaje del servidor —que dice cuántas
- *   películas lo usan y qué hacer— se queda **en la fila** de ese género en vez
+ *   películas y series lo usan y qué hacer— se queda **en la fila** de ese género en vez
  *   de en un aviso emergente: hay que poder leerlo con calma mientras se
  *   decide, y un toast desaparece a los pocos segundos.
  * - **404** al renombrar o borrar: el género ya no existía (otra persona, otra
@@ -219,7 +219,7 @@ export function AdminGenresPage() {
       <EmptyState
         icon={<Tags className="size-8" />}
         title="Todavía no hay géneros"
-        description="Crea el primero con el formulario de arriba. Cada película necesita al menos un género."
+        description="Crea el primero con el formulario de arriba. Cada película o serie necesita al menos un género."
       />
     );
   } else {
@@ -346,7 +346,7 @@ export function AdminGenresPage() {
       <ConfirmDialog
         open={genreToDelete !== null}
         title={genreToDelete ? `¿Borrar el género «${genreToDelete.name}»?` : ''}
-        description="Solo se puede borrar un género que no tenga ninguna película. Esta acción no se puede deshacer."
+        description="Solo se puede borrar un género que no tenga ninguna película ni serie. Esta acción no se puede deshacer."
         confirmLabel="Sí, borrar género"
         busy={deleting}
         onConfirm={() => void handleConfirmDelete()}

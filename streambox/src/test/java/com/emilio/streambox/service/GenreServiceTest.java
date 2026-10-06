@@ -19,6 +19,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -31,6 +32,7 @@ import com.emilio.streambox.exception.GenreInUseException;
 import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
+import com.emilio.streambox.repository.SeriesRepository;
 
 /**
  * Tests unitarios de {@link GenreService} con repositorios simulados.
@@ -53,6 +55,7 @@ class GenreServiceTest {
 
     private GenreRepository genreRepository;
     private MovieRepository movieRepository;
+    private SeriesRepository seriesRepository;
     private GenreService service;
     private Genre drama;
 
@@ -60,7 +63,8 @@ class GenreServiceTest {
     void setUp() {
         genreRepository = mock(GenreRepository.class);
         movieRepository = mock(MovieRepository.class);
-        service = new GenreService(genreRepository, movieRepository);
+        seriesRepository = mock(SeriesRepository.class);
+        service = new GenreService(genreRepository, movieRepository, seriesRepository);
 
         drama = new Genre();
         drama.setId(GENRE);
@@ -70,16 +74,17 @@ class GenreServiceTest {
 
     @Test
     void siAlguienAsignaElGeneroEntreElRecuentoYElBorradoDa409EnUso() {
-        // El recuento dijo "0 películas", pero al hacer flush la clave foránea
-        // de movie_genres rechaza el DELETE.
+        // Los recuentos dijeron "0 películas y 0 series", pero al hacer flush
+        // la clave foránea de movie_genres (o de series_genres) rechaza el DELETE.
         when(movieRepository.countByGenres_Id(GENRE)).thenReturn(0L);
+        when(seriesRepository.countByGenres_Id(GENRE)).thenReturn(0L);
         doThrow(violation("23503")).when(genreRepository).flush();
 
         GenreInUseException thrown = assertThrows(GenreInUseException.class,
                 () -> service.deleteGenre(GENRE));
 
-        assertEquals("No se puede eliminar el género \"Drama\": alguna película lo tiene asignado. "
-                + "Quítalo de esas películas antes de borrarlo.", thrown.getMessage());
+        assertEquals("No se puede eliminar el género \"Drama\": alguna película o serie lo tiene asignado. "
+                + "Quítalo de esas películas o series antes de borrarlo.", thrown.getMessage());
     }
 
     @Test
@@ -103,6 +108,59 @@ class GenreServiceTest {
         assertEquals("No se puede eliminar el género \"Drama\": lo usan 2 películas. "
                 + "Quítalo de esas películas antes de borrarlo.", thrown.getMessage());
         verify(genreRepository, never()).delete(any());
+    }
+
+    /**
+     * Un género que solo usan series tampoco se borra: antes de las series el
+     * servicio solo contaba películas, y con 0 películas intentaba el
+     * {@code DELETE} (que fallaba por la clave foránea de {@code series_genres}
+     * con un mensaje sin cifra).
+     */
+    @Test
+    void unGeneroQueSoloUsanSeriesNoLlegaABorrarse() {
+        when(movieRepository.countByGenres_Id(GENRE)).thenReturn(0L);
+        when(seriesRepository.countByGenres_Id(GENRE)).thenReturn(2L);
+
+        GenreInUseException thrown = assertThrows(GenreInUseException.class,
+                () -> service.deleteGenre(GENRE));
+
+        assertEquals("No se puede eliminar el género \"Drama\": lo usan 2 series. "
+                + "Quítalo de esas series antes de borrarlo.", thrown.getMessage());
+        verify(genreRepository, never()).delete(any());
+    }
+
+    /**
+     * Mensaje del 409 según los recuentos: singular o plural en cada parte,
+     * la parte a 0 se omite y el verbo va en singular solo si en total es
+     * una única película o serie.
+     */
+    @ParameterizedTest
+    @MethodSource("recuentosYMensajes")
+    void elMensajeDeGeneroEnUsoConcuerdaConLosRecuentos(long movies, long series, String usage) {
+        when(movieRepository.countByGenres_Id(GENRE)).thenReturn(movies);
+        when(seriesRepository.countByGenres_Id(GENRE)).thenReturn(series);
+
+        GenreInUseException thrown = assertThrows(GenreInUseException.class,
+                () -> service.deleteGenre(GENRE));
+
+        assertEquals("No se puede eliminar el género \"Drama\": " + usage + " antes de borrarlo.",
+                thrown.getMessage());
+    }
+
+    static Stream<Arguments> recuentosYMensajes() {
+        return Stream.of(
+                Arguments.of(1L, 0L,
+                        "lo usa 1 película. Quítalo de esa película"),
+                Arguments.of(3L, 0L,
+                        "lo usan 3 películas. Quítalo de esas películas"),
+                Arguments.of(0L, 1L,
+                        "lo usa 1 serie. Quítalo de esa serie"),
+                Arguments.of(3L, 2L,
+                        "lo usan 3 películas y 2 series. Quítalo de esas películas y de esas series"),
+                Arguments.of(1L, 1L,
+                        "lo usan 1 película y 1 serie. Quítalo de esa película y de esa serie"),
+                Arguments.of(2L, 1L,
+                        "lo usan 2 películas y 1 serie. Quítalo de esas películas y de esa serie"));
     }
 
     @Test
@@ -159,7 +217,7 @@ class GenreServiceTest {
             assertEquals("name", thrown.getParameter());
             assertEquals(GenreRequest.NAME_SIZE_MESSAGE, thrown.getMessage());
         }
-        verifyNoInteractions(genreRepository, movieRepository);
+        verifyNoInteractions(genreRepository, movieRepository, seriesRepository);
     }
 
     static Stream<String> nombresInvalidosTrasNormalizar() {

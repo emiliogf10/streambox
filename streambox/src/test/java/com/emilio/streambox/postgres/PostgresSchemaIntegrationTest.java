@@ -32,8 +32,8 @@ import jakarta.persistence.EntityManagerFactory;
  * (equivalente a {@code FlywaySchemaIntegrationTest}, que usa H2).
  *
  * <p>
- * Que el contexto de Spring arranque ya demuestra dos cosas: que {@code V1} y
- * {@code V2} se aplican en PostgreSQL desde cero y que Hibernate
+ * Que el contexto de Spring arranque ya demuestra dos cosas: que todas las
+ * migraciones ({@code V1}..{@code V3}) se aplican en PostgreSQL desde cero y que Hibernate
  * ({@code ddl-auto=validate}) acepta las entidades contra ese esquema. Aquí se
  * comprueba además lo que H2 no puede garantizar: los tipos reales del catálogo
  * del sistema ({@code information_schema}, {@code pg_catalog}), las políticas de
@@ -60,7 +60,12 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     @BeforeEach
     @AfterEach
     void cleanTables() {
-        // Sin TRUNCATE: borrado normal, hijas primero, para no depender de nada más
+        // Sin TRUNCATE: borrado normal, hijas primero, para no depender de nada más.
+        // Las tablas de series (V3) van antes porque series_genres referencia a genres.
+        jdbc.update("DELETE FROM user_favorite_series");
+        jdbc.update("DELETE FROM episodes");
+        jdbc.update("DELETE FROM series_genres");
+        jdbc.update("DELETE FROM series");
         jdbc.update("DELETE FROM user_favorite_movies");
         jdbc.update("DELETE FROM movie_genres");
         jdbc.update("DELETE FROM users");
@@ -73,17 +78,17 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1 y V2 (sin fila de
-     * baseline: esa solo aparece al adoptar una base existente) y ambas
+     * En una base de datos vacía Flyway aplica exactamente V1, V2 y V3 (sin
+     * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
-     * pero no en H2.
+     * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
      */
     @Test
-    void flywayAplicaV1YV2DesdeCeroSinBaseline() {
+    void flywayAplicaTodasLasMigracionesDesdeCeroSinBaseline() {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -200,13 +205,18 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                 definitions.get("idx_movies_release_year"));
     }
 
-    /** Unicidad de usuario, email y nombre de género, por restricción con nombre. */
+    /**
+     * Unicidad de usuario, email y nombre de género, por restricción con nombre
+     * (más la de episodios de V3, que se prueba en
+     * {@code PostgresSeriesSchemaIntegrationTest}).
+     */
     @Test
     void existenLasRestriccionesDeUnicidadYSeRechazanLosDuplicadosConElCodigoReal() {
         Set<String> uniques = Set.copyOf(jdbc.queryForList(
                 "SELECT conname FROM pg_constraint WHERE contype = 'u' AND connamespace = 'public'::regnamespace",
                 String.class));
-        assertEquals(Set.of("uk_users_username", "uk_users_email", "uk_genres_name"), uniques);
+        assertEquals(Set.of("uk_users_username", "uk_users_email", "uk_genres_name",
+                "uk_episodes_series_season_episode"), uniques);
 
         insertUser("dup", "dup@test.com");
         DataIntegrityViolationException byUsername = assertThrows(DataIntegrityViolationException.class,

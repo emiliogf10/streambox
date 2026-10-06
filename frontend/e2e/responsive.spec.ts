@@ -13,8 +13,8 @@
  * lo que no puede desbordarse es la página (`documentElement`).
  */
 import type { Locator, Page } from '@playwright/test';
-import { addFavoritesByTitle, loginAdmin } from './support/api';
-import { HERO_TITLE } from './support/catalog';
+import { addFavoritesByTitle, addSeriesFavoritesByTitle, findSeriesIdAsAdmin, genreIdByName, loginAdmin } from './support/api';
+import { EMPTY_SERIES, HERO_TITLE, SERIES_HERO } from './support/catalog';
 import { expect, test, waitForMovieForm } from './support/fixtures';
 import { expectCovers, expectWholePoster } from './support/images';
 
@@ -54,11 +54,11 @@ async function expectNavbarFits(page: Page, withAdminLink: boolean): Promise<voi
   const items: [Locator, string][] = [
     [page.getByRole('link', { name: 'streambox' }), 'logo'],
     [nav.getByRole('link', { name: 'Inicio' }), 'Inicio'],
-    [nav.getByText('Películas'), 'Películas'],
-    [nav.getByText('Series'), 'Series'],
+    [nav.getByRole('link', { name: 'Películas' }), 'Películas'],
+    [nav.getByRole('link', { name: 'Series' }), 'Series'],
     [nav.getByRole('link', { name: 'Mi lista' }), 'Mi lista'],
     ...(withAdminLink ? ([[nav.getByRole('link', { name: 'Administrar' }), 'Administrar']] as [Locator, string][]) : []),
-    [page.getByRole('combobox', { name: 'Buscar películas por título' }), 'buscador'],
+    [page.getByRole('combobox', { name: 'Buscar películas y series por título' }), 'buscador'],
     [page.getByRole('button', { name: 'Menú de usuario' }), 'menú de usuario'],
   ];
 
@@ -75,6 +75,53 @@ async function expectNavbarFits(page: Page, withAdminLink: boolean): Promise<voi
       const overlap = a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1;
       expect(overlap, `«${a.label}» y «${b.label}» se solapan en la barra`).toBe(false);
     }
+  }
+}
+
+/**
+ * La barra de filtros de `/peliculas` cabe: sus tres controles se ven enteros y no se pisan entre sí.
+ * En móvil es una rejilla de dos columnas (género y año arriba, orden debajo) y desde `sm` una fila.
+ */
+async function expectMovieFilterBarFits(page: Page): Promise<void> {
+  const form = page.getByRole('form', { name: 'Filtrar películas' });
+  const controls: [Locator, string][] = [
+    [form.getByRole('combobox', { name: 'Género' }), 'filtro Género'],
+    [form.getByRole('textbox', { name: 'Año' }), 'filtro Año'],
+    [form.getByRole('combobox', { name: 'Ordenar por' }), 'filtro Ordenar por'],
+  ];
+  const boxes: { label: string; x: number; y: number; width: number; height: number }[] = [];
+  for (const [locator, label] of controls) {
+    await expectFullyInsideViewportWidth(locator, page, label);
+    boxes.push({ label, ...(await locator.boundingBox())! });
+  }
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const [a, b] = [boxes[i], boxes[j]];
+      const overlap = a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1;
+      expect(overlap, `«${a.label}» y «${b.label}» se solapan`).toBe(false);
+    }
+  }
+}
+
+/**
+ * «Quitar filtros» de la barra va pegado al desplegable «Ordenar por»: o en su
+ * misma línea y centrado con él, o justo debajo (a la distancia normal entre
+ * controles, 12 px). Antes, a 768 px, bajaba solo a otra línea con el margen
+ * pensado para alinearse en fila y quedaba descolgado (~38 px de hueco).
+ */
+async function expectClearFiltersNextToSort(page: Page): Promise<void> {
+  const form = page.getByRole('form', { name: 'Filtrar películas' });
+  const sort = (await form.getByRole('combobox', { name: 'Ordenar por' }).boundingBox())!;
+  const clear = (await form.getByRole('button', { name: 'Quitar filtros' }).boundingBox())!;
+  const sameLine = clear.y < sort.y + sort.height && sort.y < clear.y + clear.height;
+  if (sameLine) {
+    const offset = Math.abs(clear.y + clear.height / 2 - (sort.y + sort.height / 2));
+    expect(offset, '«Quitar filtros» no está centrado con «Ordenar por»').toBeLessThanOrEqual(1);
+    expect(clear.x, '«Quitar filtros» debería ir a la derecha de «Ordenar por»').toBeGreaterThanOrEqual(sort.x + sort.width);
+  } else {
+    const gap = clear.y - (sort.y + sort.height);
+    expect(gap, '«Quitar filtros» debería ir justo debajo de «Ordenar por»').toBeGreaterThanOrEqual(0);
+    expect(gap, `hueco de ${gap}px entre «Ordenar por» y «Quitar filtros»`).toBeLessThanOrEqual(16);
   }
 }
 
@@ -142,6 +189,107 @@ for (const viewport of VIEWPORTS) {
       await expectNoHorizontalScroll(page);
     });
 
+    test('/series y la página de una serie (selector de temporadas y episodios)', async ({ page, request, user, signIn }) => {
+      await signIn(user);
+      await page.goto('/series');
+      const banner = page.getByRole('region', { name: SERIES_HERO.title });
+      await expect(banner).toBeVisible();
+      await expectNavbarFits(page, false);
+      await expectFullyInsideViewportWidth(page.getByRole('heading', { level: 1, name: 'Series' }), page, 'título «Series»');
+      await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Ver episodios/ }), page, '«Ver episodios»');
+      await expectFullyInsideViewportWidth(banner.getByRole('button', { name: /^Mi lista/ }), page, '«Mi lista» del banner');
+      await expectWholePoster(banner.locator('img').last(), banner, 'póster del banner de series');
+      await expectNoHorizontalScroll(page);
+
+      await banner.getByRole('link', { name: /^Ver episodios/ }).click();
+      await expect(page.getByRole('heading', { level: 1, name: SERIES_HERO.title })).toBeVisible();
+      const picker = page.getByRole('navigation', { name: 'Temporadas' });
+      for (const name of ['Temporada 1', 'Temporada 2']) {
+        await expectFullyInsideViewportWidth(picker.getByRole('link', { name }), page, `«${name}»`);
+      }
+      const episodes = page.getByRole('list', { name: 'Episodios de la temporada 1' });
+      const watchLinks = episodes.getByRole('link', { name: /^Ver T1:E/ });
+      await expect(watchLinks).toHaveCount(SERIES_HERO.seasons[0]);
+      for (let index = 0; index < SERIES_HERO.seasons[0]; index += 1) {
+        await expectFullyInsideViewportWidth(watchLinks.nth(index), page, `«Ver» del episodio ${index + 1}`);
+      }
+      await expectNoHorizontalScroll(page);
+
+      // Con su sección de series en «Mi lista» tampoco hay desborde.
+      await addSeriesFavoritesByTitle(request, user.token, [SERIES_HERO.title]);
+      await page.goto('/favorites');
+      const seriesSection = page.getByRole('region', { name: 'Series' });
+      await expectFullyInsideViewportWidth(seriesSection.getByRole('link', { name: new RegExp(`^${SERIES_HERO.title}`) }), page, 'tarjeta de serie');
+      await expectFullyInsideViewportWidth(
+        page.getByRole('region', { name: 'Películas' }).getByRole('link', { name: 'Explorar películas' }),
+        page,
+        '«Explorar películas»',
+      );
+      await expectNoHorizontalScroll(page);
+    });
+
+    test('/peliculas sin filtros: barra superior, título, barra de filtros y banner', async ({ page, user, signIn }) => {
+      await signIn(user);
+      await page.goto('/peliculas');
+      const banner = page.getByRole('region', { name: HERO_TITLE });
+      await expect(banner).toBeVisible();
+      await expectNavbarFits(page, false);
+      await expectFullyInsideViewportWidth(page.getByRole('heading', { level: 1, name: 'Películas' }), page, 'título «Películas»');
+      await expectMovieFilterBarFits(page);
+      await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Ver ahora/ }), page, '«Ver ahora»');
+      await expectFullyInsideViewportWidth(banner.getByRole('button', { name: /^Más información/ }), page, '«Más información»');
+      await expectWholePoster(banner.locator('img').last(), banner, 'póster del banner de películas');
+      await expectNoHorizontalScroll(page);
+    });
+
+    // Con filtros, dos tests (cuadrícula + error del año, y vacío): juntos rozaban los 15 s a 375 px con la suite completa.
+    // Se abren con la URL ya filtrada (como un enlace compartido): el manejo de la barra lo prueba `movies.spec.ts`.
+    test('/peliculas con filtros: cuadrícula, «Quitar filtros» y el error del año', async ({ page, request, user, signIn }) => {
+      const actionId = await genreIdByName(request, user.token, 'Acción');
+      await signIn(user);
+      // Acción de 2014: dos resultados en la cuadrícula.
+      await page.goto(`/peliculas?genero=${actionId}&anio=2014`);
+      const form = page.getByRole('form', { name: 'Filtrar películas' });
+      const results = page.getByRole('region', { name: 'Resultados' });
+      const cards = results.getByRole('listitem').getByRole('button');
+      await expect(cards).toHaveCount(2);
+      await expectMovieFilterBarFits(page);
+      await expectFullyInsideViewportWidth(form.getByRole('button', { name: 'Quitar filtros' }), page, '«Quitar filtros»');
+      await expectClearFiltersNextToSort(page);
+      for (let index = 0; index < 2; index += 1) {
+        await expectFullyInsideViewportWidth(cards.nth(index), page, `tarjeta ${index + 1}`);
+      }
+      await expectNoHorizontalScroll(page);
+
+      // El error bajo el año (el campo más estrecho) no se sale, no empuja la barra fuera de la pantalla ni descoloca «Quitar filtros».
+      const year = form.getByRole('textbox', { name: 'Año' });
+      await year.fill('99');
+      await year.press('Tab');
+      const yearError = page.getByRole('alert').filter({ hasText: 'Escribe un año entre 1888 y 2100.' });
+      await expectFullyInsideViewportWidth(yearError, page, 'error del año');
+      await expectMovieFilterBarFits(page);
+      await expectClearFiltersNextToSort(page);
+      await expectNoHorizontalScroll(page);
+    });
+
+    test('/peliculas sin resultados: el estado vacío y sus dos «Quitar filtros» caben', async ({ page, request, user, signIn }) => {
+      const actionId = await genreIdByName(request, user.token, 'Acción');
+      await signIn(user);
+      // Acción de 1982: ninguna («Blade Runner» es solo Ciencia ficción).
+      await page.goto(`/peliculas?genero=${actionId}&anio=1982`);
+      const results = page.getByRole('region', { name: 'Resultados' });
+      await expect(results.getByRole('heading', { name: 'No hay películas con estos filtros' })).toBeVisible();
+      await expectMovieFilterBarFits(page);
+      await expectFullyInsideViewportWidth(
+        page.getByRole('form', { name: 'Filtrar películas' }).getByRole('button', { name: 'Quitar filtros' }),
+        page,
+        '«Quitar filtros» de la barra',
+      );
+      await expectClearFiltersNextToSort(page);
+      await expectFullyInsideViewportWidth(results.getByRole('button', { name: 'Quitar filtros' }), page, '«Quitar filtros» del vacío');
+      await expectNoHorizontalScroll(page);
+    });
+
     test('/favorites con películas y vacía', async ({ page, request, user, signIn }) => {
       await signIn(user);
       await page.goto('/favorites');
@@ -188,56 +336,136 @@ for (const viewport of VIEWPORTS) {
       await expectNoHorizontalScroll(page);
     });
 
-    test('panel de administración: la barra con «Administrar», el listado, el formulario y los géneros', async ({
-      page,
-      request,
-      signIn,
-    }) => {
-      // Solo lectura: no crea ni borra nada (el administrador y el catálogo son compartidos).
-      await signIn({ token: await loginAdmin(request) });
-      await page.goto('/admin/peliculas');
-      const table = page.getByRole('table', { name: /^Películas del catálogo/ });
-      await expect(table).toBeVisible();
-
-      // Con el quinto enlace, la barra sigue cabiendo sin solaparse (en 375 y 768 px «Administrar» queda en icono).
-      await expectNavbarFits(page, true);
+    // Test aparte (y no dentro del anterior, que ya roza el límite de tiempo en móvil).
+    test('panel: edición de una serie con episodios y el diálogo de episodio con errores', async ({ page, request, signIn }) => {
+      // Solo lectura: el diálogo se abre y se valida en el cliente, pero no se guarda nada.
+      const adminToken = await loginAdmin(request);
+      await signIn({ token: adminToken });
+      await page.goto(`/admin/series/${await findSeriesIdAsAdmin(request, adminToken, SERIES_HERO.title)}/editar`);
+      const episodes = page.getByRole('region', { name: 'Episodios', exact: true });
+      const firstEpisode = episodes.getByRole('listitem').first();
+      await expect(firstEpisode).toBeVisible();
+      await expectFullyInsideViewportWidth(firstEpisode.getByRole('button', { name: /^Editar episodio / }), page, '«Editar» de un episodio');
+      await expectFullyInsideViewportWidth(firstEpisode.getByRole('button', { name: /^Borrar episodio / }), page, '«Borrar» de un episodio');
       await expectNoHorizontalScroll(page);
-
-      const sections = page.getByRole('navigation', { name: 'Secciones de administración' });
-      await expectFullyInsideViewportWidth(sections.getByRole('link', { name: 'Géneros' }), page, 'pestaña Géneros');
-      await expectFullyInsideViewportWidth(page.getByRole('link', { name: 'Nueva película' }), page, '«Nueva película»');
-      await expectFullyInsideViewportWidth(page.getByRole('searchbox', { name: 'Buscar por título' }), page, 'buscador del panel');
-      // La tabla (y las acciones de cada fila) caben: en móvil se ocultan columnas, no se desborda.
-      await expectFullyInsideViewportWidth(table, page, 'tabla');
-      const firstRow = table.getByRole('row').nth(1);
-      await expectFullyInsideViewportWidth(firstRow.getByRole('link', { name: /^Editar / }), page, '«Editar» de la primera fila');
-      await expectFullyInsideViewportWidth(firstRow.getByRole('button', { name: /^Borrar / }), page, '«Borrar» de la primera fila');
-      const pagination = page.getByRole('navigation', { name: 'Paginación de películas' });
-      await expectFullyInsideViewportWidth(pagination.getByRole('button', { name: 'Siguiente' }), page, '«Siguiente»');
-
-      // Formulario con todos los errores a la vista y la vista previa.
-      await page.goto('/admin/peliculas/nueva');
-      // Sin esta espera el clic podía caer durante el salto que provoca la llegada de los géneros (ver la función).
-      await waitForMovieForm(page);
-      await page.getByRole('button', { name: 'Crear película' }).click();
-      await expect(page.getByText('Elige al menos un género')).toBeVisible();
-      await expectFullyInsideViewportWidth(page.getByLabel('URL de la portada'), page, 'campo de portada');
-      await expectFullyInsideViewportWidth(
-        page.getByRole('complementary', { name: 'Vista previa de la portada' }),
-        page,
-        'vista previa',
-      );
-      await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Crear película' }), page, '«Crear película»');
-      await expectNoHorizontalScroll(page);
-
-      // Géneros, también con el renombrado en línea abierto (campo + dos botones en la misma fila).
-      await page.goto('/admin/generos');
-      await expect(page.getByRole('list', { name: 'Géneros' })).toBeVisible();
-      await page.getByRole('button', { name: 'Renombrar Drama' }).click();
-      await expectFullyInsideViewportWidth(page.getByRole('textbox', { name: 'Nuevo nombre para Drama' }), page, 'campo de renombrar');
-      await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Guardar' }), page, '«Guardar»');
+      await episodes.getByRole('button', { name: 'Añadir episodio' }).click();
+      const episodeDialog = page.getByRole('dialog', { name: 'Añadir episodio' });
+      await episodeDialog.getByRole('button', { name: 'Añadir episodio' }).click();
+      await expect(episodeDialog.getByLabel('Título', { exact: true })).toHaveAccessibleDescription('El título es obligatorio');
+      await expectFullyInsideViewportWidth(episodeDialog.getByLabel('Número', { exact: true }), page, 'campo Número del episodio');
+      await expectFullyInsideViewportWidth(episodeDialog.getByLabel('URL del vídeo'), page, 'campo URL del vídeo');
+      await expectFullyInsideViewportWidth(episodeDialog.getByRole('button', { name: 'Cancelar' }), page, '«Cancelar» del episodio');
       await expectNoHorizontalScroll(page);
       await page.keyboard.press('Escape');
+      await expect(episodeDialog).toHaveCount(0);
+    });
+
+    /**
+     * Pantallas del panel de administración, una por test.
+     *
+     * Antes eran un único test que recorría las cinco pantallas y, a 375 px con la suite completa, tardaba
+     * ~22 s de los 30 del límite: cada visita suma tiempo de carga y, al cerrar el contexto, el de guardar
+     * su traza (`trace: 'retain-on-failure'`). Con la máquina cargada acabaría fallando por tiempo sin que
+     * nada estuviera roto. Separados, cada uno tarda pocos segundos, son independientes (si uno falla, los
+     * demás siguen comprobando lo suyo) y el informe dice directamente QUÉ pantalla se desborda.
+     *
+     * Todos son de solo lectura: no crean ni borran nada (el administrador y el catálogo son compartidos).
+     */
+    test.describe('panel de administración', () => {
+      test.beforeEach(async ({ request, signIn }) => {
+        await signIn({ token: await loginAdmin(request) });
+      });
+
+      test('la barra con «Administrar» y el listado de películas', async ({ page }) => {
+        await page.goto('/admin/peliculas');
+        const table = page.getByRole('table', { name: /^Películas del catálogo/ });
+        await expect(table).toBeVisible();
+
+        // Con el quinto enlace, la barra sigue cabiendo sin solaparse (en 375 y 768 px «Administrar» queda en icono).
+        await expectNavbarFits(page, true);
+        await expectNoHorizontalScroll(page);
+
+        const sections = page.getByRole('navigation', { name: 'Secciones de administración' });
+        await expectFullyInsideViewportWidth(sections.getByRole('link', { name: 'Géneros' }), page, 'pestaña Géneros');
+        await expectFullyInsideViewportWidth(page.getByRole('link', { name: 'Nueva película' }), page, '«Nueva película»');
+        await expectFullyInsideViewportWidth(page.getByRole('searchbox', { name: 'Buscar por título' }), page, 'buscador del panel');
+        // La tabla (y las acciones de cada fila) caben: en móvil se ocultan columnas, no se desborda.
+        await expectFullyInsideViewportWidth(table, page, 'tabla');
+        const firstRow = table.getByRole('row').nth(1);
+        await expectFullyInsideViewportWidth(firstRow.getByRole('link', { name: /^Editar / }), page, '«Editar» de la primera fila');
+        await expectFullyInsideViewportWidth(firstRow.getByRole('button', { name: /^Borrar / }), page, '«Borrar» de la primera fila');
+        const pagination = page.getByRole('navigation', { name: 'Paginación de películas' });
+        await expectFullyInsideViewportWidth(pagination.getByRole('button', { name: 'Siguiente' }), page, '«Siguiente»');
+      });
+
+      test('/peliculas con la barra de un administrador (cinco enlaces) y la barra de filtros', async ({ page }) => {
+        await page.goto('/peliculas');
+        await expect(page.getByRole('region', { name: HERO_TITLE })).toBeVisible();
+        // «Películas» marcada como actual y «Administrar» a la vez: el momento más ancho de la barra.
+        await expect(page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Administrar' })).toBeVisible();
+        await expectNavbarFits(page, true);
+        await expectMovieFilterBarFits(page);
+        await expectNoHorizontalScroll(page);
+      });
+
+      test('el listado de series: tres pestañas en una fila y la marca «sin episodios»', async ({ page }) => {
+        await page.goto('/admin/series');
+        const seriesTable = page.getByRole('table', { name: /^Series del catálogo/ });
+        await expect(seriesTable).toBeVisible();
+        const sections = page.getByRole('navigation', { name: 'Secciones de administración' });
+        await expectFullyInsideViewportWidth(sections.getByRole('link', { name: 'Películas' }), page, 'pestaña Películas');
+        await expectFullyInsideViewportWidth(sections.getByRole('link', { name: 'Series' }), page, 'pestaña Series');
+        await expectFullyInsideViewportWidth(sections.getByRole('link', { name: 'Géneros' }), page, 'pestaña Géneros (con Series)');
+        await expectFullyInsideViewportWidth(page.getByRole('link', { name: 'Nueva serie' }), page, '«Nueva serie»');
+        await expectFullyInsideViewportWidth(seriesTable, page, 'tabla de series');
+        const emptyRow = seriesTable.getByRole('row', { name: new RegExp(`^${EMPTY_SERIES.title}`) });
+        await expectFullyInsideViewportWidth(
+          emptyRow.getByText('Sin episodios · oculta para los usuarios'),
+          page,
+          'marca de serie sin episodios',
+        );
+        await expectFullyInsideViewportWidth(emptyRow.getByRole('button', { name: /^Borrar / }), page, '«Borrar» de la serie vacía');
+        await expectNoHorizontalScroll(page);
+      });
+
+      test('el formulario de serie con todos los errores a la vista', async ({ page }) => {
+        // El año de fin, con su ayuda, va en la misma rejilla que el de estreno: no debe empujarla fuera.
+        await page.goto('/admin/series/nueva');
+        // Sin esta espera el clic podía caer durante el salto que provoca la llegada de los géneros (ver la función).
+        await waitForMovieForm(page);
+        await page.getByRole('button', { name: 'Crear serie' }).click();
+        await expect(page.getByText('Indica al menos un género')).toBeVisible();
+        await expectFullyInsideViewportWidth(page.getByLabel('Año de fin (opcional)'), page, 'campo de año de fin');
+        await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Crear serie' }), page, '«Crear serie»');
+        await expectNoHorizontalScroll(page);
+      });
+
+      test('el formulario de película con todos los errores a la vista y la vista previa', async ({ page }) => {
+        await page.goto('/admin/peliculas/nueva');
+        // Misma espera que en el formulario de serie: los géneros llegan aparte y desplazan el botón.
+        await waitForMovieForm(page);
+        await page.getByRole('button', { name: 'Crear película' }).click();
+        await expect(page.getByText('Elige al menos un género')).toBeVisible();
+        await expectFullyInsideViewportWidth(page.getByLabel('URL de la portada'), page, 'campo de portada');
+        await expectFullyInsideViewportWidth(
+          page.getByRole('complementary', { name: 'Vista previa de la portada' }),
+          page,
+          'vista previa',
+        );
+        await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Crear película' }), page, '«Crear película»');
+        await expectNoHorizontalScroll(page);
+      });
+
+      test('los géneros, también con el renombrado en línea abierto', async ({ page }) => {
+        // Abierto, la fila lleva el campo y dos botones a la vez: es su momento más ancho.
+        await page.goto('/admin/generos');
+        await expect(page.getByRole('list', { name: 'Géneros' })).toBeVisible();
+        await page.getByRole('button', { name: 'Renombrar Drama' }).click();
+        await expectFullyInsideViewportWidth(page.getByRole('textbox', { name: 'Nuevo nombre para Drama' }), page, 'campo de renombrar');
+        await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Guardar' }), page, '«Guardar»');
+        await expectNoHorizontalScroll(page);
+        await page.keyboard.press('Escape');
+      });
     });
   });
 }

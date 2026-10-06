@@ -27,6 +27,7 @@ No sustituye al código ni a su Javadoc: los complementa. El Javadoc explica cad
 13. [Controladores, validación y DTOs](#13-controladores-validación-y-dtos)
 14. [Catálogo: paginación, orden y búsqueda](#14-catálogo-paginación-orden-y-búsqueda)
 15. [Favoritos («Mi lista»)](#15-favoritos-mi-lista)
+    - 15 bis. [Series: temporadas y episodios](#15-bis-series-temporadas-y-episodios)
 16. [Gestión de errores](#16-gestión-de-errores)
 17. [Actuator, Swagger y logs](#17-actuator-swagger-y-logs)
 18. [Frontend: arquitectura](#18-frontend-arquitectura)
@@ -288,6 +289,8 @@ Hay dos relaciones **muchos a muchos**, y cada una necesita una **tabla de unió
 - `user_favorite_movies`: la «Mi lista» de cada usuario.
 
 En las tablas de unión, la **clave primaria es la pareja** `(movie_id, genre_id)` o `(user_id, movie_id)`. Eso hace imposible, a nivel de base de datos, que una película esté dos veces en la lista del mismo usuario.
+
+Las **series** (migración `V3`) tienen tablas propias con la misma estructura: `series`, `series_genres`, `episodes` y `user_favorite_series`. Se explican en el capítulo 15 bis.
 
 ### 5.2 Las restricciones (y por qué están en la base de datos)
 
@@ -558,12 +561,15 @@ Se evalúan **de arriba abajo** y gana la primera que coincide:
 | Método y ruta | Quién puede |
 | :--- | :--- |
 | `POST /api/users`, `POST /api/auth/login` | Cualquiera (registro y login) |
+| `/api/admin/**` (cualquier método) | Solo `ADMIN` (vistas de gestión, p. ej. series sin episodios) |
 | `GET /api/users` | Solo `ADMIN` |
 | `GET`, `HEAD /api/movies/**` | Cualquier usuario autenticado |
 | `POST`, `PUT`, `PATCH`, `DELETE /api/movies/**` | Solo `ADMIN` |
 | `GET`, `HEAD /api/genres/**` | Cualquier usuario autenticado |
 | `POST`, `PUT`, `PATCH`, `DELETE /api/genres/**` | Solo `ADMIN` |
-| **Cualquier otro método** sobre `/api/movies/**` y `/api/genres/**` (regla de cierre del catálogo) | Solo `ADMIN` |
+| `GET`, `HEAD /api/series/**` | Cualquier usuario autenticado |
+| `POST`, `PUT`, `PATCH`, `DELETE /api/series/**` (incluye los episodios) | Solo `ADMIN` |
+| **Cualquier otro método** sobre `/api/movies/**`, `/api/genres/**` y `/api/series/**` (regla de cierre del catálogo) | Solo `ADMIN` |
 | `/actuator/health`, `/actuator/health/**` | Cualquiera (comprobaciones de salud) |
 | `/v3/api-docs/**`, `/swagger-ui/**` | Cualquiera (en `prod` están desactivados) |
 | **Todo lo demás** (`anyRequest()`) | Cualquier usuario autenticado |
@@ -827,6 +833,14 @@ public List<MovieResponse> getFavorites(@AuthenticationPrincipal AuthenticatedUs
 | `POST` / `DELETE` | `/api/users/me/favorites/{movieId}` | Autenticado | Añadir / quitar por id |
 | `POST` / `DELETE` | `/api/users/me/favorites/by-title?title=` | Autenticado | Añadir / quitar por título exacto |
 | `DELETE` | `/api/users/me/favorites` | Autenticado | Vaciar la lista |
+| `GET` | `/api/series`, `/api/series/search`, `/api/series/{id}` | Autenticado | `SeriesController` (solo series con episodios; capítulo 15 bis) |
+| `POST` / `PUT` / `DELETE` | `/api/series[/{id}]` | ADMIN | `SeriesController` → `SeriesService` |
+| `POST` / `PUT` / `DELETE` | `/api/series/{id}/episodes[/{episodeId}]` | ADMIN | `EpisodeController` → `EpisodeService` |
+| `GET` | `/api/admin/series[/{id}]` | ADMIN | `AdminSeriesController` (incluye series sin episodios) |
+| `GET` / `DELETE` | `/api/users/me/favorites/series` | Autenticado | `SeriesFavoriteController`: listar / vaciar las series de la lista |
+| `POST` / `DELETE` | `/api/users/me/favorites/series/{seriesId}` | Autenticado | Añadir / quitar una serie |
+
+Películas y series comparten la construcción de la paginación (`controller/PageableFactory`: lista blanca de `sort`, `direction`, desempate por `id` y control de desbordamiento de `page × size`).
 
 ### 13.2 Cómo es un controlador
 
@@ -867,6 +881,10 @@ public record MovieRequest(
 - **Un solo mensaje por campo:** `@HttpsUrl` no evalúa lo que ya rechazan `@NotBlank` (vacío) ni `@Size` (si es demasiado larga, manda el mensaje de longitud). Los mensajes y el máximo son constantes de `MovieRequest`, y el frontend usa exactamente los mismos.
 - ¿Por qué validar en el servidor si el frontend ya filtra `videoUrl` con `getSafeVideoUrl`? Porque la API la pueden usar otros clientes y no debe depender de que cada uno se proteja. Además, `https` encaja con la CSP prevista (`img-src 'self' data: https:`).
 - Consecuencia práctica: una película antigua con una URL `http://` no se puede guardar desde el panel hasta corregir la URL (el formulario muestra el error junto al campo). El servidor nunca descarga estas URLs, así que no hay riesgo de peticiones internas (SSRF).
+
+**Géneros por título:** `genreIds` admite entre 1 y 20 géneros, en películas y en series (`MovieRequest.MAX_GENRES`). Sin tope, la lista acaba en un `IN (...)` sin límite dentro de `findAllById`; PostgreSQL admite como mucho 32 767 parámetros.
+
+**Decimales en campos enteros:** un número con decimales en un campo entero del JSON (`"duration": 100.5`, `"seasonNumber": 1.5`, incluso `100.0`) responde 400 `MALFORMED_REQUEST` en lugar de truncarse en silencio. Jackson trae esa conversión activada por defecto y se desactiva con `spring.jackson.deserialization.accept-float-as-int=false` en `application.properties`. Se aplica al `JsonMapper` de Jackson 3, con el que Spring Boot 4 lee los cuerpos; Jackson 2 solo lo usa `SecurityErrorResponseWriter` para escribir los 401/403. Lo más grave era `"genreIds": [5.5]`, que asignaba **otro género** (el 5). Los parámetros de consulta (`?page=1`) no se ven afectados, porque los convierte Spring. Tests: `JsonIntegerCoercionIntegrationTest`.
 
 Los parámetros de la URL también se validan (`@Min`/`@Max` en `page` y `size`). Para eso el controlador lleva `@Validated` en la clase. Si un parámetro no tiene el tipo correcto (`page=abc`), Spring lanza una excepción de conversión que el manejador de errores convierte en 400.
 
@@ -1040,6 +1058,113 @@ DELETE FROM user_favorite_movies WHERE user_id = ? AND movie_id = ?;
 
 ---
 
+## 15 bis. Series: temporadas y episodios
+
+Las series se añadieron en octubre de 2026. Este capítulo reúne cómo funcionan de punta a punta; los capítulos generales (seguridad, errores, frontend) remiten aquí.
+
+### 15 bis.1 Decisiones de diseño (y por qué)
+
+| Decisión | Alternativa descartada | Por qué |
+| :--- | :--- | :--- |
+| **Tablas propias**, sin tocar `movies` | Un supertipo común «contenido» con herencia JPA | No arriesga nada de lo que ya funcionaba (películas, favoritos, los datos reales de Supabase). La migración solo crea tablas. A cambio se repiten algunas columnas |
+| **La temporada es un número dentro del episodio** (`season_number`) | Una tabla `seasons` | Basta para el selector de temporadas y simplifica la API. Si algún día una temporada necesita título o año propio, se añade la tabla con una migración nueva |
+| **Página propia** `/series/:id` | Modal, como las películas | Las temporadas y la lista de episodios no caben bien en un modal, y así la serie tiene una URL que se puede compartir |
+| **Las series sin episodios no las ve el usuario** | Mostrarlas como «próximamente» | Evita páginas vacías; el administrador las prepara en el panel y aparecen solas con el primer episodio |
+| **Episodios sin imagen propia** (usan la de la serie) | Columna `image_url` en `episodes` | No hacía falta en la primera versión; está anotado en el plan |
+
+### 15 bis.2 Modelo de datos (`V3__create_series.sql`)
+
+- `series`: título, sinopsis, `release_year`, `end_year` (**nulo = en emisión**; `CHECK` de años entre 1888 y 2100 y fin ≥ estreno), `image_url`, `created_at`.
+- `series_genres`: el mismo catálogo de géneros que las películas. Borrar una serie limpia sus filas (cascada); borrar un género usado por una serie falla por clave foránea, y el servicio lo traduce a 409.
+- `episodes`: `season_number`, `episode_number`, título, sinopsis opcional, duración y `video_url`, con `CHECK` (temporada, número y duración positivos) y **`UNIQUE (series_id, season_number, episode_number)`**: no puede haber dos «T1:E3» en la misma serie. Ese índice único empieza por `series_id`, así que sirve también para listar los episodios de una serie ya ordenados y para el `EXISTS` de visibilidad.
+- `user_favorite_series`: «Mi lista» de series.
+- **Cascadas en la base de datos:** al borrar una serie se borran sus episodios, sus géneros y sus favoritos; al borrar un usuario, sus favoritos de series.
+- V3 **solo crea** tablas e índices (es segura sobre una base con datos), todas las restricciones tienen nombre (`pk_`, `fk_`, `ck_`, `uk_`, `idx_`) y **no usa `IF NOT EXISTS`**: si existiera ya una tabla `series` distinta, es mejor que falle de forma visible a que la adopte en silencio.
+- **Supabase:** las tablas nuevas nacen sin RLS. Tras arrancar la app con V3, hay que volver a ejecutar `docs/supabase-seguridad.sql`, que ya incluye las cuatro (capítulo 4.5).
+
+En Java (`entity/Series`, `entity/Episode`): `Episode.series` es `LAZY` con `@OnDelete(CASCADE)`. No se usa `CascadeType.REMOVE`, que cargaría y borraría los episodios uno a uno cuando la base de datos ya lo hace. **No hay colección `Series.episodes`**, porque los episodios se piden siempre con una consulta ordenada y una colección invitaría al N+1. **Tampoco hay colección de series favoritas en `User`**, porque el filtro JWT carga `User` en cada petición. Los favoritos de series son `INSERT`/`DELETE` nativos en `SeriesRepository`, como los de películas.
+
+### 15 bis.3 La regla de visibilidad
+
+Una serie **sin episodios** existe para el administrador pero no para el usuario:
+
+- El listado y la búsqueda públicos usan `SeriesSpecification.hasEpisodes()`, un `EXISTS` sobre `episodes`; tampoco cuentan en `totalElements`.
+- El detalle público usa `SeriesRepository.findVisibleById`: una serie vacía da **404 idéntico** (mismo estado y mismo cuerpo) al de una que no existe.
+- Solo se puede añadir a favoritos una serie con episodios. Si una serie de la lista se queda sin episodios, **la fila se conserva pero no se muestra**, y reaparece sola cuando vuelve a tenerlos.
+- El panel usa las **vistas de gestión** `GET /api/admin/series[/{id}]` (solo ADMIN), que sí incluyen las vacías.
+
+**¿Por qué «idéntico»?** Los ids son secuenciales. Si una serie oculta respondiera distinto que una inexistente, un usuario podría recorrer los ids y descubrir qué está preparando el administrador. Por eso también quitar de favoritos una serie oculta que el usuario **no** tenía responde igual que una inexistente (`RESOURCE_NOT_FOUND`). La única excepción deliberada es quitar una que **sí** estaba en su lista: da 204, porque no le revela nada que no supiera. Lo comprueba `SeriesObjectLevelAuthorizationIntegrationTest` (fue un hallazgo de la revisión de `security`).
+
+### 15 bis.4 API
+
+Endpoints en el capítulo 13.1. Detalles:
+
+- **DTOs:** `SeriesResponse` (listados, con `seasonCount` y `episodeCount`), `SeriesDetailResponse` (más `seasons`), `SeasonResponse { seasonNumber, episodes }` y `EpisodeResponse`. Las temporadas se construyen agrupando los episodios por `seasonNumber` (`TreeMap` en `SeriesMapper`). `endYear` y la sinopsis del episodio van como `null` explícito.
+- **Validación:**
+  - `SeriesRequest`: título ≤150, sinopsis ≤1000, `releaseYear` 1888–2100, `endYear` opcional en ese rango y no anterior al estreno (restricción de clase `@ValidSeriesYears`, que cuelga el error del campo `endYear`), portada con `@HttpsUrl(allowLocalCovers = true)` y entre 1 y 20 géneros.
+  - `EpisodeRequest`: temporada 1–100, número 1–1000, título ≤150, sinopsis opcional ≤1000 (en blanco se guarda `null`), duración 1–600, `videoUrl` solo `https`.
+- **Coste en consultas** (lo vigilan tests con Hibernate Statistics):
+  - Una página cuesta ≤4 consultas, tenga 5 o 25 series: la página, el total, los géneros por lotes y **una** consulta agrupada con los recuentos de temporadas y episodios (`EpisodeRepository.countBySeriesIds`, a través de `SeriesEpisodeCounts`).
+  - El detalle cuesta 2: la serie con sus géneros y sus episodios ordenados.
+  - «Mi lista» cuesta ≤3.
+- **Episodios:** el duplicado de temporada + número se comprueba **antes** de copiar los datos a la entidad. Si fuera después, Hibernate volcaría el cambio antes de la consulta. El `UNIQUE` queda como respaldo ante dos altas simultáneas: `saveAndFlush` y traducción por SQLSTATE (23505 → 409 `EPISODE_ALREADY_EXISTS`, clave foránea → 404). Las rutas de episodio buscan con `findByIdAndSeriesId`: cambiar el `seriesId` de la URL no permite tocar el episodio de otra serie (404).
+- **Favoritos** (`/api/users/me/favorites/series`): mismo patrón que películas (capítulo 15). La ruta literal `/series` tiene prioridad sobre `/{movieId}`, y hay un test que lo comprueba con una película y una serie del mismo id.
+- **Géneros:** borrar un género cuenta películas y series («lo usan 3 películas y 2 series», en singular o plural y omitiendo la parte que vale 0).
+- **Código compartido con películas:** `controller/PageableFactory` (paginación y orden) y `specification/LikePatterns` (búsqueda por título con comodines escapados y `lower()` en la base de datos). Se extrajeron de películas sin cambiar su comportamiento, para que las dos no puedan divergir.
+
+### 15 bis.5 Frontend del usuario
+
+- **Componentes genéricos.** Las piezas visuales de películas se generalizaron para servir a las dos: `PosterCard`, `PosterRow<T>`, `FeaturedBanner` y `MetaTags`, sobre un tipo común `CatalogItem` (`lib/types.ts`). `MovieCard`, `MovieRow`, `HeroBanner`… quedan como envoltorios finos con la misma API, y por eso sus tests no cambiaron. `useCatalog` se apoya en `usePagedCatalog`, que también usan las series, y `buildCatalogRows<T>` es genérica (`CatalogRow.items`).
+- **`/series` (`SeriesPage`):** la misma estructura que la portada. Banner con la serie más reciente (marca «Novedad»; la acción principal «Ver episodios» enlaza a su página, porque una serie no tiene un único vídeo), «Novedades», filas por género (≥3 títulos **sin contar el del banner**), «Cargar más series» y los estados de carga, vacío y error.
+- **`/series/:id` (`SeriesDetailPage`):**
+  - Cabecera con `FeaturedBanner` (h1, sinopsis completa, «Empezar a ver» el primer episodio y «Mi lista»).
+  - **Selector de temporada** (`SeasonPicker`): son enlaces `?temporada=N` con `aria-current` y navegación con `replace`, no un `<select>` ni el patrón `tablist`. La temporada vive en la URL, así que se puede compartir y abrir en otra pestaña; con un `<select>`, en Windows cada flecha cambiaría la URL. Solo aparece con dos o más temporadas. Una temporada inválida o ausente muestra la primera (`resolveSeasonNumber`). «Temporada 2 · 8 episodios» está en una región `role="status"`, que anuncia el cambio sin mover el foco.
+  - `EpisodeList`: una `<ol>` con un h3 «N. Título», la duración, la sinopsis si la hay y «Ver», que abre el vídeo validado con `getSafeVideoUrl` (nombre accesible «Ver T1:E3 Título»). Sin miniatura por episodio, porque aún no tienen imagen propia.
+  - Un 404 o un id mal formado muestran «Serie no encontrada» con un enlace a `/series`.
+- **Portada:** la fila «Series» (`LatestSeriesRow`) va tras «Novedades» y pide las 12 más recientes en paralelo al catálogo. Mientras carga reserva su hueco con un esqueleto; si no hay series no aparece; si falla, lo dice con «Reintentar» sin tapar el resto.
+- **Barra:** «Series» es un `NavLink` (también queda marcado en `/series/7`), igual que «Películas» (capítulo 20.8).
+- **Buscador:**
+  - Busca películas y series en paralelo (10 de cada) con **un solo `AbortController`**, y espera a las dos con `Promise.allSettled` para que la lista no crezca bajo el puntero.
+  - Muestra dos grupos ARIA («listbox con opciones agrupadas»); las flechas recorren todo en el orden visual. Intro abre el modal (película) o navega a la página (serie).
+  - Si una de las dos peticiones falla, se muestra la otra con una nota que lo explica.
+- **«Mi lista»:**
+  - `FavoritesContext` gestiona dos listas que se cargan juntas (`Promise.all`): si falla una, toda la lista muestra el error, porque enseñar media lista haría creer que se ha perdido la otra mitad.
+  - `toggleSeries` sigue el mismo patrón optimista (409/404 = el servidor ya tiene el estado deseado). Los pendientes se identifican por `tipo:id`, para que la película 3 y la serie 3 no se confundan.
+  - «Vaciar lista» envía siempre los dos `DELETE`, vacía en pantalla solo lo que el servidor confirmó y, si falla uno, dice qué se quitó y qué no.
+  - La página tiene dos secciones con su propio estado vacío.
+
+### 15 bis.6 Panel de administración
+
+- **Pestaña «Series»** (`AdminSeriesPage`, `SeriesFormPage`). Funciona como la de películas y comparte con ella:
+  - `hooks/useAdminSearchList`: búsqueda con debounce, cancelación y `?q=&page=` en la URL.
+  - `hooks/useCatalogDelete`: borrado con confirmación, no optimista; un 404 se trata como «ya borrado».
+  - En `pages/admin/`: `AdminRowActions`, `GenreCheckboxes`, `CoverPreview` y `formErrors`.
+- **Listado:** las series vacías llevan la marca «Sin episodios · oculta para los usuarios», con icono y texto, no solo color. El diálogo de borrado dice cuántos episodios se borran con la serie.
+- **Formulario:**
+  - Valida con `lib/seriesValidation.ts`, que copia literalmente los mensajes del servidor, y no deja enviar hasta que cargan los géneros.
+  - **Al crear, lleva a la edición** de la serie nueva («Serie creada. Añade episodios para que sea visible»).
+  - Al guardar cambios se queda en la página, porque debajo está la gestión de episodios.
+- **Episodios** (`SeriesEpisodesSection` + `EpisodeFormDialog`):
+  - Están agrupados por temporada. Cada uno tiene las acciones «Editar episodio T1:E3 Título» y «Borrar episodio T1:E3 Título»; el código hace único el nombre accesible.
+  - **Añadir y editar usan un único diálogo.** Al añadir, propone la última temporada y el número siguiente al más alto, y lo recalcula si cambias la temporada, salvo que ya hayas escrito el número a mano.
+  - El 409 `EPISODE_ALREADY_EXISTS` aparece junto a «Temporada» y «Número», con el foco ahí.
+  - **Tras cada cambio se vuelve a pedir la serie al servidor** (`onSeriesChange`): temporadas, recuentos y la marca de visibilidad son siempre los del servidor, nunca un cálculo local.
+  - Los avisos dicen cuándo cambia la visibilidad: con el primer episodio, «ya es visible para los usuarios»; al borrar el último, «vuelve a estar oculta».
+
+### 15 bis.7 Tests
+
+| Qué | Dónde |
+| :--- | :--- |
+| Esquema (H2) | `FlywaySchemaIntegrationTest`, `SeriesRepositoryIntegrationTest` |
+| Esquema y motor (PostgreSQL) | `PostgresSeriesSchemaIntegrationTest`, `PostgresSeriesCatalogIntegrationTest`, `PostgresBaselineAdoptionIntegrationTest` (V3 desde cero, adopción de una base antigua, SQLSTATE reales, `lower()` con İ/Σ, carreras reales entre transacciones) |
+| API | `SeriesCatalogIntegrationTest`, `SeriesAdminIntegrationTest`, `SeriesFavoritesIntegrationTest`, `SeriesQaEdgeCasesIntegrationTest` (límites, visibilidad completa, concurrencia real en H2: 4 hilos × 5 rondas → una alta y tres 409) |
+| Seguridad | `SeriesAuthorizationIntegrationTest` (reglas), `SeriesObjectLevelAuthorizationIntegrationTest` (IDOR y oculta = inexistente) |
+| Frontend | Vitest de páginas, componentes, validación y panel; E2E `series.spec.ts` y `admin-series.spec.ts` (este en el proyecto `catalogo-mutable`). La siembra E2E crea 5 series, una sin episodios creada la última: si se colara en algún listado sería el banner, así que su ausencia se nota |
+
+La prueba de mutación de `qa` confirmó que estos tests detectan si el detalle público deja de filtrar las series vacías o si un episodio se busca sin su serie.
+
+---
+
 ## 16. Gestión de errores
 
 ### 16.1 El formato común
@@ -1072,13 +1197,16 @@ Todos los errores de la API, vengan de donde vengan, tienen la misma forma (`dto
 | `ACCESS_DENIED` | 403 | Autenticado sin el rol necesario |
 | `RESOURCE_NOT_FOUND` | 404 | Película, género o usuario inexistente; ruta inexistente |
 | `MOVIE_NOT_IN_FAVORITES` | 404 | Quitar de la lista algo que no estaba |
+| `SERIES_NOT_IN_FAVORITES` | 404 | Quitar de la lista una serie (visible) que no estaba |
+| `SERIES_ALREADY_IN_FAVORITES` | 409 | Añadir a la lista una serie que ya estaba |
+| `EPISODE_ALREADY_EXISTS` | 409 | Crear o mover un episodio a una temporada y número ya ocupados («Ya existe el episodio N de la temporada T») |
 | `METHOD_NOT_ALLOWED` | 405 | Método HTTP no soportado en esa ruta |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | Cuerpo que no es JSON |
 | `USER_ALREADY_EXISTS` | 409 | Registro con usuario o email en uso |
 | `MOVIE_ALREADY_IN_FAVORITES` | 409 | Añadir a la lista algo que ya estaba |
 | `AMBIGUOUS_TITLE` | 409 | Varias películas con el mismo título en `/by-title` |
 | `GENRE_ALREADY_EXISTS` | 409 | Crear o renombrar un género con un nombre que ya tiene otro (sin distinguir mayúsculas) |
-| `GENRE_IN_USE` | 409 | Borrar un género que tiene asignado alguna película (el mensaje dice cuántas) |
+| `GENRE_IN_USE` | 409 | Borrar un género que tiene asignado alguna película o serie (el mensaje dice cuántas: «lo usan 3 películas y 2 series») |
 | `DATA_INTEGRITY_VIOLATION` | 409 | Choque no previsto con una restricción de la base de datos (respaldo genérico) |
 | `RATE_LIMIT_EXCEEDED` | 429 | Límite por IP de login o registro (con `Retry-After`) |
 | `ACCOUNT_LOCKED` | 429 | Cuenta bloqueada por demasiados logins fallidos: el fallo que agota los intentos y cualquier intento durante el bloqueo (con `Retry-After`) |
@@ -1146,12 +1274,15 @@ frontend/src/
 ├── main.tsx            punto de entrada: monta <App/> en el HTML
 ├── App.tsx             proveedores globales + rutas
 ├── index.css           Tailwind + tokens de diseño (@theme) + utilidades propias
-├── pages/              una por pantalla: HomePage, LoginPage, RegisterPage, MyListPage
+├── pages/              una por pantalla: HomePage, LoginPage, RegisterPage, MyListPage, MoviesPage, SeriesPage, SeriesDetailPage
 │   └── admin/          panel de administración: AdminLayout, AdminMoviesPage, MovieFormPage, AdminGenresPage
-├── components/         piezas reutilizables (Navbar, Modal, MoviePoster, Pagination, Button...)
+├── components/         piezas reutilizables (Navbar, Modal, MoviePoster, Pagination, Button...) y las bases
+│                       genéricas del catálogo (PosterCard, PosterRow, FeaturedBanner, MetaTags), comunes a películas y series
 ├── context/            estado compartido: AuthContext, ToastContext, FavoritesContext
-├── hooks/              lógica reutilizable: useCatalog, useModalDialog, useCountdown, useGenres, useDebouncedValue...
-├── lib/                sin React: api.ts, types.ts, utils.ts, catalog.ts, validation.ts, movieValidation.ts
+├── hooks/              lógica reutilizable: useCatalog/usePagedCatalog, useMovieFilters, useSeriesCatalog, useSeriesDetail, useModalDialog,
+│                       useCountdown, useGenres, useDebouncedValue, useAdminSearchList, useCatalogDelete...
+├── lib/                sin React: api.ts, types.ts, utils.ts, catalog.ts, series.ts, movieFilters.ts, validation.ts, movieValidation.ts,
+│                       seriesValidation.ts, episodeValidation.ts
 └── test/               utilidades de los tests (setup, helpers, fakeTimers)
 ```
 
@@ -1168,11 +1299,17 @@ frontend/src/
             /            → HomePage
             /favorites   → MyListPage
             /my-list     → redirige a /favorites
+            /peliculas   → MoviesPage (filtros en ?genero=&anio=&orden=)
+            /series      → SeriesPage
+            /series/:id  → SeriesDetailPage (temporada en ?temporada=N)
             /admin       → RequireAdmin + AdminLayout (h1 «Administración» y pestañas)
                 (índice)              → redirige a /admin/peliculas
                 peliculas             → AdminMoviesPage
                 peliculas/nueva       → MovieFormPage (alta)
                 peliculas/:id/editar  → MovieFormPage (edición)
+                series                → AdminSeriesPage
+                series/nueva          → SeriesFormPage (alta)
+                series/:id/editar     → SeriesFormPage (edición) + SeriesEpisodesSection
                 generos               → AdminGenresPage
         *                → redirige a /
 ```
@@ -1341,7 +1478,7 @@ Usan el elemento nativo `<dialog>` con `showModal()`, que ya da: capa por encima
 - Pone el foco inicial donde toca (el botón cerrar en el detalle; «Cancelar» en la confirmación, que es la opción segura).
 - Escape y clic en el fondo cierran.
 
-Un detalle: un `<dialog>` modal vuelve inerte todo lo de fuera, incluidos los avisos. Por eso, mientras hay un modal abierto, `ToastContext` mueve los avisos **dentro** del diálogo (con un *portal*, `registerHost`).
+Un detalle: un `<dialog>` modal vuelve inerte todo lo de fuera, incluidos los avisos. Por eso, mientras hay un modal abierto, `ToastContext` mueve los avisos **dentro** del diálogo (con un *portal*, `registerHost`). **Solo los avisos nacidos con el modal abierto**: los anteriores se quedan en la página, detrás del fondo. Antes se trasladaban todos, y el aviso de la acción anterior («Episodio añadido») se colaba en el siguiente diálogo y le tapaba los botones durante 5 s. Era un fallo real que destapó el E2E de episodios; lo cubre un test de `ConfirmDialog.test.tsx`.
 
 **Entrada con movimiento.** El `<dialog>` aparece con un fundido y una escala de 96 % a 100 % en 200 ms. Los avisos suben 8 px en 250 ms. Las dos animaciones son **transiciones** y no `@keyframes`: una transición se puede interrumpir a mitad (si cierras el modal mientras entra, vuelve desde donde está, sin saltos). El estado inicial se define con `@starting-style` (en `index.css` para el diálogo y con la variante `starting:` de Tailwind en `Toast.tsx`). La curva es `ease-out-strong` (`cubic-bezier(0.23, 1, 0.32, 1)`, token en `@theme`): arranca rápido y frena suave, de modo que la respuesta se percibe inmediata. Con `prefers-reduced-motion` la regla global deja todo en ~0 ms.
 
@@ -1367,6 +1504,64 @@ Solo para `ADMIN`. La barra muestra el enlace **«Administrar»** únicamente si
   - Un 409 `GENRE_ALREADY_EXISTS` se muestra junto al campo. Un 409 `GENRE_IN_USE` muestra el mensaje del servidor («lo usan 3 películas…») y el género sigue en la lista.
 - **Foco bajo la barra fija.** La barra superior es `sticky` en todos los anchos. Cuando un formulario mueve el foco al primer error, el navegador podía dejar el campo justo debajo de la barra, tapado (incumple WCAG 2.2 · 2.4.11). `Navbar` publica su altura real en la variable CSS `--navbar-height` (`hooks/useHeightCssVariable`, con un `ResizeObserver`, porque la barra mide 57 px en escritorio, 165 px en móvil y 213 px a 320 px con «Administrar»). `index.css` aplica `scroll-margin-top: calc(var(--navbar-height) + 2rem)` al contenido de `<main>` (no a los `<dialog>`, que van por encima de todo). Se descartó `scroll-padding-top` en `html` porque también desplazaba la página al enfocar los controles de la propia barra.
 
+### 20.8 Página Películas (`pages/MoviesPage.tsx`)
+
+`/peliculas` es el destino de «Películas» en la barra. Tiene **dos vistas**:
+
+- **Sin filtros:** la misma estructura que `/series` (capítulo 15 bis.5). Lleva un h1 «Películas», el banner con la más reciente (`HeroBanner`), «Novedades» y filas por género (`buildCatalogRows`, con al menos 3 títulos sin contar el del banner). Debajo, «Mostrando N de M películas» con «Cargar más películas», y los estados de carga (esqueleto), vacío y error.
+- **Con algún filtro:** una **cuadrícula de resultados** de `GET /api/movies/search` con `genreId`, `releaseYear`, `sort` y `direction`. No filtra por título, porque eso ya lo hace el buscador de la barra. Tiene:
+  - el recuento en una región `role="status"`;
+  - «Cargar más» sin duplicados;
+  - el vacío «No hay películas con estos filtros», con «Quitar filtros»;
+  - el error, con «Reintentar».
+
+Las tarjetas abren el modal de detalle de siempre (`MovieDetailsModal`). Una página propia por película (`/peliculas/:id`, como las series) queda como posible mejora en el plan.
+
+**La barra de filtros** (`components/MovieFilterBar.tsx`) tiene tres controles con su etiqueta: **Género** (`<select>` con «Todos los géneros»), **Año** y **Ordenar por**. «Quitar filtros» solo aparece si hay algún filtro y va **unido al desplegable de orden** (prop `trailing` de `SelectField`). Antes llevaba un margen fijo para alinearse con los controles: cuando bajaba solo de línea a 768 px, dejaba un hueco de 38 px. Ahora baja junto con el desplegable, y lo vigila un E2E.
+
+- **¿Por qué el año es un campo de texto** (`inputmode="numeric"`) y no `type="number"` ni una lista?
+  - Con `type="number"`, la rueda del ratón cambia el valor al desplazar la página, y además admite `e` y decimales.
+  - Una lista tendría 213 opciones (1888–2100), y no hay endpoint de «años con películas».
+  - Se valida en el cliente con las mismas constantes que el backend. El error aparece al llegar a 4 cifras o al salir del campo, no mientras escribes «20…», y un año inválido no se aplica.
+
+**Los filtros viven en la URL** (`?genero=<id>&anio=<año>&orden=<clave>`; `lib/movieFilters.ts`). Así se pueden compartir, «Atrás» vuelve al filtro anterior, y los valores inválidos de la URL se ignoran sin romper la página. Las claves de orden son:
+
+| Clave | Orden |
+| :--- | :--- |
+| `recientes` (por defecto, no se escribe en la URL) | `createdAt desc` |
+| `titulo-asc` / `titulo-desc` | Título A–Z / Z–A |
+| `anio-desc` / `anio-asc` | Año: más nuevas / más antiguas |
+| `duracion-asc` / `duracion-desc` | Duración: más cortas / más largas |
+
+**`useMovieFilters`** guarda un borrador de los controles y lo pasa a la URL tras 300 ms, o al momento con Intro. El retraso se aplica **también a los desplegables**: en Windows, las flechas sobre un `<select>` cerrado disparan un `change` cada una, y sin espera recorrer los órdenes con el teclado dejaba una entrada de historial y una petición por flecha.
+
+Un detalle que costó un bug: `setSearchParams` de React Router cambia de identidad con cada URL. Por eso, tras aplicar con Intro, se volvía a aplicar el borrador anterior y se deshacía el filtro. Lo evita la marca `handledDraft`, y hay un test que lo reproduce.
+
+**Datos:** las dos vistas usan una sola llamada a `usePagedCatalog`, que ahora acepta una `CatalogQuery` (`sort`, `direction`, `genreId`, `releaseYear`). Al cambiar de consulta, reinicia la lista durante el render y cancela con `AbortController` la carga y el «cargar más» anteriores, así que una respuesta lenta del filtro anterior nunca pisa la del nuevo. El pie «Mostrando N de M / Cargar más» es `LoadMoreFooter`, compartido con la portada y `/series`.
+
+### 20.9 Estados vacíos según el rol
+
+Un estado vacío tiene que **decir la verdad a quien lo lee**. El caso que lo motivó: un administrador creó 15 series sin episodios (ocultas por diseño) y `/series` le decía «Todavía no hay series… echa un vistazo a las películas». Para él era falso y no explicaba nada. Desde entonces:
+
+- **`/series` y `/peliculas` vacías:**
+  - Al **usuario** le dicen «Todavía no hay series/películas. Cuando se publiquen aparecerán aquí.», con «Ir al inicio».
+  - Al **administrador** le explican el motivo («las series solo aparecen cuando tienen al menos un episodio») y le ofrecen «Gestionar series/películas», que lleva al panel.
+- **Fila «Series» de la portada:** para un usuario, si no hay series visibles, no se pinta. Un administrador ve en su lugar una sola línea que explica por qué los usuarios no la ven, con «Gestionar series».
+- **Portada sin películas:** delega en la fila «Series» si las hay. Solo si no hay nada se muestra «El catálogo está vacío» (con su versión para administradores).
+- **`/series/:id` con 404:** el administrador lee además que una serie sin episodios solo se ve en el panel. El texto no confirma que la serie exista.
+- **«Mi lista»:** cada sección vacía solo ofrece «Explorar películas/series» si de verdad hay algo visible allí. `hooks/useCatalogPresence` lo pregunta pidiendo una página de tamaño 1 al mismo endpoint que usa la página de destino. Así ningún botón lleva a otra página vacía.
+
+**Reglas que se comprobaron en todos los estados vacíos:**
+
+1. Que el texto sea verdad para cada rol.
+2. Que título, descripción y botón hablen de lo mismo.
+3. Que el botón lleve a un sitio útil, nunca a otra página vacía.
+4. Que explique qué hacer o por qué.
+
+Mientras se carga el usuario, se trata como usuario normal (falla cerrado). En los tests, `src/test/UserStatusProbe` espera a que el rol esté confirmado antes de comprobar el texto.
+
+**Enlaces:** el estado vacío de la sección «Películas» de «Mi lista» lleva a `/peliculas`. El vacío general de «Mi lista» lleva a la portada, que mezcla películas y series.
+
 ---
 
 ## 21. Frontend: accesibilidad, estilos e imágenes
@@ -1383,7 +1578,7 @@ Solo para `ADMIN`. La barra muestra el enlace **«Administrar»** únicamente si
 - Contrastes calculados para cumplir WCAG AA (4,5:1); las cifras están comentadas en `index.css`.
 - **El foco nunca queda tapado por la barra fija** (WCAG 2.2 · 2.4.11): variable `--navbar-height` y `scroll-margin-top` en el contenido (detalle en 20.7).
 - **El contorno de los controles también cuenta** (WCAG 1.4.11 pide 3:1 en los elementos de interfaz). El borde de los campos era `white/15` (1,47:1) y pasó al token `field-border` (`#687286`: 3,90:1 sobre `canvas` y 3,55:1 sobre `surface`). Pendiente conocido: el contorno del buscador no llega a 3:1 (lo identifican el icono y el texto de ejemplo).
-- «Películas» y «Series» del menú son texto reservado (`PLANNED_SECTIONS` en `Navbar.tsx`), sin enlace y no enfocables, con «(próximamente)» para lectores de pantalla.
+- La barra ya no tiene secciones reservadas: «Películas» (`/peliculas`) y «Series» (`/series`) son `NavLink` sin `end`, así que siguen marcadas en sus subrutas y con filtros en la URL. La constante `PLANNED_SECTIONS` (texto atenuado, no enfocable y con «(próximamente)») se retiró al crear la página de películas.
 
 ### 21.2 Estilos (Tailwind CSS v4)
 
@@ -1427,10 +1622,10 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 850 | `.\mvnw.cmd test` (desde `streambox/`) |
-| Backend (PostgreSQL real) | Testcontainers | 68 sin Docker (más con Docker) | Se ejecutan con el anterior; se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que con Docker la cifra es mayor (eran 82 antes de añadir `PostgresGenreIntegrationTest`) |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 444 | `npm run test` (desde `frontend/`) |
-| Frontend (flujos completos) | Playwright (Chromium) | 72 (+15 de capturas, que se omiten) | `npm run test:e2e` |
+| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1145 | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (PostgreSQL real) | Testcontainers | 119 | Se ejecutan con el anterior (1264 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos es menor (95) |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 729 | `npm run test` (desde `frontend/`) |
+| Frontend (flujos completos) | Playwright (Chromium) | 135 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend
 
@@ -1507,9 +1702,9 @@ Ejemplo: `age_rating` en `movies`.
 5. Tests con Vitest (y Playwright si es un flujo importante).
 6. Comprueba: `npm run build`, `npm run lint`, `npm run test`.
 
-### 23.4 Activar «Películas» o «Series» en el menú
+### 23.4 Añadir una sección a la barra superior
 
-Están en la constante `PLANNED_SECTIONS` de `components/Navbar.tsx`. Cuando exista la página: crea la ruta (23.3) y mueve esa entrada de `PLANNED_SECTIONS` a un `NavLink` como los de «Inicio» y «Mi lista».
+Crea la página y su ruta (23.3) y añade un `NavLink` en `components/Navbar.tsx`, como los de «Películas» y «Series». Sin `end`, para que quede marcado también en sus subrutas. Comprueba que la barra sigue cabiendo a 375 y 768 px, también con «Administrar»: lo vigila `e2e/responsive.spec.ts`. Actualiza el orden de tabulación que comprueba `e2e/accessibility.spec.ts`.
 
 ---
 

@@ -68,8 +68,23 @@ public enum ErrorCode {
     GENRE_ALREADY_EXISTS,
 
     /**
-     * El género no se puede borrar porque alguna película lo tiene asignado;
-     * hay que quitárselo antes a esas películas.
+     * El género no se puede borrar porque alguna película o serie lo tiene
+     * asignado; hay que quitárselo antes a esas películas y series.
      */
-    GENRE_IN_USE
+    GENRE_IN_USE,
+
+    /**
+     * Ya existe en la serie un episodio con la misma temporada y número. Lo
+     * devuelven el alta y la edición de episodios (409).
+     */
+    EPISODE_ALREADY_EXISTS,
+
+    /** La serie ya pertenece a la lista de favoritos del usuario (409). */
+    SERIES_ALREADY_IN_FAVORITES,
+
+    /**
+     * La serie existe, pero no pertenece a la lista de favoritos del usuario
+     * (404). Si la serie no existe, el código es {@link #RESOURCE_NOT_FOUND}.
+     */
+    SERIES_NOT_IN_FAVORITES
 }

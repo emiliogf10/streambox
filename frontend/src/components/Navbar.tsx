@@ -24,17 +24,6 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     : 'text-white/70 hover:text-white');
 
 /**
- * Secciones previstas de la navegación que todavía no tienen ruta.
- *
- * Se muestran para anunciar el rumbo de la plataforma, pero como no llevan a
- * ningún sitio se pintan como texto atenuado (`span aria-disabled`), no como
- * enlace: así no entran en el orden de tabulación ni parecen interactivas.
- * Cuando exista la ruta de una sección, basta con moverla a un `NavLink`
- * (con `to` y `navLinkClass`) y quitarla de esta lista.
- */
-const PLANNED_SECTIONS = ['Películas', 'Series'] as const;
-
-/**
  * Barra superior de la zona autenticada: logo, navegación principal, buscador y menú de usuario.
  *
  * **Responsive.** Se queda pegada arriba (`sticky`, no `fixed`: ocupa su sitio
@@ -56,6 +45,12 @@ const PLANNED_SECTIONS = ['Películas', 'Series'] as const;
  * color). Es contenido normal del desplegable, no un `role="menu"`, así que el
  * lector de pantalla lo lee en orden al recorrerlo. Es informativo: el rol en el
  * cliente solo decide qué se pinta; quien protege los datos es el backend (403).
+ *
+ * **Navegación.** «Inicio» (`/`), «Películas» (`/peliculas`), «Series»
+ * (`/series`) y «Mi lista» (`/favorites`). Ya no hay secciones reservadas:
+ * «Películas» y «Series» fueron texto atenuado «(próximamente)» hasta tener su
+ * página, y al pasar a enlace ocupan el mismo hueco (mismo `px-2` y texto), así
+ * que la barra no se ensanchó.
  *
  * **Enlace de administración.** Solo los administradores ven «Administrar»
  * (a `/admin`), tras «Mi lista». Con él la navegación pasa de cuatro a cinco
@@ -123,17 +118,14 @@ export function Navbar() {
             <NavLink to="/" end className={navLinkClass}>
               Inicio
             </NavLink>
-            {PLANNED_SECTIONS.map((name) => (
-              <span
-                key={name}
-                aria-disabled="true"
-                title="Próximamente"
-                className="inline-flex min-h-11 cursor-default items-center rounded-md px-2 text-sm text-muted"
-              >
-                {name}
-                <span className="sr-only"> (próximamente)</span>
-              </span>
-            ))}
+            {/* Sin `end`: también queda marcado en cualquier subruta de la sección (y con filtros, `?genero=4`). */}
+            <NavLink to="/peliculas" className={navLinkClass}>
+              Películas
+            </NavLink>
+            {/* Sin `end`: también queda marcado en la página de una serie (`/series/7`), que es parte de la sección. */}
+            <NavLink to="/series" className={navLinkClass}>
+              Series
+            </NavLink>
             <NavLink to="/favorites" className={navLinkClass}>
               Mi lista
             </NavLink>

@@ -10,7 +10,17 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppRoutes } from './App';
-import { CURRENT_USER, jsonResponse, makeMovie, makePage, makeUser, renderWithProviders, routeFetch } from './test/helpers';
+import {
+  CURRENT_USER,
+  jsonResponse,
+  makeMovie,
+  makePage,
+  makeSeries,
+  makeSeriesDetail,
+  makeUser,
+  renderWithProviders,
+  routeFetch,
+} from './test/helpers';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -29,8 +39,47 @@ function routesFor(role: 'ADMIN' | 'USER') {
     'GET /api/movies?page=0&size=10&sort=createdAt&direction=desc': () =>
       jsonResponse(makePage([makeMovie({ id: 1, title: 'Interstellar' })])),
     'GET /api/genres': () => jsonResponse([{ id: 1, name: 'Drama' }]),
+    'GET /api/series?page=0&size=12&sort=createdAt&direction=desc': () => jsonResponse(makePage([])),
+    'GET /api/series?page=0&size=20&sort=createdAt&direction=desc': () =>
+      jsonResponse(makePage([makeSeries({ id: 4, title: 'Dark' })])),
+    'GET /api/series/4': () => jsonResponse(makeSeriesDetail({ id: 4, title: 'Dark' })),
+    'GET /api/admin/series?page=0&size=10&sort=createdAt&direction=desc': () =>
+      jsonResponse(makePage([makeSeries({ id: 4, title: 'Dark' })])),
+    'GET /api/admin/series/4': () => jsonResponse(makeSeriesDetail({ id: 4, title: 'Dark' })),
   });
 }
+
+describe('Rutas de series', () => {
+  it('«Series» de la barra lleva a /series, con su h1 y el enlace marcado como actual', async () => {
+    routesFor('USER');
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: '/', token: 'jwt' });
+
+    const nav = screen.getByRole('navigation', { name: 'Principal' });
+    await user.click(within(nav).getByRole('link', { name: 'Series' }));
+
+    expect(screen.getByText('ruta:/series')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Series' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Series' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('region', { name: 'Dark' })).toBeInTheDocument();
+  });
+
+  it('/series/:id muestra la página de la serie dentro de la aplicación (barra incluida)', async () => {
+    routesFor('USER');
+    renderWithProviders(<AppRoutes />, { route: '/series/4?temporada=2', token: 'jwt' });
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Dark' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Principal' })).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Episodios de la temporada 2' })).toBeInTheDocument();
+  });
+
+  it('sin sesión, /series lleva al login', () => {
+    routesFor('USER');
+    renderWithProviders(<AppRoutes />, { route: '/series/4' });
+
+    expect(screen.getByText('ruta:/login')).toBeInTheDocument();
+  });
+});
 
 const adminSections = () => screen.getByRole('navigation', { name: 'Secciones de administración' });
 
@@ -45,7 +94,43 @@ describe('Rutas del panel de administración', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(within(adminSections()).getByRole('link', { name: 'Películas' })).toHaveAttribute('aria-current', 'page');
     expect(within(adminSections()).getByRole('link', { name: 'Géneros' })).not.toHaveAttribute('aria-current');
+    expect(within(adminSections()).getByRole('link', { name: 'Series' })).not.toHaveAttribute('aria-current');
     expect(await screen.findByRole('row', { name: /^Interstellar/ })).toBeInTheDocument();
+  });
+
+  it('las tres secciones van en orden (Películas, Series, Géneros) y «Series» lleva al listado de series', async () => {
+    routesFor('ADMIN');
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: '/admin/peliculas', token: 'jwt' });
+    await screen.findByRole('heading', { level: 1, name: 'Administración' });
+    expect(within(adminSections()).getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Películas',
+      'Series',
+      'Géneros',
+    ]);
+
+    await user.click(within(adminSections()).getByRole('link', { name: 'Series' }));
+
+    expect(screen.getByText('ruta:/admin/series')).toBeInTheDocument();
+    expect(within(adminSections()).getByRole('link', { name: 'Series' })).toHaveAttribute('aria-current', 'page');
+    expect(within(adminSections()).getByRole('link', { name: 'Películas' })).not.toHaveAttribute('aria-current');
+    expect(await screen.findByRole('row', { name: /^Dark/ })).toBeInTheDocument();
+    // La pestaña «Series» del panel no marca el enlace «Series» de la barra principal (otra ruta: /series).
+    expect(within(screen.getByRole('navigation', { name: 'Principal' })).getByRole('link', { name: 'Series' })).not.toHaveAttribute(
+      'aria-current',
+    );
+  });
+
+  it.each([
+    ['/admin/series/nueva', 'Nueva serie'],
+    ['/admin/series/4/editar', 'Editar «Dark»'],
+  ])('%s muestra su formulario y mantiene marcada la sección «Series»', async (route, heading) => {
+    routesFor('ADMIN');
+    renderWithProviders(<AppRoutes />, { route, token: 'jwt' });
+
+    expect(await screen.findByRole('heading', { level: 2, name: heading })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(within(adminSections()).getByRole('link', { name: 'Series' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('las secciones son enlaces (no un tablist): «Géneros» cambia de URL y de sección marcada', async () => {

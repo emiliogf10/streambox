@@ -1,38 +1,41 @@
 /**
- * Funciones puras para organizar el catálogo en la portada.
+ * Funciones puras para organizar el catálogo en filas (portada y página de series).
  * Están separadas de los componentes para poder probarlas sin renderizar nada.
+ *
+ * Son genéricas: sirven igual para películas que para series, porque solo usan
+ * lo que comparten (`id`, `genres`; ver `CatalogItem`).
  */
-import type { Movie } from './types';
+import type { CatalogItem, Movie } from './types';
 
-/** Una fila horizontal de la portada. */
-export interface CatalogRow {
+/** Una fila horizontal de títulos. Por defecto, de películas. */
+export interface CatalogRow<T extends CatalogItem = Movie> {
   /** Identificador estable, útil como `key` de React. */
   id: string;
   title: string;
-  movies: Movie[];
+  items: T[];
 }
 
-/** Películas que muestra la fila "Novedades". */
+/** Títulos que muestra la fila "Novedades" (y la fila «Series» de la portada). */
 export const NEWS_ROW_SIZE = 12;
 
 /**
- * Mínimo de películas para que un género tenga su propia fila. Con 1 o 2 la
- * fila queda casi vacía y rompe el ritmo visual de la portada; esas películas
+ * Mínimo de títulos para que un género tenga su propia fila. Con 1 o 2 la
+ * fila queda casi vacía y rompe el ritmo visual de la página; esos títulos
  * siguen apareciendo en "Novedades" y en el buscador.
  */
 export const MIN_MOVIES_PER_GENRE_ROW = 3;
 
 /**
- * Añade películas a una lista sin duplicar ninguna (por `id`).
+ * Añade elementos a una lista sin duplicar ninguno (por `id`).
  *
  * Hace falta porque la paginación por páginas puede repetir un elemento si
- * alguien crea o borra películas entre dos peticiones y los límites se mueven.
+ * alguien crea o borra títulos entre dos peticiones y los límites se mueven.
  * Se conserva el orden y la primera aparición.
  *
- * @param current películas ya cargadas
- * @param incoming películas recién recibidas
+ * @param current elementos ya cargados
+ * @param incoming elementos recién recibidos
  */
-export function mergeById(current: Movie[], incoming: Movie[]): Movie[] {
+export function mergeById<T extends { id: number }>(current: T[], incoming: T[]): T[] {
   const seen = new Set(current.map((m) => m.id));
   const added = incoming.filter((m) => {
     if (seen.has(m.id)) return false;
@@ -43,36 +46,36 @@ export function mergeById(current: Movie[], incoming: Movie[]): Movie[] {
 }
 
 /**
- * Construye las filas de la portada a partir de las películas cargadas
- * (ordenadas de la más reciente a la más antigua y SIN la del banner):
- * primero "Novedades" y después una fila por género con suficientes películas
- * (ver {@link MIN_MOVIES_PER_GENRE_ROW}), de más a menos películas.
+ * Construye las filas a partir de los títulos cargados (ordenados del más
+ * reciente al más antiguo y SIN el del banner): primero "Novedades" y después
+ * una fila por género con suficientes títulos (ver {@link MIN_MOVIES_PER_GENRE_ROW}),
+ * de más a menos títulos.
  *
  * Los géneros se calculan solo con lo que ya está cargado, así que al pulsar
  * "Cargar más" pueden aparecer filas nuevas y crecer las existentes.
  *
- * @param movies películas del catálogo, más recientes primero
+ * @param items títulos del catálogo (películas o series), más recientes primero
  */
-export function buildCatalogRows(movies: Movie[]): CatalogRow[] {
-  const rows: CatalogRow[] = [];
+export function buildCatalogRows<T extends CatalogItem>(items: T[]): CatalogRow<T>[] {
+  const rows: CatalogRow<T>[] = [];
 
-  if (movies.length > 0) {
-    rows.push({ id: 'news', title: 'Novedades', movies: movies.slice(0, NEWS_ROW_SIZE) });
+  if (items.length > 0) {
+    rows.push({ id: 'news', title: 'Novedades', items: items.slice(0, NEWS_ROW_SIZE) });
   }
 
-  const byGenre = new Map<number, { name: string; movies: Movie[] }>();
-  for (const movie of movies) {
-    for (const genre of movie.genres) {
-      const entry = byGenre.get(genre.id) ?? { name: genre.name, movies: [] };
-      entry.movies.push(movie);
+  const byGenre = new Map<number, { name: string; items: T[] }>();
+  for (const item of items) {
+    for (const genre of item.genres) {
+      const entry = byGenre.get(genre.id) ?? { name: genre.name, items: [] };
+      entry.items.push(item);
       byGenre.set(genre.id, entry);
     }
   }
 
   const genreRows = [...byGenre.entries()]
-    .filter(([, entry]) => entry.movies.length >= MIN_MOVIES_PER_GENRE_ROW)
-    .sort(([, a], [, b]) => b.movies.length - a.movies.length || a.name.localeCompare(b.name, 'es'))
-    .map(([id, entry]): CatalogRow => ({ id: `genre-${id}`, title: entry.name, movies: entry.movies }));
+    .filter(([, entry]) => entry.items.length >= MIN_MOVIES_PER_GENRE_ROW)
+    .sort(([, a], [, b]) => b.items.length - a.items.length || a.name.localeCompare(b.name, 'es'))
+    .map(([id, entry]): CatalogRow<T> => ({ id: `genre-${id}`, title: entry.name, items: entry.items }));
 
   return [...rows, ...genreRows];
 }

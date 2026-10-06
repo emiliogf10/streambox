@@ -1,10 +1,13 @@
 /**
- * Tests de `useCatalog`, el hook que pagina el catálogo de la portada.
+ * Tests de `useCatalog`, el hook que pagina el catálogo de la portada, y de
+ * `useMovieResults`, el de `/peliculas` (mismo `usePagedCatalog`, con filtros).
  *
  * Protegen: el contrato con el servidor (ordenación `createdAt desc`, página 0
  * inicial, página siguiente en "cargar más"), que "cargar más" nunca pierda ni
  * duplique lo ya cargado, y que un fallo no destruya la lista (error de
- * `loadMore`) o se pueda reintentar (error inicial). `apiFetch` está simulado.
+ * `loadMore`) o se pueda reintentar (error inicial). Con filtros: el endpoint y
+ * los parámetros de cada orden, y que al cambiar de filtro se cancele lo anterior
+ * y nada del filtro viejo se cuele en la lista nueva. `apiFetch` está simulado.
  */
 import { act, renderHook, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -12,7 +15,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../context/ToastContext';
 import * as api from '../lib/api';
 import { makeMovie, makePage } from '../test/helpers';
-import { useCatalog } from './useCatalog';
+import { NO_MOVIE_FILTERS } from '../lib/movieFilters';
+import type { MovieFilters } from '../lib/movieFilters';
+import { useCatalog, useMovieResults } from './useCatalog';
 
 // Se simula SOLO `apiFetch`; `ApiError`, `isAbortError`... siguen siendo los reales.
 vi.mock('../lib/api', async (importOriginal) => ({
@@ -231,5 +236,108 @@ describe('useCatalog: reload', () => {
     expect(paramsOfCall(2).page).toBe(0); // la recarga pide la 0...
     expect(paramsOfCall(3).page).toBe(1); // ...y "cargar más" vuelve a la 1, no a la 2
     expect(result.current.movies.map((m) => m.id)).toEqual([1, 2, 9]);
+  });
+});
+
+describe('useMovieResults: la página /peliculas con y sin filtros', () => {
+  const drama: MovieFilters = { genreId: 4, year: null, sort: 'recientes' };
+
+  it('sin filtros pide lo mismo que la portada: /movies, lo más reciente primero', async () => {
+    apiFetch.mockResolvedValueOnce(firstPage);
+
+    const { result } = renderHook(() => useMovieResults(NO_MOVIE_FILTERS), { wrapper });
+
+    expect(apiFetch).toHaveBeenCalledWith('/movies', {
+      params: { page: 0, size: 20, sort: 'createdAt', direction: 'desc' },
+      signal: expect.any(AbortSignal),
+    });
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(result.current.filtered).toBe(false);
+  });
+
+  it('con filtros pide /movies/search con género, año y orden (sin título)', async () => {
+    apiFetch.mockResolvedValueOnce(firstPage);
+
+    const { result } = renderHook(() => useMovieResults({ genreId: 4, year: 2014, sort: 'titulo-desc' }), { wrapper });
+
+    expect(apiFetch).toHaveBeenCalledWith('/movies/search', {
+      params: { page: 0, size: 20, sort: 'title', direction: 'desc', genreId: 4, releaseYear: 2014 },
+      signal: expect.any(AbortSignal),
+    });
+    expect(paramsOfCall(0)).not.toHaveProperty('title');
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(result.current.filtered).toBe(true);
+  });
+
+  it('solo cambiar el orden ya cuenta como filtro: /movies/search sin género ni año', () => {
+    apiFetch.mockReturnValueOnce(new Promise(() => {}));
+
+    renderHook(() => useMovieResults({ ...NO_MOVIE_FILTERS, sort: 'duracion-asc' }), { wrapper });
+
+    expect(apiFetch.mock.calls[0][0]).toBe('/movies/search');
+    expect(paramsOfCall(0)).toEqual({ page: 0, size: 20, sort: 'duration', direction: 'asc' });
+  });
+
+  it('al cambiar de filtro cancela la petición anterior, vuelve a "loading" y una respuesta tardía no se pinta', async () => {
+    const old = deferred<unknown>();
+    apiFetch.mockReturnValueOnce(old.promise);
+    const { result, rerender } = renderHook((filters: MovieFilters) => useMovieResults(filters), {
+      wrapper,
+      initialProps: drama,
+    });
+    const oldSignal = (apiFetch.mock.calls[0][1] as { signal: AbortSignal }).signal;
+    const fresh = deferred<unknown>();
+    apiFetch.mockReturnValueOnce(fresh.promise);
+
+    rerender({ ...drama, genreId: 5 });
+
+    expect(oldSignal.aborted).toBe(true);
+    expect(paramsOfCall(1)).toMatchObject({ page: 0, genreId: 5 });
+    expect(result.current.status).toBe('loading');
+
+    // La respuesta del filtro viejo llega tarde: se descarta.
+    await act(async () => old.resolve(makePage([makeMovie({ id: 99 })])));
+    expect(result.current.status).toBe('loading');
+    expect(result.current.movies).toEqual([]);
+
+    await act(async () => fresh.resolve(makePage([makeMovie({ id: 5 })])));
+    expect(result.current.movies.map((m) => m.id)).toEqual([5]);
+  });
+
+  it('al cambiar de filtro olvida lo cargado y cancela un "cargar más" en vuelo: la página siguiente vuelve a ser la 1', async () => {
+    apiFetch.mockResolvedValueOnce(firstPage);
+    const { result, rerender } = renderHook((filters: MovieFilters) => useMovieResults(filters), {
+      wrapper,
+      initialProps: drama,
+    });
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const more = deferred<unknown>();
+    apiFetch.mockReturnValueOnce(more.promise);
+    let pendingMore!: Promise<void>;
+    act(() => {
+      pendingMore = result.current.loadMore();
+    });
+    const moreSignal = (apiFetch.mock.calls[1][1] as { signal: AbortSignal }).signal;
+    expect(result.current.loadingMore).toBe(true);
+
+    apiFetch.mockResolvedValueOnce(makePage([makeMovie({ id: 7 })], { hasNext: true, totalElements: 2 }));
+    rerender({ ...drama, year: 2001 });
+
+    expect(moreSignal.aborted).toBe(true);
+    expect(result.current.movies).toEqual([]);
+    expect(result.current.loadingMore).toBe(false);
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    // El "cargar más" del filtro viejo responde tarde: no se mezcla con la lista nueva.
+    await act(async () => {
+      more.resolve(makePage([makeMovie({ id: 3 })], { page: 1 }));
+      await pendingMore;
+    });
+    expect(result.current.movies.map((m) => m.id)).toEqual([7]);
+
+    apiFetch.mockResolvedValueOnce(makePage([makeMovie({ id: 8 })], { page: 1 }));
+    await act(() => result.current.loadMore());
+    expect(paramsOfCall(3)).toMatchObject({ page: 1, genreId: 4, releaseYear: 2001 });
+    expect(result.current.movies.map((m) => m.id)).toEqual([7, 8]);
   });
 });

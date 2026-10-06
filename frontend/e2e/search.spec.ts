@@ -1,8 +1,12 @@
 /**
  * E2E del buscador de la barra superior (combobox con lista, patrón ARIA APG).
  *
- * Los resultados salen de `GET /api/movies/search` del backend real; lo que se
- * comprueba es la integración: el texto filtra, el teclado funciona y Escape cierra.
+ * Los resultados salen de `GET /api/movies/search` y `GET /api/series/search` del
+ * backend real; lo que se comprueba es la integración: el texto filtra, el
+ * teclado funciona y Escape cierra. Las búsquedas de este archivo («blade»,
+ * «dune», «interstellar», «mad») no coinciden con ninguna serie sembrada (ver
+ * `SERIES` en `support/catalog.ts`), así que siguen contando solo películas; lo
+ * propio de las series (grupo «Series», Intro lleva a su página) está en `series.spec.ts`.
  */
 import { expect, test } from './support/fixtures';
 
@@ -13,7 +17,7 @@ test.describe('Buscador', () => {
   });
 
   test('escribir filtra con resultados reales de la API y anuncia cuántos hay', async ({ page }) => {
-    const search = page.getByRole('combobox', { name: 'Buscar películas por título' });
+    const search = page.getByRole('combobox', { name: 'Buscar películas y series por título' });
     await search.fill('blade');
 
     const list = page.getByRole('listbox', { name: 'Resultados de la búsqueda' });
@@ -25,16 +29,19 @@ test.describe('Buscador', () => {
     await expect(options.nth(1)).toContainText('Blade Runner 2049');
     await expect(search).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByRole('status').filter({ hasText: '2 resultados' })).toHaveCount(1);
+    // Solo hay películas: el grupo «Series» no aparece (no se pinta un grupo vacío).
+    await expect(list.getByRole('group', { name: 'Películas' })).toBeVisible();
+    await expect(list.getByRole('group', { name: 'Series' })).toHaveCount(0);
   });
 
   test('sin coincidencias muestra "Sin resultados" en lugar de quedarse mudo', async ({ page }) => {
-    await page.getByRole('combobox', { name: 'Buscar películas por título' }).fill('zzzzzz-no-existe');
+    await page.getByRole('combobox', { name: 'Buscar películas y series por título' }).fill('zzzzzz-no-existe');
     await expect(page.getByText('Sin resultados para «zzzzzz-no-existe».')).toBeVisible();
     await expect(page.getByRole('listbox')).toHaveCount(0);
   });
 
   test('↓ resalta, ↑ vuelve atrás y Intro abre la película resaltada', async ({ page }) => {
-    const search = page.getByRole('combobox', { name: 'Buscar películas por título' });
+    const search = page.getByRole('combobox', { name: 'Buscar películas y series por título' });
     await search.fill('blade');
     const options = page.getByRole('listbox').getByRole('option');
     await expect(options).toHaveCount(2);
@@ -60,7 +67,7 @@ test.describe('Buscador', () => {
   });
 
   test('Intro sin resaltar abre la primera coincidencia y un clic en una opción abre su película', async ({ page }) => {
-    const search = page.getByRole('combobox', { name: 'Buscar películas por título' });
+    const search = page.getByRole('combobox', { name: 'Buscar películas y series por título' });
     await search.fill('dune');
     await expect(page.getByRole('option')).toHaveCount(1);
     await search.press('Enter');
@@ -73,7 +80,7 @@ test.describe('Buscador', () => {
   });
 
   test('Escape cierra la lista y vacía el campo', async ({ page }) => {
-    const search = page.getByRole('combobox', { name: 'Buscar películas por título' });
+    const search = page.getByRole('combobox', { name: 'Buscar películas y series por título' });
     await search.fill('mad');
     await expect(page.getByRole('listbox')).toBeVisible();
 

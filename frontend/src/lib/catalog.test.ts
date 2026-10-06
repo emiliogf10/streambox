@@ -72,13 +72,13 @@ describe('buildCatalogRows', () => {
     const [news] = buildCatalogRows(movies);
 
     expect(news).toMatchObject({ id: 'news', title: 'Novedades' });
-    expect(news.movies.map((m) => m.id)).toEqual([9, 8, 7]);
+    expect(news.items.map((m) => m.id)).toEqual([9, 8, 7]);
   });
 
   it('"Novedades" se limita a NEWS_ROW_SIZE películas', () => {
     const rows = buildCatalogRows(moviesOf([], NEWS_ROW_SIZE + 5, 1));
 
-    expect(rows[0].movies).toHaveLength(NEWS_ROW_SIZE);
+    expect(rows[0].items).toHaveLength(NEWS_ROW_SIZE);
   });
 
   it('un género con menos de 3 películas no tiene fila; con 3 sí', () => {
@@ -90,7 +90,7 @@ describe('buildCatalogRows', () => {
     const withThree = buildCatalogRows(moviesOf([accion], 3, 1));
     expect(withThree.map((r) => r.id)).toEqual(['news', 'genre-1']);
     expect(withThree[1]).toMatchObject({ title: 'Acción' });
-    expect(withThree[1].movies).toHaveLength(3);
+    expect(withThree[1].items).toHaveLength(3);
   });
 
   it('una película con varios géneros aparece en la fila de cada uno', () => {
@@ -101,8 +101,8 @@ describe('buildCatalogRows', () => {
     const rows = buildCatalogRows(movies);
 
     expect(rows.map((r) => r.title)).toEqual(['Novedades', 'Acción', 'Drama']);
-    expect(rows[1].movies.map((m) => m.id)).toEqual([1, 2, 3]);
-    expect(rows[2].movies.map((m) => m.id)).toEqual([1, 2, 3]);
+    expect(rows[1].items.map((m) => m.id)).toEqual([1, 2, 3]);
+    expect(rows[2].items.map((m) => m.id)).toEqual([1, 2, 3]);
   });
 
   it('ordena los géneros de más a menos películas y desempata por nombre', () => {

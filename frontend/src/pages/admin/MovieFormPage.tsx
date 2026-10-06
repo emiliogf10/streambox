@@ -9,29 +9,25 @@ import { ErrorState } from '../../components/ErrorState';
 import { FormAlert } from '../../components/FormAlert';
 import { FormField } from '../../components/FormField';
 import { LoadingState } from '../../components/LoadingState';
-import { MoviePoster } from '../../components/MoviePoster';
 import { TextAreaField } from '../../components/TextAreaField';
 import { useToast } from '../../context/ToastContext';
-import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { useGenres } from '../../hooks/useGenres';
-import type { GenresStatus } from '../../hooks/useGenres';
 import { ApiError, apiFetch, getErrorMessage, isAbortError } from '../../lib/api';
 import {
   EMPTY_MOVIE_FORM,
   MOVIE_DESCRIPTION_MAX,
-  getPreviewImageUrl,
   toMovieRequest,
   validateImageUrl,
   validateMovieForm,
   validateVideoUrl,
 } from '../../lib/movieValidation';
 import type { MovieFormErrors, MovieFormValues } from '../../lib/movieValidation';
-import type { Genre, Movie } from '../../lib/types';
-import { ADMIN_GENRES_PATH, getReturnTo } from './adminPaths';
-
-/** Espera tras la última tecla antes de intentar cargar la portada en la vista previa. */
-const PREVIEW_DEBOUNCE_MS = 400;
+import type { Movie } from '../../lib/types';
+import { getReturnTo } from './adminPaths';
+import { CoverPreview } from './CoverPreview';
+import { focusFirstInvalidField, splitValidationErrors } from './formErrors';
+import { GenreCheckboxes } from './GenreCheckboxes';
 
 /** Orden de los campos en pantalla: el foco va al primero con error. */
 const FIELD_ORDER: (keyof MovieFormValues)[] = [
@@ -86,11 +82,7 @@ function legacyUrlErrors(values: MovieFormValues): MovieFormErrors {
 
 /** Lleva el foco al primer campo con error (en el grupo de géneros, a su primer control). */
 function focusFirstInvalid(errors: MovieFormErrors) {
-  const first = FIELD_ORDER.find((field) => errors[field]);
-  if (!first) return;
-  const element = document.getElementById(FIELD_IDS[first]);
-  if (first === 'genreIds') element?.querySelector<HTMLElement>('input, a, button')?.focus();
-  else element?.focus();
+  focusFirstInvalidField(errors, FIELD_ORDER, FIELD_IDS);
 }
 
 /** Qué pantalla de película se pide: alta, o edición de un id (`null` si el de la URL no es un número válido). */
@@ -199,12 +191,7 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
     if (error instanceof ApiError) {
       if (error.sessionExpired) return; // el aviso y la salida al login ya los gestiona AuthProvider
       if (error.code === 'VALIDATION_ERROR' && error.validationErrors) {
-        const perField: MovieFormErrors = {};
-        const unmatched: string[] = [];
-        for (const [field, message] of Object.entries(error.validationErrors)) {
-          if (Object.hasOwn(FIELD_IDS, field)) perField[field as keyof MovieFormValues] = message;
-          else unmatched.push(message);
-        }
+        const { perField, unmatched } = splitValidationErrors(error.validationErrors, FIELD_IDS);
         setErrors(perField);
         setFormError(unmatched.length > 0 ? unmatched.join(' ') : 'Revisa los campos marcados.');
         focusFirstInvalid(perField);
@@ -355,6 +342,8 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
             onChange={(event) => setField('videoUrl', event.target.value)}
           />
           <GenreCheckboxes
+            id={FIELD_IDS.genreIds}
+            itemNoun="cada película"
             genres={genres.genres}
             status={genres.status}
             loaded={genres.loaded}
@@ -366,7 +355,7 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
           />
         </div>
 
-        <CoverPreview title={values.title} imageUrl={values.imageUrl} />
+        <CoverPreview title={values.title} imageUrl={values.imageUrl} placeholderTitle="Nueva película" />
 
         <div className="lg:col-start-1">
           {/* Junto a los botones (y no arriba del todo): es donde está quien acaba de pulsar «Guardar». */}
@@ -398,142 +387,5 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
       </h2>
       {content}
     </section>
-  );
-}
-
-/** Propiedades de {@link GenreCheckboxes}. */
-interface GenreCheckboxesProps {
-  genres: Genre[];
-  status: GenresStatus;
-  loaded: boolean;
-  errorMessage: string;
-  onRetry: () => void;
-  selected: number[];
-  onToggle: (genreId: number) => void;
-  error?: string;
-}
-
-/**
- * Grupo de casillas de géneros.
- *
- * `fieldset` + `legend` agrupan las casillas bajo un nombre («Géneros») que el
- * lector de pantalla anuncia al entrar en el grupo; el requisito o el error van
- * enlazados con `aria-describedby`. Cada casilla está dentro de su `<label>`,
- * que ocupa toda la fila (objetivo táctil de 44 px) y se marca con borde y
- * fondo de acento cuando está elegida, además de la propia marca de la casilla.
- */
-function GenreCheckboxes({ genres, status, loaded, errorMessage, onRetry, selected, onToggle, error }: GenreCheckboxesProps) {
-  const hintId = `${FIELD_IDS.genreIds}-hint`;
-  const errorId = `${FIELD_IDS.genreIds}-error`;
-
-  let body: ReactNode;
-  if (!loaded && status === 'loading') {
-    body = (
-      <p role="status" className="text-sm text-muted">
-        Cargando géneros...
-      </p>
-    );
-  } else if (!loaded && status === 'error') {
-    body = (
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-red-500/30 bg-red-950/30 p-3">
-        <p className="text-sm text-red-300">{errorMessage}</p>
-        <Button variant="outline" onClick={onRetry}>
-          Reintentar
-        </Button>
-      </div>
-    );
-  } else if (genres.length === 0) {
-    body = (
-      <p className="rounded-lg border border-dashed border-line p-4 text-sm leading-relaxed text-muted">
-        Todavía no hay géneros y cada película necesita al menos uno.{' '}
-        <Link to={ADMIN_GENRES_PATH} className="focus-ring rounded-sm font-semibold text-accent underline-offset-2 hover:underline">
-          Crea uno en la pestaña Géneros
-        </Link>{' '}
-        y vuelve después a este formulario.
-      </p>
-    );
-  } else {
-    body = (
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {genres.map((genre) => (
-          <label
-            key={genre.id}
-            className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-white transition-colors hover:border-muted has-checked:border-accent/60 has-checked:bg-accent/10"
-          >
-            <input
-              type="checkbox"
-              className="focus-ring size-4 shrink-0 accent-accent"
-              checked={selected.includes(genre.id)}
-              onChange={() => onToggle(genre.id)}
-            />
-            <span className="min-w-0 wrap-anywhere">{genre.name}</span>
-          </label>
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <fieldset
-      id={FIELD_IDS.genreIds}
-      aria-describedby={error ? errorId : hintId}
-      aria-invalid={error ? true : undefined}
-      className="min-w-0"
-    >
-      <legend className="mb-1.5 text-sm font-medium text-gray-300">Géneros</legend>
-      {body}
-      {error ? (
-        <p id={errorId} role="alert" className="mt-1.5 text-xs font-medium text-danger">
-          {error}
-        </p>
-      ) : (
-        <p id={hintId} className="mt-1.5 text-xs text-muted">
-          Elige al menos uno.
-        </p>
-      )}
-    </fieldset>
-  );
-}
-
-/**
- * Vista previa de la portada, junto al formulario (debajo de los campos en móvil).
- *
- * - Se actualiza al escribir la URL, con una espera de 400 ms ({@link useDebouncedValue}):
- *   no se intenta descargar cada versión a medias de la dirección.
- * - Solo se carga una URL que cumple las reglas (`getPreviewImageUrl`): una
- *   `http://` o `javascript:` no llega nunca a una `<img>`. Mientras no sea
- *   válida se ve el respaldo de {@link MoviePoster}, el mismo que verían los
- *   usuarios si la imagen fallara.
- * - Usa `MoviePoster` con una película "borrador" (título + `imageUrl`), así que
- *   lo que se ve aquí es exactamente cómo se pintará en el catálogo.
- */
-function CoverPreview({ title, imageUrl }: { title: string; imageUrl: string }) {
-  const debouncedUrl = useDebouncedValue(imageUrl, PREVIEW_DEBOUNCE_MS);
-  const draft = { title: title.trim() || 'Nueva película', imageUrl: getPreviewImageUrl(debouncedUrl) };
-
-  const message = !debouncedUrl.trim()
-    ? 'Escribe la URL de la portada para verla aquí.'
-    : draft.imageUrl
-      ? 'Así se verá en el catálogo. Si la imagen no carga, se mostrará este respaldo con el título.'
-      : 'La URL aún no es válida, así que no se carga: se muestra el respaldo con el título.';
-
-  return (
-    <aside
-      aria-labelledby="movie-preview-title"
-      className="flex items-start gap-4 self-start rounded-xl border border-line bg-surface p-4 lg:sticky lg:top-20 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:flex-col"
-    >
-      <MoviePoster
-        title={draft.title}
-        src={draft.imageUrl}
-        alt="Vista previa de la portada"
-        className="aspect-2/3 w-28 shrink-0 rounded-lg lg:w-full"
-      />
-      <div className="min-w-0">
-        <h3 id="movie-preview-title" className="text-sm font-semibold text-white">
-          Vista previa de la portada
-        </h3>
-        <p className="mt-1 text-xs leading-relaxed text-muted">{message}</p>
-      </div>
-    </aside>
   );
 }

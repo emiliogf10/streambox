@@ -14,7 +14,7 @@ import type { Mock } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import { ToastProvider } from '../context/ToastContext';
 import { LocationProbe } from './LocationProbe';
-import type { ApiErrorBody, Movie, PageResponse, User } from '../lib/types';
+import type { ApiErrorBody, Episode, Movie, PageResponse, Series, SeriesDetail, User } from '../lib/types';
 
 /** Crea un usuario de prueba (`UserResponse`); por defecto, rol `USER`. */
 export function makeUser(overrides: Partial<User> = {}): User {
@@ -30,6 +30,9 @@ export function makeUser(overrides: Partial<User> = {}): User {
 
 /** Clave de {@link routeFetch} de la petición que `AuthProvider` lanza siempre que hay sesión. */
 export const CURRENT_USER = 'GET /api/users/me';
+
+/** Clave de {@link routeFetch} de la lista de series favoritas, que `FavoritesProvider` pide siempre al montarse. */
+export const FAVORITE_SERIES = 'GET /api/users/me/favorites/series';
 
 /** Crea una película de prueba; cada test solo especifica lo que le importa. */
 export function makeMovie(overrides: Partial<Movie> = {}): Movie {
@@ -48,11 +51,61 @@ export function makeMovie(overrides: Partial<Movie> = {}): Movie {
   };
 }
 
-/** Crea una página de resultados con los metadatos de paginación coherentes. */
-export function makePage(
-  content: Movie[],
-  overrides: Partial<PageResponse<Movie>> = {},
-): PageResponse<Movie> {
+/** Crea una serie de prueba (`SeriesResponse`): por defecto, terminada, con 2 temporadas y 5 episodios. */
+export function makeSeries(overrides: Partial<Series> = {}): Series {
+  const id = overrides.id ?? 1;
+  return {
+    id,
+    title: `Serie ${id}`,
+    description: `Sinopsis de la serie ${id}.`,
+    releaseYear: 2019,
+    endYear: 2022,
+    imageUrl: `https://img.example/series-${id}.webp`,
+    createdAt: '2026-01-01T10:00:00Z',
+    genres: [],
+    seasonCount: 2,
+    episodeCount: 5,
+    ...overrides,
+  };
+}
+
+/** Crea un episodio de prueba; el id por defecto deriva de temporada y número para que sea único. */
+export function makeEpisode(overrides: Partial<Episode> = {}): Episode {
+  const seasonNumber = overrides.seasonNumber ?? 1;
+  const episodeNumber = overrides.episodeNumber ?? 1;
+  return {
+    id: seasonNumber * 100 + episodeNumber,
+    seasonNumber,
+    episodeNumber,
+    title: `Episodio ${episodeNumber}`,
+    description: `Sinopsis del episodio ${episodeNumber}.`,
+    duration: 45,
+    videoUrl: `https://video.example/s${seasonNumber}e${episodeNumber}`,
+    ...overrides,
+  };
+}
+
+/**
+ * Crea el detalle de una serie (`SeriesDetailResponse`). Si no se pasan
+ * temporadas, genera dos (con 3 y 2 episodios); `seasonCount` y `episodeCount`
+ * se calculan a partir de ellas para que sean coherentes.
+ */
+export function makeSeriesDetail(overrides: Partial<SeriesDetail> = {}): SeriesDetail {
+  const seasons = overrides.seasons ?? [
+    { seasonNumber: 1, episodes: [1, 2, 3].map((n) => makeEpisode({ seasonNumber: 1, episodeNumber: n })) },
+    { seasonNumber: 2, episodes: [1, 2].map((n) => makeEpisode({ seasonNumber: 2, episodeNumber: n })) },
+  ];
+  return {
+    ...makeSeries(overrides),
+    seasonCount: seasons.length,
+    episodeCount: seasons.reduce((sum, season) => sum + season.episodes.length, 0),
+    ...overrides,
+    seasons,
+  };
+}
+
+/** Crea una página de resultados (de películas o series) con los metadatos de paginación coherentes. */
+export function makePage<T = Movie>(content: T[], overrides: Partial<PageResponse<T>> = {}): PageResponse<T> {
   return {
     content,
     page: 0,
@@ -112,11 +165,21 @@ type RouteHandler = (request: { url: string; init: RequestInit }) => Response | 
  * tenga nada que ver con lo que prueban; repetirlo en cada test solo añadiría
  * ruido. Quien prueba el rol lo sobrescribe pasando su propio manejador.
  *
+ * Por el mismo motivo, {@link FAVORITE_SERIES} responde por defecto con una
+ * lista vacía: `FavoritesProvider` la pide junto a la de películas en TODAS las
+ * pantallas con la lista (portada, buscador, barra...), y los tests anteriores a
+ * las series no tienen nada que decir de ella. Los tests de series favoritas la
+ * sobrescriben. (La de películas no tiene valor por defecto: sus tests ya la declaran.)
+ *
  * @param fetchMock el `vi.fn()` instalado como `fetch` global
  * @param routes manejadores por clave `"MÉTODO URL"`; se pueden cambiar entre pasos del test
  */
 export function routeFetch(fetchMock: Mock<typeof fetch>, routes: Record<string, RouteHandler>): void {
-  const withDefaults: Record<string, RouteHandler> = { [CURRENT_USER]: () => jsonResponse(makeUser()), ...routes };
+  const withDefaults: Record<string, RouteHandler> = {
+    [CURRENT_USER]: () => jsonResponse(makeUser()),
+    [FAVORITE_SERIES]: () => jsonResponse([]),
+    ...routes,
+  };
   fetchMock.mockImplementation(async (input, init = {}) => {
     const key = `${init.method ?? 'GET'} ${String(input)}`;
     const handler = withDefaults[key];
