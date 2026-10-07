@@ -1,18 +1,22 @@
 # Estado de las tareas
 
-Archivo de reanudación: si la sesión se corta (sin tokens o sin conexión), léelo primero. Se actualiza al terminar cada paso de una tarea. Rama de trabajo de las sesiones en la nube: `claude/stoic-wright-ac5w1k` (los avances se suben ahí porque el contenedor es efímero).
+Archivo de reanudación: si la sesión se corta (sin tokens o sin conexión), léelo primero. Se actualiza al terminar cada paso de una tarea. Cada hilo de la nube trabaja en su rama `claude/project-thread-*` (el contenedor es efímero: lo que no se sube a la rama se pierde) y entrega los cambios en una PR.
 
 ## Tarea en curso
 
-Tarea 29 (token en cookie HttpOnly): hecha en la rama `claude/project-thread-6wdzw2`, PR abierta. Backend 1166 (H2, sin Docker), Vitest 774, E2E 133 + 7 de `catalogo-mutable` pasan; fallan solo los 2 de `accessibility.spec.ts:189` (navegador del contenedor) y a veces el flake del aviso bajo el cursor (`admin.spec.ts:122`). Pendiente: tests `Postgres*` con Docker, revisión visual de «Comprobando tu sesión...», vida corta + refresh, HSTS.
+Tarea 29 (token en cookie HttpOnly): hecha y fusionada en `main` (PR #10; la #9 ajustó la prueba de humo de Docker del CI). Backend 1166 (H2, sin Docker), Vitest 774, E2E 133 + 7 de `catalogo-mutable` pasan; fallan solo los 2 de `accessibility.spec.ts:189` (navegador del contenedor) y a veces el flake del aviso bajo el cursor (`admin.spec.ts:122`). Pendiente: tests `Postgres*` con Docker, revisión visual de «Comprobando tu sesión...», vida corta + refresh, HSTS.
 
 ## Colección de Postman y OpenAPI versionada (2026-10-07)
 
-Hecho: `docs/api/openapi.yaml` (generada con springdoc desde el backend real en H2/8099), `docs/api/postman/` (colección v2.1 con 52 peticiones y 90 aserciones + entorno `StreamBox - Local`) y `docs/api/README.md`. Verificado con Newman contra el backend real: 52/52 y 90/90, también en una segunda ejecución (caso 409). Auth modelada como en `main` (Bearer en cabecera); **al hacer la tarea 29 (cookie HttpOnly) hay que regenerar la spec y actualizar login y autorización de la colección.** Pendiente: el conector de Postman no conectó en la sesión, así que no se creó nada en un workspace de Postman (hay que importar los archivos o repetirlo con el conector). Sin cambios de código de producción; no se ejecutó la suite de Maven.
+Hecho: `docs/api/openapi.yaml` (generada con springdoc desde el backend real en H2/8099), `docs/api/postman/` (colección v2.1 con 52 peticiones y 90 aserciones + entorno `StreamBox - Local`) y `docs/api/README.md`. Verificado con Newman contra el backend real: 52/52 y 90/90, también en una segunda ejecución (caso 409). Auth modelada como en `main` (Bearer en cabecera); **la tarea 29 (cookie HttpOnly) ya está en `main`, así que falta regenerar la spec y actualizar login y autorización de la colección.** Pendiente: el conector de Postman no conectó en la sesión, así que no se creó nada en un workspace de Postman (hay que importar los archivos o repetirlo con el conector). Sin cambios de código de producción; no se ejecutó la suite de Maven.
 
 ## Tarea 28 terminada: ADRs y revisión del README (2026-10-07)
 
 Solo documentación (sin cambios de código; no se ejecutaron tests). Hecho: `docs/adr/` con un índice y 10 ADR (0001 backend, 0002 frontend, 0003 Flyway, 0004 JWT, 0005 `/me`, 0006 rate limiting, 0007 favoritos, 0008 series, 0009 tests, 0010 Docker/nginx); README con título, árbol de carpetas corregido, stack actualizado, pasos para arrancar backend (`JWT_SECRET`) y frontend (Node 24, proxy) y enlace a los ADR. Plan actualizado (fila 28 y orden de trabajo). Pendiente del autor: leer los ADR y corregir lo que no refleje sus motivos reales (los ADR se redactaron a partir del código y del manual).
+
+## Revisión de documentación y limpieza (2026-10-07)
+
+Revisados README, manual, plan, CLAUDE.md, `frontend/README.md` y los agentes de `.claude/`. Corregido lo desfasado por la tarea 29 (cookie HttpOnly, CSRF, `logout`), por `V3` (la siguiente migración es `V4`) y las cifras de tests (backend 1261 con 95 omitidos sin Docker; Vitest 774; E2E 144 + 24 de capturas). Sin archivos borrados: ver el informe de la PR.
 
 ## Tarea anterior: «Revisión de diseño con las skills» (2026-10-07)
 
