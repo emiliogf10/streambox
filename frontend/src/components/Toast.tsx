@@ -35,7 +35,8 @@ interface ToastProps {
  * algo que llega, no como un parpadeo. Se hace con `@starting-style`
  * (variante `starting:` de Tailwind) y una TRANSICIÓN, no con `@keyframes`:
  * si llegan varios avisos seguidos, una transición se puede interrumpir sin
- * saltos. Con `prefers-reduced-motion` la regla global la deja a ~0 ms.
+ * saltos. Con `prefers-reduced-motion` se conserva el fundido (no marea) y se quita
+ * el desplazamiento (`motion-reduce:starting:translate-y-0`).
  */
 export function Toast({ toast, onDismiss }: ToastProps) {
   const [paused, setPaused] = useState(false);
@@ -49,7 +50,7 @@ export function Toast({ toast, onDismiss }: ToastProps) {
 
   return (
     <div
-      className="pointer-events-auto flex items-start gap-3 rounded-xl border border-line bg-surface-raised p-4 shadow-2xl transition-[opacity,translate] duration-250 ease-out-strong starting:translate-y-2 starting:opacity-0"
+      className="pointer-events-auto flex items-start gap-3 rounded-xl border border-line bg-surface-raised p-4 shadow-2xl transition-[opacity,translate] duration-250 ease-out-strong starting:translate-y-2 starting:opacity-0 motion-reduce:starting:translate-y-0"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}

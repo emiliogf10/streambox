@@ -182,6 +182,14 @@ for (const viewport of VIEWPORTS) {
       expect(titleBox!.x - (posterBox!.x + posterBox!.width), 'el título no pisa el póster').toBeGreaterThanOrEqual(0);
       await expectNoHorizontalScroll(page);
 
+      // «Estreno reciente» comparte fila con el primer dato (el año): antes, a 375 px, la lista de datos
+      // entera no cabía a su lado, pasaba a la línea de abajo y la etiqueta se quedaba sola.
+      const facts = banner.getByRole('list', { name: 'Datos de la película' }).getByRole('listitem');
+      const badgeBox = await facts.first().boundingBox();
+      const yearBox = await facts.nth(1).boundingBox();
+      expect(await facts.first().textContent()).toBe('Estreno reciente');
+      expect(Math.abs(badgeBox!.y + badgeBox!.height / 2 - (yearBox!.y + yearBox!.height / 2)), '«Estreno reciente» y el año en la misma fila').toBeLessThanOrEqual(6);
+
       // Con la página completa (segunda página incluida) tampoco hay desborde.
       await page.getByRole('button', { name: 'Cargar más películas' }).scrollIntoViewIfNeeded();
       await page.getByRole('button', { name: 'Cargar más películas' }).click();

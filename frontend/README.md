@@ -39,7 +39,7 @@ su propio Vite (puerto 5199), así que no toca tu base de datos ni los puertos
 ```
 frontend/
 ├── src/
-│   ├── pages/        Pantallas (Home, Login, Register, MyList)
+│   ├── pages/        Pantallas (Home, Películas, Series, MyList, Profile, Login, Register y admin/)
 │   ├── components/   Componentes reutilizables (Navbar, Modal, MoviePoster, estados cargando/vacío/error...)
 │   ├── context/      Estado global: sesión (AuthContext), avisos (ToastContext) y favoritos (FavoritesContext)
 │   ├── hooks/        Hooks propios (useCatalog, useModalDialog, useCountdown...)

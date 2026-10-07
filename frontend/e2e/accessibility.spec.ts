@@ -95,6 +95,9 @@ test.describe('Teclado', () => {
     const logout = page.getByRole('button', { name: 'Cerrar sesión' });
     await expect(logout).toBeVisible();
 
+    // El menú tiene dos acciones, en este orden: «Mi perfil» (enlace) y «Cerrar sesión» (botón).
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('link', { name: 'Mi perfil' })).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(logout).toBeFocused();
     await page.keyboard.press('Escape');

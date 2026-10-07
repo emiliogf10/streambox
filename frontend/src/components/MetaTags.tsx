@@ -7,6 +7,12 @@ interface Props {
   genres: Genre[];
   /** Nombre de la lista para lectores de pantalla: "Datos de la película", "Datos de la serie". */
   label: string;
+  /**
+   * Etiqueta de acento opcional ("Estreno reciente", "Novedad") que abre la lista: por qué
+   * se destaca este título. Es un dato más de la lista y no un elemento aparte; ver la nota
+   * «Una sola lista» de {@link MetaTags}.
+   */
+  badge?: string;
 }
 
 /**
@@ -23,10 +29,20 @@ interface Props {
  * "cuándo/cuánto dura" de "de qué va". Ahora los hechos son texto plano con
  * cifras tabulares (`tabular-nums`: los dígitos ocupan lo mismo y no "bailan"
  * de un título a otro) y solo los géneros, que son categorías, llevan fondo de etiqueta.
+ *
+ * **Una sola lista («Una sola lista»).** La etiqueta de acento del banner es el
+ * primer `<li>` y no un `<span>` hermano de la lista. Con el `<ul>` como bloque
+ * aparte, en 375 px el navegador no cabía la lista entera (año + duración + todos
+ * los géneros) junto a la etiqueta y la mandaba a la línea de debajo: la etiqueta
+ * se quedaba sola en una fila. Como elementos de la MISMA lista con salto de línea,
+ * cada dato se coloca donde cabe y la etiqueta comparte fila con el año.
  */
-export function MetaTags({ facts, genres, label }: Props) {
+export function MetaTags({ facts, genres, label, badge }: Props) {
   return (
     <ul role="list" aria-label={label} className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      {badge && (
+        <li className="rounded-md bg-accent px-2 py-0.5 text-xs font-bold text-black">{badge}</li>
+      )}
       {facts.map((fact, index) => (
         <li key={`dato-${index}-${fact}`} className="text-sm font-semibold text-white/90 tabular-nums">
           {fact}

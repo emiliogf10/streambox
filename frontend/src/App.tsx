@@ -15,6 +15,7 @@ import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { MoviesPage } from './pages/MoviesPage';
 import { MyListPage } from './pages/MyListPage';
+import { ProfilePage } from './pages/ProfilePage';
 import { RegisterPage } from './pages/RegisterPage';
 import { SeriesDetailPage } from './pages/SeriesDetailPage';
 import { SeriesPage } from './pages/SeriesPage';
@@ -24,7 +25,9 @@ import { SeriesPage } from './pages/SeriesPage';
  *
  * - `/login` y `/registro`: públicas; si ya hay sesión redirigen a `/`.
  * - `/`, `/peliculas` (con `?genero=&anio=&orden=`), `/series`, `/series/:id`
- *   (con `?temporada=N`) y `/favorites`: privadas, dentro de `AppShell` (barra + contenido).
+ *   (con `?temporada=N`), `/favorites` y `/perfil` (datos de la cuenta y resumen de
+ *   la lista): privadas, dentro de `AppShell` (barra + contenido). A `/perfil` se
+ *   llega desde «Mi perfil» en el menú de usuario de la barra.
  * - `/admin/*`: panel de administración, también dentro de `AppShell` y además
  *   tras `RequireAdmin` (espera a conocer el rol; si no es `ADMIN`, a `/`).
  *   `/admin` lleva a `/admin/peliculas`; el resto de rutas del panel son el
@@ -68,6 +71,7 @@ export function AppRoutes() {
         <Route path="/series" element={<SeriesPage />} />
         <Route path="/series/:id" element={<SeriesDetailPage />} />
         <Route path="/favorites" element={<MyListPage />} />
+        <Route path="/perfil" element={<ProfilePage />} />
         {/* Alias /my-list → /favorites por compatibilidad con enunciado */}
         <Route path="/my-list" element={<Navigate to="/favorites" replace />} />
         <Route

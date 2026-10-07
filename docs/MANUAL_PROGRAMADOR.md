@@ -1491,7 +1491,7 @@ Qué hace, paso a paso:
 
 `HomePage` reparte las películas así:
 
-- **Banner (hero)** (`components/HeroBanner.tsx`): la primera, es decir, la más reciente. Lleva póster, título, metadatos, una sinopsis recortada a 3 líneas y tres botones con jerarquía: «Ver ahora» (principal, variante `light`), «Mi lista» (secundaria, `outline`) y «Más información» (terciaria, `ghost`, sin borde), que abre el modal con la sinopsis completa. En los metadatos, «Estreno reciente» es una etiqueta de acento, el año y la duración van en texto plano con cifras tabulares, y solo los géneros llevan etiqueta (`MovieMetaTags`): si todo es etiqueta, nada destaca. Va a sangre (todo el ancho) bajo la barra superior. Ver en 21.3 por qué el póster se muestra dos veces y por qué va junto al título.
+- **Banner (hero)** (`components/HeroBanner.tsx`): la primera, es decir, la más reciente. Lleva póster, título, metadatos, una sinopsis recortada a 3 líneas y tres botones con jerarquía: «Ver ahora» (principal, variante `light`), «Mi lista» (secundaria, `outline`) y «Más información» (terciaria, `ghost`, sin borde), que abre el modal con la sinopsis completa. En los metadatos, «Estreno reciente» es una etiqueta de acento (el primer `<li>` de la misma lista de datos: como `<span>` aparte, en 375 px la lista entera no cabía a su lado y la etiqueta quedaba sola en una línea), el año y la duración van en texto plano con cifras tabulares, y solo los géneros llevan etiqueta (`MovieMetaTags`): si todo es etiqueta, nada destaca. Va a sangre (todo el ancho) bajo la barra superior. Ver en 21.3 por qué el póster se muestra dos veces y por qué va junto al título.
 - **Mientras carga**, la portada muestra `CatalogSkeleton`: siluetas con la forma real del banner y de una fila (`role="status"` con texto para lectores de pantalla; las siluetas están ocultas a la accesibilidad). Con un spinner, toda la pantalla cambiaba de golpe al llegar los datos; con el esqueleto, el contenido aparece donde ya se esperaba.
 - **Filas** (`lib/catalog.ts` → `buildCatalogRows`, con el resto de películas): «Novedades» con las 12 primeras, y **una fila por género** que tenga al menos 3 películas (una fila con 1 o 2 queda casi vacía). Las filas de género se ordenan de más a menos películas.
 
@@ -1554,7 +1554,7 @@ Usan el elemento nativo `<dialog>` con `showModal()`, que ya da: capa por encima
 
 Un detalle: un `<dialog>` modal vuelve inerte todo lo de fuera, incluidos los avisos. Por eso, mientras hay un modal abierto, `ToastContext` mueve los avisos **dentro** del diálogo (con un *portal*, `registerHost`). **Solo los avisos nacidos con el modal abierto**: los anteriores se quedan en la página, detrás del fondo. Antes se trasladaban todos, y el aviso de la acción anterior («Episodio añadido») se colaba en el siguiente diálogo y le tapaba los botones durante 5 s. Era un fallo real que destapó el E2E de episodios; lo cubre un test de `ConfirmDialog.test.tsx`.
 
-**Entrada con movimiento.** El `<dialog>` aparece con un fundido y una escala de 96 % a 100 % en 200 ms. Los avisos suben 8 px en 250 ms. Las dos animaciones son **transiciones** y no `@keyframes`: una transición se puede interrumpir a mitad (si cierras el modal mientras entra, vuelve desde donde está, sin saltos). El estado inicial se define con `@starting-style` (en `index.css` para el diálogo y con la variante `starting:` de Tailwind en `Toast.tsx`). La curva es `ease-out-strong` (`cubic-bezier(0.23, 1, 0.32, 1)`, token en `@theme`): arranca rápido y frena suave, de modo que la respuesta se percibe inmediata. Con `prefers-reduced-motion` la regla global deja todo en ~0 ms.
+**Entrada con movimiento.** El `<dialog>` aparece con un fundido y una escala de 96 % a 100 % en 200 ms. Los avisos suben 8 px en 250 ms. Las dos animaciones son **transiciones** y no `@keyframes`: una transición se puede interrumpir a mitad (si cierras el modal mientras entra, vuelve desde donde está, sin saltos). El estado inicial se define con `@starting-style` (en `index.css` para el diálogo y con la variante `starting:` de Tailwind en `Toast.tsx`). La curva es `ease-out-strong` (`cubic-bezier(0.23, 1, 0.32, 1)`, token en `@theme`): arranca rápido y frena suave, de modo que la respuesta se percibe inmediata. Con `prefers-reduced-motion` se **conservan los fundidos de opacidad** (no marean y avisan de que algo apareció) y se quita el movimiento: el diálogo no crece (`@starting-style` con `scale: 1` dentro del `@media` de `index.css`), el aviso no sube (`motion-reduce:starting:translate-y-0`), y los hundidos al pulsar, el zoom de `PosterCard` y los giros/pulsos se anulan con la variante `motion-reduce:`. La regla global solo deja a ~0 ms las animaciones sueltas (`@keyframes`) y el scroll suave. `src/index.css.test.ts` comprueba que esa regla no vuelva a anular las transiciones.
 
 ### 20.7 Panel de administración (`pages/admin/`)
 
@@ -1636,6 +1636,27 @@ Mientras se carga el usuario, se trata como usuario normal (falla cerrado). En l
 
 **Enlaces:** el estado vacío de la sección «Películas» de «Mi lista» lleva a `/peliculas`. El vacío general de «Mi lista» lleva a la portada, que mezcla películas y series.
 
+### 20.10 Perfil (`pages/ProfilePage.tsx` + `lib/profile.ts`)
+
+`/perfil` responde a «¿quién soy y qué he guardado?». Se llega desde **«Mi perfil»** en el menú de usuario de la barra (no está en la fila de navegación principal, que ya va justa de ancho). Es una ruta privada dentro de `AppShell`, como «Mi lista».
+
+**De dónde sale cada dato.** La página no hace ninguna petición propia: el usuario (nombre, correo, rol y fecha de alta) viene de `useAuth()` (`GET /api/users/me`) y las películas y series de `useFavorites()`, que `AppShell` ya cargó. Por eso no hay «títulos vistos», «horas», suscripción ni idioma: el modelo de datos no tiene historial de reproducción ni planes, y **no se inventan datos** para que la pantalla se parezca a un diseño.
+
+**Qué enseña:**
+
+- *Cabecera:* avatar con la inicial, el rol (en mayúsculas con CSS `uppercase`, para que el lector de pantalla lea «Administrador» y no deletree), el nombre (el `<h1>`), «Miembro desde octubre de 2026» (formateado en UTC: la API da un instante UTC y, sin fijar la zona, un alta a las 00:30 del día 1 podría salir en el mes anterior), «Panel de administración» (solo `isAdmin`) y «Cerrar sesión». No hay «Editar perfil»: exigiría endpoints nuevos y un botón que no hace nada es peor que no tenerlo (queda en el plan como pendiente).
+- *Estadísticas:* películas en la lista, series en la lista y géneros distintos. Son una lista de descripción (`dl`): pares etiqueta → valor. Solo se pintan con la lista ya cargada; con la lista cargando, un «0» sería falso.
+- *Cuenta:* nombre, correo y contraseña. Los puntos son fijos (no se conoce la contraseña) y los lectores leen «Oculta».
+- *Tus géneros:* los 6 más frecuentes de la lista con su recuento. `countGenres` cuenta **por id de género** (no por nombre) y cada título cuenta una vez por género; orden: recuento descendente, nombre e id.
+- *De tu lista:* hasta 5 títulos, primero películas (`FavoritesContext` las da de más reciente a más antigua) y después series, con el enlace «Ver toda mi lista». Reutiliza `MovieCard` y `SeriesCard`.
+
+**Dos fuentes, cada una con sus tres estados.** El usuario (cargando, error con «Reintentar» → `refreshUser`) y la lista (cargando, error con «Reintentar» → `reload`). Si la lista falla, la cuenta sigue visible y el error aparece solo dentro de la tarjeta «Tus géneros» (`ErrorState` con la prop `compact`, que no reserva media pantalla).
+
+**Estados vacíos (ver 20.9).** Con la lista vacía hay un único estado vacío, en «Tus géneros», y «De tu lista» no se pinta para no repetirlo. «Explorar películas» usa `ExploreLink` (extraído de «Mi lista» para compartirlo): solo aparece si `useCatalogPresence` confirma que hay películas visibles. Los textos son verdad para `USER` y `ADMIN`.
+
+**Accesibilidad.** Un solo `<h1>` (mientras carga o si falla, «Mi perfil»; con el usuario cargado, su nombre), secciones con `<h2>`, `<dl>` para los pares etiqueta-valor y el avatar `aria-hidden`. En el menú de usuario, «Mi perfil» es un `NavLink` (marca `aria-current` cuando ya estás en `/perfil`) y va **antes** de «Cerrar sesión»: con el teclado, el primer Tab desde el botón del menú llega a «Mi perfil» y el segundo a «Cerrar sesión» (lo comprueba el E2E de accesibilidad).
+
+**Tests:** `lib/profile.test.ts` (lógica pura), `pages/ProfilePage.test.tsx` (usuario y administrador, estados, lista vacía y llena), casos nuevos en `Navbar.test.tsx` y `App.test.tsx` (la ruta exige sesión) y `e2e/profile.spec.ts` (flujo completo y 320/375 px sin scroll horizontal).
 ---
 
 ## 21. Frontend: accesibilidad, estilos e imágenes
@@ -1648,10 +1669,10 @@ Mientras se carga el usuario, se trata como usuario normal (falla cerrado). En l
 - Foco siempre visible (utilidad `focus-ring`); botones de solo icono con `aria-label`.
 - Buscador con el patrón *combobox* (`role="combobox"`, `listbox`, `aria-activedescendant`) y una región `aria-live` que anuncia el número de resultados.
 - Avisos en regiones `aria-live` que **existen desde el principio** (los lectores de pantalla solo anuncian cambios en regiones que ya estaban).
-- `prefers-reduced-motion`: si el sistema pide menos movimiento, se desactivan animaciones.
+- `prefers-reduced-motion`: si el sistema pide menos movimiento, se quita lo que mueve (desplazamientos, escalas, giros, pulsos) pero se conservan los fundidos de opacidad (ver «Entrada con movimiento» en este capítulo).
 - Contrastes calculados para cumplir WCAG AA (4,5:1); las cifras están comentadas en `index.css`.
 - **El foco nunca queda tapado por la barra fija** (WCAG 2.2 · 2.4.11): variable `--navbar-height` y `scroll-margin-top` en el contenido (detalle en 20.7).
-- **El contorno de los controles también cuenta** (WCAG 1.4.11 pide 3:1 en los elementos de interfaz). El borde de los campos era `white/15` (1,47:1) y pasó al token `field-border` (`#687286`: 3,90:1 sobre `canvas` y 3,55:1 sobre `surface`). Pendiente conocido: el contorno del buscador no llega a 3:1 (lo identifican el icono y el texto de ejemplo).
+- **El contorno de los controles también cuenta** (WCAG 1.4.11 pide 3:1 en los elementos de interfaz). El borde de los campos era `white/15` (1,47:1) y pasó al token `field-border` (`#687286`: 3,90:1 sobre `canvas` y 3,55:1 sobre `surface`). El contorno del buscador de la barra (`SearchBar`) también usa `field-border` (3,91:1 sobre `canvas` por fuera y 3,33:1 sobre `surface-raised` por dentro). Queda pendiente de decisión del autor el borde `white/30` de los botones `outline` y de las temporadas inactivas de `SeasonPicker` (≈2,7:1; llevan texto, así que el borde no es lo único que los identifica).
 - La barra ya no tiene secciones reservadas: «Películas» (`/peliculas`) y «Series» (`/series`) son `NavLink` sin `end`, así que siguen marcadas en sus subrutas y con filtros en la URL. La constante `PLANNED_SECTIONS` (texto atenuado, no enfocable y con «(próximamente)») se retiró al crear la página de películas.
 
 ### 21.2 Estilos (Tailwind CSS v4)
@@ -1698,8 +1719,8 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 | :--- | :--- | :--- | :--- |
 | Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1153 | `.\mvnw.cmd test` (desde `streambox/`) |
 | Backend (PostgreSQL real) | Testcontainers | 119 | Se ejecutan con el anterior (1272 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos es menor (95) |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 729 | `npm run test` (desde `frontend/`) |
-| Frontend (flujos completos) | Playwright (Chromium) | 135 (+24 de capturas, que se omiten) | `npm run test:e2e` |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 779 | `npm run test` (desde `frontend/`) |
+| Frontend (flujos completos) | Playwright (Chromium) | 143 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend
 

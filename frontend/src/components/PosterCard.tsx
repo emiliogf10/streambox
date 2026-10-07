@@ -68,7 +68,7 @@ export function PosterCard({ title, imageUrl, meta, className = 'w-36 shrink-0 s
           title={title}
           src={imageUrl}
           className="aspect-2/3 w-full"
-          imgClassName="transition-[scale] duration-500 ease-out-strong group-hover:scale-105"
+          imgClassName="transition-[scale] duration-500 ease-out-strong group-hover:scale-105 motion-reduce:group-hover:scale-100"
         />
         <div
           aria-hidden="true"

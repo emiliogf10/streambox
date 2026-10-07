@@ -36,8 +36,7 @@ export function HeroBanner({ movie, onDetails }: Props) {
     <FeaturedBanner
       title={movie.title}
       imageUrl={movie.imageUrl}
-      badge="Estreno reciente"
-      meta={<MovieMetaTags movie={movie} />}
+      meta={<MovieMetaTags movie={movie} badge="Estreno reciente" />}
       description={movie.description}
       actions={
         <>

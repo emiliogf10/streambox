@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import type { ReactNode } from 'react';
+import { BANNER_GRID_CLASS } from './bannerGridStyles';
 import { MoviePoster } from './MoviePoster';
 
 /** Propiedades de {@link FeaturedBanner}. */
@@ -13,9 +14,7 @@ interface Props {
    * la cabecera de la página (detalle de una serie).
    */
   headingLevel?: 1 | 2;
-  /** Etiqueta de acento junto a los datos ("Estreno reciente", "Novedad"); opcional. */
-  badge?: string;
-  /** Datos del título (`MovieMetaTags`, `SeriesMetaTags`). */
+  /** Datos del título (`MovieMetaTags`, `SeriesMetaTags`); la etiqueta de acento ("Estreno reciente") va dentro, con su `badge`. */
   meta: ReactNode;
   description: string;
   /**
@@ -73,7 +72,6 @@ export function FeaturedBanner({
   title,
   imageUrl,
   headingLevel = 2,
-  badge,
   meta,
   description,
   clampDescription = true,
@@ -105,7 +103,7 @@ export function FeaturedBanner({
         <div className="absolute inset-0 bg-linear-to-t from-canvas via-canvas/40 via-30% to-transparent" />
       </div>
 
-      <div className="grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-x-4 gap-y-5 px-4 pt-6 pb-8 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-x-6 sm:px-6 md:flex md:gap-10 md:pt-10 md:pb-12 lg:gap-12">
+      <div className={BANNER_GRID_CLASS}>
         <MoviePoster
           title={title}
           src={imageUrl}
@@ -122,11 +120,8 @@ export function FeaturedBanner({
             {title}
           </Heading>
 
-          {/* La etiqueta es un dato (por qué está destacado), así que va con los demás datos y no como antetítulo. */}
-          <div className="col-span-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-            {badge && <span className="rounded-md bg-accent px-2 py-0.5 text-xs font-bold text-black">{badge}</span>}
-            {meta}
-          </div>
+          {/* La etiqueta de acento es un dato más de la lista `meta` (ver MetaTags): así comparte fila con el año en 375 px. */}
+          <div className="col-span-2">{meta}</div>
 
           {description && (
             <p

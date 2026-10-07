@@ -7,13 +7,13 @@ import { buttonClasses } from '../components/buttonStyles';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
+import { ExploreLink } from '../components/ExploreLink';
 import { LoadingState } from '../components/LoadingState';
 import { MovieCard } from '../components/MovieCard';
 import { POSTER_GRID_CLASS } from '../components/posterGridStyles';
 import { MovieDetailsModal } from '../components/MovieDetailsModal';
 import { SeriesCard } from '../components/SeriesCard';
 import { useFavorites } from '../context/FavoritesContext';
-import { useCatalogPresence } from '../hooks/useCatalogPresence';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import type { Movie } from '../lib/types';
 
@@ -95,43 +95,6 @@ function describeClear(movieCount: number, seriesCount: number): string {
   if (parts.length === 0) return 'Se quitará todo el contenido de Mi lista. Esta acción no se puede deshacer.';
   const verb = movieCount + seriesCount === 1 ? 'Se quitará' : 'Se quitarán';
   return `${verb} ${parts.join(' y ')} de Mi lista. Esta acción no se puede deshacer.`;
-}
-
-/** Clases de los enlaces "Explorar..." de una sección vacía (texto de acento, objetivo de 44 px). */
-const exploreLinkClass =
-  'focus-ring inline-flex min-h-11 items-center rounded-md text-sm font-semibold text-accent hover:underline';
-
-/** Propiedades de {@link ExploreLink}. */
-interface ExploreLinkProps {
-  /** Sección del catálogo a la que lleva (`/peliculas` muestra `/movies`; `/series`, `/series`). */
-  catalog: '/movies' | '/series';
-  to: string;
-  children: ReactNode;
-}
-
-/**
- * Enlace «Explorar películas/series» de una sección vacía de "Mi lista", que
- * solo aparece si al otro lado hay algo que explorar.
- *
- * Sin esta comprobación, «Explorar series» con ninguna serie visible (todas sin
- * episodios, por ejemplo) llevaba a otra página vacía: un callejón sin salida.
- * Así que pregunta antes ({@link useCatalogPresence}, una petición mínima que
- * solo se hace si la sección está vacía):
- * - Mientras pregunta no pinta nada, para no enseñar un enlace que quizá se
- *   retire al momento (el hueco ya tiene la altura del enlace: no salta nada).
- * - Si no se pudo saber (error), lo enseña: es mejor ofrecer el camino y que la
- *   página de destino explique su propio error que esconderlo por un fallo pasajero.
- * - Si no hay nada, no lo enseña: la frase «Todavía no has guardado...» sigue
- *   siendo verdad y no promete nada.
- */
-function ExploreLink({ catalog, to, children }: ExploreLinkProps) {
-  const presence = useCatalogPresence(catalog);
-  if (presence === 'checking' || presence === 'none') return null;
-  return (
-    <Link to={to} className={exploreLinkClass}>
-      {children}
-    </Link>
-  );
 }
 
 /**

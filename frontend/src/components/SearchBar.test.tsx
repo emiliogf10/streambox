@@ -112,6 +112,14 @@ describe('SearchBar: petición', () => {
     expect(screen.getByRole('search')).toBeInTheDocument();
   });
 
+  it('el contorno del campo usa `field-border` (≥3:1, WCAG 1.4.11) y no el borde casi invisible de `line`', () => {
+    const { input } = setup();
+
+    const box = input.parentElement as HTMLElement;
+    expect(box).toHaveClass('border-field-border');
+    expect(box).not.toHaveClass('border-line');
+  });
+
   it('espera 300 ms tras la última tecla y entonces hace UNA petición por tipo (películas y series) con el texto completo', async () => {
     const { user } = setup();
 
