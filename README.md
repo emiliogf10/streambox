@@ -314,6 +314,7 @@ Estructura de `frontend/src/`: `pages/` (Home, Películas, Series, Mi lista, Per
 Accede a la interfaz interactiva para explorar y probar los endpoints:
 - **Swagger UI**: [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
 - **OpenAPI JSON**: [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs)
+- **Especificación versionada y colección de Postman**: [`docs/api/`](docs/api/README.md) (`openapi.yaml`, colección con tests y entorno local listos para importar).
 
 ---
 

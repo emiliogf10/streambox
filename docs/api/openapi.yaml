@@ -1,0 +1,2059 @@
+# Especificación OpenAPI 3.1 de la API de StreamBox.
+# Generada con springdoc (GET /v3/api-docs) desde el backend de la rama main y convertida a YAML;
+# solo se ha cambiado `servers`. Para regenerarla: ver docs/api/README.md.
+# Autenticación: JWT Bearer (estado actual; la tarea 29 lo cambiará a cookie HttpOnly).
+openapi: 3.1.0
+info:
+  title: Streambox API
+  description: API REST para la gestión de películas, géneros y usuarios de Streambox.
+  version: '1.0'
+servers:
+- url: http://localhost:8080
+  description: Backend local (perfil dev)
+paths:
+  /api/series/{seriesId}/episodes/{episodeId}:
+    put:
+      tags:
+      - episode-controller
+      summary: Modifica un episodio
+      description: Actualiza los datos de un episodio de la serie, incluida su temporada y número. Requiere rol ADMIN.
+      operationId: updateEpisode
+      parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: episodeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EpisodeRequest'
+        required: true
+      responses:
+        '200':
+          description: Episodio modificado correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/EpisodeResponse'
+        '400':
+          description: Los datos proporcionados no son válidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: La serie no existe, o el episodio no existe o es de otra serie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Otro episodio ya ocupa esa temporada y número (código EPISODE_ALREADY_EXISTS)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - episode-controller
+      summary: Elimina un episodio
+      description: Elimina un episodio de la serie. Si era el último, la serie vuelve a quedar oculta para los usuarios. Requiere
+        rol ADMIN.
+      operationId: deleteEpisode
+      parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: episodeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: Episodio eliminado correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: La serie no existe, o el episodio no existe o es de otra serie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/series/{id}:
+    get:
+      tags:
+      - series-controller
+      summary: Obtiene una serie por ID
+      description: Devuelve la serie con sus géneros y sus temporadas (cada una con sus episodios, ordenados por número).
+        Una serie sin episodios responde 404, igual que una inexistente.
+      operationId: getSeriesById
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Serie encontrada
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/SeriesDetailResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: La serie no existe o no tiene episodios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - series-controller
+      summary: Modifica una serie
+      description: Actualiza los datos de una serie y sus géneros. Los episodios no se tocan. Requiere rol ADMIN.
+      operationId: updateSeries
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SeriesRequest'
+        required: true
+      responses:
+        '200':
+          description: Serie modificada correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/SeriesDetailResponse'
+        '400':
+          description: Los datos proporcionados no son válidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Serie o género no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - series-controller
+      summary: Elimina una serie
+      description: Elimina la serie, todos sus episodios y la retira de las listas de todos los usuarios. Requiere rol ADMIN.
+      operationId: deleteSeries
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: Serie eliminada correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Serie no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/movies/{id}:
+    get:
+      tags:
+      - movie-controller
+      summary: Obtiene una película por ID
+      description: Devuelve la información completa de una película incluyendo los géneros asociados.
+      operationId: getMovieById
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Película encontrada
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/MovieResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Película no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - movie-controller
+      summary: Modifica una película
+      description: Actualiza los datos de una película existente y sus géneros asociados. Requiere rol ADMIN.
+      operationId: updateMovie
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MovieRequest'
+        required: true
+      responses:
+        '200':
+          description: Película modificada correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/MovieResponse'
+        '400':
+          description: Los datos proporcionados no son válidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Película o género no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - movie-controller
+      summary: Elimina una película
+      description: Elimina de Streambox la película correspondiente al ID indicado. La película se retira automáticamente
+        de todos los favoritos. Requiere rol ADMIN.
+      operationId: deleteMovie
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: Película eliminada correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Película no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/genres/{id}:
+    put:
+      tags:
+      - genre-controller
+      summary: Renombra un género
+      description: Cambia el nombre de un género existente. El nombre se normaliza igual que en el alta (sin espacios exteriores,
+        primera letra en mayúscula y el resto en minúscula). Renombrarlo a su mismo nombre no es un error. Requiere rol ADMIN.
+      operationId: updateGenre
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenreRequest'
+        required: true
+      responses:
+        '200':
+          description: Género modificado correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/GenreResponse'
+        '400':
+          description: Los datos proporcionados no son válidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Género no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Otro género ya tiene ese nombre (código GENRE_ALREADY_EXISTS)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - genre-controller
+      summary: Elimina un género
+      description: Elimina el género indicado. Solo se puede borrar si ninguna película ni serie lo tiene asignado; si no,
+        hay que quitarlo antes de esas películas y series. Requiere rol ADMIN.
+      operationId: deleteGenre
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: Género eliminado correctamente
+        '400':
+          description: El identificador no tiene un formato válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Género no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Alguna película o serie tiene asignado el género; el mensaje indica cuántas de cada (código GENRE_IN_USE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/users:
+    get:
+      tags:
+      - user-controller
+      summary: Obtiene todos los usuarios
+      description: Devuelve la lista de usuarios registrados. Este endpoint requiere permisos de administrador.
+      operationId: getUsers
+      responses:
+        '200':
+          description: Usuarios obtenidos correctamente
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    post:
+      tags:
+      - user-controller
+      summary: Registra un nuevo usuario
+      description: Crea una nueva cuenta de usuario en Streambox. No requiere autenticación.
+      operationId: createUser
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+        required: true
+      responses:
+        '201':
+          description: Usuario creado correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: 'Los datos proporcionados no son válidos (código VALIDATION_ERROR, un mensaje por campo en validationErrors).
+            La contraseña debe tener entre 12 y 64 caracteres, ocupar como máximo 72 bytes en UTF-8, no ser común ni trivial
+            y no contener el nombre de usuario ni la parte local del email. Si incumple varias reglas solo se informa de una,
+            por este orden: longitud, bytes, común, datos personales'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: El nombre de usuario o el correo ya están en uso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Demasiados registros desde esta IP; ver cabecera Retry-After
+          headers:
+            Retry-After:
+              description: Segundos que hay que esperar antes de volver a intentarlo (entero, mínimo 1).
+              required: true
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/users/me/favorites/{movieId}:
+    post:
+      tags:
+      - favorite-controller
+      summary: Añade una película a mi lista
+      description: Añade una película a los favoritos del usuario autenticado.
+      operationId: addFavorite
+      parameters:
+      - name: movieId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: Película añadida correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Película no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: La película ya está incluida en mi lista
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - favorite-controller
+      summary: Elimina una película de mi lista
+      description: Elimina una película de los favoritos del usuario autenticado.
+      operationId: removeFavorite
+      parameters:
+      - name: movieId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: Película eliminada correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: La película no existe o no está en mi lista
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/users/me/favorites/series/{seriesId}:
+    post:
+      tags:
+      - series-favorite-controller
+      summary: Añade una serie a mi lista
+      description: Añade una serie con episodios a los favoritos del usuario autenticado.
+      operationId: addFavorite_1
+      parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: Serie añadida correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: La serie no existe o no tiene episodios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: La serie ya está en mi lista (código SERIES_ALREADY_IN_FAVORITES)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - series-favorite-controller
+      summary: Quita una serie de mi lista
+      description: Elimina una serie de los favoritos del usuario autenticado. Una serie que estaba en la lista se puede quitar
+        aunque se haya quedado sin episodios.
+      operationId: removeFavorite_1
+      parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: Serie quitada correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 'La serie no estaba en mi lista: SERIES_NOT_IN_FAVORITES si es una serie con episodios; RESOURCE_NOT_FOUND
+            ("Serie no encontrada") si no existe o no tiene episodios, sin distinguir entre ambos casos'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/users/me/favorites/by-title:
+    post:
+      tags:
+      - favorite-controller
+      summary: Añade una película a mi lista por título
+      description: Añade a favoritos una película cuyo título coincide exactamente con el parámetro title, sin distinguir
+        mayúsculas.
+      operationId: addFavoriteByTitle
+      parameters:
+      - name: title
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Película añadida correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No existe una película con el título indicado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: La película ya está en mi lista, o el título es ambiguo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - favorite-controller
+      summary: Elimina una película de mi lista por título
+      description: Elimina de favoritos una película cuyo título coincide exactamente con el parámetro title, sin distinguir
+        mayúsculas.
+      operationId: removeFavoriteByTitle
+      parameters:
+      - name: title
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Película eliminada correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: La película no existe o no está en mi lista
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: El título es ambiguo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/series:
+    get:
+      tags:
+      - series-controller
+      summary: Obtiene las series
+      description: Devuelve de forma paginada las series que tienen al menos un episodio, con sus recuentos de temporadas
+        y episodios. Las series sin episodios no aparecen.
+      operationId: getSeries
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+          minimum: 0
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+          maximum: 100
+          minimum: 1
+      - name: sort
+        in: query
+        description: 'Campo de ordenación: id, title, releaseYear o createdAt'
+        required: false
+        schema:
+          type: string
+          default: title
+      - name: direction
+        in: query
+        description: 'Dirección de ordenación: asc (ascendente, por defecto) o desc (descendente), sin distinguir mayúsculas.
+          El desempate por id sigue la misma dirección. Por ejemplo, sort=createdAt&direction=desc devuelve primero las series
+          más recientes'
+        required: false
+        schema:
+          type: string
+          default: asc
+      responses:
+        '200':
+          description: Series obtenidas correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/SeriesPageResponse'
+        '400':
+          description: Parámetros de paginación u ordenación inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    post:
+      tags:
+      - series-controller
+      summary: Crea una serie
+      description: Crea una serie asociada a los géneros indicados. Nace sin episodios, así que los usuarios no la verán hasta
+        que se le añada el primero. Requiere rol ADMIN.
+      operationId: createSeries
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SeriesRequest'
+        required: true
+      responses:
+        '201':
+          description: Serie creada correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/SeriesDetailResponse'
+        '400':
+          description: Los datos proporcionados no son válidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Uno o más géneros no existen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/series/{seriesId}/episodes:
+    post:
+      tags:
+      - episode-controller
+      summary: Añade un episodio a una serie
+      description: Crea un episodio en la temporada y con el número indicados. Con el primer episodio la serie pasa a ser
+        visible para los usuarios. Requiere rol ADMIN.
+      operationId: createEpisode
+      parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EpisodeRequest'
+        required: true
+      responses:
+        '201':
+          description: Episodio creado correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/EpisodeResponse'
+        '400':
+          description: Los datos proporcionados no son válidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Serie no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Ya existe un episodio con esa temporada y número (código EPISODE_ALREADY_EXISTS)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/movies:
+    get:
+      tags:
+      - movie-controller
+      summary: Obtiene todas las películas
+      description: Devuelve de forma paginada todas las películas almacenadas en Streambox.
+      operationId: getMovies
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+          minimum: 0
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+          maximum: 100
+          minimum: 1
+      - name: sort
+        in: query
+        description: 'Campo de ordenación: id, title, releaseYear, duration o createdAt'
+        required: false
+        schema:
+          type: string
+          default: title
+      - name: direction
+        in: query
+        description: 'Dirección de ordenación: asc (ascendente, por defecto) o desc (descendente), sin distinguir mayúsculas.
+          El desempate por id sigue la misma dirección. Por ejemplo, sort=createdAt&direction=desc devuelve primero las películas
+          más recientes'
+        required: false
+        schema:
+          type: string
+          default: asc
+      responses:
+        '200':
+          description: Películas obtenidas correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/MoviePageResponse'
+        '400':
+          description: Parámetros de paginación u ordenación inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    post:
+      tags:
+      - movie-controller
+      summary: Crea una película
+      description: Crea una nueva película en Streambox, asociándola a los géneros indicados. Este endpoint requiere permisos
+        de administrador.
+      operationId: createMovie
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MovieRequest'
+        required: true
+      responses:
+        '201':
+          description: Película creada correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/MovieResponse'
+        '400':
+          description: Los datos proporcionados no son válidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Uno o más géneros no existen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/genres:
+    get:
+      tags:
+      - genre-controller
+      summary: Obtiene todos los géneros
+      description: Devuelve la lista completa de géneros cinematográficos disponibles en Streambox.
+      operationId: getGenres
+      responses:
+        '200':
+          description: Géneros obtenidos correctamente
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GenreResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    post:
+      tags:
+      - genre-controller
+      summary: Crea un género
+      description: Crea un nuevo género cinematográfico. Este endpoint requiere permisos de administrador.
+      operationId: createGenre
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenreRequest'
+        required: true
+      responses:
+        '201':
+          description: Género creado correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/GenreResponse'
+        '400':
+          description: Los datos proporcionados no son válidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Ya existe un género con ese nombre (código GENRE_ALREADY_EXISTS)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/auth/login:
+    post:
+      tags:
+      - auth-controller
+      summary: Inicia sesión
+      description: Autentica un usuario mediante su correo electrónico y contraseña y devuelve un token JWT.
+      operationId: login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Autenticación realizada correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: 'Los datos proporcionados no son válidos (email con formato incorrecto, contraseña vacía o de más de
+            1024 caracteres). No gasta intento de la cuenta. En el login no se aplica la política de longitud del registro:
+            las cuentas antiguas siguen pudiendo entrar'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 'Credenciales incorrectas (código INVALID_CREDENTIALS, mensaje «Email o contraseña incorrectos»). El
+            cuerpo incluye remainingAttempts: intentos que le quedan a la cuenta ya descontado este fallo (siempre 1 o más);
+            si el siguiente intento también falla y era el último, la cuenta se bloquea y se responde 429 ACCOUNT_LOCKED.
+            Es idéntico exista o no el email'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 'Demasiados intentos; la cabecera Retry-After indica los segundos que hay que esperar. Código ACCOUNT_LOCKED:
+            la cuenta está bloqueada por logins fallidos (lo devuelve el fallo que agota los intentos y cualquier intento
+            durante el bloqueo, aunque la contraseña sea correcta; el mensaje dice cuántos minutos dura). Código RATE_LIMIT_EXCEEDED:
+            demasiadas peticiones de login desde esta IP'
+          headers:
+            Retry-After:
+              description: Segundos que hay que esperar antes de volver a intentarlo (entero, mínimo 1).
+              required: true
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/users/me:
+    get:
+      tags:
+      - user-controller
+      summary: Obtiene el usuario autenticado
+      description: Devuelve la información del usuario asociado al token JWT utilizado en la petición.
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Usuario obtenido correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/users/me/favorites:
+    get:
+      tags:
+      - favorite-controller
+      summary: Obtiene mi lista
+      description: Devuelve las películas favoritas del usuario autenticado.
+      operationId: getFavorites
+      responses:
+        '200':
+          description: Lista obtenida correctamente
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MovieResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - favorite-controller
+      summary: Vacía mi lista
+      description: Elimina de una vez todas las películas favoritas del usuario autenticado.
+      operationId: clearFavorites
+      responses:
+        '204':
+          description: Lista vaciada correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/users/me/favorites/series:
+    get:
+      tags:
+      - series-favorite-controller
+      summary: Obtiene las series de mi lista
+      description: Devuelve las series favoritas del usuario autenticado, ordenadas por título. Las series que se han quedado
+        sin episodios no aparecen (vuelven a aparecer si se les añade alguno).
+      operationId: getFavorites_1
+      responses:
+        '200':
+          description: Lista obtenida correctamente
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SeriesResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+    delete:
+      tags:
+      - series-favorite-controller
+      summary: Vacía las series de mi lista
+      description: Elimina de una vez todas las series favoritas del usuario autenticado; sus películas favoritas no cambian.
+      operationId: clearFavorites_1
+      responses:
+        '204':
+          description: Series quitadas correctamente
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/series/search:
+    get:
+      tags:
+      - series-controller
+      summary: Busca series
+      description: Busca series con episodios aplicando opcionalmente filtros por título (contiene, sin distinguir mayúsculas;
+        % y _ se tratan como texto), género y año de estreno. Los resultados se devuelven de forma paginada y ordenada.
+      operationId: searchSeries
+      parameters:
+      - name: title
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: genreId
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: releaseYear
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+          minimum: 0
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+          maximum: 100
+          minimum: 1
+      - name: sort
+        in: query
+        description: 'Campo de ordenación: id, title, releaseYear o createdAt'
+        required: false
+        schema:
+          type: string
+          default: title
+      - name: direction
+        in: query
+        description: 'Dirección de ordenación: asc (ascendente, por defecto) o desc (descendente), sin distinguir mayúsculas.
+          El desempate por id sigue la misma dirección. Por ejemplo, sort=createdAt&direction=desc devuelve primero las series
+          más recientes'
+        required: false
+        schema:
+          type: string
+          default: asc
+      responses:
+        '200':
+          description: Búsqueda realizada correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/SeriesPageResponse'
+        '400':
+          description: Parámetros de paginación u ordenación inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/movies/search:
+    get:
+      tags:
+      - movie-controller
+      summary: Busca películas
+      description: Busca películas aplicando opcionalmente filtros por título, género y año de lanzamiento. Los resultados
+        se devuelven de forma paginada y ordenada.
+      operationId: searchMovies
+      parameters:
+      - name: title
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: genreId
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: releaseYear
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+          minimum: 0
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+          maximum: 100
+          minimum: 1
+      - name: sort
+        in: query
+        description: 'Campo de ordenación: id, title, releaseYear, duration o createdAt'
+        required: false
+        schema:
+          type: string
+          default: title
+      - name: direction
+        in: query
+        description: 'Dirección de ordenación: asc (ascendente, por defecto) o desc (descendente), sin distinguir mayúsculas.
+          El desempate por id sigue la misma dirección. Por ejemplo, sort=createdAt&direction=desc devuelve primero las películas
+          más recientes'
+        required: false
+        schema:
+          type: string
+          default: asc
+      responses:
+        '200':
+          description: Búsqueda realizada correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/MoviePageResponse'
+        '400':
+          description: Parámetros de paginación u ordenación inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/admin/series:
+    get:
+      tags:
+      - admin-series-controller
+      summary: Lista las series para el panel
+      description: Devuelve de forma paginada todas las series, también las que aún no tienen episodios (episodeCount = 0,
+        ocultas para los usuarios). Filtro opcional por título. Requiere rol ADMIN.
+      operationId: getSeries_1
+      parameters:
+      - name: title
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+          minimum: 0
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+          maximum: 100
+          minimum: 1
+      - name: sort
+        in: query
+        description: 'Campo de ordenación: id, title, releaseYear o createdAt'
+        required: false
+        schema:
+          type: string
+          default: title
+      - name: direction
+        in: query
+        description: 'Dirección de ordenación: asc (ascendente, por defecto) o desc (descendente), sin distinguir mayúsculas.
+          El desempate por id sigue la misma dirección. Por ejemplo, sort=createdAt&direction=desc devuelve primero las series
+          más recientes'
+        required: false
+        schema:
+          type: string
+          default: asc
+      responses:
+        '200':
+          description: Series obtenidas correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/SeriesPageResponse'
+        '400':
+          description: Parámetros de paginación u ordenación inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+  /api/admin/series/{id}:
+    get:
+      tags:
+      - admin-series-controller
+      summary: Obtiene una serie para el panel
+      description: Devuelve la serie con sus géneros y temporadas aunque no tenga episodios (seasons vacío). Requiere rol
+        ADMIN.
+      operationId: getSeriesById_1
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Serie encontrada
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/SeriesDetailResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Serie no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - bearerAuth: []
+components:
+  schemas:
+    EpisodeRequest:
+      type: object
+      properties:
+        seasonNumber:
+          type: integer
+          format: int32
+          maximum: 100
+          minimum: 1
+        episodeNumber:
+          type: integer
+          format: int32
+          maximum: 1000
+          minimum: 1
+        title:
+          type: string
+          maxLength: 150
+          minLength: 0
+        description:
+          type: string
+          description: Sinopsis opcional. Si se omite o va en blanco se guarda sin sinopsis (null en la respuesta).
+          maxLength: 1000
+          minLength: 0
+        duration:
+          type: integer
+          format: int32
+          maximum: 600
+          minimum: 1
+        videoUrl:
+          type: string
+          description: URL del vídeo. Debe ser una URL https:// absoluta, con host y sin credenciales (usuario:clave@). Solo
+            caracteres ASCII visibles (sin espacios); máximo 500 caracteres.
+          example: https://videos.streambox.example/watch/serie-1x01
+          maxLength: 500
+          minLength: 0
+      required:
+      - duration
+      - episodeNumber
+      - seasonNumber
+      - title
+      - videoUrl
+    EpisodeResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        seasonNumber:
+          type: integer
+          format: int32
+        episodeNumber:
+          type: integer
+          format: int32
+        title:
+          type: string
+        description:
+          type: string
+        duration:
+          type: integer
+          format: int32
+        videoUrl:
+          type: string
+    SeriesRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 150
+          minLength: 0
+        description:
+          type: string
+          maxLength: 1000
+          minLength: 0
+        releaseYear:
+          type: integer
+          format: int32
+          maximum: 2100
+          minimum: 1888
+        endYear:
+          type: integer
+          format: int32
+          description: Año en que terminó la serie; null o ausente si sigue en emisión. Si se indica, entre 1888 y 2100 y
+            no anterior a releaseYear.
+          maximum: 2100
+          minimum: 1888
+        imageUrl:
+          type: string
+          description: URL de la portada. Debe ser una URL https:// absoluta, con host y sin credenciales (usuario:clave@),
+            o una portada propia del frontend con la forma /covers/<archivo>, donde el archivo empieza por letra o número
+            y solo contiene letras, números, punto, guion y guion bajo. Solo caracteres ASCII visibles (sin espacios); máximo
+            500 caracteres.
+          example: https://image.tmdb.org/t/p/w500/portada.jpg
+          maxLength: 500
+          minLength: 0
+        genreIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+          maxItems: 20
+          minItems: 0
+          uniqueItems: true
+      required:
+      - description
+      - genreIds
+      - imageUrl
+      - releaseYear
+      - title
+    GenreResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+    SeasonResponse:
+      type: object
+      properties:
+        seasonNumber:
+          type: integer
+          format: int32
+        episodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/EpisodeResponse'
+    SeriesDetailResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        description:
+          type: string
+        releaseYear:
+          type: integer
+          format: int32
+        endYear:
+          type: integer
+          format: int32
+        imageUrl:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        genres:
+          type: array
+          items:
+            $ref: '#/components/schemas/GenreResponse'
+        seasonCount:
+          type: integer
+          format: int64
+        episodeCount:
+          type: integer
+          format: int64
+        seasons:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeasonResponse'
+    MovieRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 150
+          minLength: 0
+        description:
+          type: string
+          maxLength: 1000
+          minLength: 0
+        duration:
+          type: integer
+          format: int32
+          minimum: 1
+        releaseYear:
+          type: integer
+          format: int32
+          maximum: 2100
+          minimum: 1888
+        imageUrl:
+          type: string
+          description: URL de la portada. Debe ser una URL https:// absoluta, con host y sin credenciales (usuario:clave@),
+            o una portada propia del frontend con la forma /covers/<archivo>, donde el archivo empieza por letra o número
+            y solo contiene letras, números, punto, guion y guion bajo. Solo caracteres ASCII visibles (sin espacios); máximo
+            500 caracteres.
+          example: https://image.tmdb.org/t/p/w500/portada.jpg
+          maxLength: 500
+          minLength: 0
+        videoUrl:
+          type: string
+          description: URL del vídeo. Debe ser una URL https:// absoluta, con host y sin credenciales (usuario:clave@). Solo
+            caracteres ASCII visibles (sin espacios); máximo 500 caracteres.
+          example: https://videos.streambox.example/watch/dune
+          maxLength: 500
+          minLength: 0
+        genreIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+          maxItems: 20
+          minItems: 0
+          uniqueItems: true
+      required:
+      - description
+      - duration
+      - genreIds
+      - imageUrl
+      - releaseYear
+      - title
+      - videoUrl
+    MovieResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        description:
+          type: string
+        duration:
+          type: integer
+          format: int32
+        releaseYear:
+          type: integer
+          format: int32
+        imageUrl:
+          type: string
+        videoUrl:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        genres:
+          type: array
+          items:
+            $ref: '#/components/schemas/GenreResponse'
+          uniqueItems: true
+    GenreRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 50
+          minLength: 2
+      required:
+      - name
+    CreateUserRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          maxLength: 50
+          minLength: 3
+        email:
+          type: string
+          format: email
+          minLength: 1
+        password:
+          type: string
+          description: 'Contraseña de la cuenta: entre 12 y 64 caracteres y como máximo 72 bytes en UTF-8 (las tildes y eñes
+            ocupan 2 bytes y los emojis 4). No puede ser una contraseña común o trivial ni contener el nombre de usuario o
+            la parte del email anterior a la @. No se exigen mayúsculas, números ni símbolos: se recomienda una frase larga.'
+          example: un paseo por el retiro en otoño
+          maxLength: 64
+          minLength: 12
+      required:
+      - email
+      - password
+      - username
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum:
+          - USER
+          - ADMIN
+        createdAt:
+          type: string
+          format: date-time
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+        password:
+          type: string
+          maxLength: 1024
+          minLength: 0
+      required:
+      - email
+      - password
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+    SeriesResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        description:
+          type: string
+        releaseYear:
+          type: integer
+          format: int32
+        endYear:
+          type: integer
+          format: int32
+        imageUrl:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        genres:
+          type: array
+          items:
+            $ref: '#/components/schemas/GenreResponse'
+        seasonCount:
+          type: integer
+          format: int64
+        episodeCount:
+          type: integer
+          format: int64
+    SeriesPageResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeriesResponse'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+        hasNext:
+          type: boolean
+        hasPrevious:
+          type: boolean
+    MoviePageResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/MovieResponse'
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+        hasNext:
+          type: boolean
+        hasPrevious:
+          type: boolean
+    ErrorResponse:
+      type: object
+      description: 'Formato común de todas las respuestas de error de la API (4xx y 5xx). El cliente debe decidir por status
+        y code, nunca por el texto de message. Los campos que no aplican a un error se omiten del JSON: nunca se envían con
+        valor null.'
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Fecha y hora del error, en UTC y formato ISO-8601.
+          example: '2026-10-04T11:15:30.123Z'
+        status:
+          type: integer
+          format: int32
+          description: Código de estado HTTP; coincide con el de la respuesta.
+          example: 404
+        error:
+          type: string
+          description: Frase estándar del estado HTTP según la especificación (en inglés).
+          example: Not Found
+        code:
+          type: string
+          description: 'Código funcional estable del error: el cliente debe decidir por este campo (y por status), nunca por
+            el texto de message. Valores:
+
+            - RESOURCE_NOT_FOUND (404): el recurso o la ruta no existen (una serie sin episodios también da este código a
+            los usuarios).
+
+            - MOVIE_NOT_IN_FAVORITES (404): la película no está en la lista del usuario.
+
+            - SERIES_NOT_IN_FAVORITES (404): la serie existe, pero no está en la lista del usuario.
+
+            - USER_ALREADY_EXISTS (409): el nombre de usuario o el email ya están registrados.
+
+            - MOVIE_ALREADY_IN_FAVORITES (409): la película ya está en la lista del usuario.
+
+            - SERIES_ALREADY_IN_FAVORITES (409): la serie ya está en la lista del usuario.
+
+            - EPISODE_ALREADY_EXISTS (409): la serie ya tiene un episodio con esa temporada y número.
+
+            - GENRE_ALREADY_EXISTS (409): ya existe otro género con ese nombre.
+
+            - GENRE_IN_USE (409): el género no se puede borrar porque alguna película o serie lo tiene asignado.
+
+            - AMBIGUOUS_TITLE (409): varias películas tienen ese título; hay que usar el id.
+
+            - DATA_INTEGRITY_VIOLATION (409): la operación choca con una restricción de los datos.
+
+            - VALIDATION_ERROR (400): datos o parámetros no válidos; el detalle por campo va en validationErrors.
+
+            - MALFORMED_REQUEST (400 y otros 4xx genéricos): la petición no se puede interpretar (JSON mal formado, tipos
+            incorrectos).
+
+            - INVALID_CREDENTIALS (401): email o contraseña incorrectos en el login, o token ausente, caducado o no válido.
+
+            - ACCESS_DENIED (403): autenticado, pero sin permisos (por ejemplo, no es ADMIN).
+
+            - METHOD_NOT_ALLOWED (405): el método HTTP no está soportado por la ruta.
+
+            - UNSUPPORTED_MEDIA_TYPE (415): el tipo de contenido no está soportado.
+
+            - RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login o registro desde la misma IP; ver la cabecera Retry-After.
+
+            - ACCOUNT_LOCKED (429): la cuenta está bloqueada temporalmente por logins fallidos; ver la cabecera Retry-After.
+
+            - INTERNAL_ERROR (500 u otro 5xx): error no controlado en el servidor.'
+          enum:
+          - RESOURCE_NOT_FOUND
+          - USER_ALREADY_EXISTS
+          - MOVIE_ALREADY_IN_FAVORITES
+          - MOVIE_NOT_IN_FAVORITES
+          - VALIDATION_ERROR
+          - INVALID_CREDENTIALS
+          - DATA_INTEGRITY_VIOLATION
+          - INTERNAL_ERROR
+          - AMBIGUOUS_TITLE
+          - ACCESS_DENIED
+          - MALFORMED_REQUEST
+          - METHOD_NOT_ALLOWED
+          - UNSUPPORTED_MEDIA_TYPE
+          - RATE_LIMIT_EXCEEDED
+          - ACCOUNT_LOCKED
+          - GENRE_ALREADY_EXISTS
+          - GENRE_IN_USE
+          - EPISODE_ALREADY_EXISTS
+          - SERIES_ALREADY_IN_FAVORITES
+          - SERIES_NOT_IN_FAVORITES
+          example: RESOURCE_NOT_FOUND
+        message:
+          type: string
+          description: 'Mensaje legible en español, pensado para mostrarlo al usuario. Puede cambiar: no se debe usar para
+            tomar decisiones.'
+          example: Película no encontrada
+        path:
+          type: string
+          description: Ruta de la petición que produjo el error (sin los parámetros de consulta).
+          example: /api/movies/42
+        validationErrors:
+          type: object
+          additionalProperties:
+            type: string
+          description: 'Solo en los 400 con código VALIDATION_ERROR: un mensaje por cada campo o parámetro no válido (nombre
+            del campo → mensaje). En el resto de errores no aparece (no se envía con null).'
+          example:
+            title: El título es obligatorio
+        remainingAttempts:
+          type: integer
+          format: int32
+          description: 'Solo en el 401 INVALID_CREDENTIALS del login: intentos que le quedan a la cuenta, con este fallo ya
+            descontado. Nunca vale 0, porque el fallo que agota los intentos ya responde 429 ACCOUNT_LOCKED. En el resto de
+            errores no aparece (no se envía con null).'
+          example: 4
+          minimum: 1
+      required:
+      - code
+      - error
+      - message
+      - path
+      - status
+      - timestamp
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

@@ -6,6 +6,10 @@ Archivo de reanudación: si la sesión se corta (sin tokens o sin conexión), l�
 
 Ninguna. Esperando la siguiente petición.
 
+## Colección de Postman y OpenAPI versionada (2026-10-07)
+
+Hecho: `docs/api/openapi.yaml` (generada con springdoc desde el backend real en H2/8099), `docs/api/postman/` (colección v2.1 con 52 peticiones y 90 aserciones + entorno `StreamBox - Local`) y `docs/api/README.md`. Verificado con Newman contra el backend real: 52/52 y 90/90, también en una segunda ejecución (caso 409). Auth modelada como en `main` (Bearer en cabecera); **al hacer la tarea 29 (cookie HttpOnly) hay que regenerar la spec y actualizar login y autorización de la colección.** Pendiente: el conector de Postman no conectó en la sesión, así que no se creó nada en un workspace de Postman (hay que importar los archivos o repetirlo con el conector). Sin cambios de código de producción; no se ejecutó la suite de Maven.
+
 ## Tarea 28 terminada: ADRs y revisión del README (2026-10-07)
 
 Solo documentación (sin cambios de código; no se ejecutaron tests). Hecho: `docs/adr/` con un índice y 10 ADR (0001 backend, 0002 frontend, 0003 Flyway, 0004 JWT, 0005 `/me`, 0006 rate limiting, 0007 favoritos, 0008 series, 0009 tests, 0010 Docker/nginx); README con título, árbol de carpetas corregido, stack actualizado, pasos para arrancar backend (`JWT_SECRET`) y frontend (Node 24, proxy) y enlace a los ADR. Plan actualizado (fila 28 y orden de trabajo). Pendiente del autor: leer los ADR y corregir lo que no refleje sus motivos reales (los ADR se redactaron a partir del código y del manual).
