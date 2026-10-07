@@ -1636,6 +1636,27 @@ Mientras se carga el usuario, se trata como usuario normal (falla cerrado). En l
 
 **Enlaces:** el estado vacío de la sección «Películas» de «Mi lista» lleva a `/peliculas`. El vacío general de «Mi lista» lleva a la portada, que mezcla películas y series.
 
+### 20.10 Perfil (`pages/ProfilePage.tsx` + `lib/profile.ts`)
+
+`/perfil` responde a «¿quién soy y qué he guardado?». Se llega desde **«Mi perfil»** en el menú de usuario de la barra (no está en la fila de navegación principal, que ya va justa de ancho). Es una ruta privada dentro de `AppShell`, como «Mi lista».
+
+**De dónde sale cada dato.** La página no hace ninguna petición propia: el usuario (nombre, correo, rol y fecha de alta) viene de `useAuth()` (`GET /api/users/me`) y las películas y series de `useFavorites()`, que `AppShell` ya cargó. Por eso no hay «títulos vistos», «horas», suscripción ni idioma: el modelo de datos no tiene historial de reproducción ni planes, y **no se inventan datos** para que la pantalla se parezca a un diseño.
+
+**Qué enseña:**
+
+- *Cabecera:* avatar con la inicial, el rol (en mayúsculas con CSS `uppercase`, para que el lector de pantalla lea «Administrador» y no deletree), el nombre (el `<h1>`), «Miembro desde octubre de 2026» (formateado en UTC: la API da un instante UTC y, sin fijar la zona, un alta a las 00:30 del día 1 podría salir en el mes anterior), «Panel de administración» (solo `isAdmin`) y «Cerrar sesión». No hay «Editar perfil»: exigiría endpoints nuevos y un botón que no hace nada es peor que no tenerlo (queda en el plan como pendiente).
+- *Estadísticas:* películas en la lista, series en la lista y géneros distintos. Son una lista de descripción (`dl`): pares etiqueta → valor. Solo se pintan con la lista ya cargada; con la lista cargando, un «0» sería falso.
+- *Cuenta:* nombre, correo y contraseña. Los puntos son fijos (no se conoce la contraseña) y los lectores leen «Oculta».
+- *Tus géneros:* los 6 más frecuentes de la lista con su recuento. `countGenres` cuenta **por id de género** (no por nombre) y cada título cuenta una vez por género; orden: recuento descendente, nombre e id.
+- *De tu lista:* hasta 5 títulos, primero películas (`FavoritesContext` las da de más reciente a más antigua) y después series, con el enlace «Ver toda mi lista». Reutiliza `MovieCard` y `SeriesCard`.
+
+**Dos fuentes, cada una con sus tres estados.** El usuario (cargando, error con «Reintentar» → `refreshUser`) y la lista (cargando, error con «Reintentar» → `reload`). Si la lista falla, la cuenta sigue visible y el error aparece solo dentro de la tarjeta «Tus géneros» (`ErrorState` con la prop `compact`, que no reserva media pantalla).
+
+**Estados vacíos (ver 20.9).** Con la lista vacía hay un único estado vacío, en «Tus géneros», y «De tu lista» no se pinta para no repetirlo. «Explorar películas» usa `ExploreLink` (extraído de «Mi lista» para compartirlo): solo aparece si `useCatalogPresence` confirma que hay películas visibles. Los textos son verdad para `USER` y `ADMIN`.
+
+**Accesibilidad.** Un solo `<h1>` (mientras carga o si falla, «Mi perfil»; con el usuario cargado, su nombre), secciones con `<h2>`, `<dl>` para los pares etiqueta-valor y el avatar `aria-hidden`. En el menú de usuario, «Mi perfil» es un `NavLink` (marca `aria-current` cuando ya estás en `/perfil`) y va **antes** de «Cerrar sesión»: con el teclado, el primer Tab desde el botón del menú llega a «Mi perfil» y el segundo a «Cerrar sesión» (lo comprueba el E2E de accesibilidad).
+
+**Tests:** `lib/profile.test.ts` (lógica pura), `pages/ProfilePage.test.tsx` (usuario y administrador, estados, lista vacía y llena), casos nuevos en `Navbar.test.tsx` y `App.test.tsx` (la ruta exige sesión) y `e2e/profile.spec.ts` (flujo completo y 320/375 px sin scroll horizontal).
 ---
 
 ## 21. Frontend: accesibilidad, estilos e imágenes
@@ -1698,8 +1719,8 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 | :--- | :--- | :--- | :--- |
 | Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1153 | `.\mvnw.cmd test` (desde `streambox/`) |
 | Backend (PostgreSQL real) | Testcontainers | 119 | Se ejecutan con el anterior (1272 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos es menor (95) |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 729 | `npm run test` (desde `frontend/`) |
-| Frontend (flujos completos) | Playwright (Chromium) | 135 (+24 de capturas, que se omiten) | `npm run test:e2e` |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 772 | `npm run test` (desde `frontend/`) |
+| Frontend (flujos completos) | Playwright (Chromium) | 143 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend
 

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Link, NavLink } from 'react-router-dom';
-import { LogOut, ShieldCheck, UserCircle } from 'lucide-react';
+import { LogOut, ShieldCheck, User, UserCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useHeightCssVariable } from '../hooks/useHeightCssVariable';
 import { SearchBar } from './SearchBar';
@@ -45,6 +45,9 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
  * color). Es contenido normal del desplegable, no un `role="menu"`, así que el
  * lector de pantalla lo lee en orden al recorrerlo. Es informativo: el rol en el
  * cliente solo decide qué se pinta; quien protege los datos es el backend (403).
+ * Tras los datos del usuario van dos acciones, ambas de 44 px: «Mi perfil»
+ * (enlace a `/perfil`, que cierra el menú al navegar) y «Cerrar sesión». El perfil
+ * vive aquí y no en la fila de navegación principal, que ya está al límite de ancho.
  *
  * **Navegación.** «Inicio» (`/`), «Películas» (`/peliculas`), «Series»
  * (`/series`) y «Mi lista» (`/favorites`). Ya no hay secciones reservadas:
@@ -189,6 +192,19 @@ export function Navbar() {
                     )}
                   </div>
                 )}
+                {/* NavLink: marca `aria-current="page"` cuando ya estás en el perfil. Cierra el menú al navegar. */}
+                <NavLink
+                  to="/perfil"
+                  onClick={() => setMenuOpen(false)}
+                  className={({ isActive }) =>
+                    `focus-ring flex min-h-11 w-full items-center gap-2 px-4 text-left text-sm transition-colors hover:text-white ${
+                      isActive ? 'font-semibold text-white' : 'text-gray-300'
+                    }`
+                  }
+                >
+                  <User aria-hidden="true" className="size-4" />
+                  Mi perfil
+                </NavLink>
                 <button
                   type="button"
                   onClick={() => logout()}

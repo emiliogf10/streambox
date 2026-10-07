@@ -88,7 +88,7 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 - Cada bug corregido deja un test que falla sin el arreglo.
 - Lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia real) se prueba también contra PostgreSQL real en `src/test/.../postgres/` (extiende `PostgresIntegrationTestSupport`); H2 puede ocultar diferencias (ya ocultó un bug de búsqueda).
 - Frontend: lógica y componentes con Vitest + Testing Library (`*.test.ts(x)` junto al código, utilidades en `src/test/`); flujos completos con Playwright en `frontend/e2e/`. Localiza por rol/etiqueta, no con `data-testid`.
-- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 1272 con Docker —1153 con H2 y 119 contra PostgreSQL real—; sin Docker salen 1248 ejecutados con 95 omitidos, porque cada parametrizado omitido cuenta como uno; 729 de Vitest y 135 E2E + 24 de capturas omitidas).
+- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 1272 con Docker —1153 con H2 y 119 contra PostgreSQL real—; sin Docker salen 1248 ejecutados con 95 omitidos, porque cada parametrizado omitido cuenta como uno; 772 de Vitest y 143 E2E + 24 de capturas omitidas).
 - Vitest no espera tiempo real: los debounces se prueban con `src/test/fakeTimers.ts`. Los E2E que modifican el catálogo van en el proyecto `catalogo-mutable` de Playwright, que corre al final.
 
 ## Frontend: estado actual
@@ -106,6 +106,7 @@ SPA en `frontend/src/` organizada en `pages/`, `components/`, `context/`, `hooks
 - `/peliculas` y `/series` son las secciones de la barra (ya no hay secciones reservadas). Los filtros de `/peliculas` viven en la URL (`lib/movieFilters.ts`, `hooks/useMovieFilters.ts`) y todos los listados paginados pasan por `hooks/usePagedCatalog.ts`.
 - **Los textos de la interfaz importan tanto como el código** (petición expresa del autor). Cada estado vacío, aviso o botón debe ser verdad para cada rol (USER/ADMIN; mientras carga el usuario, se trata como USER), con título, descripción y botón coherentes y sin llevar a otra página vacía (ver cap. 20.9 del manual). Al revisar un cambio, léelos todos, no te limites a los tests.
 - La barra superior publica su altura en `--navbar-height` y el contenido usa `scroll-margin-top` para que el foco no quede tapado (WCAG 2.4.11).
+- **Perfil** (`/perfil`, `pages/ProfilePage.tsx`, enlace «Mi perfil» en el menú de usuario): solo muestra datos reales (`useAuth` + `useFavorites`, sin peticiones propias). No hay historial, suscripción ni «Editar perfil» (pendiente en el plan: exige endpoints nuevos). El correo es el `subject` del JWT: cambiarlo cerraría la sesión. Ver cap. 20.10 del manual.
 
 Pendiente: la revisión visual humana. Al tocar el frontend verifica con `npm run build`, `npm run lint` (debe dar código 0), `npm run test` y, si afecta a flujos o a la maquetación, `npm run test:e2e`.
 

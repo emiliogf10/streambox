@@ -38,6 +38,8 @@ function routesFor(role: 'ADMIN' | 'USER') {
       jsonResponse(makePage([makeMovie({ id: 1, title: 'Interstellar' })])),
     'GET /api/movies?page=0&size=10&sort=createdAt&direction=desc': () =>
       jsonResponse(makePage([makeMovie({ id: 1, title: 'Interstellar' })])),
+    'GET /api/movies?page=0&size=1&sort=createdAt&direction=desc': () =>
+      jsonResponse(makePage([makeMovie({ id: 1, title: 'Interstellar' })])),
     'GET /api/genres': () => jsonResponse([{ id: 1, name: 'Drama' }]),
     'GET /api/series?page=0&size=12&sort=createdAt&direction=desc': () => jsonResponse(makePage([])),
     'GET /api/series?page=0&size=20&sort=createdAt&direction=desc': () =>
@@ -78,6 +80,60 @@ describe('Rutas de series', () => {
     renderWithProviders(<AppRoutes />, { route: '/series/4' });
 
     expect(screen.getByText('ruta:/login')).toBeInTheDocument();
+  });
+});
+
+describe('Ruta del perfil', () => {
+  it('/perfil muestra la página dentro de la aplicación (barra incluida), con el nombre del usuario como único h1', async () => {
+    routesFor('USER');
+    renderWithProviders(<AppRoutes />, { route: '/perfil', token: 'jwt' });
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'ana' })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('navigation', { name: 'Principal' })).toBeInTheDocument();
+    expect(screen.getByText('ruta:/perfil')).toBeInTheDocument();
+    expect(document.title).toBe('Mi perfil — StreamBox');
+  });
+
+  it('sin sesión, /perfil lleva al login', () => {
+    routesFor('USER');
+    renderWithProviders(<AppRoutes />, { route: '/perfil' });
+
+    expect(screen.getByText('ruta:/login')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'ana' })).not.toBeInTheDocument();
+  });
+
+  it('desde el menú de usuario, «Mi perfil» lleva a /perfil', async () => {
+    routesFor('USER');
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: '/', token: 'jwt' });
+
+    await user.click(await screen.findByRole('button', { name: 'Menú de usuario' }));
+    await user.click(screen.getByRole('link', { name: 'Mi perfil' }));
+
+    expect(screen.getByText('ruta:/perfil')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'ana' })).toBeInTheDocument();
+  });
+
+  it('un administrador llega desde el perfil al panel con «Panel de administración»', async () => {
+    routesFor('ADMIN');
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: '/perfil', token: 'jwt' });
+
+    await user.click(await screen.findByRole('link', { name: 'Panel de administración' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Administración' })).toBeInTheDocument();
+  });
+
+  it('«Cerrar sesión» desde el perfil lleva al login', async () => {
+    routesFor('USER');
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: '/perfil', token: 'jwt' });
+
+    await user.click(await screen.findByRole('button', { name: 'Cerrar sesión' }));
+
+    expect(await screen.findByText('ruta:/login')).toBeInTheDocument();
+    expect(localStorage.getItem('token')).toBeNull();
   });
 });
 

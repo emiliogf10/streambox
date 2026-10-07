@@ -37,6 +37,7 @@
   - **Panel de administración** (`/admin`, solo `ADMIN`): películas en tabla con buscador y paginación, alta y edición en un formulario con vista previa de la portada, borrado con confirmación, y gestión de géneros (crear, renombrar en línea y borrar si ninguna película lo usa). El enlace «Administrar» solo lo ven los administradores; el rol se consulta al servidor (`GET /api/users/me`) en cada sesión.
   - Login que avisa de los intentos que quedan antes del bloqueo de la cuenta y muestra la cuenta atrás cuando está bloqueada.
   - **Series** con temporadas y episodios: página `/series` (banner, filas por género), página propia de cada serie con selector de temporada y lista de episodios, fila «Series» en la portada, buscador que encuentra películas y series, y «Mi lista» con dos secciones. Las series sin episodios no las ven los usuarios hasta que el administrador les añade el primero. El panel de administración gestiona series y episodios.
+  - **Perfil** (`/perfil`, desde «Mi perfil» en el menú de usuario): avatar, rol y «miembro desde», estadísticas de tu lista (películas, series y géneros distintos), datos de tu cuenta, los géneros que más guardas y un adelanto de «Mi lista». Solo usa datos reales; no hay historial de reproducción ni suscripciones.
   - **Página «Películas»** (`/peliculas`): banner y filas por género como en Series, más filtros por género, año y orden que se guardan en la URL (se pueden compartir y «Atrás» vuelve al filtro anterior).
   - Cliente HTTP único (`apiFetch`) con manejo uniforme de 401, 403 y 429 (cuenta atrás con `Retry-After`) y avisos (toasts) en cada acción.
   - Accesible (teclado, foco visible, modales con `<dialog>`, buscador tipo combobox, contrastes WCAG AA) y responsive (móvil, tablet y escritorio) con Tailwind v4.
@@ -299,7 +300,7 @@ npm run dev
 ```
 La aplicación web estará disponible en `http://localhost:5173` (con el backend en el 8080). Otros comandos: `npm run build` (comprobación de tipos + empaquetado) y `npx oxlint src` (lint).
 
-Estructura de `frontend/src/`: `pages/` (Home, Login, Registro, Mi lista), `components/`, `context/` (sesión, avisos, favoritos), `hooks/`, `lib/` (cliente de API, tipos, utilidades). Las portadas de ejemplo están en `public/covers/`; para que las películas de tu base de datos las usen, ejecuta a mano el script opcional `docs/portadas-locales.sql` (explicado en su cabecera).
+Estructura de `frontend/src/`: `pages/` (Home, Películas, Series, Mi lista, Perfil, Login, Registro y `admin/`), `components/`, `context/` (sesión, avisos, favoritos), `hooks/`, `lib/` (cliente de API, tipos, utilidades). Las portadas de ejemplo están en `public/covers/`; para que las películas de tu base de datos las usen, ejecuta a mano el script opcional `docs/portadas-locales.sql` (explicado en su cabecera).
 
 
 ### Documentación Interactiva (Swagger UI)

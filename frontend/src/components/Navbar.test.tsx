@@ -1,5 +1,6 @@
 /**
- * Tests de `Navbar`: los enlaces «Películas», «Series» y «Administrar» y el menú de usuario.
+ * Tests de `Navbar`: los enlaces «Películas», «Series» y «Administrar» y el menú de usuario
+ * (con su enlace «Mi perfil»).
  *
  * Protegen la muestra visible del rol: el enlace «Administrar» y la etiqueta
  * «Administrador» del menú aparecen SOLO a quien el servidor confirma como
@@ -214,12 +215,59 @@ describe('Navbar: menú de usuario', () => {
     expect(screen.getByText('Administrador').querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('mientras /users/me carga, el menú es el de siempre: solo «Cerrar sesión», sin huecos ni «undefined»', async () => {
+  it.each(['USER', 'ADMIN'] as const)(
+    'ofrece «Mi perfil» (enlace a /perfil) encima de «Cerrar sesión» al rol %s',
+    async (role) => {
+      const user = renderNavbar(() => jsonResponse(makeUser({ role })));
+      await screen.findByText('estado:ready');
+
+      await openMenu(user);
+
+      const profile = screen.getByRole('link', { name: 'Mi perfil' });
+      expect(profile).toHaveAttribute('href', '/perfil');
+      // El icono es decorativo: el nombre lo da el texto.
+      expect(profile.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+      const logout = screen.getByRole('button', { name: 'Cerrar sesión' });
+      // «Mi perfil» va antes en el orden del documento (y del tabulador) que «Cerrar sesión».
+      expect(profile.compareDocumentPosition(logout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // No se añade a la fila de navegación principal (ya está al límite de ancho).
+      expect(within(screen.getByRole('navigation', { name: 'Principal' })).queryByRole('link', { name: 'Mi perfil' })).toBeNull();
+    },
+  );
+
+  it('pulsar «Mi perfil» navega a /perfil y cierra el menú', async () => {
+    const user = renderNavbar(() => jsonResponse(makeUser()));
+    await openMenu(user);
+
+    await user.click(screen.getByRole('link', { name: 'Mi perfil' }));
+
+    expect(screen.getByText('ruta:/perfil')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Menú de usuario' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('link', { name: 'Mi perfil' })).not.toBeInTheDocument();
+  });
+
+  it('en /perfil, «Mi perfil» queda marcado como la página actual', async () => {
+    routeFetch(fetchMock, { ...FAVORITES });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <FavoritesProvider>
+        <Navbar />
+      </FavoritesProvider>,
+      { token: 'jwt', route: '/perfil' },
+    );
+
+    await openMenu(user);
+
+    expect(screen.getByRole('link', { name: 'Mi perfil' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('mientras /users/me carga, el menú es el de siempre: «Mi perfil» y «Cerrar sesión», sin huecos ni «undefined»', async () => {
     const user = renderNavbar(() => new Promise<Response>(() => {}));
 
     await openMenu(user);
 
     expect(screen.getByText('estado:loading')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Mi perfil' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cerrar sesión' })).toBeInTheDocument();
     expect(screen.queryByText('Sesión iniciada como')).not.toBeInTheDocument();
     expect(screen.queryByText('Administrador')).not.toBeInTheDocument();
