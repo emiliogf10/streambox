@@ -52,7 +52,7 @@ function renderHome() {
       <HomePage />
       <UserStatusProbe />
     </FavoritesProvider>,
-    { token: 'jwt' },
+    { session: true },
   );
   return user;
 }

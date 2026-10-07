@@ -10,7 +10,7 @@ import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { errorResponse, jsonResponse, renderWithProviders } from '../test/helpers';
+import { apiCalls, errorResponse, jsonResponse, renderWithProviders } from '../test/helpers';
 import { RegisterPage } from './RegisterPage';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -59,7 +59,7 @@ describe('RegisterPage: validación en el cliente', () => {
     expect(email()).toHaveAccessibleDescription('Introduce tu correo electrónico.');
     expect(password()).toHaveAccessibleDescription('La contraseña debe tener entre 12 y 64 caracteres.');
     expect(username()).toHaveFocus();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(apiCalls(fetchMock)).toEqual([]);
   });
 
   it('los mensajes de error se anuncian (role="alert") junto al campo, no solo con color', async () => {
@@ -117,7 +117,7 @@ describe('RegisterPage: validación en el cliente', () => {
       expect(password()).toHaveAccessibleDescription('La contraseña debe tener entre 12 y 64 caracteres.');
       expect(password()).toHaveFocus();
     }
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(apiCalls(fetchMock)).toEqual([]);
   });
 
   it('una contraseña de 65 caracteres también se rechaza en el cliente', async () => {
@@ -129,7 +129,7 @@ describe('RegisterPage: validación en el cliente', () => {
     await user.click(submit());
 
     expect(password()).toHaveAccessibleDescription('La contraseña debe tener entre 12 y 64 caracteres.');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(apiCalls(fetchMock)).toEqual([]);
   });
 
   it('empezar a corregir un campo borra su error al instante', async () => {
@@ -156,7 +156,7 @@ describe('RegisterPage: validación en el cliente', () => {
     await user.click(submit());
 
     await screen.findByRole('heading', { name: 'Pantalla de login' });
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = apiCalls(fetchMock)[0];
     expect(url).toBe('/api/users');
     expect(init?.method).toBe('POST');
     expect(JSON.parse(String(init?.body))).toEqual({
@@ -176,7 +176,7 @@ describe('RegisterPage: validación en el cliente', () => {
     await user.click(submit());
 
     expect(username()).toHaveAttribute('aria-invalid', 'true');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(apiCalls(fetchMock)).toEqual([]);
   });
 });
 

@@ -64,19 +64,20 @@ describe('FavoriteButton (interfaz)', () => {
       <FavoritesProvider>
         <FavoriteButton movie={m1} />
       </FavoritesProvider>,
-      { token: 'jwt' },
+      { session: true },
     );
     // Espera a que termine la carga inicial: el botón refleja el estado real.
     await screen.findByRole('button', { name: initial.length > 0 ? IN_LIST : NOT_IN_LIST });
     return user;
   }
 
-  it('carga la lista con el token y refleja que la película ya está en ella', async () => {
+  it('carga la lista con la cookie de sesión (sin cabecera Authorization) y refleja que la película ya está en ella', async () => {
     await setup([m1]);
 
     // Se busca la petición de la lista (no "la primera"): `AuthProvider` también pide `/users/me`.
     const listCall = fetchMock.mock.calls.find(([url]) => String(url) === '/api/users/me/favorites');
-    expect(new Headers(listCall?.[1]?.headers).get('Authorization')).toBe('Bearer jwt');
+    expect(new Headers(listCall?.[1]?.headers).has('Authorization')).toBe(false);
+    expect(listCall?.[1]?.credentials).toBe('same-origin');
     expect(screen.getByRole('button', { name: IN_LIST })).toBeInTheDocument();
   });
 
@@ -538,7 +539,7 @@ describe('FavoriteButton de una serie', () => {
       <FavoritesProvider>
         <FavoriteButton series={series} />
       </FavoritesProvider>,
-      { token: 'jwt' },
+      { session: true },
     );
 
     const button = await screen.findByRole('button', { name: /^Mi lista\s*—\s*Serie Uno$/ });

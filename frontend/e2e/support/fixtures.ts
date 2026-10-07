@@ -1,10 +1,12 @@
 /**
  * `test` extendido con lo que necesitan casi todas las pruebas:
  *
- *  - `user`: una cuenta recién registrada (email y usuario únicos) con su JWT.
+ *  - `user`: una cuenta recién registrada (email y usuario únicos) con su JWT
+ *    (el valor de la cookie de sesión que fijó el login).
  *    Cada test tiene la suya, por eso son independientes y paralelizables.
  *  - `signIn`: función que deja la sesión abierta en el navegador sin pasar por
- *    el formulario (siembra el token en `localStorage`, como haría el login real).
+ *    el formulario (siembra en el contexto del navegador la cookie `streambox_token`,
+ *    HttpOnly como la real, que es lo que haría el login).
  *    Los tests que prueban el formulario de login NO la usan.
  *  - `failOnPageErrors` (automático): una excepción JavaScript no capturada en la
  *    página (un fallo de React, un `undefined`...) hace fallar el test aunque la
@@ -12,7 +14,7 @@
  */
 import { test as base, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import { createUserWithToken } from './api';
+import { SESSION_COOKIE, createUserWithToken } from './api';
 import type { TestUser } from './api';
 
 interface Fixtures {
@@ -28,10 +30,12 @@ export const test = base.extend<Fixtures>({
 
   signIn: async ({ page }, provide) => {
     await provide(async ({ token }) => {
-      // `/login` no necesita sesión ni hace peticiones autenticadas: sirve para tener
-      // un origen donde escribir en `localStorage` antes de cargar la aplicación "ya logueada".
-      await page.goto('/login');
-      await page.evaluate((jwt) => localStorage.setItem('token', jwt), token);
+      // La sesión vive en una cookie HttpOnly, inaccesible desde la página: se siembra
+      // desde el contexto del navegador con los mismos atributos que fija el backend.
+      // Va sin `Secure` porque el backend E2E corre en http (ver playwright.config.ts).
+      await page.context().addCookies([
+        { name: SESSION_COOKIE, value: token, domain: 'localhost', path: '/api', httpOnly: true, sameSite: 'Strict' },
+      ]);
     });
   },
 
@@ -47,6 +51,16 @@ export const test = base.extend<Fixtures>({
 });
 
 export { expect };
+
+/**
+ * Cookie de sesión del contexto del navegador, o `undefined` si no hay sesión.
+ * Se lee con la API de Playwright porque, al ser HttpOnly, la página no puede
+ * verla (justo lo que se quiere: el JavaScript de la app no tiene el token).
+ */
+export async function sessionCookie(page: Page) {
+  const cookies = await page.context().cookies();
+  return cookies.find((cookie) => cookie.name === SESSION_COOKIE);
+}
 
 /** Escapa un texto para usarlo literalmente dentro de una expresión regular. */
 export function escapeRegExp(text: string): string {

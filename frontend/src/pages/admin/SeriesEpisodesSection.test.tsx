@@ -58,7 +58,7 @@ function Harness({ initial }: { initial: SeriesDetail }) {
 }
 
 function renderSection(initial: SeriesDetail) {
-  return renderWithProviders(<Harness initial={initial} />, { token: 'jwt' });
+  return renderWithProviders(<Harness initial={initial} />, { session: true });
 }
 
 const setupUser = () => userEvent.setup({ delay: null });

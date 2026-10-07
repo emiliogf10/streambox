@@ -105,7 +105,7 @@ function renderPage(route = '/peliculas', user = userEvent.setup()) {
       <BackButton />
       <UserStatusProbe />
     </FavoritesProvider>,
-    { token: 'jwt', route },
+    { session: true, route },
   );
   return user;
 }

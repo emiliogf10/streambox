@@ -52,7 +52,7 @@ function renderPage() {
       <SeriesPage />
       <UserStatusProbe />
     </FavoritesProvider>,
-    { token: 'jwt', route: '/series' },
+    { session: true, route: '/series' },
   );
   return user;
 }

@@ -5,16 +5,23 @@ import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import com.emilio.streambox.dto.ErrorCode;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.security.ratelimit.RateLimitingFilter;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -47,8 +54,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
+    /** Cabecera exigida en peticiones no seguras autenticadas por cookie. */
+    public static final String CSRF_HEADER = "X-Requested-With";
+
+    /** Valor exigido en {@link #CSRF_HEADER}. */
+    public static final String CSRF_HEADER_VALUE = "StreamBox";
+
+    /** Ruta del cierre de sesión (pública e idempotente). */
+    public static final String LOGOUT_PATH = "/api/auth/logout";
+
     private final JwtService jwtService;
     private final UserRepository userRepository;
+    private final SecurityErrorResponseWriter errorWriter;
+    private final RequestMatcher loginRequest;
+    private final RequestMatcher registerRequest;
+    private final RequestMatcher logoutRequest;
 
     /**
      * Crea una instancia del filtro JWT.
@@ -56,13 +76,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * @param jwtService     servicio utilizado para validar los tokens JWT
      * @param userRepository repositorio utilizado para buscar al usuario
      *                       asociado al token
+     * @param errorWriter    escritor del 403 CSRF_REJECTED
+     * @param matchers       constructor de matchers de rutas (el mismo que usan
+     *                       las reglas de autorización)
      */
     public JwtAuthenticationFilter(
             JwtService jwtService,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            SecurityErrorResponseWriter errorWriter,
+            PathPatternRequestMatcher.Builder matchers) {
 
         this.jwtService = jwtService;
         this.userRepository = userRepository;
+        this.errorWriter = errorWriter;
+        this.loginRequest = matchers.matcher(HttpMethod.POST, RateLimitingFilter.LOGIN_PATH);
+        this.registerRequest = matchers.matcher(HttpMethod.POST, RateLimitingFilter.REGISTER_PATH);
+        this.logoutRequest = matchers.matcher(HttpMethod.POST, LOGOUT_PATH);
     }
 
     /**
@@ -104,13 +133,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
 
         String authHeader = request.getHeader("Authorization");
+        boolean bearer = authHeader != null && authHeader.startsWith("Bearer ");
+        String token;
+        boolean fromCookie = false;
 
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            filterChain.doFilter(request, response);
-            return;
+        if (bearer) {
+            // Precedencia: si hay Authorization: Bearer, manda y no se mira la
+            // cookie (aunque el Bearer sea inválido: no se "rescata" con la cookie).
+            token = authHeader.substring(7);
+        } else {
+            if (isCookieExempt(request)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+            token = readCookie(request);
+            fromCookie = true;
+            if (token == null) {
+                filterChain.doFilter(request, response);
+                return;
+            }
         }
-
-        String token = authHeader.substring(7);
 
         try {
 
@@ -120,6 +162,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     .orElse(null);
 
             if (user != null) {
+
+                // Defensa CSRF: el navegador adjunta la cookie solo, así que una
+                // petición no segura autenticada por cookie debe traer una cabecera
+                // personalizada que un formulario de otro sitio no puede añadir.
+                if (fromCookie && !isSafeMethod(request.getMethod())
+                        && !CSRF_HEADER_VALUE.equals(request.getHeader(CSRF_HEADER))) {
+                    errorWriter.write(request, response, HttpStatus.FORBIDDEN, ErrorCode.CSRF_REJECTED,
+                            "Petición rechazada: falta la cabecera de protección "
+                                    + CSRF_HEADER + ": " + CSRF_HEADER_VALUE);
+                    return;
+                }
 
                 AuthenticatedUser principal = AuthenticatedUser.from(user);
 
@@ -147,5 +200,37 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /** Valor de la cookie de sesión, o {@code null} si no viene o está vacía. */
+    private static String readCookie(HttpServletRequest request) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            return null;
+        }
+        for (Cookie cookie : cookies) {
+            if (AuthCookieService.COOKIE_NAME.equals(cookie.getName())) {
+                String value = cookie.getValue();
+                return value == null || value.isBlank() ? null : value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Login, registro y logout son públicos y no necesitan sesión: ignorar la
+     * cookie ahí evita que una caducada o manipulada, o la exigencia CSRF, los
+     * bloquee. Riesgo residual documentado: un login CSRF (un sitio ajeno
+     * inicia sesión del usuario con credenciales del atacante); lo mitiga
+     * SameSite=Strict.
+     */
+    private boolean isCookieExempt(HttpServletRequest request) {
+        return loginRequest.matches(request) || registerRequest.matches(request)
+                || logoutRequest.matches(request);
+    }
+
+    private static boolean isSafeMethod(String method) {
+        return "GET".equals(method) || "HEAD".equals(method)
+                || "OPTIONS".equals(method) || "TRACE".equals(method);
     }
 }

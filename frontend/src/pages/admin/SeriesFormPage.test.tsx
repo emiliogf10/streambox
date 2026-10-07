@@ -55,7 +55,7 @@ function renderForm(route: string, routeState?: unknown) {
       <Route path="/admin/series/:id/editar" element={<SeriesFormPage />} />
       <Route path="/admin/generos" element={<p>Pestaña de géneros</p>} />
     </Routes>,
-    { route, token: 'jwt', routeState },
+    { route, session: true, routeState },
   );
 }
 

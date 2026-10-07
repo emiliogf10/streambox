@@ -12,7 +12,7 @@ La API la consume una SPA y podría consumirla otro cliente. Se busca no depende
 - Roles `USER` y `ADMIN`. El registro público siempre crea `USER`; los administradores solo nacen de `AdminAccountInitializer` (`ADMIN_EMAIL`/`ADMIN_PASSWORD`).
 - Contraseñas con **BCrypt**; política para cuentas nuevas (12–64 caracteres, ≤ 72 bytes, no común, sin usuario ni email). El login no exige mínimo para no dejar fuera cuentas antiguas.
 - Respuestas 401/403 en JSON estructurado (`ErrorResponse` con `ErrorCode`).
-- El frontend guarda el token en `localStorage` (solo `AuthContext` lo toca).
+- El token viaja en una cookie `HttpOnly` (`streambox_token`, `SameSite=Strict`, `Path=/api`) que fija el login (tarea 29); el frontend ya no lo guarda ni lo ve. Defensa CSRF: cabecera `X-Requested-With: StreamBox` en las peticiones no seguras autenticadas por cookie. Los clientes que no son el navegador pueden seguir usando `Authorization: Bearer`.
 
 ## Alternativas descartadas
 - **Sesión de servidor (cookie `JSESSIONID`):** simple, pero estado en memoria y más trabajo para escalar.
@@ -22,5 +22,5 @@ La API la consume una SPA y podría consumirla otro cliente. Se busca no depende
 ## Consecuencias
 - (+) Revocación de rol inmediata; el servidor no guarda sesiones.
 - (−) Una lectura de base de datos por petición autenticada (aceptable a esta escala; cacheable si hiciera falta).
-- (−) **`localStorage` es accesible desde JavaScript**: un XSS podría robar el token. Se mitiga con una CSP estricta en nginx y sin `dangerouslySetInnerHTML`, y la tarea 29 prevé pasarlo a una cookie `HttpOnly`.
+- (−) Con cookie hay que defenderse de CSRF (`SameSite=Strict` + cabecera personalizada; login CSRF residual) y, con HTTPS, activar `Secure` y HSTS. Un XSS ya no puede robar el token, aunque sí actuar con la sesión mientras dure.
 - (−) Un JWT no se puede invalidar antes de que caduque (salvo borrando al usuario); no hay «cerrar sesión en todos los dispositivos».

@@ -103,11 +103,6 @@ export interface User {
   createdAt: string;
 }
 
-/** Respuesta de `POST /api/auth/login`. */
-export interface LoginResponse {
-  token: string;
-}
-
 /** Cuerpo de `POST /api/users` (registro público; el servidor siempre crea rol `USER`). */
 export interface RegisterRequest {
   username: string;

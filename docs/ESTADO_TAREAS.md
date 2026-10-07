@@ -4,7 +4,7 @@ Archivo de reanudación: si la sesión se corta (sin tokens o sin conexión), l�
 
 ## Tarea en curso
 
-Ninguna. Esperando la siguiente petición.
+Tarea 29 (token en cookie HttpOnly): hecha en la rama `claude/project-thread-6wdzw2`, PR abierta. Backend 1166 (H2, sin Docker), Vitest 774, E2E 133 + 7 de `catalogo-mutable` pasan; fallan solo los 2 de `accessibility.spec.ts:189` (navegador del contenedor) y a veces el flake del aviso bajo el cursor (`admin.spec.ts:122`). Pendiente: tests `Postgres*` con Docker, revisión visual de «Comprobando tu sesión...», vida corta + refresh, HSTS.
 
 ## Colección de Postman y OpenAPI versionada (2026-10-07)
 

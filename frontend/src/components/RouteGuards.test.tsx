@@ -6,14 +6,27 @@
  * sesión no ve el formulario de login. `RequireAdmin` (preparada para el futuro
  * `/admin`) debe esperar al rol antes de decidir y fallar cerrado.
  *
- * `fetch` está simulado: `AuthProvider` pide `/users/me` en cuanto hay sesión
- * (`routeFetch` responde por defecto con un usuario normal).
+ * `fetch` está simulado: `AuthProvider` pide `/users/me` al arrancar para
+ * descubrir la sesión (`routeFetch` responde por defecto con un usuario normal si
+ * se renderiza con `session: true` y con 401 si no). Mientras ese chequeo está
+ * pendiente las rutas esperan: redirigir ya echaría al login a quien recarga con
+ * la sesión abierta.
  */
-import { act, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Route, Routes } from 'react-router-dom';
+import { Link, Route, Routes } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CURRENT_USER, errorResponse, jsonResponse, makeUser, renderWithProviders, routeFetch } from '../test/helpers';
+import {
+  CURRENT_USER,
+  errorResponse,
+  jsonResponse,
+  makeUser,
+  noContentResponse,
+  renderWithProviders,
+  routeFetch,
+} from '../test/helpers';
+import { apiFetch } from '../lib/api';
 import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './RouteGuards';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -58,59 +71,101 @@ function Routing() {
   );
 }
 
+/** Botón de prueba que hace una petición autenticada (para provocar un 401 con la app abierta). */
+function RequestButton() {
+  return (
+    <button type="button" onClick={() => void apiFetch('/movies').catch(() => undefined)}>
+      Pedir catálogo
+    </button>
+  );
+}
+
+/** Botón de prueba: inicia sesión con el contexto real (`login`). */
+function LoginButton() {
+  const { login } = useAuth();
+  return (
+    <button type="button" onClick={() => void login('ana@example.com', 'x').catch(() => undefined)}>
+      Entrar
+    </button>
+  );
+}
+
 describe('RequireAuth', () => {
-  it('sin sesión redirige a /login y no enseña el contenido privado', () => {
+  it('sin sesión (401 en el chequeo inicial) redirige a /login y no enseña el contenido privado', async () => {
     renderWithProviders(<Routing />, { route: '/' });
 
-    expect(screen.getByRole('heading', { name: 'Formulario de login' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Formulario de login' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Portada privada' })).not.toBeInTheDocument();
     expect(screen.getByText('ruta:/login')).toBeInTheDocument();
   });
 
-  it('con sesión muestra el contenido', () => {
-    renderWithProviders(<Routing />, { route: '/', token: 'jwt' });
+  it('mientras se comprueba la sesión espera: ni contenido privado ni redirección al login', () => {
+    routeFetch(fetchMock, { [CURRENT_USER]: () => new Promise<Response>(() => {}) });
 
-    expect(screen.getByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
+    renderWithProviders(<Routing />, { route: '/', session: true });
+
+    expect(screen.getByText('Comprobando tu sesión...').closest('[role="status"]')).not.toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Portada privada' })).not.toBeInTheDocument();
     expect(screen.getByText('ruta:/')).toBeInTheDocument();
   });
 
-  it('si la sesión se cierra mientras se está dentro (p. ej. en otra pestaña), expulsa al login', () => {
-    renderWithProviders(<Routing />, { route: '/', token: 'jwt' });
-    expect(screen.getByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
+  it('con sesión muestra el contenido', async () => {
+    renderWithProviders(<Routing />, { route: '/', session: true });
 
-    act(() => {
-      window.dispatchEvent(new StorageEvent('storage', { key: 'token', newValue: null }));
+    expect(await screen.findByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
+    expect(screen.getByText('ruta:/')).toBeInTheDocument();
+  });
+
+  it('si el chequeo inicial falla (500) no manda al login: avisa y «Reintentar» recupera la sesión', async () => {
+    routeFetch(fetchMock, { [CURRENT_USER]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom') });
+    const user = userEvent.setup();
+    renderWithProviders(<Routing />, { route: '/', session: true });
+
+    const title = await screen.findByRole('heading', { name: 'No se pudo comprobar tu sesión' });
+    expect(title.closest('[role="alert"]')).not.toBeNull();
+    expect(screen.getByText('ruta:/')).toBeInTheDocument();
+
+    routeFetch(fetchMock, { [CURRENT_USER]: () => jsonResponse(makeUser()) });
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }));
+
+    expect(await screen.findByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
+  });
+
+  it('si la sesión caduca mientras se está dentro (401 en una petición), expulsa al login', async () => {
+    renderWithProviders(
+      <>
+        <Routing />
+        <RequestButton />
+      </>,
+      { route: '/', session: true },
+    );
+    await screen.findByRole('heading', { name: 'Portada privada' });
+    routeFetch(fetchMock, {
+      'GET /api/movies': () => errorResponse(401, 'UNAUTHORIZED', 'No autenticado.'),
+      'POST /api/auth/logout': () => noContentResponse(),
     });
 
-    expect(screen.getByRole('heading', { name: 'Formulario de login' })).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Pedir catálogo' }));
+
+    expect(await screen.findByRole('heading', { name: 'Formulario de login' })).toBeInTheDocument();
     expect(screen.getByText('ruta:/login')).toBeInTheDocument();
   });
 });
 
 describe('RequireAdmin', () => {
-  it('sin sesión, RequireAuth manda al login antes de mirar el rol (no se pide /users/me)', () => {
+  it('sin sesión, RequireAuth manda al login antes de mirar el rol', async () => {
     renderWithProviders(<Routing />, { route: '/admin' });
 
-    expect(screen.getByText('ruta:/login')).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('mientras se carga el rol espera (sin redirigir ni enseñar el panel)', () => {
-    routeFetch(fetchMock, { [CURRENT_USER]: () => new Promise<Response>(() => {}) });
-
-    renderWithProviders(<Routing />, { route: '/admin', token: 'jwt' });
-
-    // Redirigir aquí echaría a un administrador real solo por recargar la página en /admin.
-    // Se busca por texto: la zona de avisos mantiene siempre otra región `role="status"` (vacía).
-    expect(screen.getByText('Comprobando permisos...').closest('[role="status"]')).not.toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Panel de administración' })).not.toBeInTheDocument();
-    expect(screen.getByText('ruta:/admin')).toBeInTheDocument();
+    expect(await screen.findByText('ruta:/login')).toBeInTheDocument();
+    // Solo se hizo el chequeo inicial de la sesión: nada del panel.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/users/me');
   });
 
   it('a un administrador le muestra el contenido cuando el servidor lo confirma', async () => {
     routeFetch(fetchMock, { [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })) });
 
-    renderWithProviders(<Routing />, { route: '/admin', token: 'jwt' });
+    renderWithProviders(<Routing />, { route: '/admin', session: true });
 
     expect(await screen.findByRole('heading', { name: 'Panel de administración' })).toBeInTheDocument();
     expect(screen.getByText('ruta:/admin')).toBeInTheDocument();
@@ -119,17 +174,35 @@ describe('RequireAdmin', () => {
   it('a un usuario normal lo redirige a la portada sin enseñarle el panel', async () => {
     routeFetch(fetchMock, { [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'USER' })) });
 
-    renderWithProviders(<Routing />, { route: '/admin', token: 'jwt' });
+    renderWithProviders(<Routing />, { route: '/admin', session: true });
 
     expect(await screen.findByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
     expect(screen.getByText('ruta:/')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Panel de administración' })).not.toBeInTheDocument();
   });
 
-  it('si no se puede comprobar el rol, falla cerrado (sin panel ni expulsión) y «Reintentar» lo resuelve', async () => {
-    routeFetch(fetchMock, { [CURRENT_USER]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom') });
+  it('si tras iniciar sesión no se pudo cargar el usuario, falla cerrado (sin panel ni expulsión) y «Reintentar» lo resuelve', async () => {
+    // Arranque sin sesión; el login sale bien pero `/users/me` falla: sesión abierta sin rol confirmado.
+    let loggedIn = false;
+    routeFetch(fetchMock, {
+      [CURRENT_USER]: () =>
+        loggedIn ? errorResponse(500, 'INTERNAL_ERROR', 'boom') : errorResponse(401, 'UNAUTHORIZED', 'No autenticado.'),
+      'POST /api/auth/login': () => {
+        loggedIn = true;
+        return noContentResponse();
+      },
+    });
     const user = userEvent.setup();
-    renderWithProviders(<Routing />, { route: '/admin', token: 'jwt' });
+    renderWithProviders(
+      <>
+        <Routing />
+        <><LoginButton /><Link to="/admin">Ir al panel</Link></>
+      </>,
+      { route: '/login' },
+    );
+    await user.click(await screen.findByRole('button', { name: 'Entrar' }));
+    await screen.findByRole('heading', { name: 'Portada privada' });
+    await user.click(screen.getByRole('link', { name: 'Ir al panel' }));
 
     const title = await screen.findByRole('heading', { name: 'No se pudo comprobar tu cuenta' });
     expect(title.closest('[role="alert"]')).not.toBeNull();
@@ -144,27 +217,47 @@ describe('RequireAdmin', () => {
 });
 
 describe('RedirectIfAuthenticated', () => {
-  it('sin sesión muestra la pantalla pública', () => {
+  it('sin sesión muestra la pantalla pública', async () => {
     renderWithProviders(<Routing />, { route: '/login' });
 
-    expect(screen.getByRole('heading', { name: 'Formulario de login' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Formulario de login' })).toBeInTheDocument();
   });
 
-  it('con sesión en /login redirige a la portada', () => {
-    renderWithProviders(<Routing />, { route: '/login', token: 'jwt' });
+  it('mientras se comprueba la sesión no parpadea el formulario de login', () => {
+    routeFetch(fetchMock, { [CURRENT_USER]: () => new Promise<Response>(() => {}) });
 
-    expect(screen.getByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
+    renderWithProviders(<Routing />, { route: '/login', session: true });
+
+    expect(screen.queryByRole('heading', { name: 'Formulario de login' })).not.toBeInTheDocument();
+    expect(screen.getByText('Comprobando tu sesión...')).toBeInTheDocument();
+  });
+
+  it('con sesión en /login redirige a la portada', async () => {
+    renderWithProviders(<Routing />, { route: '/login', session: true });
+
+    expect(await screen.findByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Formulario de login' })).not.toBeInTheDocument();
     expect(screen.getByText('ruta:/')).toBeInTheDocument();
   });
 
-  it('al iniciar sesión estando en /login pasa solo a la portada (como hace LoginPage con login())', () => {
-    renderWithProviders(<Routing />, { route: '/login' });
-
-    act(() => {
-      window.dispatchEvent(new StorageEvent('storage', { key: 'token', newValue: 'otro-token' }));
+  it('al iniciar sesión estando en /login pasa solo a la portada (como hace LoginPage con login())', async () => {
+    routeFetch(fetchMock, { 'POST /api/auth/login': () => noContentResponse() });
+    renderWithProviders(
+      <>
+        <Routing />
+        <LoginButton />
+      </>,
+      { route: '/login' },
+    );
+    await screen.findByRole('heading', { name: 'Formulario de login' });
+    // `/users/me` ya existe en el servidor simulado para el usuario que se acaba de identificar.
+    routeFetch(fetchMock, {
+      'POST /api/auth/login': () => noContentResponse(),
+      [CURRENT_USER]: () => jsonResponse(makeUser()),
     });
 
-    expect(screen.getByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Entrar' }));
+
+    expect(await screen.findByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
   });
 });

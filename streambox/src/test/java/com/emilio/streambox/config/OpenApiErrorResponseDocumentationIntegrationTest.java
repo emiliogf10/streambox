@@ -167,7 +167,9 @@ class OpenApiErrorResponseDocumentationIntegrationTest {
     void lasRespuestasCorrectasConservanSuTipoYLos204SiguenSinCuerpo() throws Exception {
         JsonNode paths = apiDocs().path("paths");
 
-        assertEquals("#/components/schemas/LoginResponse", schemaRef(paths, "/api/auth/login", "post", "200"));
+        assertTrue(paths.at("/~1api~1auth~1login/post/responses/204").isObject());
+        assertTrue(paths.at("/~1api~1auth~1login/post/responses/204/content").isMissingNode());
+        assertTrue(paths.at("/~1api~1auth~1login/post/responses/200").isMissingNode());
         assertEquals("#/components/schemas/UserResponse", schemaRef(paths, "/api/users", "post", "201"));
         assertEquals("#/components/schemas/MovieResponse", schemaRef(paths, "/api/movies/{id}", "get", "200"));
         assertEquals("#/components/schemas/MoviePageResponse", schemaRef(paths, "/api/movies", "get", "200"));

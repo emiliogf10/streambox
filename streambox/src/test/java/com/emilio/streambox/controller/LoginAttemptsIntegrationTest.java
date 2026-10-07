@@ -126,8 +126,9 @@ class LoginAttemptsIntegrationTest {
         failTimes("att3@test.com", 2);
 
         login("att3@test.com", PASSWORD)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").isNotEmpty());
+                .andExpect(status().isNoContent())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .cookie().exists("streambox_token"));
     }
 
     @Test
@@ -135,7 +136,7 @@ class LoginAttemptsIntegrationTest {
         createUser("att4");
         login("att4@test.com", "mal").andExpect(jsonPath("$.remainingAttempts").value(2));
         login("att4@test.com", "mal").andExpect(jsonPath("$.remainingAttempts").value(1));
-        login("att4@test.com", PASSWORD).andExpect(status().isOk());
+        login("att4@test.com", PASSWORD).andExpect(status().isNoContent());
 
         login("att4@test.com", "mal")
                 .andExpect(status().isUnauthorized())
@@ -166,7 +167,7 @@ class LoginAttemptsIntegrationTest {
         login("att9@test.com", "mal")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.remainingAttempts").value(1));
-        login("att9@test.com", PASSWORD).andExpect(status().isOk());
+        login("att9@test.com", PASSWORD).andExpect(status().isNoContent());
     }
 
     @Test

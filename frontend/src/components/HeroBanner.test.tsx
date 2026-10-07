@@ -28,7 +28,7 @@ function renderBanner(movie: Movie, onDetails = vi.fn()) {
     <FavoritesProvider>
       <HeroBanner movie={movie} onDetails={onDetails} />
     </FavoritesProvider>,
-    { token: 'jwt' },
+    { session: true },
   );
   return screen.getByRole('region', { name: movie.title });
 }
