@@ -22,7 +22,7 @@
 # construya igual hoy que dentro de seis meses. Se usa Maven directamente en
 # lugar de ./mvnw porque la imagen ya lo trae: el wrapper solo serviría para
 # descargar otra vez la misma versión.
-FROM maven:3.9.16-eclipse-temurin-21 AS build
+FROM maven:3.9-eclipse-temurin-26 AS build
 
 WORKDIR /build
 
