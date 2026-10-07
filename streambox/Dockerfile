@@ -17,11 +17,11 @@
 
 
 # ---------- Etapa 1: compilación ----------------------------------------
-# Imagen oficial de Maven con Temurin 21. Versión fijada (3.9.16, la misma
-# que declara .mvn/wrapper/maven-wrapper.properties) para que la imagen se
-# construya igual hoy que dentro de seis meses. Se usa Maven directamente en
-# lugar de ./mvnw porque la imagen ya lo trae: el wrapper solo serviría para
-# descargar otra vez la misma versión.
+# Imagen oficial de Maven 3.9 con Temurin 26 (Dependabot la subió desde la
+# 21). El código se compila con `release 21` (propiedad java.version del
+# pom.xml), así que el bytecode es de Java 21 y la etapa de ejecución usa un
+# JRE 21. Se usa el Maven de la imagen en lugar de ./mvnw (el wrapper apunta
+# a otra versión, y descargarla otra vez no aporta nada dentro de Docker).
 FROM maven:3.9-eclipse-temurin-26 AS build
 
 WORKDIR /build
