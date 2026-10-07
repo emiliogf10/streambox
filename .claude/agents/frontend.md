@@ -22,14 +22,14 @@ Si la app del backend no está en marcha en el puerto 8080, díselo al principal
 
 ## Estado actual del código (verifícalo en `frontend/src/`)
 
-La Fase 3 del plan está hecha. Estructura: `src/pages/` (Home, Login, Register, MyList), `src/components/` (Navbar, SearchBar, Modal, ConfirmDialog, MoviePoster, Toast, botones, estados cargando/vacío/error...), `src/context/` (`AuthContext`, `ToastContext`, `FavoritesContext`), `src/hooks/` (`useCatalog`, `useModalDialog`...), `src/lib/` (`api.ts`, `types.ts`, `utils.ts`, `catalog.ts`, `validation.ts`). **Reutiliza lo que ya existe antes de crear algo nuevo.**
+La Fase 3 del plan está hecha. Estructura: `src/pages/` (Home, Películas, Series, SeriesDetail, MyList, Profile, Login, Register y `admin/`), `src/components/` (Navbar, SearchBar, Modal, ConfirmDialog, MoviePoster, Toast, botones, estados cargando/vacío/error...), `src/context/` (`AuthContext`, `ToastContext`, `FavoritesContext`), `src/hooks/` (`useCatalog`, `useModalDialog`...), `src/lib/` (`api.ts`, `types.ts`, `utils.ts`, `catalog.ts`, `validation.ts`). **Reutiliza lo que ya existe antes de crear algo nuevo.**
 
-Reglas ya vigentes que no debes romper: todas las llamadas pasan por `apiFetch`/`ApiError` (`lib/api.ts`), el token solo lo toca `AuthContext`, cero `style={{}}` (clases de Tailwind y tokens `@theme` de `index.css`), foco visible con `focus-ring`, imágenes siempre desde `movie.imageUrl` con `MoviePoster`, URLs de la API validadas con `getSafeVideoUrl`, y el catálogo se pide con `sort=createdAt&direction=desc`. Tests: Vitest + Testing Library (`npm run test`, `*.test.ts(x)` junto al código, utilidades en `src/test/`) y Playwright (`npm run test:e2e`, en `e2e/`, con backend propio en el 8099 y Vite en el 5199: nunca uses el 8080/5173 del usuario). Todo cambio de comportamiento lleva test y se verifica con `npm run build`, `npx oxlint src` y `npm run test`. `npm run lint` pasa con código 0 en todo el proyecto: mantenlo así.
+Reglas ya vigentes que no debes romper: todas las llamadas pasan por `apiFetch`/`ApiError` (`lib/api.ts`), el JWT no existe para JavaScript (va en la cookie HttpOnly `streambox_token`; nunca lo guardes en `localStorage`) y la sesión la descubre `AuthContext` con `GET /api/users/me`, cero `style={{}}` (clases de Tailwind y tokens `@theme` de `index.css`), foco visible con `focus-ring`, imágenes siempre desde `movie.imageUrl` con `MoviePoster`, URLs de la API validadas con `getSafeVideoUrl`, y el catálogo se pide con `sort=createdAt&direction=desc`. Tests: Vitest + Testing Library (`npm run test`, `*.test.ts(x)` junto al código, utilidades en `src/test/`) y Playwright (`npm run test:e2e`, en `e2e/`, con backend propio en el 8099 y Vite en el 5199: nunca uses el 8080/5173 del usuario). Todo cambio de comportamiento lleva test y se verifica con `npm run build`, `npx oxlint src` y `npm run test`. `npm run lint` pasa con código 0 en todo el proyecto: mantenlo así.
 
 ## Contrato de la API (verifícalo en los controladores o en Swagger `/swagger-ui.html`)
 
-- Base `/api`. Autenticación `Authorization: Bearer <token>`.
-- Público: `POST /api/auth/login` (`{email, password}` → `{token}`) y `POST /api/users` (`{username, email, password}` → usuario, siempre rol `USER`).
+- Base `/api`. Autenticación por cookie HttpOnly `streambox_token`: `apiFetch` manda `credentials: 'same-origin'` y `X-Requested-With: StreamBox` en las peticiones no seguras (sin ella, 403 `CSRF_REJECTED`).
+- Público: `POST /api/auth/login` (`{email, password}` → 204 sin cuerpo y `Set-Cookie`), `POST /api/auth/logout` (204, borra la cookie) y `POST /api/users` (`{username, email, password}` → usuario, siempre rol `USER`).
 - Autenticado: `GET /api/users/me`, `GET /api/movies?page&size&sort`, `GET /api/movies/{id}`, `GET /api/movies/search?title&genreId&releaseYear&page&size&sort`, `GET /api/genres`, y la lista: `GET /api/users/me/favorites`, `POST|DELETE /api/users/me/favorites/{movieId}`, `DELETE /api/users/me/favorites`.
 - Paginación: `{content, page, size, totalElements, totalPages, hasNext, hasPrevious}`; `size` 1–100; `sort` solo `id|title|releaseYear|duration|createdAt`.
 - Película: `{id, title, description, duration, releaseYear, imageUrl, videoUrl, createdAt, genres:[{id,name}]}` (géneros ordenados por nombre; `createdAt` es un instante ISO en UTC).
@@ -37,7 +37,7 @@ Reglas ya vigentes que no debes romper: todas las llamadas pasan por `apiFetch`/
   - **401** = sin token válido → limpiar sesión y llevar al login. **403** = autenticado sin permisos: **no** cerrar sesión.
   - **429** = demasiados intentos (login/registro/cuenta bloqueada): leer la cabecera `Retry-After` (segundos) y mostrar "inténtalo de nuevo en N s".
   - **409** en favoritos = ya estaba en la lista; **404** al quitar = no estaba. Nunca asumas éxito sin comprobar `res.ok`.
-- No hay endpoints de administración en la UI todavía (admin: crear/editar/borrar películas y géneros existe en la API).
+- Series (`/api/series...`, favoritos de series) y administración (`/api/admin/series`, altas/ediciones/borrados de películas, géneros, series y episodios solo `ADMIN`) existen en la API y en la UI (`pages/admin/`). Consulta Swagger o `docs/api/openapi.yaml` para el contrato completo.
 
 ## Reglas de trabajo
 

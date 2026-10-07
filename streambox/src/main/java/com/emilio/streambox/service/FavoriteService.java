@@ -182,8 +182,10 @@ public class FavoriteService {
      *       sino un recurso inexistente: 404. Devolver 409 "ya está en favoritos"
      *       sería un mensaje falso.</li>
      *   <li>Cualquier otra violación (nulos, longitudes...) no se disfraza: se
-     *       relanza tal cual para que acabe en un 500 genérico y quede en el
-     *       log, porque indicaría un fallo de programación.</li>
+     *       relanza tal cual: {@code GlobalExceptionHandler} la convierte en un
+     *       409 {@code DATA_INTEGRITY_VIOLATION} con un mensaje genérico (sin
+     *       revelar el detalle del motor), porque indicaría un fallo de
+     *       programación.</li>
      * </ul>
      *
      * @param error excepción lanzada por el repositorio
