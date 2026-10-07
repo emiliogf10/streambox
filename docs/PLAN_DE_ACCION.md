@@ -161,7 +161,7 @@ Un agente ya revisó capturas a 375/768/1280 px (a 768 px el navbar con "Pelícu
 
 | # | Tarea | Prior. | Dif. | Archivos | Depende de |
 |---|---|---|---|---|---|
-| 28 | Documentación: ~~arquitectura, tabla de errores~~ (hechas en `docs/MANUAL_PROGRAMADOR.md`, 2026-10-02: recorrido de una petición, arranque, configuración, Flyway, JPA, N+1, seguridad, errores, frontend, tests y recetas; mantenerlo al día al cambiar el código); pendiente: ADRs; revisar README (codificación rota, árbol de carpetas) (`frontend/README.md` ya se reescribió en la tarea 25) | Media | BAJA | `README.md`, `frontend/README.md`, `docs/` | resto |
+| 28 | Documentación: ~~arquitectura, tabla de errores~~ (hechas en `docs/MANUAL_PROGRAMADOR.md`, 2026-10-02: recorrido de una petición, arranque, configuración, Flyway, JPA, N+1, seguridad, errores, frontend, tests y recetas; mantenerlo al día al cambiar el código); **ADRs hechos (2026-10-07)**: 10 decisiones en `docs/adr/` (backend, frontend, Flyway, JWT, `/me`, rate limiting, favoritos, series, tests y Docker); **README revisado**: título, árbol de carpetas corregido (estaba descuadrado), stack, cómo arrancar backend y frontend y enlace a los ADR (`frontend/README.md` ya se reescribió en la tarea 25). La codificación del README estaba bien (UTF-8) | Media | BAJA | `README.md`, `frontend/README.md`, `docs/` | resto |
 | 29 | **Adelantada en parte (2026-10-06): la CSP y las cabeceras de seguridad ya están en nginx (tarea 27). Queda:** token en cookie HttpOnly + vida corta + refresh, y HSTS cuando haya HTTPS. Texto original: token en el cliente: cookie HttpOnly o CSP + vida corta + refresh (I4, S4). El frontend ya concentra el token en `AuthContext` y `lib/api.ts`, así que el cambio queda localizado. **CSP y cabeceras** (no existen; el frontend no se sirve aún desde ningún servidor): `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`, como cabecera HTTP (no `<meta>`; no aplicar en dev por el preámbulo inline de Vite) + `Referrer-Policy`, `X-Content-Type-Options`, HSTS en el servidor que sirva `dist/` | Media | MEDIA | `SecurityConfig`, `api.ts`, `AuthContext`, servidor del `dist/` | 15 ✅ |
 
 ---
@@ -228,4 +228,4 @@ Un agente ya revisó capturas a 375/768/1280 px (a 768 px el navbar con "Pelícu
 
 1. **Revisión visual humana** (panel de administración, series, películas) y **primer push** para ver el CI en verde en GitHub.
 2. **29** (lo que queda: token en cookie HttpOnly + vida corta + refresh; HSTS cuando haya HTTPS).
-3. **28** (documentación: ADRs y revisar el README).
+3. ~~**28** (documentación: ADRs y revisar el README)~~ hecha.

@@ -1,4 +1,4 @@
-# 🎬 StreamBox — Backend API
+# 🎬 StreamBox
 
 [![CI](https://github.com/emiliogf10/streambox/actions/workflows/ci.yml/badge.svg)](https://github.com/emiliogf10/streambox/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/Docker-compose-2496ED.svg?logo=docker)](#-arrancar-con-docker-recomendado)
@@ -8,7 +8,7 @@
 [![JWT](https://img.shields.io/badge/JWT-JJWT%200.12.6-black.svg?logo=jsonwebtokens)](https://github.com/jwtk/jjwt)
 [![OpenAPI](https://img.shields.io/badge/Swagger-OpenAPI%203-green.svg?logo=swagger)](https://swagger.io/)
 
-**StreamBox** es una API RESTful desarrollada con **Java 21** y **Spring Boot 4** para una plataforma de streaming y vídeo bajo demanda (OTT) al estilo Netflix. Proporciona una arquitectura modular y segura para gestionar usuarios, catálogo cinematográfico, búsquedas avanzadas con especificaciones dinámicas y listas personalizadas de favoritos ("Mi Lista").
+**StreamBox** es una plataforma de streaming y vídeo bajo demanda (OTT) al estilo Netflix: una API RESTful en **Java 21** y **Spring Boot 4** más una SPA en **React**. Ofrece una arquitectura modular y segura para gestionar usuarios, catálogo cinematográfico, búsquedas avanzadas con especificaciones dinámicas y listas personalizadas de favoritos ("Mi Lista").
 
 ---
 
@@ -53,8 +53,8 @@
 | **Lenguaje Backend** | Java 21 LTS |
 | **Framework** | Spring Boot 4.1.0 |
 | **Módulos Spring** | Spring WebMVC, Spring Data JPA, Spring Security, Spring Validation |
-| **Persistencia** | PostgreSQL (producción/local), Hibernate ORM |
-| **Testing** | JUnit 5, MockMvc, `@SpringBootTest`, H2 Database (en memoria) |
+| **Persistencia** | PostgreSQL (producción/local), Hibernate ORM, **Flyway** (migraciones) |
+| **Testing** | JUnit 5, MockMvc, `@SpringBootTest`, H2 (en memoria), Testcontainers (PostgreSQL real); Vitest y Playwright en el frontend |
 | **Seguridad** | JJWT (0.12.6), BCryptPasswordEncoder |
 | **Documentación** | SpringDoc OpenAPI Starter WebMVC UI 3.1.0 |
 | **Productividad** | Lombok |
@@ -66,22 +66,28 @@
 
 > 📘 **Explicación detallada de cómo funciona todo por dentro** (recorrido de una petición, seguridad JWT, rate limiting, Flyway, transacciones y N+1, gestión de errores, frontend y tests): [docs/MANUAL_PROGRAMADOR.md](docs/MANUAL_PROGRAMADOR.md).
 
-El backend sigue una arquitectura limpia orientada por capas bajo el paquete base `com.emilio.streambox`:
+> 🧭 **Por qué está hecho así:** las decisiones de arquitectura (Spring Boot + Maven, SPA con Vite, Flyway, JWT, rate limiting, series, tests, Docker) están razonadas en los [ADR de `docs/adr/`](docs/adr/README.md).
+
+El repositorio tiene dos proyectos independientes y la documentación:
 
 ```
-streambox/
-├── frontend/          # SPA React + Vite + Tailwind CSS (Interfaz OTT)
-└── streambox/         # Backend Spring Boot
-    ├── controller/    # Controladores REST (/api/...) y contratos HTTP
-    ├── dto/           # Objetos de transferencia de datos (Requests y Responses)
-├── mapper/            # Mapeadores manuales puros con métodos estáticos
-├── service/           # Lógica de negocio y transaccionalidad (@Transactional)
-├── repository/        # Repositorios JPA y JpaSpecificationExecutor
-├── entity/            # Entidades de dominio mapeadas a PostgreSQL
-├── specification/     # Filtros dinámicos de consulta (MovieSpecification)
-├── security/          # Filtros JWT, SecurityConfig y UserDetailsService
-├── exception/         # Excepciones de dominio y GlobalExceptionHandler
-└── config/            # Configuraciones adicionales de la aplicación
+streambox/                 # raíz del repositorio
+├── streambox/             # Backend Spring Boot (Maven, paquete base com.emilio.streambox)
+│   └── src/main/java/com/emilio/streambox/
+│       ├── controller/    # Controladores REST (/api/...) y contratos HTTP
+│       ├── dto/           # Objetos de transferencia de datos (Requests y Responses)
+│       ├── mapper/        # Mapeadores manuales con métodos estáticos
+│       ├── service/       # Lógica de negocio y transaccionalidad (@Transactional)
+│       ├── repository/    # Repositorios JPA y consultas
+│       ├── entity/        # Entidades de dominio mapeadas a PostgreSQL
+│       ├── specification/ # Filtros dinámicos de consulta (películas y series)
+│       ├── security/      # Filtros JWT, SecurityConfig, rate limiting y contraseñas
+│       ├── exception/     # Excepciones de dominio y GlobalExceptionHandler
+│       └── config/        # Configuración de OpenAPI
+├── frontend/              # SPA React + Vite + Tailwind CSS (Interfaz OTT)
+├── docs/                  # Manual del programador, plan de acción, ADR y scripts SQL
+├── docker-compose.yml     # db + backend + frontend (nginx)
+└── .github/               # CI (GitHub Actions) y Dependabot
 ```
 
 ---
@@ -214,7 +220,7 @@ Configura las siguientes variables de entorno en tu sistema o en tu IDE:
 
 El esquema lo gestiona **Flyway** (`streambox/src/main/resources/db/migration`). Al arrancar se aplican las migraciones pendientes y Hibernate solo **valida** que las entidades coinciden con las tablas (`ddl-auto=validate`).
 
-- Para cambiar el modelo: modifica la entidad **y** añade una migración nueva (`V2__descripcion.sql`). Nunca edites una migración ya aplicada: Flyway lo detecta y no arranca.
+- Para cambiar el modelo: modifica la entidad **y** añade una migración nueva (`V<N+1>__descripcion.sql`, hoy la última es `V3`). Nunca edites una migración ya aplicada: Flyway lo detecta y no arranca.
 - Una base de datos creada antes de Flyway (con `ddl-auto=update`) se adopta automáticamente: `V1` es idempotente.
 - Para crear el primer administrador define `ADMIN_EMAIL` y `ADMIN_PASSWORD` (el registro público siempre crea usuarios `USER`).
 
@@ -280,25 +286,26 @@ npm run test:e2e   # Playwright: flujos completos en un navegador real (Chromium
 - Para generar capturas de pantalla (375, 768 y 1280 px) y revisarlas a ojo: `E2E_SCREENSHOTS_DIR=<carpeta> npx playwright test capturas` (en PowerShell: `$env:E2E_SCREENSHOTS_DIR='C:\temp\screens'; npx playwright test capturas`).
 - Nota técnica: `spring-boot:run -Dspring-boot.run.useTestClasspath=true` añade las dependencias de test (H2) pero **no** carga `application-test.properties`; por eso el E2E configura todo por variables de entorno.
 
-Iniciar el servidor de desarrollo:
+Iniciar el servidor de desarrollo (necesita `JWT_SECRET` y la conexión a la base de datos de `application-local.properties`, ver arriba):
 ```bash
-# Windows
+# Windows (PowerShell)
+$env:JWT_SECRET = "<texto de al menos 32 caracteres>"
 .\mvnw.cmd spring-boot:run
 
 # Linux / macOS
-./mvnw spring-boot:run
+JWT_SECRET="<texto de al menos 32 caracteres>" ./mvnw spring-boot:run
 ```
 
 Una vez levantada la aplicación, la API estará disponible en `http://localhost:8080`.
 
 ### Ejecución del Frontend (React + Vite)
-En una nueva terminal, sitúate en el directorio `frontend/`:
+Requiere **Node.js 24** (la versión del CI) y el backend arrancado en el 8080. En una nueva terminal, sitúate en el directorio `frontend/`:
 ```bash
 cd frontend
-npm install
+npm install   # solo la primera vez (o en CI: npm ci)
 npm run dev
 ```
-La aplicación web estará disponible en `http://localhost:5173` (con el backend en el 8080). Otros comandos: `npm run build` (comprobación de tipos + empaquetado) y `npx oxlint src` (lint).
+La aplicación web estará disponible en `http://localhost:5173`; Vite reenvía `/api` al backend en `localhost:8080`, por eso no hace falta configurar CORS. Otros comandos: `npm run build` (comprobación de tipos + empaquetado), `npm run lint` (oxlint), `npm run test` (Vitest) y `npm run test:e2e` (Playwright).
 
 Estructura de `frontend/src/`: `pages/` (Home, Películas, Series, Mi lista, Perfil, Login, Registro y `admin/`), `components/`, `context/` (sesión, avisos, favoritos), `hooks/`, `lib/` (cliente de API, tipos, utilidades). Las portadas de ejemplo están en `public/covers/`; para que las películas de tu base de datos las usen, ejecuta a mano el script opcional `docs/portadas-locales.sql` (explicado en su cabecera).
 
