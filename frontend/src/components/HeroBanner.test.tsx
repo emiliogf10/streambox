@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FavoritesProvider } from '../context/FavoritesContext';
 import { jsonResponse, makeMovie, renderWithProviders, routeFetch } from '../test/helpers';
 import type { Movie } from '../lib/types';
+import { BANNER_GRID_CLASS } from './bannerGridStyles';
 import { HeroBanner } from './HeroBanner';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -79,11 +80,21 @@ describe('HeroBanner', () => {
 
     const badge = within(banner).getByText('Estreno reciente');
     const dataList = within(banner).getByRole('list', { name: 'Datos de la película' });
-    // Comparten contenedor (la misma fila de datos)...
-    expect(badge.parentElement).toContainElement(dataList);
+    // Es el primer elemento de la MISMA lista de datos (así comparte fila con el año en 375 px, en vez de
+    // quedarse sola en una línea porque la lista entera no cabía a su lado)...
+    expect(badge.tagName).toBe('LI');
+    expect(badge.parentElement).toBe(dataList);
+    expect(dataList.firstElementChild).toBe(badge);
     // ...y el título va ANTES en el orden de lectura: lo primero que oye un lector de pantalla es la película.
     const heading = within(banner).getByRole('heading', { level: 2, name: 'Arrival' });
     expect(heading.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('su rejilla interior es la constante compartida con el esqueleto de carga', () => {
+    const banner = renderBanner(makeMovie({ id: 9, title: 'Arrival' }));
+
+    const grid = banner.querySelector('section > div:not([aria-hidden])');
+    expect(grid).toHaveClass(...BANNER_GRID_CLASS.split(' '));
   });
 
   it('las tres acciones tienen jerarquía: «Más información» es terciaria (sin borde) y las otras no', () => {

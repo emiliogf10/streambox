@@ -4,6 +4,7 @@
  */
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { BANNER_GRID_CLASS } from './bannerGridStyles';
 import { CatalogSkeleton } from './CatalogSkeleton';
 
 describe('CatalogSkeleton', () => {
@@ -20,5 +21,12 @@ describe('CatalogSkeleton', () => {
     const shapes = screen.getByRole('status').querySelector('[aria-hidden="true"]');
     expect(shapes).not.toBeNull();
     expect(shapes).toHaveClass('animate-pulse', 'motion-reduce:animate-none');
+  });
+
+  it('la silueta del banner usa la MISMA rejilla que el banner real (constante compartida)', () => {
+    render(<CatalogSkeleton />);
+
+    const grid = screen.getByRole('status').querySelector('[aria-hidden="true"] > div');
+    expect(grid).toHaveClass(...BANNER_GRID_CLASS.split(' '));
   });
 });

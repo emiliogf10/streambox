@@ -48,6 +48,16 @@ describe('PosterCard', () => {
   });
 });
 
+describe('PosterCard: movimiento reducido', () => {
+  it('el zoom de la imagen y el hundido al pulsar se desactivan con `prefers-reduced-motion`', () => {
+    render(<PosterCard title="A" imageUrl="https://img.example/a.webp" meta="m" onClick={() => {}} />);
+
+    const card = screen.getByRole('button');
+    expect(card).toHaveClass('active:scale-98', 'motion-reduce:active:scale-100');
+    expect(card.querySelector('img')).toHaveClass('group-hover:scale-105', 'motion-reduce:group-hover:scale-100');
+  });
+});
+
 describe('MovieCard y SeriesCard', () => {
   it('MovieCard: año y duración, y pulsar entrega la película', async () => {
     const movie = makeMovie({ id: 5, title: 'Arrival', releaseYear: 2016, duration: 116 });

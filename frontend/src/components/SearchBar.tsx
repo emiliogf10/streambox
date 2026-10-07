@@ -261,7 +261,7 @@ export function SearchBar() {
       <label htmlFor={inputId} className="sr-only">
         Buscar películas y series por título
       </label>
-      <div className="flex min-h-11 items-center gap-2 rounded-full border border-line bg-surface-raised px-4 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent">
+      <div className="flex min-h-11 items-center gap-2 rounded-full border border-field-border bg-surface-raised px-4 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent">
         <Search aria-hidden="true" className="size-4 shrink-0 text-muted" />
         <input
           id={inputId}

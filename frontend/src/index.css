@@ -18,7 +18,11 @@
  * COMPONENTE, no de texto: WCAG 1.4.11 pide 3:1 entre el borde que delimita un
  * control y lo que lo rodea. El borde anterior (`white/15`) daba 1.47:1 sobre
  * canvas: el campo solo se adivinaba por la etiqueta.
- *   field-border sobre canvas 3.90 · sobre surface 3.55
+ *   field-border sobre canvas 3.90 · sobre surface 3.55 · sobre surface-raised 3.33
+ * También lo usa el contorno del buscador de la barra (`SearchBar`, relleno
+ * `surface-raised` sobre la barra `canvas`): el borde anterior (`line`, blanco
+ * al 10 %) daba ≈1.2:1 y el campo se perdía; ahora 3.90 hacia fuera y 3.33
+ * hacia dentro, ambos por encima del 3:1 de WCAG 1.4.11.
  * Texto seleccionado (`::selection`, blanco sobre accent al 35 % encima de
  * canvas, ≈ #5a431a): 9.33.
  */
@@ -75,7 +79,7 @@
    * porque el usuario está esperando el contenido. `@starting-style` define el
    * estado "antes de aparecer" sin JavaScript; los navegadores que no lo
    * entienden simplemente lo muestran sin animación. Con `prefers-reduced-motion`
-   * la regla global de abajo deja la duración a ~0 ms.
+   * la regla de abajo conserva el fundido y quita el crecimiento.
    */
   dialog[open] {
     opacity: 1;
@@ -141,10 +145,21 @@
 }
 
 /*
- * Respeta `prefers-reduced-motion`: quien lo activa en su sistema (mareos,
- * trastornos vestibulares) no ve transiciones ni animaciones decorativas. Se
- * dejan a ~0 ms en lugar de quitarlas del todo para que los eventos
- * `transitionend`/`animationend` sigan disparándose.
+ * Respeta `prefers-reduced-motion` (mareos, trastornos vestibulares), pero solo
+ * quita lo que MUEVE: desplazamientos, escalados y animaciones continuas. Los
+ * fundidos de opacidad y de color se conservan: no producen sensación de
+ * movimiento y avisan de que algo apareció o cambió (WCAG 2.3.3 habla de
+ * animación de movimiento; la auditoría de diseño lo recomendó así). Antes la
+ * regla ponía TODA transición a ~0 ms, de modo que los diálogos y los avisos
+ * aparecían de golpe.
+ *
+ * Cada efecto de movimiento se desactiva donde se declara, con la variante
+ * `motion-reduce:` de Tailwind (`active:scale-*` de botones y tarjetas, el zoom
+ * de `PosterCard`, el desplazamiento de `Toast`, `animate-pulse`/`animate-spin`)
+ * y, para el `<dialog>`, en el bloque de abajo. Aquí solo quedan las animaciones
+ * sueltas (`@keyframes`) y el desplazamiento suave de la página, que no tienen
+ * otro sitio donde declararse. Se dejan a ~0 ms en lugar de quitarlas para que
+ * `animationend` siga disparándose.
  */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -152,8 +167,17 @@
   ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /* El diálogo sigue apareciendo con un fundido, pero sin crecer del 96 % al 100 %. */
+  dialog[open] {
+    transition: opacity 200ms var(--ease-out-strong);
+
+    @starting-style {
+      opacity: 0;
+      scale: 1;
+    }
   }
 }
 
