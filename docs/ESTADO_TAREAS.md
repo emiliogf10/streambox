@@ -6,7 +6,11 @@ Archivo de reanudación: si la sesión se corta (sin tokens o sin conexión), l�
 
 Ninguna. Esperando la siguiente petición.
 
-## Última tarea terminada: «Revisión de diseño con las skills» (2026-10-07)
+## Tarea 28 terminada: ADRs y revisión del README (2026-10-07)
+
+Solo documentación (sin cambios de código; no se ejecutaron tests). Hecho: `docs/adr/` con un índice y 10 ADR (0001 backend, 0002 frontend, 0003 Flyway, 0004 JWT, 0005 `/me`, 0006 rate limiting, 0007 favoritos, 0008 series, 0009 tests, 0010 Docker/nginx); README con título, árbol de carpetas corregido, stack actualizado, pasos para arrancar backend (`JWT_SECRET`) y frontend (Node 24, proxy) y enlace a los ADR. Plan actualizado (fila 28 y orden de trabajo). Pendiente del autor: leer los ADR y corregir lo que no refleje sus motivos reales (los ADR se redactaron a partir del código y del manual).
+
+## Tarea anterior: «Revisión de diseño con las skills» (2026-10-07)
 
 Resultado completo en `docs/PLAN_DE_ACCION.md`, apartado «Segunda revisión de diseño (2026-10-07)». Resumen:
 
