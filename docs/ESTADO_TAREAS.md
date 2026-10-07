@@ -16,8 +16,8 @@ Archivo de reanudación: si la sesión se corta (sin tokens o sin conexión), l�
 |---|---|---|
 | 1 | Crear este archivo de estado | ✅ |
 | 2 | Preparar entorno del frontend (`npm ci`, Chromium de Playwright) y medir la línea base (build, lint, Vitest, E2E) | ✅ build ✅, lint exit 0, Vitest 772/772, E2E 134 pasan + 24 omitidos (capturas) + **2 fallan** (ver notas) |
-| 3 | Auditoría con las skills de las páginas nuevas (series, detalle de serie, admin, perfil) y de las modificadas | ⬜ |
-| 4 | Aplicar mejoras: movimiento reducido, contorno del buscador (3:1), constante de rejilla compartida (`CatalogSkeleton`/banner), «Estreno reciente» en 375 px, hallazgos de la auditoría | ⬜ |
+| 3 | Auditoría con las skills de las páginas nuevas (series, detalle de serie, admin, perfil) y de las modificadas | 🔄 delegada al agente `frontend` (junto con el paso 4) |
+| 4 | Aplicar mejoras (delegado al agente `frontend`; incluye el fallo de línea base de WCAG 2.4.11): movimiento reducido, contorno del buscador (3:1), constante de rejilla compartida (`CatalogSkeleton`/banner), «Estreno reciente» en 375 px, hallazgos de la auditoría | ⬜ |
 | 5 | Verificación completa (build, lint, Vitest, E2E) y recuento de tests | ⬜ |
 | 6 | Actualizar docs (plan, manual cap. 20, CLAUDE.md si cambian cifras, READMEs) y borrar lo obsoleto | ⬜ |
 | 7 | Informe final | ⬜ |
