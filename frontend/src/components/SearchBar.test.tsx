@@ -75,7 +75,7 @@ function setup(
     <FavoritesProvider>
       <SearchBar />
     </FavoritesProvider>,
-    { token: 'jwt' },
+    { session: true },
   );
   return { user, input: screen.getByRole('combobox', { name: LABEL }) };
 }

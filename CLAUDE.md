@@ -96,7 +96,7 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 SPA en `frontend/src/` organizada en `pages/`, `components/`, `context/`, `hooks/` y `lib/` (la Fase 3 del plan está hecha). Reglas que ya se cumplen y no deben romperse:
 
 - **Todas las llamadas a la API pasan por `lib/api.ts` (`apiFetch`/`ApiError`)**: nada de `fetch` suelto. Maneja 401 (cierra sesión una vez; el 401 de login/registro no), 403 (no cierra sesión), 429 (`Retry-After`), 204 y red caída. Se decide por `status`/`code`, no por el texto.
-- **El token JWT (`localStorage`, clave `token`) solo lo toca `context/AuthContext.tsx`** (y el puente `configureAuth` de `api.ts`). Moverlo a cookie HttpOnly es la tarea 29.
+- **El JWT ya no existe para JavaScript**: va en la cookie HttpOnly `streambox_token` (tarea 29). `AuthContext` descubre la sesión con `GET /api/users/me`; `apiFetch` manda `credentials: 'same-origin'` y `X-Requested-With: StreamBox` en las peticiones no seguras (defensa CSRF; sin ella 403 `CSRF_REJECTED`). Nunca guardes el token en `localStorage`. Pendiente: vida corta + refresh y HSTS.
 - Estilos con **clases de Tailwind y tokens `@theme`** de `index.css` (`canvas`, `surface`, `accent`, `muted`...), cero `style={{}}`. Foco visible con `focus-ring`. Contrastes WCAG AA ya calculados: si cambias un token, recalcula.
 - Modales con `components/Modal` (`<dialog>` + `useModalDialog`); avisos con `useToast()`; favoritos con `FavoritesContext` (optimista, 409/404 = estado ya correcto).
 - Las imágenes salen **siempre del `imageUrl` del título** (película o serie, tipo común `CatalogItem`) vía `components/MoviePoster` (lazy, con respaldo). Portadas locales de ejemplo en `public/covers/*.webp` (+ script opcional `docs/portadas-locales.sql`).

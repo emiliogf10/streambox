@@ -7,12 +7,27 @@ import { LoadingState } from './LoadingState';
 /**
  * Protege una ruta: sin sesión redirige a `/login`.
  *
- * Es también el mecanismo del cierre de sesión por 401: `apiFetch` solo limpia
- * el token y este componente, al ver `isAuthenticated = false`, hace la
+ * Es también el mecanismo del cierre de sesión por 401: `AuthProvider` solo
+ * limpia la sesión y este componente, al ver `isAuthenticated = false`, hace la
  * redirección una única vez.
+ *
+ * Mientras el arranque averigua si hay sesión (`GET /users/me`) espera con un
+ * indicador: redirigir ya echaría al login a quien recarga con la sesión abierta.
+ * Si ese chequeo falla por red o 5xx no se sabe si hay sesión, así que se ofrece
+ * reintentar en lugar de mandar al login.
  */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isCheckingSession, sessionCheckFailed, refreshUser } = useAuth();
+  if (isCheckingSession) return <LoadingState label="Comprobando tu sesión..." />;
+  if (sessionCheckFailed) {
+    return (
+      <ErrorState
+        title="No se pudo comprobar tu sesión"
+        message="No se ha podido conectar con el servidor. Inténtalo de nuevo."
+        onRetry={refreshUser}
+      />
+    );
+  }
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
 }
 
@@ -49,9 +64,13 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
 
 /**
  * Envuelve las pantallas públicas (`/login`, `/registro`): si ya hay sesión,
- * no tiene sentido mostrarlas y se redirige a la portada.
+ * no tiene sentido mostrarlas y se redirige a la portada. Si el chequeo inicial
+ * falló (sin saber si hay sesión) se muestran igualmente: el login sigue siendo
+ * posible y el servidor decidirá.
  */
 export function RedirectIfAuthenticated({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isCheckingSession } = useAuth();
+  // Sin esperar al chequeo inicial, quien ya tiene sesión vería un parpadeo del formulario.
+  if (isCheckingSession) return <LoadingState label="Comprobando tu sesión..." />;
   return isAuthenticated ? <Navigate to="/" replace /> : <>{children}</>;
 }

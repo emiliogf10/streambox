@@ -92,10 +92,12 @@ Sigamos una petición real de principio a fin: el frontend pide la primera pági
 
 ```
 GET /api/movies?page=0&size=20&sort=createdAt&direction=desc
-Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+Cookie: streambox_token=eyJhbGciOiJIUzI1NiJ9...
 ```
 
-**1. El navegador.** `useCatalog` (frontend) llama a `apiFetch('/movies', { params: {...} })`. `apiFetch` añade la cabecera `Authorization` con el token guardado y hace el `fetch`.
+(El navegador añade la cookie solo; un cliente que no sea el navegador, como Swagger o un script, puede enviar en su lugar `Authorization: Bearer <token>`.)
+
+**1. El navegador.** `useCatalog` (frontend) llama a `apiFetch('/movies', { params: {...} })`. `apiFetch` hace el `fetch` con `credentials: 'same-origin'`: el navegador adjunta la cookie `streambox_token` por su cuenta, y JavaScript nunca ve el token.
 
 **2. Vite.** Ve que la ruta empieza por `/api` y la reenvía a `http://localhost:8080`.
 
@@ -656,10 +658,11 @@ La última regla es una red de seguridad: un endpoint nuevo que se olvide de añ
 
 Para cada petición:
 
-1. Lee la cabecera `Authorization`. Si no existe o no empieza por `Bearer `, **no hace nada** y deja pasar la petición (sin autenticar).
+1. Busca el token: primero la cabecera `Authorization: Bearer` (si existe, **manda ella**; un Bearer inválido da 401 aunque haya cookie válida) y, si no hay, la cookie `streambox_token`. Si no hay ninguna, **no hace nada** y deja pasar la petición (sin autenticar). Login, registro y logout ignoran la cookie para que una vieja no los bloquee.
 2. Extrae el token y pide a `JwtService.extractEmail(token)` que lo valide y devuelva el email. Si el token está manipulado, caducado o lo emitió otro sistema, salta una excepción: se registra un `WARN` en el log y la petición sigue **sin autenticar**.
 3. **Busca el usuario en la base de datos** por email. Si no existe (por ejemplo, se borró la cuenta), la petición sigue sin autenticar.
 4. Crea un `AuthenticatedUser(id, email, role)` y lo guarda en el `SecurityContextHolder` con la autoridad `ROLE_<rol>`.
+5. **Defensa CSRF.** Si la autenticación vino de la **cookie** y la petición no es segura (POST/PUT/PATCH/DELETE), exige la cabecera `X-Requested-With: StreamBox`; sin ella responde 403 `CSRF_REJECTED`. Una web ajena no puede poner esa cabecera sin un preflight CORS, y aquí no hay CORS abierto. Con Bearer no hace falta (no es una credencial que el navegador envíe solo).
 
 **¿Por qué consulta la base de datos en cada petición, si el token ya lleva el email?** Porque así los cambios son **inmediatos**: si a un usuario le quitan el rol de administrador o le borran la cuenta, su token sigue siendo válido criptográficamente, pero a la siguiente petición el filtro lee el rol actualizado. Cuesta una consulta por petición (muy barata: busca por un campo `UNIQUE`, que tiene índice).
 
@@ -748,7 +751,7 @@ sequenceDiagram
     else correcto
         A->>L: recordSuccess(intento) (borra los fallos)
         A->>A: JwtService.generateToken(user)
-        A-->>F: 200 {"token": "eyJ..."}
+        A-->>F: 204 + Set-Cookie streambox_token (HttpOnly, SameSite=Strict, Path=/api)
     end
 ```
 
@@ -970,7 +973,7 @@ Los límites coinciden con los de la base de datos (`VARCHAR(150)`, `CHECK relea
 2. **Estabilidad**: el contrato de la API no cambia cada vez que cambia una tabla.
 3. **Rendimiento y errores**: serializar una entidad con relaciones `LAZY` provocaría consultas inesperadas o `LazyInitializationException`.
 
-Los DTOs de salida son `record` (inmutables): `MovieResponse`, `GenreResponse`, `UserResponse`, `LoginResponse`, `MoviePageResponse`.
+Los DTOs de salida son `record` (inmutables): `MovieResponse`, `GenreResponse`, `UserResponse`, `MoviePageResponse`.
 
 Los **mappers** (`…/mapper`) son clases `final` con métodos estáticos que copian campos:
 
@@ -1396,7 +1399,7 @@ Un **contexto** de React es una forma de compartir un valor con todos los compon
 - `RedirectIfAuthenticated`: con sesión, `/login` y `/registro` redirigen a `/`.
 - `RequireAdmin` (envuelve todo `/admin`): mientras se carga el usuario muestra «Comprobando permisos...» (así, recargar en `/admin` no expulsa a un administrador real antes de saber su rol); si la carga falla, no enseña el contenido y ofrece «Reintentar»; si el usuario es `USER`, redirige a `/`.
 
-`RequireAuth` y `RedirectIfAuthenticated` leen el token de forma **síncrona** al arrancar (de `localStorage`), así que no hay «parpadeo» mostrando contenido protegido un instante. Recuerda que esto es solo experiencia de usuario: **la seguridad real la pone el backend**, que rechaza cualquier petición sin token válido.
+`RequireAuth` y `RedirectIfAuthenticated` esperan al primer chequeo de sesión (`isCheckingSession`, ver 19.2) y muestran «Comprobando tu sesión...» en lugar de redirigir o enseñar el formulario, así que no hay «parpadeo». Recuerda que esto es solo experiencia de usuario: **la seguridad real la pone el backend**, que rechaza cualquier petición sin token válido.
 
 **`FavoritesProvider` vive dentro de `AppShell`**: solo existe en la zona autenticada. Al cerrar sesión se desmonta y la lista de un usuario no puede verla el siguiente.
 
@@ -1425,7 +1428,7 @@ const page = await apiFetch<PageResponse<Movie>>('/movies', {
 
 Qué hace, paso a paso:
 
-1. Añade `Authorization: Bearer <token>`, salvo en endpoints marcados `public: true` (login y registro).
+1. Envía `credentials: 'same-origin'` (la cookie de sesión viaja sola) y, en todo método que no sea GET/HEAD/OPTIONS, la cabecera `X-Requested-With: StreamBox` (defensa CSRF). Ya no hay cabecera `Authorization`.
 2. Construye la query con `URLSearchParams` (que codifica caracteres especiales) y omite los parámetros vacíos.
 3. Convierte `body` a JSON.
 4. Hace el `fetch`. Si falla la red (backend apagado, sin conexión) → `ApiError` con `status: 0` y código `NETWORK_ERROR`.
@@ -1445,7 +1448,7 @@ Qué hace, paso a paso:
 
 ### 19.2 `AuthContext`: la sesión
 
-`context/AuthContext.tsx` es la **única** pieza que lee y escribe el token en `localStorage` (clave `token`). Expone `token`, `isAuthenticated`, `login(token)` y `logout()`.
+`context/AuthContext.tsx` gestiona la sesión, pero **ya no hay token en el cliente**: vive en la cookie HttpOnly `streambox_token`, invisible para JavaScript (un XSS ya no puede robarlo). La sesión se descubre al arrancar con `GET /api/users/me` (200 = sesión; 401 = sin sesión, en silencio; red/5xx = error con «Reintentar»), con tres estados (`unknown`, `active`, `none`) y un contador `epoch` que descarta respuestas tardías. Expone `isAuthenticated`, `isCheckingSession`, `login(email, password)` (llama a `/auth/login` y luego a `/users/me`), `logout()` (limpia el estado y pide `POST /auth/logout` para borrar la cookie), `user`, `isAdmin`, `userStatus` y `refreshUser`. Se borra al arrancar la clave `token` heredada de `localStorage`.
 
 **El puente con `apiFetch`.** `api.ts` necesita el token y avisar de los 401, pero no puede importar `AuthContext` (sería una dependencia circular: el contexto ya importa `api.ts`). La solución: `api.ts` ofrece `configureAuth(puente)` y el `AuthProvider` se registra al montarse, pasando dos funciones: `getToken` y `onUnauthorized`.
 
@@ -1458,10 +1461,8 @@ Qué hace, paso a paso:
 
 **Detalles que explican el código:**
 
-- `tokenRef` es una copia **síncrona** del token. El estado de React se actualiza después del render, pero una petición lanzada justo tras `login()` debe llevar ya el token nuevo.
 - `useLayoutEffect` registra el puente **antes** que cualquier `useEffect`. Los componentes hijos lanzan peticiones en sus `useEffect` al montarse, y esos efectos se ejecutan antes que los del padre; los *layout effects* se ejecutan antes que todos ellos.
-- El evento `storage` sincroniza pestañas: si cierras sesión en una, las demás se enteran. `localStorage.clear()` emite el evento con `key === null` y también cuenta como cierre de sesión.
-- `localStorage` puede lanzar excepciones (modo privado de algunos navegadores); se captura y se trata como «sin sesión».
+- Sin sincronización inmediata entre pestañas (ya no hay `localStorage` ni evento `storage`): la otra pestaña se entera en su siguiente petición (401 con aviso).
 
 **El usuario actual y su rol.** Además del token, `AuthProvider` carga el usuario con `GET /api/users/me` cada vez que cambia la sesión: tras `login()`, al arrancar con un token guardado y cuando otra pestaña cambia el token. `useAuth()` expone `user`, `isAdmin`, `userStatus` (`idle` sin sesión, `loading`, `ready` o `error`) y `refreshUser()` para reintentar.
 
@@ -1474,7 +1475,7 @@ Qué hace, paso a paso:
 
 **El login** (`pages/LoginPage.tsx`) llama a `apiFetch('/auth/login', { method: 'POST', body, public: true })`, guarda el token con `login(token)` y ya está: `RedirectIfAuthenticated` ve la sesión y lleva a `/`.
 
-> **Pendiente conocido (tarea 29 del plan).** Guardar el JWT en `localStorage` lo deja accesible a cualquier JavaScript de la página: si hubiera una vulnerabilidad XSS, podrían robarlo. La alternativa más segura es una cookie `HttpOnly`. Como todo el manejo del token está en `AuthContext` y `api.ts`, el cambio queda localizado.
+> **Hecho en la tarea 29.** El JWT va en cookie HttpOnly (`SameSite=Strict`, `Path=/api`, `Secure` según `streambox.auth.cookie.secure`/`STREAMBOX_AUTH_COOKIE_SECURE`, `true` por defecto; el compose HTTP en localhost lo pone a `false`). Riesgos residuales: sin revocación (el logout solo borra la cookie; el JWT dura 24 h), login CSRF mitigado con SameSite, y siguen pendientes vida corta + refresh, y HSTS con HTTPS.
 
 ---
 

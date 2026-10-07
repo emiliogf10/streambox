@@ -129,6 +129,10 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD. Copia .env.example como .env y rellénalo.}
       JWT_SECRET: ${JWT_SECRET:?Falta JWT_SECRET (mínimo 32 caracteres). Genera uno con openssl rand -base64 48 y ponlo en .env.}
       JWT_EXPIRATION_HOURS: ${JWT_EXPIRATION_HOURS:-24}
+      # Cookie de sesion sin "Secure": este compose sirve HTTP en localhost y el
+      # navegador no guardaria una cookie Secure. Detras de HTTPS (produccion)
+      # ponla a true en .env.
+      STREAMBOX_AUTH_COOKIE_SECURE: ${STREAMBOX_AUTH_COOKIE_SECURE:-false}
       # Administrador inicial (opcional): si ADMIN_EMAIL y ADMIN_PASSWORD
       # están vacíos, no se crea ninguno.
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}

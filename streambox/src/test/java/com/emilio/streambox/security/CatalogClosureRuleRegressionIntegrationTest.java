@@ -142,8 +142,9 @@ class CatalogClosureRuleRegressionIntegrationTest {
 
         mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"closurenew@test.com\",\"password\":\"Closure-Pass-2026\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").isNotEmpty());
+                .andExpect(status().isNoContent())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .cookie().exists("streambox_token"));
     }
 
     /**

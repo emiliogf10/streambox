@@ -80,7 +80,7 @@ function renderList(route = '/admin/series') {
       </Routes>
       <LocationDetails />
     </>,
-    { route, token: 'jwt' },
+    { route, session: true },
   );
 }
 

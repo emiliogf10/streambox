@@ -18,6 +18,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      // Sesión por cookie: el navegador cree hablar SIEMPRE con el origen de Vite
+      // (mismo origen), así que la cookie `streambox_token` (HttpOnly, SameSite=Strict,
+      // Path=/api, sin atributo Domain) se guarda y se reenvía sin CORS. El proxy deja
+      // pasar `Set-Cookie` y `Cookie` tal cual; no hace falta `cookieDomainRewrite` (la
+      // cookie no lleva Domain) ni `cookiePathRewrite` (el prefijo /api no se reescribe).
       '/api': {
         target: apiProxyTarget,
         changeOrigin: true,

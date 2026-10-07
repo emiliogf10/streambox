@@ -99,16 +99,22 @@ public class SecurityConfig {
          *
          * @param jwtService     servicio encargado de generar y validar tokens JWT
          * @param userRepository repositorio utilizado para buscar usuarios
+         * @param errorWriter    escritor de errores JSON de seguridad (403 CSRF)
+         * @param matcherBuilder constructor de matchers de rutas de la aplicación
          * @return instancia configurada de {@link JwtAuthenticationFilter}
          */
         @Bean
         public JwtAuthenticationFilter jwtAuthenticationFilter(
                         JwtService jwtService,
-                        UserRepository userRepository) {
+                        UserRepository userRepository,
+                        SecurityErrorResponseWriter errorWriter,
+                        ObjectProvider<PathPatternRequestMatcher.Builder> matcherBuilder) {
 
                 return new JwtAuthenticationFilter(
                                 jwtService,
-                                userRepository);
+                                userRepository,
+                                errorWriter,
+                                matcherBuilder.getIfAvailable(PathPatternRequestMatcher::withDefaults));
         }
 
         /**
@@ -119,8 +125,11 @@ public class SecurityConfig {
          * </p>
          *
          * <ul>
-         * <li>Desactiva CSRF, ya que la API utiliza autenticación
-         * mediante tokens JWT.</li>
+         * <li>Desactiva el CSRF de Spring: la API es stateless y la defensa
+         * propia está en {@link JwtAuthenticationFilter} (SameSite=Strict en la
+         * cookie y cabecera {@code X-Requested-With: StreamBox} obligatoria en
+         * peticiones no seguras autenticadas por cookie; con Bearer no hace
+         * falta porque el navegador no lo adjunta solo).</li>
          * <li>Permite el acceso sin autenticación a los endpoints
          * de usuarios y autenticación, a las comprobaciones de salud
          * ({@code /actuator/health}) y a la documentación OpenAPI.</li>
@@ -177,6 +186,11 @@ public class SecurityConfig {
                                                 .requestMatchers(HttpMethod.POST,
                                                                 RateLimitingFilter.REGISTER_PATH,
                                                                 RateLimitingFilter.LOGIN_PATH)
+                                                .permitAll()
+
+                                                // Logout: publico e idempotente (solo borra la cookie).
+                                                .requestMatchers(HttpMethod.POST,
+                                                                JwtAuthenticationFilter.LOGOUT_PATH)
                                                 .permitAll()
 
                                                 // Vistas de gestion (p. ej. /api/admin/series, que

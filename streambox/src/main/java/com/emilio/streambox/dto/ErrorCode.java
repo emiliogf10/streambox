@@ -86,5 +86,11 @@ public enum ErrorCode {
      * La serie existe, pero no pertenece a la lista de favoritos del usuario
      * (404). Si la serie no existe, el código es {@link #RESOURCE_NOT_FOUND}.
      */
-    SERIES_NOT_IN_FAVORITES
+    SERIES_NOT_IN_FAVORITES,
+
+    /**
+     * Petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie a la que
+     * falta la cabecera {@code X-Requested-With: StreamBox} (defensa CSRF, 403).
+     */
+    CSRF_REJECTED
 }

@@ -48,16 +48,42 @@ export function newTestUser(): TestUser {
 
 /** Registra un usuario por API (`POST /api/users`, público; siempre rol USER). */
 export async function registerUser(request: APIRequestContext, user: TestUser): Promise<void> {
-  const response = await request.post(`${BACKEND_URL}/api/users`, { data: user });
+  const response = await request.post(`${BACKEND_URL}/api/users`, {
+    data: user,
+    headers: { 'X-Requested-With': 'StreamBox' }, // el backend la exige a toda petición no segura
+  });
   await expectOk(response, `Registrar a ${user.email}`);
 }
 
-/** Inicia sesión por API y devuelve el JWT. */
+/** Nombre de la cookie de sesión que fija el backend (HttpOnly, SameSite=Strict, Path=/api). */
+export const SESSION_COOKIE = 'streambox_token';
+
+/**
+ * Extrae el valor de la cookie de sesión de la cabecera `Set-Cookie` del login.
+ * El login ya no devuelve el JWT en el cuerpo (204 sin contenido): este valor es
+ * lo que los tests reenvían como cookie (en llamadas directas a la API) o siembran
+ * en el navegador (`signIn`).
+ */
+function sessionCookieValue(response: APIResponse): string {
+  for (const header of response.headersArray()) {
+    if (header.name.toLowerCase() !== 'set-cookie') continue;
+    const match = new RegExp(`^${SESSION_COOKIE}=([^;]+)`).exec(header.value);
+    if (match) return match[1];
+  }
+  throw new Error(`El login no fijó la cookie ${SESSION_COOKIE}`);
+}
+
+/**
+ * Inicia sesión por API y devuelve el valor de la cookie de sesión (el JWT), que
+ * las demás funciones de este archivo reenvían como `Cookie` (ver {@link authHeaders}).
+ */
 export async function loginApi(request: APIRequestContext, email: string, password: string): Promise<string> {
-  const response = await request.post(`${BACKEND_URL}/api/auth/login`, { data: { email, password } });
+  const response = await request.post(`${BACKEND_URL}/api/auth/login`, {
+    data: { email, password },
+    headers: { 'X-Requested-With': 'StreamBox' },
+  });
   await expectOk(response, `Login de ${email}`);
-  const body = (await response.json()) as { token: string };
-  return body.token;
+  return sessionCookieValue(response);
 }
 
 /**
@@ -70,8 +96,9 @@ export async function loginAdmin(request: APIRequestContext): Promise<string> {
   for (;;) {
     const response = await request.post(`${BACKEND_URL}/api/auth/login`, {
       data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+      headers: { 'X-Requested-With': 'StreamBox' },
     });
-    if (response.ok()) return ((await response.json()) as { token: string }).token;
+    if (response.ok()) return sessionCookieValue(response);
     if (Date.now() > deadline) {
       throw new Error(`No se pudo iniciar sesión como administrador: ${response.status()} ${await response.text()}`);
     }
@@ -79,7 +106,7 @@ export async function loginAdmin(request: APIRequestContext): Promise<string> {
   }
 }
 
-/** Crea un usuario nuevo y devuelve sus datos junto con un JWT ya válido. */
+/** Crea un usuario nuevo y devuelve sus datos junto con el valor de su cookie de sesión (el JWT). */
 export async function createUserWithToken(request: APIRequestContext): Promise<TestUser & { token: string }> {
   const user = newTestUser();
   await registerUser(request, user);
@@ -87,15 +114,21 @@ export async function createUserWithToken(request: APIRequestContext): Promise<T
   return { ...user, token };
 }
 
-/** Cabecera `Authorization` para las llamadas autenticadas. */
-function bearer(token: string): Record<string, string> {
-  return { Authorization: `Bearer ${token}` };
+/**
+ * Cabeceras de las llamadas autenticadas: la cookie de sesión y la cabecera
+ * anti-CSRF `X-Requested-With`, que el backend exige a las peticiones no seguras
+ * autenticadas por cookie. Es la misma autenticación que usa el navegador, así
+ * que estas llamadas ejercitan el camino real. (El nombre del parámetro sigue
+ * siendo `token`: es el JWT, aunque ahora viaje en una cookie.)
+ */
+function authHeaders(token: string): Record<string, string> {
+  return { Cookie: `${SESSION_COOKIE}=${token}`, 'X-Requested-With': 'StreamBox' };
 }
 
 /** Crea un género (administrador) y devuelve su id. */
 export async function createGenre(request: APIRequestContext, adminToken: string, name: string): Promise<number> {
   const response = await request.post(`${BACKEND_URL}/api/genres`, {
-    headers: bearer(adminToken),
+    headers: authHeaders(adminToken),
     data: { name },
   });
   await expectOk(response, `Crear el género «${name}»`);
@@ -115,13 +148,13 @@ export interface NewMovie {
 
 /** Crea una película (administrador). */
 export async function createMovie(request: APIRequestContext, adminToken: string, movie: NewMovie): Promise<void> {
-  const response = await request.post(`${BACKEND_URL}/api/movies`, { headers: bearer(adminToken), data: movie });
+  const response = await request.post(`${BACKEND_URL}/api/movies`, { headers: authHeaders(adminToken), data: movie });
   await expectOk(response, `Crear la película «${movie.title}»`);
 }
 
 /** Número total de películas del catálogo (para no sembrar dos veces). */
 export async function catalogSize(request: APIRequestContext, token: string): Promise<number> {
-  const response = await request.get(`${BACKEND_URL}/api/movies`, { headers: bearer(token), params: { size: 1 } });
+  const response = await request.get(`${BACKEND_URL}/api/movies`, { headers: authHeaders(token), params: { size: 1 } });
   await expectOk(response, 'Consultar el tamaño del catálogo');
   return ((await response.json()) as { totalElements: number }).totalElements;
 }
@@ -129,7 +162,7 @@ export async function catalogSize(request: APIRequestContext, token: string): Pr
 /** Busca una película por título exacto recorriendo el catálogo (para obtener su id). */
 async function findMovieId(request: APIRequestContext, token: string, title: string): Promise<number> {
   const response = await request.get(`${BACKEND_URL}/api/movies/search`, {
-    headers: bearer(token),
+    headers: authHeaders(token),
     params: { title, size: 100 },
   });
   await expectOk(response, `Buscar «${title}»`);
@@ -147,13 +180,13 @@ async function findMovieId(request: APIRequestContext, token: string, title: str
  */
 export async function deleteMoviesMatching(request: APIRequestContext, adminToken: string, text: string): Promise<void> {
   const response = await request.get(`${BACKEND_URL}/api/movies/search`, {
-    headers: bearer(adminToken),
+    headers: authHeaders(adminToken),
     params: { title: text, size: 100 },
   });
   await expectOk(response, `Buscar películas con «${text}»`);
   const page = (await response.json()) as ApiPage<ApiMovie>;
   for (const movie of page.content.filter((item) => item.title.includes(text))) {
-    const deleted = await request.delete(`${BACKEND_URL}/api/movies/${movie.id}`, { headers: bearer(adminToken) });
+    const deleted = await request.delete(`${BACKEND_URL}/api/movies/${movie.id}`, { headers: authHeaders(adminToken) });
     if (deleted.status() !== 404) await expectOk(deleted, `Borrar la película «${movie.title}»`);
   }
 }
@@ -166,7 +199,7 @@ export interface ApiGenre {
 
 /** Lista de géneros (`GET /api/genres`). */
 export async function listGenres(request: APIRequestContext, token: string): Promise<ApiGenre[]> {
-  const response = await request.get(`${BACKEND_URL}/api/genres`, { headers: bearer(token) });
+  const response = await request.get(`${BACKEND_URL}/api/genres`, { headers: authHeaders(token) });
   await expectOk(response, 'Listar los géneros');
   return (await response.json()) as ApiGenre[];
 }
@@ -192,7 +225,7 @@ export async function deleteGenresNamed(
   names: readonly string[],
 ): Promise<void> {
   for (const genre of (await listGenres(request, adminToken)).filter((item) => names.includes(item.name))) {
-    const deleted = await request.delete(`${BACKEND_URL}/api/genres/${genre.id}`, { headers: bearer(adminToken) });
+    const deleted = await request.delete(`${BACKEND_URL}/api/genres/${genre.id}`, { headers: authHeaders(adminToken) });
     if (deleted.status() !== 404) await expectOk(deleted, `Borrar el género «${genre.name}»`);
   }
 }
@@ -219,7 +252,7 @@ export interface NewEpisode {
 
 /** Crea una serie (administrador) y devuelve su id. Nace sin episodios. */
 export async function createSeries(request: APIRequestContext, adminToken: string, series: NewSeries): Promise<number> {
-  const response = await request.post(`${BACKEND_URL}/api/series`, { headers: bearer(adminToken), data: series });
+  const response = await request.post(`${BACKEND_URL}/api/series`, { headers: authHeaders(adminToken), data: series });
   await expectOk(response, `Crear la serie «${series.title}»`);
   return ((await response.json()) as { id: number }).id;
 }
@@ -232,7 +265,7 @@ export async function createEpisode(
   episode: NewEpisode,
 ): Promise<void> {
   const response = await request.post(`${BACKEND_URL}/api/series/${seriesId}/episodes`, {
-    headers: bearer(adminToken),
+    headers: authHeaders(adminToken),
     data: episode,
   });
   await expectOk(response, `Crear el episodio T${episode.seasonNumber}:E${episode.episodeNumber} de la serie ${seriesId}`);
@@ -245,7 +278,7 @@ export async function createEpisode(
  */
 export async function seriesCatalogSize(request: APIRequestContext, adminToken: string): Promise<number> {
   const response = await request.get(`${BACKEND_URL}/api/admin/series`, {
-    headers: bearer(adminToken),
+    headers: authHeaders(adminToken),
     params: { size: 1 },
   });
   await expectOk(response, 'Consultar el número de series');
@@ -259,7 +292,7 @@ export async function seriesCatalogSize(request: APIRequestContext, adminToken: 
  */
 export async function findSeriesIdAsAdmin(request: APIRequestContext, adminToken: string, title: string): Promise<number> {
   const response = await request.get(`${BACKEND_URL}/api/admin/series`, {
-    headers: bearer(adminToken),
+    headers: authHeaders(adminToken),
     params: { title, size: 100 },
   });
   await expectOk(response, `Buscar la serie «${title}»`);
@@ -277,13 +310,13 @@ export async function findSeriesIdAsAdmin(request: APIRequestContext, adminToken
  */
 export async function deleteSeriesMatching(request: APIRequestContext, adminToken: string, text: string): Promise<void> {
   const response = await request.get(`${BACKEND_URL}/api/admin/series`, {
-    headers: bearer(adminToken),
+    headers: authHeaders(adminToken),
     params: { title: text, size: 100 },
   });
   await expectOk(response, `Buscar series con «${text}»`);
   const page = (await response.json()) as ApiPage<ApiMovie>;
   for (const series of page.content.filter((item) => item.title.includes(text))) {
-    const deleted = await request.delete(`${BACKEND_URL}/api/series/${series.id}`, { headers: bearer(adminToken) });
+    const deleted = await request.delete(`${BACKEND_URL}/api/series/${series.id}`, { headers: authHeaders(adminToken) });
     if (deleted.status() !== 404) await expectOk(deleted, `Borrar la serie «${series.title}»`);
   }
 }
@@ -291,7 +324,7 @@ export async function deleteSeriesMatching(request: APIRequestContext, adminToke
 /** Número de series que ve un USUARIO al buscar `title` (`GET /api/series/search`: solo las que tienen episodios). */
 export async function publicSeriesSearchCount(request: APIRequestContext, token: string, title: string): Promise<number> {
   const response = await request.get(`${BACKEND_URL}/api/series/search`, {
-    headers: bearer(token),
+    headers: authHeaders(token),
     params: { title, size: 1 },
   });
   await expectOk(response, `Buscar series públicas con «${title}»`);
@@ -306,13 +339,13 @@ export async function addSeriesFavoritesByTitle(
 ): Promise<void> {
   for (const title of titles) {
     const response = await request.get(`${BACKEND_URL}/api/series/search`, {
-      headers: bearer(token),
+      headers: authHeaders(token),
       params: { title, size: 100 },
     });
     await expectOk(response, `Buscar la serie «${title}»`);
     const match = ((await response.json()) as ApiPage<ApiMovie>).content.find((series) => series.title === title);
     if (!match) throw new Error(`La serie «${title}» no está en el listado público`);
-    const added = await request.post(`${BACKEND_URL}/api/users/me/favorites/series/${match.id}`, { headers: bearer(token) });
+    const added = await request.post(`${BACKEND_URL}/api/users/me/favorites/series/${match.id}`, { headers: authHeaders(token) });
     await expectOk(added, `Añadir la serie «${title}» a favoritos`);
   }
 }
@@ -325,7 +358,7 @@ export async function addFavoritesByTitle(
 ): Promise<void> {
   for (const title of titles) {
     const id = await findMovieId(request, token, title);
-    const response = await request.post(`${BACKEND_URL}/api/users/me/favorites/${id}`, { headers: bearer(token) });
+    const response = await request.post(`${BACKEND_URL}/api/users/me/favorites/${id}`, { headers: authHeaders(token) });
     await expectOk(response, `Añadir «${title}» a favoritos`);
   }
 }

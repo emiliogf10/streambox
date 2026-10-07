@@ -4,48 +4,47 @@ import { apiFetch, configureAuth, isAbortError } from '../lib/api';
 import type { User } from '../lib/types';
 import { useToast } from './ToastContext';
 
-/** Clave de `localStorage` donde se guarda el JWT. */
-const TOKEN_KEY = 'token';
-
 /**
- * Lee el token guardado. `localStorage` puede lanzar excepciones (modo privado
- * de algunos navegadores, almacenamiento bloqueado): en ese caso se trata como
- * "sin sesión" en lugar de romper la aplicación.
+ * Clave de `localStorage` donde versiones anteriores guardaban el JWT. Ya no se
+ * escribe nunca: solo se BORRA al arrancar, para que una sesión antigua no deje
+ * un token válido al alcance de cualquier script (XSS) en ese navegador.
  */
-function readStoredToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
+const LEGACY_TOKEN_KEY = 'token';
 
-/** Guarda o borra (con `null`) el token; ignora los fallos de almacenamiento. */
-function writeStoredToken(token: string | null): void {
+/** Borra el token heredado; ignora los fallos de almacenamiento (modo privado...). */
+function removeLegacyToken(): void {
   try {
-    if (token === null) localStorage.removeItem(TOKEN_KEY);
-    else localStorage.setItem(TOKEN_KEY, token);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
   } catch {
-    // Sin almacenamiento: la sesión vivirá solo mientras no se recargue la página.
+    // Sin almacenamiento no hay nada que limpiar.
   }
 }
 
 /**
  * Estado de la carga del usuario actual (`GET /api/users/me`):
  * - `idle`: no hay sesión, no hay nada que cargar.
- * - `loading`: hay sesión y se está preguntando al servidor quién es.
+ * - `loading`: se está preguntando al servidor quién es (también al arrancar).
  * - `ready`: `user` ya tiene los datos de la sesión actual.
- * - `error`: no se pudo cargar (red, 5xx...). La sesión sigue abierta, pero
- *   `isAdmin` es `false` hasta que un reintento salga bien.
+ * - `error`: no se pudo cargar (red, 5xx...). Si ya había sesión, sigue abierta
+ *   pero `isAdmin` es `false` hasta que un reintento salga bien.
  */
 export type UserStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /** Valor que expone {@link useAuth}. */
 interface AuthContextValue {
-  /** JWT actual, o `null` si no hay sesión. */
-  token: string | null;
-  /** `true` si hay una sesión iniciada. */
+  /** `true` solo cuando el servidor ha confirmado una sesión (nunca mientras se comprueba). */
   isAuthenticated: boolean;
+  /**
+   * `true` mientras el arranque aún averigua si hay sesión (`GET /users/me`
+   * pendiente). Las rutas esperan en lugar de redirigir a `/login`, que echaría
+   * a quien recarga la página con la sesión abierta.
+   */
+  isCheckingSession: boolean;
+  /**
+   * `true` si el chequeo inicial falló por red o 5xx: no se sabe si hay sesión,
+   * así que ni se muestra la app ni se manda al login; se ofrece reintentar.
+   */
+  sessionCheckFailed: boolean;
   /** Usuario de la sesión actual, o `null` si no hay sesión o aún no se ha cargado. */
   user: User | null;
   /**
@@ -56,21 +55,33 @@ interface AuthContextValue {
   isAdmin: boolean;
   /** Estado de la carga de {@link AuthContextValue.user}; ver {@link UserStatus}. */
   userStatus: UserStatus;
-  /** Vuelve a pedir el usuario actual (p. ej. el botón "Reintentar" tras un fallo de red). */
+  /** Vuelve a pedir el usuario actual (reintento tras un fallo de red, también en el arranque). */
   refreshUser: () => void;
-  /** Guarda el token recibido del login y abre la sesión. */
-  login: (token: string) => void;
-  /** Cierra la sesión (idempotente). */
-  logout: () => void;
+  /**
+   * Inicia sesión: `POST /auth/login` (el servidor fija la cookie HttpOnly) y
+   * después carga el usuario. Lanza el `ApiError` del login (401, 429...) para
+   * que el formulario lo muestre.
+   */
+  login: (email: string, password: string) => Promise<void>;
+  /** Cierra la sesión: el estado se limpia al instante y se pide al servidor borrar la cookie. */
+  logout: () => Promise<void>;
 }
 
 /**
- * Resultado de una petición a `/users/me`, junto con el token y el intento que
- * la originaron. Guardar a qué sesión pertenece es lo que impide que el usuario
- * de una sesión anterior aparezca en la nueva (ver {@link AuthProvider}).
+ * Qué se sabe de la sesión:
+ * - `unknown`: recién arrancada la app, aún no se ha preguntado al servidor.
+ * - `active`: el servidor la ha confirmado (o se acaba de iniciar).
+ * - `none`: no hay sesión.
+ */
+type SessionState = 'unknown' | 'active' | 'none';
+
+/**
+ * Resultado de una petición a `/users/me`, junto con la sesión (`epoch`) y el
+ * intento que la originaron. Guardar a qué sesión pertenece es lo que impide que
+ * el usuario de una sesión anterior aparezca en la nueva (ver {@link AuthProvider}).
  */
 interface UserResult {
-  token: string;
+  epoch: number;
   attempt: number;
   status: 'ready' | 'error';
   user: User | null;
@@ -79,71 +90,103 @@ interface UserResult {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 /**
- * Proveedor de la sesión: ÚNICA fuente de verdad del token y del usuario actual.
+ * Proveedor de la sesión: ÚNICA fuente de verdad de quién está dentro.
  *
- * Es el único sitio (junto con el puente de `api.ts`) que toca `localStorage`.
- * Se registra en `apiFetch` con `configureAuth`, de modo que:
- * - `apiFetch` lee el token de aquí al enviar cada petición.
- * - Ante un 401 en un endpoint autenticado, `apiFetch` avisa y aquí se cierra
- *   la sesión. No se navega desde aquí: al quedar `isAuthenticated = false`, la
- *   ruta protegida redirige a `/login` por sí sola, UNA vez, aunque fallen
- *   varias peticiones a la vez (el segundo aviso ya encuentra la sesión cerrada
- *   y no hace nada).
+ * **Sin token en JavaScript.** El JWT viaja en la cookie `streambox_token`
+ * (HttpOnly, SameSite=Strict, Path=/api) que fija el backend en el login: el
+ * navegador la envía solo y ningún script, ni un XSS, puede leerla. Por eso aquí
+ * no hay token ni `localStorage`; la sesión se DESCUBRE preguntando
+ * `GET /api/users/me` al arrancar (200 = hay sesión, 401 = no la hay; ese primer
+ * 401 es silencioso, sin aviso de «sesión caducada»).
  *
- * **Usuario actual y rol.** Cada vez que cambia el token (login, arranque con un
- * token guardado, otra pestaña) se pide `GET /api/users/me`. El rol NO se saca
- * del JWT por dos motivos: el token no lo lleva (solo `sub` = email e `iss`), y
- * aunque lo llevara quedaría desfasado hasta que caducase (24 h), mientras que el
- * backend lee el usuario de la base de datos en cada petición y un cambio de rol
- * es inmediato. Preguntar al servidor da siempre su verdad. Aun así, el rol en el
- * cliente solo decide qué se muestra: quien proteja los datos es el backend (403).
+ * Se registra en `apiFetch` con `configureAuth`: ante un 401 en un endpoint
+ * autenticado con la sesión abierta se cierra la sesión UNA vez y se avisa. No
+ * se navega desde aquí: al quedar `isAuthenticated = false`, la ruta protegida
+ * redirige a `/login` por sí sola aunque fallen varias peticiones a la vez.
  *
- * **Respuestas tardías.** El resultado se guarda junto con el token (y el
- * intento) que lo pidió, y `user`/`userStatus` se DERIVAN comparándolo con la
- * sesión actual. Si el token ya cambió, ese resultado simplemente no cuenta: un
- * usuario de la sesión anterior nunca se asigna a la nueva, ni siquiera durante
- * el render que hay entre `login()` y la siguiente petición. Además, cada cambio
- * cancela la petición en curso con `AbortController`.
+ * **Usuario y rol.** El rol no está en el JWT ni en JavaScript: se pregunta al
+ * servidor, que lee la base de datos en cada petición (un cambio de rol es
+ * inmediato). En el cliente solo decide qué se muestra; protege el backend (403).
+ *
+ * **Respuestas tardías.** Cada inicio o cierre de sesión incrementa `epoch`; el
+ * resultado de `/users/me` se guarda con el `epoch` que lo pidió y `user` se
+ * DERIVA comparándolo con el actual, así que el usuario de una sesión anterior
+ * nunca se asigna a la nueva. Además, cada cambio cancela la petición en curso.
+ *
+ * **Limitación conocida:** al no haber `localStorage`, las pestañas ya no se
+ * sincronizan al instante. Si cierras sesión en una, la otra lo descubre en su
+ * siguiente petición (401, con su aviso). La cookie sí es común a todas.
  *
  * Debe ir dentro de `ToastProvider` (muestra el aviso de sesión caducada).
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
-  const [token, setToken] = useState<string | null>(readStoredToken);
-  // Copia síncrona del token para `apiFetch`: el estado de React se actualiza
-  // tras el render, pero una petición lanzada justo después de `login` ya debe
-  // llevar el token nuevo.
-  const tokenRef = useRef<string | null>(token);
+  const [session, setSession] = useState<SessionState>('unknown');
+  const [epoch, setEpoch] = useState(0);
+  // Copias síncronas para `apiFetch`: el estado de React se actualiza tras el
+  // render, pero una petición lanzada justo después ya debe ver la sesión nueva.
+  const sessionRef = useRef<SessionState>('unknown');
+  const epochRef = useRef(0);
   // Contador de reintentos de `/users/me`: cambiarlo vuelve a lanzar la petición
-  // con el mismo token y, como forma parte de la "clave" del resultado, el
-  // estado pasa a `loading` mientras tanto en lugar de quedarse en `error`.
+  // y, como forma parte de la "clave" del resultado, el estado pasa a `loading`
+  // mientras tanto en lugar de quedarse en `error`.
   const [attempt, setAttempt] = useState(0);
   const [userResult, setUserResult] = useState<UserResult | null>(null);
+  const resultRef = useRef<UserResult | null>(null);
 
-  /**
-   * Cambia la sesión en memoria (sin tocar `localStorage`) y olvida el usuario
-   * anterior. Lo comparten login, logout y el evento `storage` de otra pestaña.
-   */
-  const applyToken = useCallback((next: string | null) => {
-    tokenRef.current = next;
-    setToken(next);
-    setUserResult(null);
+  /** Guarda el resultado en el estado y en su copia síncrona. */
+  const storeResult = useCallback((result: UserResult | null) => {
+    resultRef.current = result;
+    setUserResult(result);
   }, []);
 
-  const login = useCallback(
-    (newToken: string) => {
-      writeStoredToken(newToken);
-      applyToken(newToken);
+  /** Cambia la sesión en memoria y empieza una época nueva (olvida el usuario anterior). */
+  const applySession = useCallback(
+    (next: SessionState) => {
+      sessionRef.current = next;
+      epochRef.current += 1;
+      setSession(next);
+      setEpoch(epochRef.current);
+      storeResult(null);
     },
-    [applyToken],
+    [storeResult],
   );
 
-  const logout = useCallback(() => {
-    writeStoredToken(null);
-    applyToken(null);
-  }, [applyToken]);
+  const logout = useCallback(async () => {
+    if (sessionRef.current === 'none') return; // idempotente
+    applySession('none');
+    try {
+      // `public`: un 401 aquí (cookie ya caducada) no debe disparar otro cierre.
+      await apiFetch('/auth/logout', { method: 'POST', public: true });
+    } catch {
+      // Best-effort: la interfaz ya está sin sesión. Si el servidor no respondió,
+      // la cookie caducará sola (y un 401 posterior se tratará como sin sesión).
+    }
+  }, [applySession]);
+
+  const login = useCallback(
+    async (email: string, password: string) => {
+      // `public`: un 401 es «credenciales incorrectas», no «sesión caducada».
+      await apiFetch('/auth/login', { method: 'POST', body: { email, password }, public: true });
+      // La cookie ya está en el navegador. Se carga el usuario antes de abrir la
+      // sesión en la interfaz para no pintar un instante «sin rol».
+      let me: User | null = null;
+      try {
+        me = await apiFetch<User>('/users/me', { public: true });
+      } catch {
+        // La sesión existe (el login salió bien) aunque no se pudo cargar el
+        // usuario: se abre igualmente y el estado `error` ofrece reintentar.
+      }
+      applySession('active');
+      storeResult({ epoch: epochRef.current, attempt, status: me ? 'ready' : 'error', user: me });
+    },
+    [applySession, storeResult, attempt],
+  );
 
   const refreshUser = useCallback(() => setAttempt((n) => n + 1), []);
+
+  // Al arrancar se borra el token que versiones anteriores guardaron en localStorage.
+  useEffect(removeLegacyToken, []);
 
   // `useLayoutEffect` (y no `useEffect`) porque los efectos de los componentes
   // hijos —que ya lanzan peticiones al montarse— se ejecutan ANTES que los del
@@ -151,65 +194,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // `useEffect`, así que el puente está listo cuando llega la primera petición.
   useLayoutEffect(() => {
     configureAuth({
-      getToken: () => tokenRef.current,
-      onUnauthorized: (usedToken) => {
-        // Ignora el 401 si ya no hay sesión o si pertenece a una petición hecha
-        // con un token anterior (p. ej. respuesta tardía tras volver a entrar).
-        if (tokenRef.current === null || usedToken !== tokenRef.current) return;
-        logout();
+      getSessionKey: () => epochRef.current,
+      onUnauthorized: (usedKey) => {
+        // Ignora el 401 si ya no hay sesión o si es de una época anterior
+        // (respuesta tardía tras volver a entrar).
+        if (sessionRef.current === 'none' || usedKey !== epochRef.current) return;
+        if (sessionRef.current === 'unknown') {
+          // Primer chequeo: un 401 solo significa «no hay sesión». Sin aviso.
+          applySession('none');
+          return;
+        }
+        applySession('none');
         toast.info('Tu sesión ha caducado. Inicia sesión de nuevo.');
+        // Limpia la cookie caducada o revocada (best-effort, sin bucle: es `public`).
+        apiFetch('/auth/logout', { method: 'POST', public: true }).catch(() => undefined);
       },
     });
     return () => configureAuth(null);
-  }, [logout, toast]);
+  }, [applySession, toast]);
 
-  // Carga el usuario de la sesión actual cada vez que cambia el token (o se
-  // pide un reintento). `login()` sigue siendo síncrono: esto va por detrás.
+  // Carga el usuario (y con ello descubre la sesión) mientras pueda haberla:
+  // al arrancar, en cada reintento y cuando cambia la época.
+  const noSession = session === 'none';
   useEffect(() => {
-    if (token === null) return;
+    if (noSession) return;
+    // `login` ya dejó el usuario cargado: no se repite la petición.
+    const existing = resultRef.current;
+    if (existing?.epoch === epoch && existing.attempt === attempt && existing.status === 'ready') return;
     const controller = new AbortController();
     apiFetch<User>('/users/me', { signal: controller.signal })
       .then((me) => {
-        if (!controller.signal.aborted) setUserResult({ token, attempt, status: 'ready', user: me });
+        if (controller.signal.aborted) return;
+        if (sessionRef.current === 'unknown') {
+          sessionRef.current = 'active'; // 200: hay sesión (la época no cambia)
+          setSession('active');
+        }
+        storeResult({ epoch, attempt, status: 'ready', user: me });
       })
       .catch((error: unknown) => {
         if (isAbortError(error) || controller.signal.aborted) return;
-        // Un 401 ya lo ha gestionado `apiFetch` (cierre de sesión y aviso únicos):
-        // la sesión de este token ya no existe y no hay nada que guardar.
-        if (tokenRef.current !== token) return;
-        // Red caída, 5xx...: la sesión se mantiene, pero sin rol confirmado
-        // (`isAdmin = false`). Se puede reintentar con `refreshUser()`.
-        setUserResult({ token, attempt, status: 'error', user: null });
+        // Un 401 ya lo gestionó `apiFetch` (sesión cerrada, aviso único si procede).
+        if (sessionRef.current === 'none' || epochRef.current !== epoch) return;
+        // Red caída, 5xx...: se puede reintentar con `refreshUser()`. Con la
+        // sesión ya confirmada se mantiene (sin rol: `isAdmin = false`); en el
+        // arranque queda «sin saber» (ver `sessionCheckFailed`).
+        storeResult({ epoch, attempt, status: 'error', user: null });
       });
     return () => controller.abort();
-  }, [token, attempt]);
+    // `session` solo pasa de `unknown` a `active` dentro de esta misma petición
+    // (la época no cambia) y no debe relanzarla: por eso la dependencia es
+    // `noSession` y no `session`.
+  }, [noSession, epoch, attempt, storeResult]);
 
-  // Si se cierra o abre sesión en otra pestaña, esta se mantiene coherente.
-  useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      // `key === null` es lo que emite `localStorage.clear()`: se vació todo el
-      // almacenamiento, así que equivale a que la clave del token pase a `null`.
-      // Cualquier otra clave no nos afecta.
-      if (event.key !== null && event.key !== TOKEN_KEY) return;
-      // Solo una cadena no vacía cuenta como token nuevo; cualquier otra cosa
-      // (null, cadena vacía) se trata como cierre de sesión.
-      const next = event.key === null || !event.newValue ? null : event.newValue;
-      applyToken(next);
-    };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, [applyToken]);
-
-  // El resultado guardado solo vale si es de ESTA sesión y de ESTE intento.
-  const current =
-    token !== null && userResult?.token === token && userResult.attempt === attempt ? userResult : null;
+  // El resultado guardado solo vale si es de ESTA época y de ESTE intento.
+  const current = session !== 'none' && userResult?.epoch === epoch && userResult.attempt === attempt ? userResult : null;
   const user = current?.user ?? null;
-  const userStatus: UserStatus = token === null ? 'idle' : (current?.status ?? 'loading');
+  const userStatus: UserStatus = session === 'none' ? 'idle' : (current?.status ?? 'loading');
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      token,
-      isAuthenticated: token !== null,
+      isAuthenticated: session === 'active',
+      isCheckingSession: session === 'unknown' && current === null,
+      sessionCheckFailed: session === 'unknown' && current?.status === 'error',
       user,
       isAdmin: user?.role === 'ADMIN',
       userStatus,
@@ -217,7 +263,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
     }),
-    [token, user, userStatus, refreshUser, login, logout],
+    [session, current, user, userStatus, refreshUser, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

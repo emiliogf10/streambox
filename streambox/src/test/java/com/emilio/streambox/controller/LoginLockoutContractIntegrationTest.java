@@ -171,8 +171,9 @@ class LoginLockoutContractIntegrationTest {
 
         CLOCK.advance(Duration.ofSeconds(1));
         login(email, PASSWORD)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").isNotEmpty());
+                .andExpect(status().isNoContent())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .cookie().exists("streambox_token"));
 
         login(email, "mal")
                 .andExpect(status().isUnauthorized())

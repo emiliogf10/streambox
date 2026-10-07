@@ -155,13 +155,32 @@ export function noContentResponse(): Response {
 type RouteHandler = (request: { url: string; init: RequestInit }) => Response | Promise<Response>;
 
 /**
+ * ¿Simula el servidor que el navegador trae una cookie de sesión válida? Lo fija
+ * {@link renderWithProviders} (`session: true`); {@link routeFetch} lo consulta al
+ * responder `GET /api/users/me`. Se lee al atender la petición, no al configurar
+ * `routeFetch`, así que el orden entre ambas llamadas da igual.
+ */
+let sessionActive = false;
+
+/**
+ * Manejador de `GET /api/users/me` para un usuario concreto que respeta la sesión
+ * simulada: con `session: true` responde con `user` y sin ella con 401. Úsalo en
+ * lugar de `() => jsonResponse(user)` cuando el test también comprueba el caso
+ * «sin sesión».
+ */
+export function currentUserAs(user: User): () => Response {
+  return () => (sessionActive ? jsonResponse(user) : errorResponse(401, 'UNAUTHORIZED', 'No autenticado.'));
+}
+
+/**
  * Configura un `fetch` simulado que responde según `"MÉTODO /ruta?query"`
  * (p. ej. `'POST /api/users/me/favorites/1'`). Una ruta sin manejador hace fallar
  * el test con un mensaje claro en lugar de devolver algo inventado.
  *
  * Única excepción: {@link CURRENT_USER} (`GET /api/users/me`) responde por
- * defecto con un usuario normal ({@link makeUser}). `AuthProvider` lo pide en
- * CUANTO hay sesión, así que todas las pantallas con token lo lanzan aunque no
+ * defecto con un usuario normal ({@link makeUser}) si `renderWithProviders` se
+ * llamó con `session: true`, y con 401 si no. `AuthProvider` lo pide SIEMPRE al
+ * arrancar (así descubre la sesión), así que todas las pantallas lo lanzan aunque no
  * tenga nada que ver con lo que prueban; repetirlo en cada test solo añadiría
  * ruido. Quien prueba el rol lo sobrescribe pasando su propio manejador.
  *
@@ -176,7 +195,8 @@ type RouteHandler = (request: { url: string; init: RequestInit }) => Response | 
  */
 export function routeFetch(fetchMock: Mock<typeof fetch>, routes: Record<string, RouteHandler>): void {
   const withDefaults: Record<string, RouteHandler> = {
-    [CURRENT_USER]: () => jsonResponse(makeUser()),
+    [CURRENT_USER]: () =>
+      sessionActive ? jsonResponse(makeUser()) : errorResponse(401, 'UNAUTHORIZED', 'No autenticado.'),
     [FAVORITE_SERIES]: () => jsonResponse([]),
     ...routes,
   };
@@ -188,12 +208,25 @@ export function routeFetch(fetchMock: Mock<typeof fetch>, routes: Record<string,
   });
 }
 
+/**
+ * Llamadas hechas al `fetch` simulado SIN contar el chequeo de sesión
+ * (`GET /api/users/me`) que `AuthProvider` hace siempre al montarse. Sirve para
+ * afirmar «este formulario no ha llamado al servidor» sin que el arranque cuente.
+ */
+export function apiCalls(fetchMock: Mock<typeof fetch>): Parameters<typeof fetch>[] {
+  return fetchMock.mock.calls.filter(([url]) => String(url) !== '/api/users/me');
+}
+
 /** Opciones de {@link renderWithProviders}. */
 interface RenderOptions {
   /** Ruta inicial del router en memoria. */
   route?: string;
-  /** Token guardado antes de montar (sesión iniciada). Sin él, no hay sesión. */
-  token?: string;
+  /**
+   * `true` = hay una sesión abierta (la cookie HttpOnly existe): `GET /users/me`
+   * responde con el usuario de {@link routeFetch}. Sin ella responde 401 («no hay
+   * sesión»), que es lo que averigua `AuthProvider` al arrancar.
+   */
+  session?: boolean;
   /** Estado de navegación de la entrada inicial (`location.state`), p. ej. la "vuelta al listado". */
   routeState?: unknown;
 }
@@ -204,7 +237,7 @@ interface RenderOptions {
  * redirecciones sin depender de cómo esté montado el router.
  */
 export function renderWithProviders(ui: ReactElement, options: RenderOptions = {}): RenderResult {
-  if (options.token) localStorage.setItem('token', options.token);
+  sessionActive = options.session === true;
   const route = options.route ?? '/';
   // Con estado, la entrada se pasa como objeto (`parsePath` separa ruta, búsqueda y fragmento).
   const entry = options.routeState === undefined ? route : { ...parsePath(route), state: options.routeState };
