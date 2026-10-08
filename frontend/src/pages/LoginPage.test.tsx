@@ -4,13 +4,13 @@
  * Se consulta la pantalla como lo haría una persona o un lector de pantalla
  * (por etiqueta, rol y texto). Protegen que un 401 de login sea "credenciales
  * incorrectas" (y no cierre ninguna sesión), que un 429 bloquee el botón con
- * cuenta atrás en vez de dejar martillear al servidor, y que solo se guarde el
- * token si el servidor lo concede. `fetch` está simulado.
+ * cuenta atrás en vez de dejar martillear al servidor, y que el login no deje
+ * ningún token en el navegador (la sesión es una cookie HttpOnly). `fetch` está simulado.
  */
 import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { errorResponse, jsonResponse, renderWithProviders, routeFetch } from '../test/helpers';
+import { apiCalls, errorResponse, jsonResponse, makeUser, noContentResponse, renderWithProviders, routeFetch } from '../test/helpers';
 import { LoginPage } from './LoginPage';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -49,34 +49,48 @@ describe('LoginPage', () => {
     await user.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
 
     expect(screen.getByText('Introduce tu correo electrónico y tu contraseña.')).toHaveAttribute('role', 'alert');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(apiCalls(fetchMock)).toEqual([]);
   });
 
-  it('un login correcto envía el correo recortado SIN token y guarda el token recibido', async () => {
-    routeFetch(fetchMock, { 'POST /api/auth/login': () => jsonResponse({ token: 'jwt-nuevo' }) });
+  it('un login correcto envía el correo recortado, con la cabecera anti-CSRF y SIN token en el navegador', async () => {
+    routeFetch(fetchMock, { 'POST /api/auth/login': () => noContentResponse() });
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />, { route: '/login' });
 
     await fillAndSubmit(user, '  ana@example.com  ');
 
-    await vi.waitFor(() => expect(localStorage.getItem('token')).toBe('jwt-nuevo'));
-    const [url, init] = fetchMock.mock.calls[0];
+    await vi.waitFor(() => expect(fetchMock.mock.calls.map(([url]) => url)).toContain('/api/auth/login'));
+    const [url, init] = apiCalls(fetchMock)[0];
     expect(url).toBe('/api/auth/login');
     expect(init?.method).toBe('POST');
+    expect(init?.credentials).toBe('same-origin');
     expect(JSON.parse(String(init?.body))).toEqual({ email: 'ana@example.com', password: 'secreta123' });
-    expect(new Headers(init?.headers).has('Authorization')).toBe(false);
+    const headers = new Headers(init?.headers);
+    expect(headers.has('Authorization')).toBe(false);
+    expect(headers.get('X-Requested-With')).toBe('StreamBox');
+    expect(localStorage.length).toBe(0);
   });
 
-  it('tras un login correcto la sesión pide quién es el usuario (/users/me) con el token NUEVO', async () => {
-    routeFetch(fetchMock, { 'POST /api/auth/login': () => jsonResponse({ token: 'jwt-nuevo' }) });
+  it('tras un login correcto la sesión carga quién es el usuario (/users/me) con la cookie, sin Authorization', async () => {
+    let loggedIn = false;
+    routeFetch(fetchMock, {
+      'POST /api/auth/login': () => {
+        loggedIn = true;
+        return noContentResponse();
+      },
+      'GET /api/users/me': () =>
+        loggedIn ? jsonResponse(makeUser()) : errorResponse(401, 'UNAUTHORIZED', 'No autenticado.'),
+    });
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />, { route: '/login' });
 
     await fillAndSubmit(user);
 
-    await vi.waitFor(() => expect(fetchMock.mock.calls.map(([url]) => url)).toContain('/api/users/me'));
-    const me = fetchMock.mock.calls.find(([url]) => url === '/api/users/me');
-    expect(new Headers(me?.[1]?.headers).get('Authorization')).toBe('Bearer jwt-nuevo');
+    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '/api/users/me')).toHaveLength(2));
+    const me = fetchMock.mock.calls.filter(([url]) => url === '/api/users/me')[1];
+    expect(new Headers(me[1]?.headers).has('Authorization')).toBe(false);
+    expect(me[1]?.credentials).toBe('same-origin');
+    expect(localStorage.length).toBe(0);
   });
 
   it('mientras espera la respuesta bloquea el botón (evita enviar dos veces)', async () => {
@@ -151,10 +165,16 @@ describe('LoginPage', () => {
     });
 
     it('al volver a enviar, el aviso de intentos anterior desaparece', async () => {
-      fetchMock.mockImplementationOnce(async () =>
-        errorResponse(401, 'INVALID_CREDENTIALS', 'x', { remainingAttempts: 2 }),
-      );
-      fetchMock.mockImplementationOnce(() => new Promise<Response>(() => {}));
+      // Primer envío: 401 con intentos; el segundo se queda pendiente. (El chequeo inicial de la sesión también es una llamada.)
+      let attempts = 0;
+      routeFetch(fetchMock, {
+        'POST /api/auth/login': () => {
+          attempts += 1;
+          return attempts === 1
+            ? errorResponse(401, 'INVALID_CREDENTIALS', 'x', { remainingAttempts: 2 })
+            : new Promise<Response>(() => {});
+        },
+      });
       const user = userEvent.setup();
       renderWithProviders(<LoginPage />, { route: '/login' });
 

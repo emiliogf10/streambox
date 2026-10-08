@@ -1,8 +1,8 @@
 # StreamBox: frontend
 
-SPA de la plataforma de streaming StreamBox: catálogo de películas, búsqueda,
-registro e inicio de sesión y la lista personal de favoritos. Consume la API
-REST del backend (carpeta `../streambox`).
+SPA de la plataforma de streaming StreamBox: catálogo de películas y series,
+búsqueda, registro e inicio de sesión (cookie HttpOnly), «Mi lista», perfil y
+panel de administración. Consume la API REST del backend (carpeta `../streambox`).
 
 Stack: React 19, Vite, TypeScript, Tailwind CSS v4 (se configura en
 `src/index.css` con `@theme`, no hay `tailwind.config.js`), `react-router-dom` 7
@@ -10,7 +10,7 @@ y `lucide-react`. Tests con Vitest + Testing Library y Playwright.
 
 ## Requisitos
 
-- Node.js 20.19 o superior (o 22.12+) y npm.
+- Node.js 20.19 o superior (o 22.12+) y npm. El CI y el Dockerfile usan Node 24.
 - Para `npm run dev`, el backend en marcha en `http://localhost:8080`: el proxy
   de Vite envía `/api` a ese puerto.
 

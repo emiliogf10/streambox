@@ -364,9 +364,9 @@ jobs:
       #   1. "/" sirve la SPA (200) con la cabecera Content-Security-Policy.
       #   2. "/api/movies" sin token: 401 con el error en JSON (el proxy
       #      llega al backend y la seguridad funciona).
-      #   3. Login del administrador: devuelve un token (Flyway creó el
-      #      esquema en PostgreSQL y el administrador se creó al arrancar),
-      #      y con ese token /api/users/me dice que es ADMIN.
+      #   3. Login del administrador: responde 204 con la cookie de sesión HttpOnly
+      #      (Flyway creó el esquema en PostgreSQL y el administrador se creó al
+      #      arrancar), y con esa cookie /api/users/me dice que es ADMIN.
       # Sin jq a propósito (grep y sed): el mismo script funciona en el
       # Git Bash de Windows para reproducir la prueba en local.
       - name: Prueba de humo con curl
@@ -393,18 +393,16 @@ jobs:
           echo "3/3 Login del administrador"
           admin_email="$(sed -n 's/^ADMIN_EMAIL=//p' "$STREAMBOX_ENV_FILE")"
           admin_password="$(sed -n 's/^ADMIN_PASSWORD=//p' "$STREAMBOX_ENV_FILE")"
-          status="$(curl -sS -o "$tmp/login.json" -w '%{http_code}' \
-            -H 'Content-Type: application/json' \
+          status="$(curl -sS -o /dev/null -D "$tmp/login.headers" -c "$tmp/cookies.txt" -w '%{http_code}' \
+            -H 'Content-Type: application/json' -H 'X-Requested-With: StreamBox' \
             --data "{\"email\":\"$admin_email\",\"password\":\"$admin_password\"}" \
             "$base_url/api/auth/login")"
-          [ "$status" = "200" ] || fail "El login del administrador devolvió $status (se esperaba 200)"
-          token="$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' "$tmp/login.json")"
-          [ -n "$token" ] || fail "El login del administrador no devolvió token"
-          echo "::add-mask::$token"
-          status="$(curl -sS -o "$tmp/me.json" -w '%{http_code}' \
-            -H "Authorization: Bearer $token" "$base_url/api/users/me")"
-          [ "$status" = "200" ] || fail "GET /api/users/me con el token devolvió $status (se esperaba 200)"
-          grep -q '"role":"ADMIN"' "$tmp/me.json" || fail "El usuario del token no es ADMIN"
+          [ "$status" = "204" ] || fail "El login del administrador devolvió $status (se esperaba 204)"
+          grep -qi '^set-cookie: streambox_token=.*HttpOnly' "$tmp/login.headers" || fail "El login no fijó la cookie streambox_token HttpOnly"
+          status="$(curl -sS -o "$tmp/me.json" -b "$tmp/cookies.txt" -w '%{http_code}' \
+            "$base_url/api/users/me")"
+          [ "$status" = "200" ] || fail "GET /api/users/me con la cookie devolvió $status (se esperaba 200)"
+          grep -q '"role":"ADMIN"' "$tmp/me.json" || fail "El usuario de la sesión no es ADMIN"
 
           echo "Prueba de humo superada."
 

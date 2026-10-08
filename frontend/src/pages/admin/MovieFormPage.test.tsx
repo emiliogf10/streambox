@@ -61,7 +61,7 @@ function renderForm(route: string, routeState?: unknown) {
       </Routes>
       <SearchProbe />
     </>,
-    { route, token: 'jwt', routeState },
+    { route, session: true, routeState },
   );
 }
 

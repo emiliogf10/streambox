@@ -116,6 +116,9 @@ class LoginAttemptsIntegrationTest {
                 .andExpect(jsonPath("$.message").value(STILL_LOCKED))
                 .andExpect(jsonPath("$.remainingAttempts").doesNotExist())
                 .andExpect(jsonPath("$.token").doesNotExist())
+                // El token va ahora en la cookie: el bloqueo no debe entregarla.
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .cookie().doesNotExist("streambox_token"))
                 .andExpect(header().exists("Retry-After"));
     }
 
@@ -126,8 +129,9 @@ class LoginAttemptsIntegrationTest {
         failTimes("att3@test.com", 2);
 
         login("att3@test.com", PASSWORD)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").isNotEmpty());
+                .andExpect(status().isNoContent())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .cookie().exists("streambox_token"));
     }
 
     /**
@@ -146,7 +150,7 @@ class LoginAttemptsIntegrationTest {
         String successIp = nextIp();
         login("att4@test.com", "mal", failingIp).andExpect(jsonPath("$.remainingAttempts").value(2));
         login("att4@test.com", "mal", failingIp).andExpect(jsonPath("$.remainingAttempts").value(1));
-        login("att4@test.com", PASSWORD, successIp).andExpect(status().isOk());
+        login("att4@test.com", PASSWORD, successIp).andExpect(status().isNoContent());
 
         login("att4@test.com", "mal", failingIp)
                 .andExpect(status().isUnauthorized())
@@ -177,7 +181,7 @@ class LoginAttemptsIntegrationTest {
         login("att9@test.com", "mal")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.remainingAttempts").value(1));
-        login("att9@test.com", PASSWORD).andExpect(status().isOk());
+        login("att9@test.com", PASSWORD).andExpect(status().isNoContent());
     }
 
     @Test

@@ -65,7 +65,7 @@ function renderProfile({ user = makeUser(), movies = [], series = [], extra = {}
     <FavoritesProvider>
       <ProfilePage />
     </FavoritesProvider>,
-    { token: 'jwt', route: '/perfil' },
+    { session: true, route: '/perfil' },
   );
   return userEvents;
 }

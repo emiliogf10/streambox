@@ -92,10 +92,12 @@ Sigamos una petición real de principio a fin: el frontend pide la primera pági
 
 ```
 GET /api/movies?page=0&size=20&sort=createdAt&direction=desc
-Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
+Cookie: streambox_token=eyJhbGciOiJIUzI1NiJ9...
 ```
 
-**1. El navegador.** `useCatalog` (frontend) llama a `apiFetch('/movies', { params: {...} })`. `apiFetch` añade la cabecera `Authorization` con el token guardado y hace el `fetch`.
+(El navegador añade la cookie solo; un cliente que no sea el navegador, como Swagger o un script, puede enviar en su lugar `Authorization: Bearer <token>`.)
+
+**1. El navegador.** `useCatalog` (frontend; delega en `usePagedCatalog`) llama a `apiFetch('/movies', { params: {...} })`. `apiFetch` hace el `fetch` con `credentials: 'same-origin'`: el navegador adjunta la cookie `streambox_token` por su cuenta, y JavaScript nunca ve el token.
 
 **2. Vite.** Ve que la ruta empieza por `/api` y la reenvía a `http://localhost:8080`.
 
@@ -103,7 +105,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
 
 **4. `RateLimitingFilter`.** Solo actúa en `POST /api/auth/login` y `POST /api/users` (los reconoce con el mismo tipo de comparador de rutas que la autorización; capítulo 11). Esta petición es un `GET`, así que la deja pasar.
 
-**5. `JwtAuthenticationFilter`.** Lee la cabecera `Authorization`, valida el token (firma, caducidad, emisor), saca el email, busca el usuario en la base de datos y lo deja «apuntado» en el `SecurityContext` como usuario autenticado con su rol.
+**5. `JwtAuthenticationFilter`.** Toma el token de la cookie `streambox_token` (o, si viene, de `Authorization: Bearer`, que tiene preferencia: clientes de API), valida el token (firma, caducidad, emisor), saca el email, busca el usuario en la base de datos y lo deja «apuntado» en el `SecurityContext` como usuario autenticado con su rol. Si el token vino de la cookie y la petición no es segura (POST/PUT/PATCH/DELETE), exige además la cabecera `X-Requested-With: StreamBox` (defensa CSRF): sin ella, 403 `CSRF_REJECTED`.
 
 **6. Autorización.** Spring Security consulta las reglas de `SecurityConfig`: `GET /api/movies/**` exige estar autenticado. Lo está, así que pasa.
 
@@ -141,7 +143,7 @@ select ... from movie_genres mg join genres g ... where mg.movie_id in (?, ?, ..
 }
 ```
 
-**13. De vuelta en el navegador**, `apiFetch` comprueba `res.ok`, interpreta el JSON y se lo da a `useCatalog`, que lo guarda en el estado de React. La portada se vuelve a pintar.
+**13. De vuelta en el navegador**, `apiFetch` comprueba `res.ok`, interpreta el JSON y se lo da a `usePagedCatalog` (que lo usa `useCatalog`), que lo guarda en el estado de React. La portada se vuelve a pintar.
 
 Si algo falla en cualquier punto (token caducado, parámetro inválido, error de base de datos), la petición no sigue: se corta y se devuelve un error JSON con un formato común (capítulo 16).
 
@@ -153,7 +155,7 @@ Cuando ejecutas `.\mvnw.cmd spring-boot:run` desde `streambox/`, ocurre esto, en
 
 1. **`StreamboxApplication.main`** arranca Spring Boot. La clase lleva dos anotaciones importantes:
    - `@SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)`: Spring Security, por defecto, crea un usuario `user` con una contraseña aleatoria que imprime en la consola. No lo queremos (los usuarios están en nuestra base de datos), así que se excluye.
-   - `@ConfigurationPropertiesScan`: busca los `record` anotados con `@ConfigurationProperties` (`JwtProperties`, `AdminProperties`, `RateLimitProperties`) y los rellena con los valores de los `.properties`.
+   - `@ConfigurationPropertiesScan`: busca los `record` anotados con `@ConfigurationProperties` (`JwtProperties`, `AdminProperties`, `AuthCookieProperties`, `RateLimitProperties`) y los rellena con los valores de los `.properties`.
 
 2. **Se carga la configuración.** Primero `application.properties` (común), luego el del perfil activo (`application-dev.properties` por defecto) y, si existe, `application-local.properties` con tus credenciales (capítulo 4).
 
@@ -214,6 +216,7 @@ En vez de leer valores sueltos con `@Value`, el proyecto agrupa la configuració
 | :--- | :--- | :--- |
 | `jwt.*` | `security/JwtProperties` | Secreto (≥32 caracteres) y horas de validez del token |
 | `streambox.admin.*` | `security/AdminProperties` | Email, usuario y contraseña del administrador inicial |
+| `streambox.auth.cookie.*` | `security/AuthCookieProperties` | Atributo `Secure` de la cookie de sesión `streambox_token` (por defecto `true`) |
 | `streambox.security.rate-limit.*` | `security/ratelimit/RateLimitProperties` | Límites de login, registro y bloqueo de cuentas |
 
 Las duraciones se escriben como `1m`, `1h`, `15m` y Spring las convierte en `java.time.Duration` automáticamente.
@@ -226,6 +229,7 @@ Las duraciones se escriben como `1m`, `1h`, `15m` y Spring las convierte en `jav
 | `JWT_EXPIRATION_HOURS` | No (24) | Validez del token |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | No | Crean el primer administrador. Al crearlo, la contraseña debe cumplir la política del registro (capítulo 10.5); si ya existe, no se valida |
 | `ADMIN_USERNAME` | No (`admin`) | Nombre del administrador |
+| `STREAMBOX_AUTH_COOKIE_SECURE` | No (`true`) | Atributo `Secure` de la cookie de sesión. Solo debe ser `false` para probar por HTTP plano (el `docker-compose.yml` lo pone a `false` por defecto); detrás de HTTPS, `true` |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | Solo en `prod` | Conexión a la base de datos |
 | `SPRING_PROFILES_ACTIVE` | No | `prod` en producción |
 
@@ -239,14 +243,14 @@ Supabase es PostgreSQL gestionado, así que el backend funciona sin cambios de c
 
 Funciona porque lo importado desde `application.properties` sobrescribe sus valores por defecto (sección 4.1). Las variables de entorno `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME` y `SPRING_DATASOURCE_PASSWORD` ganan a todo (sección 4.2): es lo que usan los tests E2E para apuntar a su propia base y lo que debe usarse para cualquier prueba, porque **arrancar la app sin más se conecta a la base real**.
 
-**Los tests nunca tocan esa base.** Algunos borran tablas enteras al empezar y al terminar, así que se comprobó: con una conexión falsa e inalcanzable en `application-local.properties`, los 387 tests con H2 pasan. Las propiedades de `application-test.properties` ganan a las del archivo local.
+**Los tests nunca tocan esa base.** Algunos borran tablas enteras al empezar y al terminar, así que se comprobó: con una conexión falsa e inalcanzable en `application-local.properties`, toda la suite con H2 pasa (se comprobó cuando eran 387 tests). Las propiedades de `application-test.properties` ganan a las del archivo local.
 
 Puntos que conviene entender:
 
 - **Pooler.** Usa la cadena *Session pooler* (puerto **5432**). El *Transaction pooler* (puerto 6543) no admite las sentencias preparadas que usa Hibernate. La conexión directa suele ser solo IPv6 y puede no funcionar en tu red.
 - **SSL.** `sslmode=require` es obligatorio: Supabase no acepta conexiones sin cifrar.
 - **Usuario.** Con el pooler es `postgres.<id-del-proyecto>`, no solo `postgres`.
-- **El esquema lo crea Flyway** al arrancar contra la base vacía (aplica `V1` y `V2`), igual que en local.
+- **El esquema lo crea Flyway** al arrancar contra la base vacía (aplica `V1`, `V2` y `V3`), igual que en local.
 - **Seguridad: la API pública de Supabase.** Supabase publica automáticamente una API REST sobre el esquema `public`, accesible con una clave pública, y da privilegios por defecto a los roles `anon` y `authenticated`. Como las tablas viven ahí, hay que cerrarla. **Desde la auditoría de octubre de 2026 lo hace la propia aplicación**, en cada arranque: un *callback* de Flyway (`db/callback/postgresql/afterMigrate__close_public_api.sql`, sección 5.4) activa RLS sin políticas en todas las tablas de `public`, retira los privilegios a `anon` y `authenticated` (también sobre secuencias y funciones) y cambia los privilegios por defecto para que lo que se cree después nazca cerrado. La aplicación no se ve afectada porque conecta con el rol `postgres`, propietario de las tablas, que se salta RLS. [`docs/supabase-seguridad.sql`](supabase-seguridad.sql) queda como **respaldo manual** (el mismo bloque, para aplicarlo sin arrancar la app). *Por qué:* antes era un paso manual que solo protegía las tablas que existían el día que se ejecutaba, y las que creaba Flyway después (las de series, por ejemplo) nacían abiertas hasta que alguien se acordaba de repetirlo. **Alcance:** el callback actúa sobre **todas** las tablas y funciones del esquema `public`, no solo las de StreamBox. Si ese mismo proyecto de Supabase aloja otra aplicación que usa la Data API con sus propias políticas RLS, se la rompería; para esa situación se quita la ubicación del callback (`spring.flyway.locations=classpath:db/migration`) y se aplica el cierre a mano solo a las tablas propias. Además, **el primer arranque contra tu Supabase aplica RLS y retira privilegios a `anon`/`authenticated`** (lo mismo que ya hiciste con el script; no toca datos). Lo que sigue sin poder hacer el código: ver cuál es el estado real de tu proyecto Supabase. Lo más robusto es **desactivar la Data API del proyecto** (StreamBox accede por conexión directa), y mirar el log de arranque: un `WARNING` de este callback significa que algo sigue abierto.
 - **Mover los datos** de una base a otra: ver `docs/PLAN_DE_ACCION.md` (migración a Supabase). Los `id` se conservan, y por eso hay que comprobar que las secuencias de identidad quedan por encima del mayor `id` (si no, el siguiente `INSERT` chocaría con una fila existente).
 
@@ -257,7 +261,7 @@ Con Docker, `docker compose up -d --build` levanta la aplicación completa en `h
 #### Las imágenes
 
 - **Backend** (`streambox/Dockerfile`), en dos etapas:
-  1. **Compilación** con Maven + JDK 21. Primero se copia solo `pom.xml` y se descargan las dependencias en una capa propia (`dependency:go-offline`); así, un cambio de código no vuelve a descargarlas. Se compila **sin tests** (`-Dmaven.test.skip=true`), porque los tests van en el CI.
+  1. **Compilación** con la imagen `maven:3.9-eclipse-temurin-26` (el `pom.xml` compila con `release 21`, así que el bytecode es de Java 21; la etapa de ejecución usa JRE 21). Primero se copia solo `pom.xml` y se descargan las dependencias en una capa propia (`dependency:go-offline`); así, un cambio de código no vuelve a descargarlas. Se compila **sin tests** (`-Dmaven.test.skip=true`), porque los tests van en el CI.
   2. **Ejecución** con un JRE 21 Alpine. El JAR se extrae en capas (`-Djarmode=tools extract`): `lib/`, 65 MB que casi nunca cambian, y `app.jar`, 185 kB. Un cambio de código solo cambia una capa pequeña.
 
   La aplicación corre con un **usuario sin privilegios** (UID 10001), perfil `prod`, `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError` y un `HEALTHCHECK` contra `/actuator/health/readiness`. Imagen: unos 270 MB.
@@ -292,7 +296,7 @@ Es la única puerta de entrada.
 - **Caché:** `index.html` con `no-cache`; `/assets/` (nombres con hash) un año e `immutable`; `/covers/` un día. Un recurso que no existe da 404, no `index.html`.
 - **No se publica:** `/actuator` no es accesible desde fuera, y las rutas con `;` dan 400. El `;` es un truco clásico para saltarse reglas de seguridad por ruta en Java.
 - **Cabeceras de seguridad**, en todas las respuestas (`always`), declaradas una sola vez en el `server`. Si un `location` tuviera su propio `add_header`, dejaría de heredarlas.
-  - Una **CSP** estricta: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`. Es la segunda línea de defensa contra XSS: aunque se colara HTML, el navegador no ejecutaría scripts en línea, y un script colado no podría mandar el token de `localStorage` a otro servidor.
+  - Una **CSP** estricta: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`. Es la segunda línea de defensa contra XSS: aunque se colara HTML, el navegador no ejecutaría scripts en línea, y `connect-src 'self'` impide que un script colado envíe datos a otro servidor. (El token ya no es accesible para JavaScript: va en una cookie HttpOnly.)
   - `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, una `Permissions-Policy` restrictiva y `Cross-Origin-Opener/Resource-Policy: same-origin`.
   
   Se comprobó recorriendo toda la app en Chromium: **0 violaciones**, y un script en línea de control quedó bloqueado. La CSP no se aplica en `npm run dev`, porque Vite inyecta código en línea. HSTS está comentado porque por HTTP los navegadores lo ignoran; se activará cuando haya HTTPS.
@@ -306,7 +310,7 @@ Se ejecuta en cada `push` a `main`, en cada pull request y a mano. Lanza cuatro 
 | `backend` | `./mvnw -B -ntp verify` con Temurin 21. Los runners traen Docker, así que **los tests de PostgreSQL se ejecutan siempre**. Si falla, sube los informes de surefire |
 | `frontend` | `npm ci --ignore-scripts`, `build`, `lint` y `test` con Node 24 |
 | `e2e` | Playwright con su propio backend H2 (8099) y Vite (5199), y caché de los navegadores. Si falla, sube el informe |
-| `docker` | Construye las dos imágenes (caché `type=gha`, sin publicarlas en ningún registro), levanta el stack con un `.env` de secretos aleatorios (`openssl rand`, enmascarados en el log) y comprueba con `curl` la CSP, el 401 de la API y el login del administrador. Siempre termina con `down -v` |
+| `docker` | Construye las dos imágenes (caché `type=gha`, sin publicarlas en ningún registro), levanta el stack con un `.env` de secretos aleatorios (`openssl rand`, enmascarados en el log) y comprueba con `curl` la CSP, el 401 de la API y el login del administrador (204 con la cookie `streambox_token` HttpOnly, y `GET /api/users/me` con esa cookie devuelve rol `ADMIN`). Siempre termina con `down -v` |
 
 Ningún job usa secretos del repositorio y el token solo tiene `contents: read`. Las *actions* van fijadas **por SHA** y no por etiqueta, porque una etiqueta se puede mover a código malicioso (ocurrió con `tj-actions` en 2025); Dependabot actualiza el SHA y su comentario. La sintaxis se validó con `actionlint`.
 
@@ -399,7 +403,7 @@ Al arrancar, Flyway:
 2. Ejecuta, en orden, las que falten.
 3. Guarda en el historial cada migración aplicada junto a un **checksum** (una huella de su contenido).
 
-**Regla de oro: nunca edites una migración ya aplicada**, ni siquiera un comentario. Flyway recalcula el checksum, ve que no coincide con el guardado y se niega a arrancar. Para cambiar algo, crea una migración nueva (`V3__...`).
+**Regla de oro: nunca edites una migración ya aplicada**, ni siquiera un comentario. Flyway recalcula el checksum, ve que no coincide con el guardado y se niega a arrancar. Para cambiar algo, crea una migración nueva (la siguiente es `V4__...`).
 
 #### Callbacks: SQL que no es una migración (`afterMigrate`)
 
@@ -430,7 +434,7 @@ spring.flyway.baseline-on-migrate=true
 spring.flyway.baseline-version=0
 ```
 
-Si Flyway encuentra una base **con tablas pero sin historial**, la marca como «versión 0» (baseline) y aplica V1 y V2 encima. Por eso V1 usa `CREATE TABLE IF NOT EXISTS` y `CREATE INDEX IF NOT EXISTS`: sobre una base antigua no falla, solo añade lo que falte.
+Si Flyway encuentra una base **con tablas pero sin historial**, la marca como «versión 0» (baseline) y aplica V1, V2 y V3 encima (V3 solo crea tablas nuevas, sin `IF NOT EXISTS`). Por eso V1 usa `CREATE TABLE IF NOT EXISTS` y `CREATE INDEX IF NOT EXISTS`: sobre una base antigua no falla, solo añade lo que falte.
 
 > **Matiz importante.** En una base antigua, V1 solo añade los **índices**. Las tablas ya existían, así que `IF NOT EXISTS` no las toca y conservan sus claves foráneas **sin `ON DELETE CASCADE`** y **sin los `CHECK`**. Por eso `MovieService.deleteMovie` sigue borrando a mano los favoritos antes de borrar la película (`deleteFromAllFavorites`). Los tests de `PostgresBaselineAdoptionIntegrationTest` lo comprueban.
 
@@ -487,7 +491,7 @@ public class Movie {
 
 ### 6.3 `equals` y `hashCode` por id
 
-Las tres entidades implementan la igualdad así:
+Todas las entidades (`Movie`, `User`, `Genre`, `Series`, `Episode`) implementan la igualdad así:
 
 ```java
 public boolean equals(Object other) {
@@ -640,7 +644,7 @@ Petición ─► RateLimitingFilter ─► JwtAuthenticationFilter ─► (filtr
 
 | Configuración | Qué hace y por qué |
 | :--- | :--- |
-| `csrf.disable()` | CSRF es un ataque que aprovecha las **cookies** que el navegador envía solo. Esta API usa un token en la cabecera `Authorization` que el navegador no envía automáticamente, así que CSRF no aplica |
+| `csrf.disable()` | CSRF es un ataque que aprovecha las **cookies** que el navegador envía solo. Como el token viaja en una cookie, el CSRF sí aplica: se desactiva el filtro de Spring porque la API es stateless y la defensa propia está en `JwtAuthenticationFilter` (sección 9.3, punto 5): cookie `SameSite=Strict` y cabecera obligatoria `X-Requested-With: StreamBox` en las peticiones no seguras autenticadas por cookie (con `Authorization: Bearer` no hace falta) |
 | `SessionCreationPolicy.STATELESS` | No se crean sesiones HTTP (ni cookie `JSESSIONID`). Cada petición se autentica por sí misma con su token. El servidor no recuerda nada entre peticiones |
 | `exceptionHandling(...)` | Sustituye las páginas de error HTML de Spring por respuestas JSON (capítulo 16) |
 | `authorizeHttpRequests(...)` | Las reglas de acceso por ruta y método (ver abajo) |
@@ -653,6 +657,7 @@ Se evalúan **de arriba abajo** y gana la primera que coincide:
 | Método y ruta | Quién puede |
 | :--- | :--- |
 | `POST /api/users`, `POST /api/auth/login` | Cualquiera (registro y login) |
+| `POST /api/auth/logout` | Cualquiera (público e idempotente: solo borra la cookie) |
 | `/api/admin/**` (cualquier método) | Solo `ADMIN` (vistas de gestión, p. ej. series sin episodios) |
 | `/api/users` con **cualquier método salvo `POST`** (el listado de cuentas; `GET`, `HEAD`, `PUT`...) | Solo `ADMIN` |
 | `GET`, `HEAD /api/movies/**` | Cualquier usuario autenticado |
@@ -663,14 +668,14 @@ Se evalúan **de arriba abajo** y gana la primera que coincide:
 | `POST`, `PUT`, `PATCH`, `DELETE /api/series/**` (incluye los episodios) | Solo `ADMIN` |
 | **Cualquier otro método** sobre `/api/movies/**`, `/api/genres/**` y `/api/series/**` (regla de cierre del catálogo) | Solo `ADMIN` |
 | `/actuator/health`, `/actuator/health/**` | Cualquiera (comprobaciones de salud) |
-| `/v3/api-docs/**`, `/swagger-ui/**` | Cualquiera (en `prod` están desactivados) |
+| `/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html` | Cualquiera (en `prod` están desactivados) |
 | **Todo lo demás** (`anyRequest()`) | Cualquier usuario autenticado |
 
 **La regla de `/api/users` es por ruta, no por método** (auditoría de octubre de 2026). Antes decía solo «`GET /api/users` → `ADMIN`». Pero `HEAD /api/users` no coincidía con esa regla, caía en `anyRequest().authenticated()` y Spring MVC lo atendía con el `@GetMapping`: cualquier usuario normal ejecutaba el listado completo de cuentas y, como Tomcat envía `Content-Length` en el `HEAD`, deducía cuántas cuentas hay (125 bytes con 1 usuario, 387 con 3). Se reprodujo con una prueba contra el Tomcat real. **Lección: una regla de autorización atada a un método HTTP deja fuera a los demás; para recursos privilegiados, escribe la regla por ruta** (como ya se hace con `/api/admin/**`). La coincidencia es exacta: `/api/users/me` y `/api/users/me/**` no entran en ella y siguen siendo «autenticado».
 
 La última regla es una red de seguridad: un endpoint nuevo que se olvide de añadir aquí queda **protegido por defecto**, no abierto. Por ejemplo, `/api/users/me` y `/api/users/me/favorites` caen en ella.
 
-**Pero «autenticado» no basta para escribir.** Hasta octubre de 2026 solo había reglas para `GET` y `POST` de géneros, así que `PUT` y `DELETE` habrían caído en `anyRequest().authenticated()`: en cuanto se crearon esos endpoints, **cualquier usuario normal** habría podido editar o borrar géneros. Por eso se añadieron antes que los endpoints, y además una **regla de cierre del catálogo**: cualquier método que no sea lectura (`GET`/`HEAD`) sobre películas o géneros es solo para `ADMIN`. Así, un endpoint de escritura que se añada en el futuro nace protegido aunque se olvide su regla. `HEAD` va con `GET` porque es la misma lectura sin cuerpo (Spring MVC lo atiende con los `@GetMapping`). Lo vigilan `CatalogWriteAuthorizationIntegrationTest` (401/403 en cada método de escritura) y `CatalogClosureRuleRegressionIntegrationTest` (la regla de cierre no bloquea lecturas, endpoints personales, login/registro, Actuator ni Swagger; y un cambio de rol se aplica con el mismo token).
+**Pero «autenticado» no basta para escribir.** Hasta octubre de 2026 solo había reglas para `GET` y `POST` de géneros, así que `PUT` y `DELETE` habrían caído en `anyRequest().authenticated()`: en cuanto se crearon esos endpoints, **cualquier usuario normal** habría podido editar o borrar géneros. Por eso se añadieron antes que los endpoints, y además una **regla de cierre del catálogo**: cualquier método que no sea lectura (`GET`/`HEAD`) sobre películas, géneros o series es solo para `ADMIN`. Así, un endpoint de escritura que se añada en el futuro nace protegido aunque se olvide su regla. `HEAD` va con `GET` porque es la misma lectura sin cuerpo (Spring MVC lo atiende con los `@GetMapping`). Lo vigilan `CatalogWriteAuthorizationIntegrationTest` (401/403 en cada método de escritura) y `CatalogClosureRuleRegressionIntegrationTest` (la regla de cierre no bloquea lecturas, endpoints personales, login/registro, Actuator ni Swagger; y un cambio de rol se aplica con el mismo token).
 
 `hasRole("ADMIN")` comprueba que el usuario tiene la autoridad `ROLE_ADMIN`. El prefijo `ROLE_` lo añade el filtro JWT (sección 9.3).
 
@@ -678,10 +683,11 @@ La última regla es una red de seguridad: un endpoint nuevo que se olvide de añ
 
 Para cada petición:
 
-1. Lee la cabecera `Authorization`. Si no existe o no empieza por `Bearer `, **no hace nada** y deja pasar la petición (sin autenticar).
+1. Busca el token: primero la cabecera `Authorization: Bearer` (si existe, **manda ella**; un Bearer inválido da 401 aunque haya cookie válida) y, si no hay, la cookie `streambox_token`. Si no hay ninguna, **no hace nada** y deja pasar la petición (sin autenticar). Login, registro y logout ignoran la cookie para que una vieja no los bloquee.
 2. Extrae el token y pide a `JwtService.extractEmail(token)` que lo valide y devuelva el email. Si el token está manipulado, caducado o lo emitió otro sistema, salta una excepción: se registra un `WARN` en el log y la petición sigue **sin autenticar**.
 3. **Busca el usuario en la base de datos** por email. Si no existe (por ejemplo, se borró la cuenta), la petición sigue sin autenticar.
 4. Crea un `AuthenticatedUser(id, email, role)` y lo guarda en el `SecurityContextHolder` con la autoridad `ROLE_<rol>`.
+5. **Defensa CSRF.** Si la autenticación vino de la **cookie** y la petición no es segura (POST/PUT/PATCH/DELETE), exige la cabecera `X-Requested-With: StreamBox`; sin ella responde 403 `CSRF_REJECTED`. Una web ajena no puede poner esa cabecera sin un preflight CORS, y aquí no hay CORS abierto. Con Bearer no hace falta (no es una credencial que el navegador envíe solo).
 
 **¿Por qué consulta la base de datos en cada petición, si el token ya lleva el email?** Porque así los cambios son **inmediatos**: si a un usuario le quitan el rol de administrador o le borran la cuenta, su token sigue siendo válido criptográficamente, pero a la siguiente petición el filtro lee el rol actualizado. Cuesta una consulta por petición (muy barata: busca por un campo `UNIQUE`, que tiene índice).
 
@@ -759,9 +765,9 @@ sequenceDiagram
     C->>C: @Valid (email con formato, password no vacía y ≤1024)
     C->>A: login(email, password)
     A->>A: normaliza email (trim + minúsculas)
+    A->>DB: findByEmail(email)
     A->>L: reserveAttempt(email)
     L-->>F: 429 ACCOUNT_LOCKED + Retry-After si la cuenta ya acumula 5 fallos en 15 min
-    A->>DB: findByEmail(email)
     A->>A: BCrypt.matches(password, hash real o hash falso)
     alt incorrecto
         A->>L: recordFailure(intento) → intentos restantes
@@ -770,7 +776,7 @@ sequenceDiagram
     else correcto
         A->>L: recordSuccess(intento) (borra los fallos)
         A->>A: JwtService.generateToken(user)
-        A-->>F: 200 {"token": "eyJ..."}
+        A-->>F: 204 + Set-Cookie streambox_token (HttpOnly, SameSite=Strict, Path=/api)
     end
 ```
 
@@ -833,8 +839,8 @@ Ambas responden **429 Too Many Requests** con la cabecera **`Retry-After`** (seg
 | Fallos 1.º a 4.º | 401 `INVALID_CREDENTIALS` «Email o contraseña incorrectos» con **`remainingAttempts`** = 4, 3, 2, 1 |
 | 5.º fallo | 429 `ACCOUNT_LOCKED` + `Retry-After: 900` «Has superado el número máximo de intentos. La cuenta queda bloqueada durante 15 minutos.» |
 | Cualquier intento durante el bloqueo (también con la contraseña correcta) desde una IP **desconocida** | 429 `ACCOUNT_LOCKED` con el tiempo que falta («…Inténtalo de nuevo en N minutos.») |
-| Intento desde una **IP conocida** de esa cuenta mientras otros la tienen bloqueada | Se procesa con normalidad (contraseña correcta → 200); sus propios fallos tienen su contador de 5 en 15 min (ver 11.2) |
-| Login correcto | 200; borra los fallos acumulados del contador contra el que se reservó y deja esa IP como «conocida» |
+| Intento desde una **IP conocida** de esa cuenta mientras otros la tienen bloqueada | Se procesa con normalidad (contraseña correcta → 204 con `Set-Cookie`); sus propios fallos tienen su contador de 5 en 15 min (ver 11.2) |
+| Login correcto | 204 con `Set-Cookie`; borra los fallos acumulados del contador contra el que se reservó y deja esa IP como «conocida» |
 
 - `remainingAttempts` son los intentos que le quedan a la cuenta **con este fallo ya descontado**. Por eso nunca vale 0: el fallo que agota los intentos ya responde 429. En el resto de errores de la API el campo **no aparece** (ni siquiera como `null`).
 - **No revela qué emails existen:** los números, los mensajes, las cabeceras y el bloqueo son idénticos para un email registrado y para uno inexistente (lo comprueba `LoginLockoutContractIntegrationTest`, que también mide que los tiempos de respuesta sean parecidos).
@@ -893,7 +899,7 @@ Los fallos se cuentan **también para emails que no existen**: si solo se contar
 
 ### 12.1 Roles
 
-Hay dos: `USER` y `ADMIN` (`entity/Role`). El `USER` consulta el catálogo y gestiona su lista; el `ADMIN` además crea, modifica y borra películas y géneros, y lista usuarios.
+Hay dos: `USER` y `ADMIN` (`entity/Role`). El `USER` consulta el catálogo y gestiona su lista; el `ADMIN` además crea, modifica y borra películas, géneros, series y episodios, usa las vistas de gestión `/api/admin/**` y lista usuarios.
 
 ### 12.2 Cómo se crea un administrador: `AdminAccountInitializer`
 
@@ -934,6 +940,7 @@ public List<MovieResponse> getFavorites(@AuthenticationPrincipal AuthenticatedUs
 | Método | Ruta | Rol | Controlador → servicio |
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/auth/login` | Público | `AuthController.login` → `AuthenticationService.login` |
+| `POST` | `/api/auth/logout` | Público | `AuthController.logout` |
 | `POST` | `/api/users` | Público | `UserController.createUser` → `UserService.registerUser` |
 | `GET` | `/api/users/me` | Autenticado | `UserController.getCurrentUser` |
 | `GET` | `/api/users` | ADMIN | `UserController.getUsers` |
@@ -1016,7 +1023,7 @@ Los límites coinciden con los de la base de datos (`VARCHAR(150)`, `CHECK relea
 2. **Estabilidad**: el contrato de la API no cambia cada vez que cambia una tabla.
 3. **Rendimiento y errores**: serializar una entidad con relaciones `LAZY` provocaría consultas inesperadas o `LazyInitializationException`.
 
-Los DTOs de salida son `record` (inmutables): `MovieResponse`, `GenreResponse`, `UserResponse`, `LoginResponse`, `MoviePageResponse`.
+Los DTOs de salida son `record` (inmutables): `MovieResponse`, `GenreResponse`, `UserResponse`, `MoviePageResponse`.
 
 Los **mappers** (`…/mapper`) son clases `final` con métodos estáticos que copian campos:
 
@@ -1042,7 +1049,7 @@ Se escriben a mano en vez de usar MapStruct (una librería que los genera): son 
 | `sort` | `title` | Solo `id`, `title`, `releaseYear`, `duration`, `createdAt` |
 | `direction` | `asc` | `asc` o `desc`, sin distinguir mayúsculas |
 
-`MovieController.buildPageable` construye el `Pageable` y hace tres comprobaciones:
+`PageableFactory.build` (la usan `MovieController` y `SeriesController`) construye el `Pageable` y hace tres comprobaciones:
 
 1. **Lista blanca de `sort`.** Si el cliente pudiera ordenar por cualquier campo, podría ordenar por `genres` (una relación, que rompe la consulta) o tantear la estructura interna de la entidad. Cualquier otro valor da 400.
 2. **Dirección.** `parseDirection` se escribió a mano porque el método de Spring (`Sort.Direction.fromString`) lanzaría un mensaje en inglés del framework, que no debe llegar al cliente.
@@ -1117,7 +1124,7 @@ Los administradores pueden crear (`POST`), renombrar (`PUT /api/genres/{id}`) y 
 
 **Duplicados.** El servicio comprueba antes de guardar con `existsByNameIgnoreCase` (o `...AndIdNot` al renombrar, para que renombrar un género a su propio nombre sea un 200). Ignora mayúsculas porque la restricción `UNIQUE` sí las distingue y podría haber filas antiguas como «Ciencia Ficción». La restricción queda como respaldo ante dos altas simultáneas: si salta (SQLSTATE `23505`), se traduce al mismo 409 `GENRE_ALREADY_EXISTS`. Se usa `saveAndFlush` para que el error salte dentro del servicio y se pueda traducir.
 
-**Borrado.** Si alguna película usa el género, se responde 409 `GENRE_IN_USE` con el recuento («lo usan 3 películas»; `MovieRepository.countByGenres_Id`, un `COUNT` que no carga películas). ¿Por qué no borrar y ya? La clave foránea `movie_genres.genre_id` **no** tiene `ON DELETE CASCADE` a propósito, y toda película debe tener al menos un género: borrar en cascada podría dejar películas sin ninguno. La base de datos respalda la regla: si alguien asigna el género justo entre la comprobación y el borrado, la FK salta en el `flush` (SQLSTATE `23503`) y se traduce también a `GENRE_IN_USE`, esta vez sin cifra (tras un `flush` fallido la transacción ya no admite más consultas). `SqlStates` es el ayudante que saca el `SQLSTATE` de la cadena de causas; lo comparten `GenreService` y `FavoriteService`.
+**Borrado.** Si alguna película usa el género, se responde 409 `GENRE_IN_USE` con el recuento («lo usan 3 películas»; `MovieRepository.countByGenres_Id`, un `COUNT` que no carga películas). ¿Por qué no borrar y ya? La clave foránea `movie_genres.genre_id` **no** tiene `ON DELETE CASCADE` a propósito, y toda película debe tener al menos un género: borrar en cascada podría dejar películas sin ninguno. La base de datos respalda la regla: si alguien asigna el género justo entre la comprobación y el borrado, la FK salta en el `flush` y cualquier `DataIntegrityViolationException` en ese punto se traduce también a `GENRE_IN_USE`, esta vez sin cifra (tras un `flush` fallido la transacción ya no admite más consultas). `SqlStates` es el ayudante que saca el `SQLSTATE` de la cadena de causas; lo usan `GenreService` (solo para la unicidad, `23505`), `FavoriteService`, `SeriesFavoriteService` y `EpisodeService`.
 
 ---
 
@@ -1166,7 +1173,7 @@ DELETE FROM user_favorite_movies WHERE user_id = ? AND movie_id = ?;
 
 ### 15.3 Quitar, vaciar y listar
 
-- **Quitar**: el `DELETE` devuelve cuántas filas borró. Si es 0, la película no estaba → **404** `MOVIE_NOT_IN_FAVORITES`. No hace falta consultar antes.
+- **Quitar**: primero se comprueba que la película existe (si no, 404 `RESOURCE_NOT_FOUND`); después el `DELETE` devuelve cuántas filas borró. Si es 0, la película no estaba en la lista → **404** `MOVIE_NOT_IN_FAVORITES`.
 - **Vaciar**: un solo `DELETE ... WHERE user_id = ?`. Si ya estaba vacía, no es error (204).
 - **Listar**: una consulta JPQL ordenada por título; los géneros se cargan por lotes.
 
@@ -1313,6 +1320,7 @@ Todos los errores de la API, vengan de donde vengan, tienen la misma forma (`dto
 | `MALFORMED_REQUEST` | 400 | JSON mal escrito o con tipos imposibles |
 | `INVALID_CREDENTIALS` | 401 | Login incorrecto (con `remainingAttempts`), y también 401 por falta de token |
 | `ACCESS_DENIED` | 403 | Autenticado sin el rol necesario |
+| `CSRF_REJECTED` | 403 | Petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie sin la cabecera `X-Requested-With: StreamBox` |
 | `RESOURCE_NOT_FOUND` | 404 | Película, género o usuario inexistente; ruta inexistente |
 | `MOVIE_NOT_IN_FAVORITES` | 404 | Quitar de la lista algo que no estaba |
 | `SERIES_NOT_IN_FAVORITES` | 404 | Quitar de la lista una serie (visible) que no estaba |
@@ -1337,7 +1345,7 @@ Todos los errores de la API, vengan de donde vengan, tienen la misma forma (`dto
 Tiene tres bloques:
 
 1. **Excepciones de dominio** (las nuestras). Los servicios lanzan excepciones con significado (`MovieNotFoundException`, `UserAlreadyExistsException`…) y el manejador decide su código HTTP. Así los servicios no saben nada de HTTP.
-   - **Jerarquía**: `MovieNotFoundException`, `GenreNotFoundException`, `UserNotFoundException` y `MovieNotInFavoritesException` heredan de `ResourceNotFoundException`. Un solo manejador atiende todos los 404, y una excepción nueva «no encontrado» funciona sin tocar el manejador. (`MovieNotInFavoritesException` tiene su propio manejador para darle un código más específico; Spring siempre elige el manejador más concreto.)
+   - **Jerarquía**: `MovieNotFoundException`, `GenreNotFoundException`, `UserNotFoundException`, `SeriesNotFoundException`, `EpisodeNotFoundException`, `MovieNotInFavoritesException` y `SeriesNotInFavoritesException` heredan de `ResourceNotFoundException`. Un solo manejador atiende todos los 404, y una excepción nueva «no encontrado» funciona sin tocar el manejador. (`MovieNotInFavoritesException` y `SeriesNotInFavoritesException` tienen su propio manejador para darle un código más específico; Spring siempre elige el manejador más concreto.)
 2. **Excepciones estándar de Spring MVC.** La clase **hereda de `ResponseEntityExceptionHandler`**, que ya sabe convertir cada error del framework en su código correcto (404 ruta inexistente, 405, 415, JSON ilegible…). Se sobrescriben sus métodos solo para cambiar el **formato** a `ErrorResponse`. Sin esta herencia, el manejador genérico de `Exception` capturaría todo eso y lo convertiría en 500.
 3. **El último recurso** (`@ExceptionHandler(Exception.class)`): cualquier error no previsto se registra en el log **con su traza completa** y el cliente recibe un mensaje genérico. **Nunca se devuelve el mensaje de una excepción del framework**, porque puede revelar nombres de clases, tablas o rutas internas.
 
@@ -1366,7 +1374,7 @@ El resto (`env`, `beans`, `heapdump`…) **no se exponen**: algunos mostrarían 
 
 `springdoc` genera la documentación interactiva a partir de las anotaciones `@Operation` y `@ApiResponses` de los controladores. Está en `http://localhost:8080/swagger-ui.html` (solo en `dev`).
 
-`config/OpenApiConfig` define el título y el esquema de seguridad `bearerAuth`: en Swagger, pulsas «Authorize», pegas el token y todas las peticiones lo llevan. Los controladores con `@SecurityRequirement(name = "bearerAuth")` muestran el candado.
+`config/OpenApiConfig` define el título y el esquema de seguridad `bearerAuth`: en Swagger, pulsas «Authorize», pegas un token y todas las peticiones lo llevan. Como el login entrega el JWT en una cookie HttpOnly (204, sin cuerpo), el token hay que copiarlo del valor de la cookie `streambox_token` en las herramientas del navegador; con `Bearer` no se exige `X-Requested-With`. Los controladores con `@SecurityRequirement(name = "bearerAuth")` muestran el candado.
 
 **Respuestas de error en el OpenAPI.** springdoc rellena cada `@ApiResponse` sin `content` con el tipo de retorno del método. Por eso, hasta octubre de 2026, el 401 del login aparecía documentado como un `LoginResponse` (el token) y el 404 de películas como una `MovieResponse`: un cliente generado a partir del OpenAPI habría leído un error como si fuera un token. Ahora `config/ErrorResponseOpenApiCustomizer` (un `GlobalOpenApiCustomizer` registrado como `@Bean` en `OpenApiConfig`) recorre el documento ya generado y hace dos cosas:
 
@@ -1394,15 +1402,16 @@ frontend/src/
 ├── main.tsx            punto de entrada: monta <App/> en el HTML
 ├── App.tsx             proveedores globales + rutas
 ├── index.css           Tailwind + tokens de diseño (@theme) + utilidades propias
-├── pages/              una por pantalla: HomePage, LoginPage, RegisterPage, MyListPage, MoviesPage, SeriesPage, SeriesDetailPage
-│   └── admin/          panel de administración: AdminLayout, AdminMoviesPage, MovieFormPage, AdminGenresPage
+├── pages/              una por pantalla: HomePage, LoginPage, RegisterPage, MyListPage, ProfilePage, MoviesPage, SeriesPage, SeriesDetailPage
+│   └── admin/          panel de administración: AdminLayout, AdminMoviesPage, MovieFormPage, AdminSeriesPage, SeriesFormPage,
+│                       SeriesEpisodesSection, EpisodeFormDialog, AdminGenresPage y piezas compartidas (CoverPreview, GenreCheckboxes...)
 ├── components/         piezas reutilizables (Navbar, Modal, MoviePoster, Pagination, Button...) y las bases
 │                       genéricas del catálogo (PosterCard, PosterRow, FeaturedBanner, MetaTags), comunes a películas y series
 ├── context/            estado compartido: AuthContext, ToastContext, FavoritesContext
 ├── hooks/              lógica reutilizable: useCatalog/usePagedCatalog, useMovieFilters, useSeriesCatalog, useSeriesDetail, useModalDialog,
 │                       useCountdown, useGenres, useDebouncedValue, useAdminSearchList, useCatalogDelete...
 ├── lib/                sin React: api.ts, types.ts, utils.ts, catalog.ts, series.ts, movieFilters.ts, validation.ts, movieValidation.ts,
-│                       seriesValidation.ts, episodeValidation.ts
+│                       seriesValidation.ts, episodeValidation.ts, profile.ts, posterFallback.ts
 └── test/               utilidades de los tests (setup, helpers, fakeTimers)
 ```
 
@@ -1419,6 +1428,7 @@ frontend/src/
             /            → HomePage
             /favorites   → MyListPage
             /my-list     → redirige a /favorites
+            /perfil      → ProfilePage
             /peliculas   → MoviesPage (filtros en ?genero=&anio=&orden=)
             /series      → SeriesPage
             /series/:id  → SeriesDetailPage (temporada en ?temporada=N)
@@ -1431,6 +1441,7 @@ frontend/src/
                 series/nueva          → SeriesFormPage (alta)
                 series/:id/editar     → SeriesFormPage (edición) + SeriesEpisodesSection
                 generos               → AdminGenresPage
+                *                     → redirige a /admin/peliculas
         *                → redirige a /
 ```
 
@@ -1442,7 +1453,7 @@ Un **contexto** de React es una forma de compartir un valor con todos los compon
 - `RedirectIfAuthenticated`: con sesión, `/login` y `/registro` redirigen a `/`.
 - `RequireAdmin` (envuelve todo `/admin`): mientras se carga el usuario muestra «Comprobando permisos...» (así, recargar en `/admin` no expulsa a un administrador real antes de saber su rol); si la carga falla, no enseña el contenido y ofrece «Reintentar»; si el usuario es `USER`, redirige a `/`.
 
-`RequireAuth` y `RedirectIfAuthenticated` leen el token de forma **síncrona** al arrancar (de `localStorage`), así que no hay «parpadeo» mostrando contenido protegido un instante. Recuerda que esto es solo experiencia de usuario: **la seguridad real la pone el backend**, que rechaza cualquier petición sin token válido.
+`RequireAuth` y `RedirectIfAuthenticated` esperan al primer chequeo de sesión (`isCheckingSession`, ver 19.2) y muestran «Comprobando tu sesión...» en lugar de redirigir o enseñar el formulario, así que no hay «parpadeo». Recuerda que esto es solo experiencia de usuario: **la seguridad real la pone el backend**, que rechaza cualquier petición sin token válido.
 
 **`FavoritesProvider` vive dentro de `AppShell`**: solo existe en la zona autenticada. Al cerrar sesión se desmonta y la lista de un usuario no puede verla el siguiente.
 
@@ -1471,7 +1482,7 @@ const page = await apiFetch<PageResponse<Movie>>('/movies', {
 
 Qué hace, paso a paso:
 
-1. Añade `Authorization: Bearer <token>`, salvo en endpoints marcados `public: true` (login y registro).
+1. Envía `credentials: 'same-origin'` (la cookie de sesión viaja sola) y, en todo método que no sea GET/HEAD/OPTIONS, la cabecera `X-Requested-With: StreamBox` (defensa CSRF). Ya no hay cabecera `Authorization`.
 2. Construye la query con `URLSearchParams` (que codifica caracteres especiales) y omite los parámetros vacíos.
 3. Convierte `body` a JSON.
 4. Hace el `fetch`. Si falla la red (backend apagado, sin conexión) → `ApiError` con `status: 0` y código `NETWORK_ERROR`.
@@ -1491,36 +1502,34 @@ Qué hace, paso a paso:
 
 ### 19.2 `AuthContext`: la sesión
 
-`context/AuthContext.tsx` es la **única** pieza que lee y escribe el token en `localStorage` (clave `token`). Expone `token`, `isAuthenticated`, `login(token)` y `logout()`.
+`context/AuthContext.tsx` gestiona la sesión, pero **ya no hay token en el cliente**: vive en la cookie HttpOnly `streambox_token`, invisible para JavaScript (un XSS ya no puede robarlo). La sesión se descubre al arrancar con `GET /api/users/me` (200 = sesión; 401 = sin sesión, en silencio; red/5xx = error con «Reintentar»), con tres estados (`unknown`, `active`, `none`) y un contador `epoch` que descarta respuestas tardías. Expone `isAuthenticated`, `isCheckingSession`, `login(email, password)` (llama a `/auth/login` y luego a `/users/me`), `logout()` (limpia el estado y pide `POST /auth/logout` para borrar la cookie), `user`, `isAdmin`, `userStatus` y `refreshUser`. Se borra al arrancar la clave `token` heredada de `localStorage`.
 
-**El puente con `apiFetch`.** `api.ts` necesita el token y avisar de los 401, pero no puede importar `AuthContext` (sería una dependencia circular: el contexto ya importa `api.ts`). La solución: `api.ts` ofrece `configureAuth(puente)` y el `AuthProvider` se registra al montarse, pasando dos funciones: `getToken` y `onUnauthorized`.
+**El puente con `apiFetch`.** `api.ts` necesita saber a qué sesión pertenece cada respuesta y avisar de los 401, pero no puede importar `AuthContext` (sería una dependencia circular: el contexto ya importa `api.ts`). La solución: `api.ts` ofrece `configureAuth(puente)` y el `AuthProvider` se registra al montarse, pasando dos funciones: `getSessionKey` (devuelve el contador `epoch` de la sesión) y `onUnauthorized`.
 
 **El 401 sin bucles.** Si el token caduca y la portada lanza tres peticiones a la vez, llegan tres 401. Sin cuidado, habría tres cierres de sesión, tres avisos y tres redirecciones. El diseño lo evita:
 
-1. `apiFetch` **no navega nunca**; solo llama a `onUnauthorized(tokenUsado)`.
-2. `onUnauthorized` ignora el aviso si ya no hay sesión o si el token usado **no es el actual** (una respuesta tardía de una sesión anterior).
+1. `apiFetch` **no navega nunca**; solo llama a `onUnauthorized(claveUsada)`, la época de sesión con la que se hizo la petición.
+2. `onUnauthorized` ignora el aviso si ya no hay sesión o si la clave usada **no es la actual** (una respuesta tardía de una sesión anterior). Un 401 durante el primer chequeo de sesión (`unknown`) deja la sesión en «sin sesión» sin toast.
 3. El primer aviso cierra la sesión y muestra un único toast. Los siguientes ya encuentran la sesión cerrada y no hacen nada.
 4. Al quedar `isAuthenticated = false`, `RequireAuth` redirige a `/login` **una vez**.
 
 **Detalles que explican el código:**
 
-- `tokenRef` es una copia **síncrona** del token. El estado de React se actualiza después del render, pero una petición lanzada justo tras `login()` debe llevar ya el token nuevo.
 - `useLayoutEffect` registra el puente **antes** que cualquier `useEffect`. Los componentes hijos lanzan peticiones en sus `useEffect` al montarse, y esos efectos se ejecutan antes que los del padre; los *layout effects* se ejecutan antes que todos ellos.
-- El evento `storage` sincroniza pestañas: si cierras sesión en una, las demás se enteran. `localStorage.clear()` emite el evento con `key === null` y también cuenta como cierre de sesión.
-- `localStorage` puede lanzar excepciones (modo privado de algunos navegadores); se captura y se trata como «sin sesión».
+- Sin sincronización inmediata entre pestañas (ya no hay `localStorage` ni evento `storage`): la otra pestaña se entera en su siguiente petición (401 con aviso).
 
-**El usuario actual y su rol.** Además del token, `AuthProvider` carga el usuario con `GET /api/users/me` cada vez que cambia la sesión: tras `login()`, al arrancar con un token guardado y cuando otra pestaña cambia el token. `useAuth()` expone `user`, `isAdmin`, `userStatus` (`idle` sin sesión, `loading`, `ready` o `error`) y `refreshUser()` para reintentar.
+**El usuario actual y su rol.** Además de descubrir la sesión, `AuthProvider` carga el usuario con `GET /api/users/me` al arrancar, tras `login()` y en cada `refreshUser()`. `useAuth()` expone `user`, `isAdmin`, `userStatus` (`idle` sin sesión, `loading`, `ready` o `error`) y `refreshUser()` para reintentar.
 
 - **Por qué se pregunta al servidor y no se lee del JWT.** El token no lleva el rol (solo el email como `sub` y el emisor). Y aunque lo llevara, quedaría desfasado hasta que caducase (24 h), mientras que el backend lee el usuario de la base de datos en cada petición y un cambio de rol es inmediato. Preguntar a `/users/me` mantiene esa misma coherencia en el cliente.
-- `login()` sigue siendo síncrono: la carga del usuario va detrás y la navegación no espera por ella.
-- **Respuestas tardías.** El resultado se guarda junto al token (y al número de intento) que lo pidió, y `user`/`userStatus` se calculan comparándolo con la sesión actual: el usuario de una sesión anterior nunca se asigna a la nueva. Además, cada cambio cancela la petición en curso con `AbortController`. Son dos defensas independientes.
+- `login(email, password)` es asíncrono: espera a `POST /auth/login` y a `GET /users/me` antes de abrir la sesión en la interfaz (así no se pinta un instante «sin rol»); si `/users/me` falla, la sesión se abre igualmente con `userStatus = 'error'`.
+- **Respuestas tardías.** El resultado se guarda junto a la época de sesión (`epoch`) y al número de intento que lo pidieron, y `user`/`userStatus` se calculan comparándolo con la sesión actual: el usuario de una sesión anterior nunca se asigna a la nueva. Además, cada cambio cancela la petición en curso con `AbortController`. Son dos defensas independientes.
 - **Errores.** Un 401 lo gestiona `apiFetch` como cualquier otro (cierra sesión y avisa una vez). Si falla por red o un 5xx, la sesión se mantiene con `userStatus = 'error'` e `isAdmin = false`: **falla cerrado** (ante la duda, no se muestra nada de administrador).
 - **El rol del cliente solo decide qué se pinta**: la etiqueta «Administrador» del menú de usuario (`Navbar`, que muestra también «Sesión iniciada como» y el nombre), y la guarda `RequireAdmin`. La seguridad real es el 403 del backend.
 - En los tests, `routeFetch` (`src/test/helpers.tsx`) responde por defecto a `/users/me` con un usuario `USER` (`makeUser`), y cada test puede sobrescribirlo.
 
-**El login** (`pages/LoginPage.tsx`) llama a `apiFetch('/auth/login', { method: 'POST', body, public: true })`, guarda el token con `login(token)` y ya está: `RedirectIfAuthenticated` ve la sesión y lleva a `/`.
+**El login** (`pages/LoginPage.tsx`) llama a `login(email, password)` del contexto (que hace `POST /auth/login` con `public: true` y luego carga `/users/me`; no hay token que guardar) y ya está: `RedirectIfAuthenticated` ve la sesión y lleva a `/`.
 
-> **Pendiente conocido (tarea 29 del plan).** Guardar el JWT en `localStorage` lo deja accesible a cualquier JavaScript de la página: si hubiera una vulnerabilidad XSS, podrían robarlo. La alternativa más segura es una cookie `HttpOnly`. Como todo el manejo del token está en `AuthContext` y `api.ts`, el cambio queda localizado.
+> **Hecho en la tarea 29.** El JWT va en cookie HttpOnly (`SameSite=Strict`, `Path=/api`, `Secure` según `streambox.auth.cookie.secure`/`STREAMBOX_AUTH_COOKIE_SECURE`, `true` por defecto; el compose HTTP en localhost lo pone a `false`). Riesgos residuales: sin revocación (el logout solo borra la cookie; el JWT dura 24 h), login CSRF mitigado con SameSite, y siguen pendientes vida corta + refresh, y HSTS con HTTPS.
 
 ---
 
@@ -1606,7 +1615,7 @@ Un detalle: un `<dialog>` modal vuelve inerte todo lo de fuera, incluidos los av
 
 Solo para `ADMIN`. La barra muestra el enlace **«Administrar»** únicamente si `isAdmin` (y no mientras se carga el usuario). En 375 px se reduce al icono, con su nombre accesible. Todo `/admin` va dentro de `RequireAdmin`, pero recuerda que **esto es solo interfaz**: quien protege los datos es el backend (403 para un `USER`, regla de cierre del catálogo; capítulo 9.2).
 
-- **`AdminLayout`**: un único `h1` «Administración» y dos pestañas, Películas y Géneros. Como cada pestaña es una **ruta**, son enlaces (`NavLink` con `aria-current="page"`) dentro de un `<nav aria-label="Secciones de administración">`, no el patrón ARIA `tablist`. Ese patrón es para paneles que se muestran sin cambiar de URL, y con enlaces funcionan el botón «Atrás», abrir en otra pestaña y compartir la dirección.
+- **`AdminLayout`**: un único `h1` «Administración» y tres pestañas, Películas, Series y Géneros. Como cada pestaña es una **ruta**, son enlaces (`NavLink` con `aria-current="page"`) dentro de un `<nav aria-label="Secciones de administración">`, no el patrón ARIA `tablist`. Ese patrón es para paneles que se muestran sin cambiar de URL, y con enlaces funcionan el botón «Atrás», abrir en otra pestaña y compartir la dirección.
 - **`AdminMoviesPage`** (listado):
   - Tabla con portada pequeña (`MoviePoster`), título, año, duración, géneros y acciones «Editar X» y «Borrar X» (el nombre accesible incluye el título).
   - En móvil la tabla se compacta (año, duración y géneros bajo el título, y acciones solo con icono) para no provocar scroll horizontal.
@@ -1763,10 +1772,10 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1256 | `.\mvnw.cmd test` (desde `streambox/`) |
-| Backend (PostgreSQL real) | Testcontainers | 131 | Se ejecutan con el anterior (1387 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 779 | `npm run test` (desde `frontend/`) |
-| Frontend (flujos completos) | Playwright (Chromium) | 143 (+24 de capturas, que se omiten) | `npm run test:e2e` |
+| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1269 | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (PostgreSQL real) | Testcontainers | 131 | Se ejecutan con el anterior (1400 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 774 | `npm run test` (desde `frontend/`) |
+| Frontend (flujos completos) | Playwright (Chromium) | 144 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend
 
@@ -1800,7 +1809,7 @@ Prueban de verdad todo el recorrido del capítulo 2: filtros, seguridad, control
 
 - **Vitest + Testing Library** (`*.test.ts(x)` junto al código): prueban la lógica (`apiFetch`, validación, `buildCatalogRows`…) y los componentes **como los usaría una persona**: buscan elementos por su rol y su texto (`getByRole('button', { name: 'Iniciar sesión' })`), no por clases CSS. Si un test no encuentra un elemento por su rol, suele ser un problema de accesibilidad. Se ejecutan en `jsdom` (un navegador simulado), con algunas simulaciones en `src/test/setup.ts` (por ejemplo, `<dialog>`, que jsdom no implementa).
 - **Playwright** (`frontend/e2e/`): abre un Chromium real y recorre la aplicación de verdad (registro, login, catálogo, favoritos, buscador, teclado, responsive en 375/768/1280 px). Levanta **su propio backend** en el puerto 8099 con H2 en memoria y su propio Vite en el 5199, siembra 25 películas por la API con un administrador temporal y lo apaga todo al terminar. No toca tu base de datos ni tus puertos 8080 y 5173. Las portadas se siembran como rutas propias (`/covers/...`), que son las únicas no `https` que acepta la API.
-- **Specs que modifican el catálogo** (`admin-peliculas.spec.ts`: crea, edita y borra una película) van en un proyecto aparte, `catalogo-mutable`, que Playwright solo empieza cuando el resto ha terminado. Mientras existe una película creada por un test, ella pasa a ser la más reciente, y los tests que comprueban el banner o «Mostrando 25 de 25» fallarían según el orden. Contrapartida: si falla algún test del proyecto principal, este se omite. Para ejecutarlo solo: `npx playwright test admin-peliculas --no-deps`.
+- **Specs que modifican el catálogo** (`admin-peliculas.spec.ts` y `admin-series.spec.ts`: crean, editan y borran títulos) van en un proyecto aparte, `catalogo-mutable`, que Playwright solo empieza cuando el resto ha terminado. Mientras existe una película creada por un test, ella pasa a ser la más reciente, y los tests que comprueban el banner o «Mostrando 25 de 25» fallarían según el orden. Contrapartida: si falla algún test del proyecto principal, este se omite. Para ejecutarlo solo: `npx playwright test admin-peliculas admin-series --no-deps`.
 - **El tiempo en los tests.** Ningún test de Vitest espera tiempo real. Los que dependen de un debounce (buscador de la barra, buscador del panel, vista previa de la portada) usan el reloj falso de `src/test/fakeTimers.ts`: `installManualTimers()` en `beforeEach` y `passTime(ms)` para dejar pasar el tiempo. Así se comprueba el retraso exacto (nada a los 299 ms, la petición a los 300) y el resultado no depende de lo cargada que esté la máquina. Con el reloj real y `waitFor` (1 s), algunos fallaban a veces con la suite en paralelo.
 - **Esperar como una persona en E2E.** Antes de pulsar en el formulario de película se espera a que esté completo (`waitForMovieForm(page)` en `e2e/support/fixtures.ts`). Los géneros llegan aparte y, al aparecer, desplazan los botones 128 px en móvil. Playwright solo comprueba qué hay bajo el puntero en el primer evento del clic, así que el `mouseup` podía caer en otro elemento.
 
@@ -1827,12 +1836,12 @@ Ejemplo: `GET /api/movies/{id}/similar`.
 
 Ejemplo: `age_rating` en `movies`.
 
-1. **Migración nueva**: `V3__add_movie_age_rating.sql`, en SQL que funcione en PostgreSQL y en H2. Piensa qué pasa con las filas existentes (¿`NOT NULL` con valor por defecto?).
+1. **Migración nueva**: `V4__add_movie_age_rating.sql`, en SQL que funcione en PostgreSQL y en H2. Piensa qué pasa con las filas existentes (¿`NOT NULL` con valor por defecto?).
 2. **Entidad**: añade el campo a `Movie` con su `@Column`.
 3. **DTOs y mapper**: `MovieRequest` (con validación), `MovieResponse` y `MovieMapper`.
 4. **Arranca la aplicación**: Hibernate valida que entidad y migración coinciden.
 5. **Tests**: `FlywaySchemaIntegrationTest` y `PostgresSchemaIntegrationTest` para la columna y sus restricciones.
-6. **Nunca** edites V1 ni V2.
+6. **Nunca** edites una migración ya aplicada (V1 a V3).
 
 ### 23.3 Añadir una pantalla al frontend
 
@@ -1856,7 +1865,7 @@ Crea la página y su ruta (23.3) y añade un `NavLink` en `components/Navbar.tsx
 | **Bean** | Objeto creado y gestionado por Spring (servicios, repositorios, controladores…) |
 | **BCrypt** | Algoritmo de hash de contraseñas, lento a propósito y con sal |
 | **BOLA / IDOR** | Vulnerabilidad: acceder a datos de otro usuario cambiando un id en la petición |
-| **CSRF** | Ataque que aprovecha las cookies que el navegador envía solo; no aplica a APIs con token en cabecera |
+| **CSRF** | Ataque que aprovecha las cookies que el navegador envía solo. StreamBox lo mitiga con `SameSite=Strict` y exigiendo la cabecera `X-Requested-With` en las peticiones que modifican datos |
 | **Debounce** | Esperar a que el usuario deje de escribir antes de actuar |
 | **DTO** | *Data Transfer Object*: objeto que entra o sale por la API, separado de la entidad |
 | **Entidad** | Clase Java que representa una fila de una tabla (JPA) |
@@ -1867,7 +1876,7 @@ Crea la página y su ruta (23.3) y añade un `NavLink` en `components/Navbar.tsx
 | **Inyección de dependencias** | Spring pasa a cada clase los objetos que necesita por su constructor |
 | **JPA** | Especificación Java para guardar objetos en bases de datos relacionales |
 | **JPQL** | Lenguaje de consultas de JPA, sobre entidades en lugar de tablas |
-| **JWT** | Token firmado que identifica al usuario en cada petición |
+| **JWT** | Token firmado que identifica al usuario en cada petición (viaja en la cookie HttpOnly `streambox_token`) |
 | **LAZY** | Carga diferida: una relación no se lee de la base de datos hasta que se usa |
 | **Migración** | Script SQL versionado que cambia el esquema |
 | **N+1** | Problema de rendimiento: 1 consulta para N elementos + 1 consulta extra por cada uno |

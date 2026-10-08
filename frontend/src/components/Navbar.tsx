@@ -78,7 +78,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
  */
 export function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const { isAuthenticated, user, isAdmin, logout } = useAuth();
+  const { isAuthenticated, isCheckingSession, user, isAdmin, logout } = useAuth();
   const headerRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -207,7 +207,7 @@ export function Navbar() {
                 </NavLink>
                 <button
                   type="button"
-                  onClick={() => logout()}
+                  onClick={() => void logout()}
                   className="focus-ring flex min-h-11 w-full items-center gap-2 px-4 text-left text-sm text-gray-300 transition-colors hover:text-white"
                 >
                   <LogOut aria-hidden="true" className="size-4" />
@@ -217,12 +217,16 @@ export function Navbar() {
             )}
           </div>
         ) : (
-          <Link
-            to="/login"
-            className="focus-ring inline-flex min-h-11 items-center rounded-lg bg-accent px-4 text-sm font-semibold text-black"
-          >
-            Iniciar sesión
-          </Link>
+          // Mientras el arranque averigua si hay sesión no se ofrece «Iniciar sesión»:
+          // a quien ya la tiene le parpadearía un botón falso.
+          !isCheckingSession && (
+            <Link
+              to="/login"
+              className="focus-ring inline-flex min-h-11 items-center rounded-lg bg-accent px-4 text-sm font-semibold text-black"
+            >
+              Iniciar sesión
+            </Link>
+          )
         )}
       </div>
     </header>

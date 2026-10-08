@@ -3,7 +3,6 @@ package com.emilio.streambox.service;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import com.emilio.streambox.dto.LoginResponse;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.AccountLockedException;
 import com.emilio.streambox.exception.InvalidCredentialsException;
@@ -77,16 +76,16 @@ public class AuthenticationService {
      *                 nunca {@code X-Forwarded-For} a mano): decide si el
      *                 bloqueo de la cuenta le aplica como IP conocida o
      *                 desconocida (ver {@link LoginAttemptService})
-     * @return respuesta con el token JWT
+     * @return token JWT; el controlador lo entrega en una cookie HttpOnly, nunca
+     *         en el cuerpo
      * @throws InvalidCredentialsException si el email no existe o la contraseña es
      *         incorrecta; lleva los intentos que quedan antes del bloqueo
      * @throws AccountLockedException si la cuenta está bloqueada temporalmente
      *         por demasiados intentos fallidos, o si este fallo agota los intentos
      */
-    public LoginResponse login(String email, String password, String clientIp) {
+    public String login(String email, String password, String clientIp) {
 
-        return new LoginResponse(
-                jwtService.generateToken(authenticate(email, password, clientIp)));
+        return jwtService.generateToken(authenticate(email, password, clientIp));
     }
 
     /**

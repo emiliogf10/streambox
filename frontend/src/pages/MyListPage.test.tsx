@@ -65,7 +65,7 @@ function renderList(movies: Movie[], series: Series[], extra: Parameters<typeof 
     <FavoritesProvider>
       <MyListPage />
     </FavoritesProvider>,
-    { token: 'jwt', route: '/favorites' },
+    { session: true, route: '/favorites' },
   );
   return user;
 }

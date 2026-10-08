@@ -105,7 +105,7 @@ class RateLimitingIntegrationTest {
                 .andExpect(status().isTooManyRequests());
 
         login("user2@test.com", "correct-password", "10.2.0.2")
-                .andExpect(status().isOk());
+                .andExpect(status().isNoContent());
     }
 
     // --- Límite por IP en registro ---
@@ -130,7 +130,7 @@ class RateLimitingIntegrationTest {
         register("indep1", ip).andExpect(status().isCreated());
         register("indep2", ip).andExpect(status().isCreated());
 
-        login("user4@test.com", "correct-password", ip).andExpect(status().isOk());
+        login("user4@test.com", "correct-password", ip).andExpect(status().isNoContent());
     }
 
     @Test
@@ -194,12 +194,12 @@ class RateLimitingIntegrationTest {
         createUser("user8");
         login("user8@test.com", "mal", "10.9.0.1").andExpect(status().isUnauthorized());
         login("user8@test.com", "mal", "10.9.0.2").andExpect(status().isUnauthorized());
-        login("user8@test.com", "correct-password", "10.9.0.3").andExpect(status().isOk());
+        login("user8@test.com", "correct-password", "10.9.0.3").andExpect(status().isNoContent());
 
         // Vuelve a tener 3 intentos fallidos disponibles
         login("user8@test.com", "mal", "10.9.0.4").andExpect(status().isUnauthorized());
         login("user8@test.com", "mal", "10.9.0.5").andExpect(status().isUnauthorized());
-        login("user8@test.com", "correct-password", "10.9.0.6").andExpect(status().isOk());
+        login("user8@test.com", "correct-password", "10.9.0.6").andExpect(status().isNoContent());
     }
 
     @Test
@@ -217,7 +217,7 @@ class RateLimitingIntegrationTest {
         login("user9@test.com", "mal", "10.10.0.2");
         login("user9@test.com", "mal", "10.10.0.3");
 
-        login("other@test.com", "other-password", "10.10.0.4").andExpect(status().isOk());
+        login("other@test.com", "other-password", "10.10.0.4").andExpect(status().isNoContent());
     }
 
     // --- Variantes de la ruta (regresión) ---

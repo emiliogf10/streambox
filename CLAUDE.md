@@ -90,7 +90,7 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 - Cada bug corregido deja un test que falla sin el arreglo.
 - Lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia real) se prueba también contra PostgreSQL real en `src/test/.../postgres/` (extiende `PostgresIntegrationTestSupport`); H2 puede ocultar diferencias (ya ocultó un bug de búsqueda).
 - Frontend: lógica y componentes con Vitest + Testing Library (`*.test.ts(x)` junto al código, utilidades en `src/test/`); flujos completos con Playwright en `frontend/e2e/`. Localiza por rol/etiqueta, no con `data-testid`.
-- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 1387 con Docker —1256 con H2 y 131 contra PostgreSQL real—; sin Docker se omiten los de PostgreSQL (cada parametrizado omitido cuenta como uno, así que el recuento de omitidos no coincide con el de métodos); 779 de Vitest y 143 E2E + 24 de capturas omitidas).
+- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 1400 con Docker —1269 con H2 y 131 contra PostgreSQL real—; sin Docker se omiten los de PostgreSQL (cada parametrizado omitido cuenta como uno, así que el recuento de omitidos no coincide con el de métodos); 774 de Vitest y 144 E2E + 24 de capturas omitidas; en el contenedor de Claude (Chromium 141) fallan 2 E2E de `accessibility.spec.ts:189`).
 - Vitest no espera tiempo real: los debounces se prueban con `src/test/fakeTimers.ts`. Los E2E que modifican el catálogo van en el proyecto `catalogo-mutable` de Playwright, que corre al final.
 
 ## Frontend: estado actual
@@ -98,7 +98,7 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 SPA en `frontend/src/` organizada en `pages/`, `components/`, `context/`, `hooks/` y `lib/` (la Fase 3 del plan está hecha). Reglas que ya se cumplen y no deben romperse:
 
 - **Todas las llamadas a la API pasan por `lib/api.ts` (`apiFetch`/`ApiError`)**: nada de `fetch` suelto. Maneja 401 (cierra sesión una vez; el 401 de login/registro no), 403 (no cierra sesión), 429 (`Retry-After`), 204 y red caída. Se decide por `status`/`code`, no por el texto.
-- **El token JWT (`localStorage`, clave `token`) solo lo toca `context/AuthContext.tsx`** (y el puente `configureAuth` de `api.ts`). Moverlo a cookie HttpOnly es la tarea 29.
+- **El JWT ya no existe para JavaScript**: va en la cookie HttpOnly `streambox_token` (tarea 29). `AuthContext` descubre la sesión con `GET /api/users/me`; `apiFetch` manda `credentials: 'same-origin'` y `X-Requested-With: StreamBox` en las peticiones no seguras (defensa CSRF; sin ella 403 `CSRF_REJECTED`). Nunca guardes el token en `localStorage`. Pendiente: vida corta + refresh y HSTS.
 - Estilos con **clases de Tailwind y tokens `@theme`** de `index.css` (`canvas`, `surface`, `accent`, `muted`...), cero `style={{}}`. Foco visible con `focus-ring`. Contrastes WCAG AA ya calculados: si cambias un token, recalcula.
 - Modales con `components/Modal` (`<dialog>` + `useModalDialog`); avisos con `useToast()`; favoritos con `FavoritesContext` (optimista, 409/404 = estado ya correcto).
 - Las imágenes salen **siempre del `imageUrl` del título** (película o serie, tipo común `CatalogItem`) vía `components/MoviePoster` (lazy, con respaldo). Portadas locales de ejemplo en `public/covers/*.webp` (+ script opcional `docs/portadas-locales.sql`).

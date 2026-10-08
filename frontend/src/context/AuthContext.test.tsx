@@ -1,26 +1,33 @@
 /**
  * Tests de `AuthProvider` / `useAuth`: la única fuente de verdad de la sesión.
  *
- * Protegen que el token solo vive en `localStorage['token']`, que las pestañas
- * se mantienen coherentes entre sí (evento `storage`), que un 401 cierra la
- * sesión UNA sola vez y solo si es de la sesión actual, y que un almacenamiento
- * roto no tumba la aplicación. Se usa el `apiFetch` real con `fetch` simulado
- * para probar el puente `configureAuth` de punta a punta.
+ * Protegen el modelo de sesión por cookie HttpOnly:
+ * - No hay token en JavaScript: nunca se escribe en `localStorage`, y el que dejaron
+ *   versiones anteriores se borra al arrancar.
+ * - La sesión se descubre al arrancar con `GET /api/users/me` (200 = hay sesión,
+ *   401 = no hay, SIN aviso de «sesión caducada»; red/5xx = error recuperable).
+ * - `login` llama a `/auth/login` y carga el usuario; `logout` limpia el estado al
+ *   instante y pide borrar la cookie (best-effort).
+ * - Un 401 en un endpoint autenticado con la sesión abierta la cierra UNA sola vez,
+ *   y solo si es de la sesión actual.
+ * - `isAdmin` falla cerrado y el usuario de una sesión anterior nunca se cuela en la nueva.
  *
- * También protegen la carga del usuario actual (`GET /api/users/me`): que se
- * pide en cada sesión, que `isAdmin` falla cerrado y que el usuario de una
- * sesión anterior nunca se cuela en la nueva.
+ * Se usa el `apiFetch` real con `fetch` simulado para probar el puente `configureAuth`
+ * de punta a punta.
  */
 import { act, renderHook, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiFetch } from '../lib/api';
+import { ApiError, apiFetch } from '../lib/api';
 import type { User } from '../lib/types';
-import { errorResponse, jsonResponse, makeUser } from '../test/helpers';
+import { errorResponse, jsonResponse, makeUser, noContentResponse } from '../test/helpers';
 import { AuthProvider, useAuth } from './AuthContext';
 import { ToastProvider } from './ToastContext';
 
 const fetchMock = vi.fn<typeof fetch>();
+
+const SESSION_EXPIRED = 'Tu sesión ha caducado. Inicia sesión de nuevo.';
+const UNAUTHORIZED = () => errorResponse(401, 'UNAUTHORIZED', 'No autenticado.');
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
@@ -28,19 +35,6 @@ function wrapper({ children }: { children: ReactNode }) {
       <AuthProvider>{children}</AuthProvider>
     </ToastProvider>
   );
-}
-
-/** Simula el evento que el navegador emite en OTRA pestaña cuando cambia `localStorage`. */
-function storageEvent(init: StorageEventInit) {
-  act(() => {
-    window.dispatchEvent(new StorageEvent('storage', init));
-  });
-}
-
-/** Cabecera Authorization de la última petición hecha con `fetch`. */
-function lastAuthorization(): string | null {
-  const init = fetchMock.mock.calls.at(-1)?.[1];
-  return new Headers(init?.headers).get('Authorization');
 }
 
 /** Promesa controlable a mano para decidir CUÁNDO contesta el servidor. */
@@ -52,173 +46,374 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-/** Peticiones hechas a `GET /api/users/me`. */
-function userRequests() {
-  return fetchMock.mock.calls.filter(([url]) => String(url) === '/api/users/me');
+/** Llamadas hechas a `url` (con su método, por defecto GET). */
+function callsTo(url: string, method = 'GET') {
+  return fetchMock.mock.calls.filter(([u, init]) => String(u) === url && (init?.method ?? 'GET') === method);
 }
 
+type Handler = () => Response | Promise<Response>;
+
 /**
- * Simula `GET /api/users/me` respondiendo según el token con el que se pide
- * (clave = token sin `Bearer `). Cualquier otra petición hace fallar la llamada
- * con un mensaje claro en lugar de inventarse una respuesta.
+ * Servidor simulado: cada ruta `"MÉTODO /ruta"` tiene su manejador. Lo que no se
+ * declara hace fallar la llamada con un mensaje claro (nada se inventa).
  */
-function serveCurrentUser(byToken: Record<string, () => Response | Promise<Response>>) {
+function serve(routes: Record<string, Handler>) {
   fetchMock.mockImplementation(async (input, init) => {
-    const usedToken = new Headers(init?.headers).get('Authorization')?.replace('Bearer ', '') ?? '';
-    const handler = String(input) === '/api/users/me' ? byToken[usedToken] : undefined;
-    if (!handler) throw new Error(`Petición no prevista en el test: ${String(input)} con token «${usedToken}»`);
+    const key = `${init?.method ?? 'GET'} ${String(input)}`;
+    const handler = routes[key];
+    if (!handler) throw new Error(`Petición no prevista en el test: ${key}`);
     return handler();
   });
+}
+
+/** Monta el proveedor y espera a que el chequeo inicial de la sesión termine. */
+async function startApp() {
+  const hook = renderHook(() => useAuth(), { wrapper });
+  await waitFor(() => expect(hook.result.current.isCheckingSession).toBe(false));
+  return hook;
 }
 
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
-  // Por defecto el servidor no contesta: el `/users/me` que lanza `AuthProvider`
-  // en cuanto hay sesión se queda en "cargando" y no interfiere con los tests
-  // que no tratan del usuario. Los que sí, configuran su propia respuesta.
-  fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('AuthProvider: login y logout', () => {
-  it('sin token guardado no hay sesión', () => {
+describe('AuthProvider: arranque (se descubre la sesión con GET /users/me)', () => {
+  it('con cookie válida (200): hay sesión, el usuario está cargado y no se envía Authorization', async () => {
+    const me = makeUser({ role: 'ADMIN' });
+    serve({ 'GET /api/users/me': () => jsonResponse(me) });
+
     const { result } = renderHook(() => useAuth(), { wrapper });
 
-    expect(result.current).toMatchObject({ token: null, isAuthenticated: false });
+    // Mientras no contesta: no se sabe. Ni autenticado ni «sin sesión».
+    expect(result.current).toMatchObject({
+      isAuthenticated: false,
+      isCheckingSession: true,
+      sessionCheckFailed: false,
+      userStatus: 'loading',
+    });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    expect(result.current).toMatchObject({ user: me, isAdmin: true, userStatus: 'ready', isCheckingSession: false });
+    expect(callsTo('/api/users/me')).toHaveLength(1);
+    const init = callsTo('/api/users/me')[0][1];
+    expect(init?.credentials).toBe('same-origin');
+    expect(new Headers(init?.headers).has('Authorization')).toBe(false);
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
   });
 
-  it('arranca con la sesión guardada en localStorage', () => {
-    localStorage.setItem('token', 'guardado');
+  it('sin sesión (401): no hay sesión y NO se avisa de «sesión caducada» en este primer chequeo', async () => {
+    serve({ 'GET /api/users/me': UNAUTHORIZED });
 
-    const { result } = renderHook(() => useAuth(), { wrapper });
+    const { result } = await startApp();
 
-    expect(result.current).toMatchObject({ token: 'guardado', isAuthenticated: true });
+    expect(result.current).toMatchObject({
+      isAuthenticated: false,
+      sessionCheckFailed: false,
+      user: null,
+      isAdmin: false,
+      userStatus: 'idle',
+    });
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+    // Sin sesión no hay nada que cerrar: no se llama a /auth/logout.
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(0);
   });
 
-  it('login guarda el token en localStorage["token"] y abre la sesión', () => {
+  it.each([
+    ['red caída', () => Promise.reject(new TypeError('Failed to fetch'))],
+    ['error 500', () => errorResponse(500, 'INTERNAL_ERROR', 'boom')],
+  ] as const)('si el chequeo falla (%s): ni sesión ni «sin sesión», error recuperable con refreshUser', async (_case, failure) => {
+    serve({ 'GET /api/users/me': failure as Handler });
+
     const { result } = renderHook(() => useAuth(), { wrapper });
 
-    act(() => result.current.login('abc'));
+    await waitFor(() => expect(result.current.sessionCheckFailed).toBe(true));
+    expect(result.current).toMatchObject({
+      isAuthenticated: false,
+      isCheckingSession: false,
+      user: null,
+      isAdmin: false,
+      userStatus: 'error',
+    });
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
 
-    expect(localStorage.getItem('token')).toBe('abc');
-    expect(result.current).toMatchObject({ token: 'abc', isAuthenticated: true });
+    const me: User = makeUser({ role: 'ADMIN' });
+    serve({ 'GET /api/users/me': () => jsonResponse(me) });
+    act(() => result.current.refreshUser());
+
+    // Mientras reintenta vuelve a «comprobando», no se queda en error.
+    expect(result.current).toMatchObject({ isCheckingSession: true, userStatus: 'loading' });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    expect(result.current).toMatchObject({ user: me, isAdmin: true, userStatus: 'ready', sessionCheckFailed: false });
   });
 
-  it('logout borra el token y cierra la sesión (y es idempotente)', () => {
-    localStorage.setItem('token', 'abc');
-    const { result } = renderHook(() => useAuth(), { wrapper });
+  it('borra el token que versiones anteriores dejaron en localStorage', async () => {
+    localStorage.setItem('token', 'jwt-heredado');
+    localStorage.setItem('tema', 'oscuro');
+    serve({ 'GET /api/users/me': UNAUTHORIZED });
 
-    act(() => result.current.logout());
-    act(() => result.current.logout());
+    const { result } = await startApp();
 
     expect(localStorage.getItem('token')).toBeNull();
+    expect(localStorage.getItem('tema')).toBe('oscuro'); // solo la clave del token
+    // Y el token heredado NO abre sesión: manda el servidor (aquí, 401).
     expect(result.current.isAuthenticated).toBe(false);
+    const init = callsTo('/api/users/me')[0][1];
+    expect(new Headers(init?.headers).has('Authorization')).toBe(false);
   });
 
-  it('una petición lanzada justo después de login ya lleva el token nuevo', async () => {
-    fetchMock.mockImplementation(async () => jsonResponse({}));
-    const { result } = renderHook(() => useAuth(), { wrapper });
+  it('si localStorage lanza (modo privado), arranca igualmente en lugar de romper', async () => {
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new DOMException('Acceso denegado', 'SecurityError');
+    });
+    serve({ 'GET /api/users/me': () => jsonResponse(makeUser()) });
 
-    act(() => result.current.login('recien-llegado'));
-    await apiFetch('/movies');
+    const { result } = await startApp();
 
-    expect(lastAuthorization()).toBe('Bearer recien-llegado');
-  });
-
-  it('useAuth fuera de AuthProvider lanza un error claro', () => {
-    // React registra con console.error el error de render; es lo esperado aquí.
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    expect(() => renderHook(() => useAuth())).toThrow('useAuth debe usarse dentro de <AuthProvider>.');
+    expect(result.current.isAuthenticated).toBe(true);
   });
 });
 
-describe('AuthProvider: sincronización entre pestañas (evento storage)', () => {
-  it('un token nuevo escrito en otra pestaña abre la sesión aquí y lo usan las peticiones', async () => {
-    fetchMock.mockImplementation(async () => jsonResponse({}));
-    const { result } = renderHook(() => useAuth(), { wrapper });
+describe('AuthProvider: login', () => {
+  it('llama a /auth/login (con cabecera anti-CSRF), carga el usuario y abre la sesión sin pedir /users/me dos veces', async () => {
+    let loggedIn = false;
+    const me = makeUser({ username: 'nueva' });
+    serve({
+      'GET /api/users/me': () => (loggedIn ? jsonResponse(me) : UNAUTHORIZED()),
+      'POST /api/auth/login': () => {
+        loggedIn = true;
+        return noContentResponse();
+      },
+    });
+    const { result } = await startApp();
+    expect(result.current.isAuthenticated).toBe(false);
 
-    storageEvent({ key: 'token', newValue: 'de-otra-pestana' });
-    await apiFetch('/movies');
+    await act(async () => result.current.login('ana@example.com', 'secreta'));
 
-    expect(result.current).toMatchObject({ token: 'de-otra-pestana', isAuthenticated: true });
-    expect(lastAuthorization()).toBe('Bearer de-otra-pestana');
+    expect(result.current).toMatchObject({ isAuthenticated: true, user: me, userStatus: 'ready' });
+    const [, init] = callsTo('/api/auth/login', 'POST')[0];
+    expect(JSON.parse(String(init?.body))).toEqual({ email: 'ana@example.com', password: 'secreta' });
+    expect(new Headers(init?.headers).get('X-Requested-With')).toBe('StreamBox');
+    expect(new Headers(init?.headers).has('Authorization')).toBe(false);
+    // Arranque (401) + carga tras el login = 2; el efecto de carga no repite la petición.
+    await waitFor(() => expect(callsTo('/api/users/me')).toHaveLength(2));
+    expect(callsTo('/api/users/me')).toHaveLength(2);
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
   });
 
-  it('el token borrado en otra pestaña (newValue null) cierra la sesión', () => {
-    localStorage.setItem('token', 'abc');
-    const { result } = renderHook(() => useAuth(), { wrapper });
+  it('nunca escribe el token (ni nada) en localStorage al iniciar y cerrar sesión', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    let loggedIn = false;
+    serve({
+      'GET /api/users/me': () => (loggedIn ? jsonResponse(makeUser()) : UNAUTHORIZED()),
+      'POST /api/auth/login': () => {
+        loggedIn = true;
+        return noContentResponse();
+      },
+      'POST /api/auth/logout': () => noContentResponse(),
+    });
+    const { result } = await startApp();
 
-    storageEvent({ key: 'token', newValue: null });
+    await act(async () => result.current.login('ana@example.com', 'secreta'));
+    await act(async () => result.current.logout());
 
+    expect(setItem).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('credenciales incorrectas: login lanza el ApiError (con remainingAttempts), sigue sin sesión y NO avisa de «sesión caducada»', async () => {
+    serve({
+      'GET /api/users/me': UNAUTHORIZED,
+      'POST /api/auth/login': () => errorResponse(401, 'INVALID_CREDENTIALS', 'x', { remainingAttempts: 3 }),
+    });
+    const { result } = await startApp();
+
+    let error: unknown;
+    await act(async () => {
+      error = await result.current.login('ana@example.com', 'mal').catch((e: unknown) => e);
+    });
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 401, code: 'INVALID_CREDENTIALS', remainingAttempts: 3 });
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+    // No llegó a pedir el usuario: solo el chequeo inicial.
+    expect(callsTo('/api/users/me')).toHaveLength(1);
+  });
+
+  it('un 429 del login se propaga con su Retry-After', async () => {
+    serve({
+      'GET /api/users/me': UNAUTHORIZED,
+      'POST /api/auth/login': () =>
+        errorResponse(429, 'ACCOUNT_LOCKED', 'x', {}, { 'Retry-After': '120' }),
+    });
+    const { result } = await startApp();
+
+    let error: unknown;
+    await act(async () => {
+      error = await result.current.login('ana@example.com', 'x').catch((e: unknown) => e);
+    });
+
+    expect(error).toMatchObject({ status: 429, code: 'ACCOUNT_LOCKED', retryAfterSeconds: 120 });
     expect(result.current.isAuthenticated).toBe(false);
   });
 
-  it('localStorage.clear() en otra pestaña (key === null) cierra la sesión', () => {
-    localStorage.setItem('token', 'abc');
-    const { result } = renderHook(() => useAuth(), { wrapper });
+  it('si el login sale bien pero /users/me falla, la sesión se abre igualmente (sin rol: falla cerrado) y refreshUser reintenta', async () => {
+    let loggedIn = false;
+    let meWorks = false;
+    serve({
+      'GET /api/users/me': () => {
+        if (!loggedIn) return UNAUTHORIZED();
+        return meWorks ? jsonResponse(makeUser({ role: 'ADMIN' })) : errorResponse(500, 'INTERNAL_ERROR', 'boom');
+      },
+      'POST /api/auth/login': () => {
+        loggedIn = true;
+        return noContentResponse();
+      },
+    });
+    const { result } = await startApp();
 
-    storageEvent({ key: null });
+    await act(async () => result.current.login('ana@example.com', 'secreta'));
+    await waitFor(() => expect(result.current.userStatus).toBe('error'));
+    expect(result.current).toMatchObject({ isAuthenticated: true, user: null, isAdmin: false });
 
-    expect(result.current).toMatchObject({ token: null, isAuthenticated: false });
+    meWorks = true;
+    act(() => result.current.refreshUser());
+    await waitFor(() => expect(result.current.userStatus).toBe('ready'));
+    expect(result.current.isAdmin).toBe(true);
   });
 
-  it('un newValue vacío no cuenta como token: cierra la sesión', () => {
-    localStorage.setItem('token', 'abc');
-    const { result } = renderHook(() => useAuth(), { wrapper });
+  it('el usuario del chequeo de arranque nunca se queda en la sesión nueva, llegue su respuesta antes o después del login', async () => {
+    for (const order of ['antes', 'después'] as const) {
+      fetchMock.mockReset();
+      const startup = deferred<Response>();
+      const afterLogin = deferred<Response>();
+      let meCalls = 0;
+      serve({
+        'GET /api/users/me': () => (++meCalls === 1 ? startup.promise : afterLogin.promise),
+        'POST /api/auth/login': () => noContentResponse(),
+      });
+      const { result, unmount } = renderHook(() => useAuth(), { wrapper });
 
-    storageEvent({ key: 'token', newValue: '' });
+      // El chequeo inicial sigue en vuelo cuando se inicia sesión con otra cuenta.
+      let loginDone!: Promise<void>;
+      act(() => {
+        loginDone = result.current.login('nueva@example.com', 'x');
+      });
+      await waitFor(() => expect(meCalls).toBe(2));
 
-    expect(result.current.isAuthenticated).toBe(false);
-  });
+      const lateAdmin = () => jsonResponse(makeUser({ username: 'admin-anterior', role: 'ADMIN' }));
+      const fresh = () => jsonResponse(makeUser({ username: 'nueva', role: 'USER' }));
+      if (order === 'antes') {
+        await act(async () => startup.resolve(lateAdmin()));
+        await act(async () => {
+          afterLogin.resolve(fresh());
+          await loginDone;
+        });
+      } else {
+        await act(async () => {
+          afterLogin.resolve(fresh());
+          await loginDone;
+        });
+        // Al abrirse la sesión nueva, la comprobación antigua en vuelo se cancela.
+        expect(callsTo('/api/users/me')[0][1]?.signal?.aborted).toBe(true);
+        await act(async () => startup.resolve(lateAdmin()));
+      }
 
-  it('los cambios de claves ajenas se ignoran', () => {
-    localStorage.setItem('token', 'abc');
-    const { result } = renderHook(() => useAuth(), { wrapper });
-
-    storageEvent({ key: 'tema', newValue: 'oscuro' });
-    storageEvent({ key: 'tema', newValue: null });
-
-    expect(result.current).toMatchObject({ token: 'abc', isAuthenticated: true });
-  });
-
-  it('deja de escuchar al desmontarse', () => {
-    const add = vi.spyOn(window, 'addEventListener');
-    const remove = vi.spyOn(window, 'removeEventListener');
-    const { unmount } = renderHook(() => useAuth(), { wrapper });
-    const registered = add.mock.calls.find(([type]) => type === 'storage')?.[1];
-    expect(registered).toBeDefined();
-
-    unmount();
-
-    // Un listener que sobreviviera al componente sería una fuga de memoria y de estado.
-    expect(remove).toHaveBeenCalledWith('storage', registered);
+      expect(result.current.user?.username, order).toBe('nueva');
+      expect(result.current.isAdmin, order).toBe(false);
+      unmount();
+    }
   });
 });
 
-describe('AuthProvider: 401 del servidor', () => {
-  it('un 401 con el token actual cierra la sesión y avisa', async () => {
-    localStorage.setItem('token', 'actual');
-    const { result } = renderHook(() => useAuth(), { wrapper });
-    fetchMock.mockImplementation(async () => errorResponse(401, 'UNAUTHORIZED', 'x'));
+describe('AuthProvider: logout', () => {
+  it('limpia el estado AL INSTANTE y pide borrar la cookie (POST /auth/logout con cabecera anti-CSRF)', async () => {
+    const serverLogout = deferred<Response>();
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser({ role: 'ADMIN' })),
+      'POST /api/auth/logout': () => serverLogout.promise,
+    });
+    const { result } = await startApp();
+    expect(result.current.isAdmin).toBe(true);
+
+    let done!: Promise<void>;
+    act(() => {
+      done = result.current.logout();
+    });
+
+    // El servidor aún no ha contestado, pero la interfaz ya no tiene sesión.
+    expect(result.current).toMatchObject({ isAuthenticated: false, user: null, isAdmin: false, userStatus: 'idle' });
+    const [, init] = callsTo('/api/auth/logout', 'POST')[0];
+    expect(new Headers(init?.headers).get('X-Requested-With')).toBe('StreamBox');
+    await act(async () => {
+      serverLogout.resolve(noContentResponse());
+      await done;
+    });
+    // Cerrar sesión por decisión propia no es «sesión caducada».
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+  });
+
+  it('es idempotente: una segunda llamada no vuelve a pedir nada al servidor', async () => {
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'POST /api/auth/logout': () => noContentResponse(),
+    });
+    const { result } = await startApp();
+
+    await act(async () => result.current.logout());
+    await act(async () => result.current.logout());
+
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(1);
+    expect(result.current.isAuthenticated).toBe(false);
+  });
+
+  it('es best-effort: si /auth/logout falla (red o 500), no lanza y la sesión de la interfaz sigue cerrada', async () => {
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'POST /api/auth/logout': () => Promise.reject(new TypeError('Failed to fetch')),
+    });
+    const { result } = await startApp();
+
+    await act(async () => {
+      await expect(result.current.logout()).resolves.toBeUndefined();
+    });
+
+    expect(result.current.isAuthenticated).toBe(false);
+  });
+});
+
+describe('AuthProvider: 401 del servidor con la sesión abierta', () => {
+  /** Arranca con sesión y deja `/auth/logout` disponible (el cierre por 401 limpia la cookie). */
+  async function startSignedIn() {
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'POST /api/auth/logout': () => noContentResponse(),
+      'GET /api/movies': () => errorResponse(401, 'UNAUTHORIZED', 'x'),
+      'GET /api/genres': () => errorResponse(401, 'UNAUTHORIZED', 'x'),
+      'GET /api/users/me/favorites': () => errorResponse(401, 'UNAUTHORIZED', 'x'),
+    });
+    return startApp();
+  }
+
+  it('un 401 cierra la sesión, avisa y limpia la cookie caducada', async () => {
+    const { result } = await startSignedIn();
 
     await act(async () => {
       await apiFetch('/movies').catch(() => undefined);
     });
 
-    expect(result.current.isAuthenticated).toBe(false);
-    expect(localStorage.getItem('token')).toBeNull();
-    expect(screen.getByText('Tu sesión ha caducado. Inicia sesión de nuevo.')).toBeInTheDocument();
+    expect(result.current).toMatchObject({ isAuthenticated: false, user: null, isAdmin: false, userStatus: 'idle' });
+    expect(screen.getByText(SESSION_EXPIRED)).toBeInTheDocument();
+    await waitFor(() => expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(1));
   });
 
   it('varios 401 simultáneos cierran la sesión y avisan UNA sola vez', async () => {
-    localStorage.setItem('token', 'actual');
-    renderHook(() => useAuth(), { wrapper });
-    fetchMock.mockImplementation(async () => errorResponse(401, 'UNAUTHORIZED', 'x'));
+    await startSignedIn();
 
     await act(async () => {
       await Promise.all([
@@ -228,226 +423,82 @@ describe('AuthProvider: 401 del servidor', () => {
       ]);
     });
 
-    expect(screen.getAllByText('Tu sesión ha caducado. Inicia sesión de nuevo.')).toHaveLength(1);
+    expect(screen.getAllByText(SESSION_EXPIRED)).toHaveLength(1);
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(1);
   });
 
-  it('un 401 tardío de una petición hecha con un token ANTERIOR se ignora', async () => {
-    localStorage.setItem('token', 'viejo');
-    // Solo `/movies` contesta (cuando se suelte); el `/users/me` de cada sesión se queda pendiente.
+  it('un 401 tardío de una petición hecha en una sesión ANTERIOR se ignora', async () => {
     const slowMovies = deferred<Response>();
-    const release = slowMovies.resolve;
-    fetchMock.mockImplementation((input) =>
-      String(input) === '/api/movies' ? slowMovies.promise : new Promise<Response>(() => {}),
-    );
-    const { result } = renderHook(() => useAuth(), { wrapper });
+    let loggedIn = true;
+    serve({
+      'GET /api/users/me': () => (loggedIn ? jsonResponse(makeUser()) : UNAUTHORIZED()),
+      'GET /api/movies': () => slowMovies.promise,
+      'POST /api/auth/logout': () => noContentResponse(),
+      'POST /api/auth/login': () => noContentResponse(),
+    });
+    const { result } = await startApp();
 
-    // La petición sale con el token viejo...
+    // La petición sale en la sesión vieja...
     const slow = apiFetch('/movies').catch(() => undefined);
-    // ...el usuario vuelve a entrar y ahora la sesión es otra...
-    act(() => result.current.login('nuevo'));
+    // ...el usuario cierra sesión y vuelve a entrar (otra sesión)...
+    await act(async () => result.current.logout());
+    loggedIn = true;
+    await act(async () => result.current.login('ana@example.com', 'x'));
     // ...y entonces llega el 401 de la petición antigua.
     await act(async () => {
-      release(errorResponse(401, 'UNAUTHORIZED', 'x'));
+      slowMovies.resolve(errorResponse(401, 'UNAUTHORIZED', 'x'));
       await slow;
     });
 
-    expect(result.current).toMatchObject({ token: 'nuevo', isAuthenticated: true });
-    expect(localStorage.getItem('token')).toBe('nuevo');
-    expect(screen.queryByText('Tu sesión ha caducado. Inicia sesión de nuevo.')).not.toBeInTheDocument();
+    expect(result.current.isAuthenticated).toBe(true);
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
   });
 
   it('un 403 no cierra la sesión', async () => {
-    localStorage.setItem('token', 'actual');
-    const { result } = renderHook(() => useAuth(), { wrapper });
-    fetchMock.mockImplementation(async () => errorResponse(403, 'ACCESS_DENIED', 'x'));
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'GET /api/movies': () => errorResponse(403, 'ACCESS_DENIED', 'x'),
+    });
+    const { result } = await startApp();
 
     await act(async () => {
       await apiFetch('/movies').catch(() => undefined);
     });
 
     expect(result.current.isAuthenticated).toBe(true);
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
   });
 
-  it('al desmontar el proveedor se desconecta el puente: apiFetch ya no manda token', async () => {
-    localStorage.setItem('token', 'actual');
-    fetchMock.mockImplementation(async () => jsonResponse({}));
-    const { unmount } = renderHook(() => useAuth(), { wrapper });
+  it('al desmontar el proveedor se desconecta el puente: un 401 posterior ya no avisa a nadie', async () => {
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'GET /api/movies': () => errorResponse(401, 'UNAUTHORIZED', 'x'),
+    });
+    const { unmount } = await startApp();
     unmount();
 
-    await apiFetch('/movies');
+    await apiFetch('/movies').catch(() => undefined);
 
-    expect(lastAuthorization()).toBeNull();
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(0);
   });
 });
 
-describe('AuthProvider: usuario actual (GET /users/me)', () => {
-  const SESSION_EXPIRED = 'Tu sesión ha caducado. Inicia sesión de nuevo.';
-
-  it('sin sesión no pide nada: user null, isAdmin false y userStatus "idle"', () => {
-    const { result } = renderHook(() => useAuth(), { wrapper });
-
-    expect(result.current).toMatchObject({ user: null, isAdmin: false, userStatus: 'idle' });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
+describe('AuthProvider: usuario actual y rol', () => {
   it.each([
     ['USER', false],
     ['ADMIN', true],
-  ] as const)('tras login pide /users/me con el token nuevo; con rol %s, isAdmin es %s', async (role, expected) => {
-    const me = makeUser({ role });
-    serveCurrentUser({ nuevo: () => jsonResponse(me) });
-    const { result } = renderHook(() => useAuth(), { wrapper });
+  ] as const)('con rol %s, isAdmin es %s', async (role, expected) => {
+    serve({ 'GET /api/users/me': () => jsonResponse(makeUser({ role })) });
 
-    act(() => result.current.login('nuevo'));
+    const { result } = await startApp();
 
-    // `login` sigue siendo síncrono: la sesión ya está abierta y el usuario se carga detrás,
-    // sin dar por hecho ningún rol mientras tanto.
-    expect(result.current).toMatchObject({ isAuthenticated: true, user: null, isAdmin: false, userStatus: 'loading' });
-    await waitFor(() => expect(result.current.userStatus).toBe('ready'));
-    expect(result.current.user).toEqual(me);
     expect(result.current.isAdmin).toBe(expected);
-    expect(userRequests()).toHaveLength(1);
-    expect(lastAuthorization()).toBe('Bearer nuevo');
   });
 
-  it('al recargar la página con un token guardado también pide el usuario de esa sesión', async () => {
-    localStorage.setItem('token', 'guardado');
-    serveCurrentUser({ guardado: () => jsonResponse(makeUser({ role: 'ADMIN' })) });
+  it('useAuth fuera de AuthProvider lanza un error claro', () => {
+    // React registra con console.error el error de render; es lo esperado aquí.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const { result } = renderHook(() => useAuth(), { wrapper });
-
-    expect(result.current.userStatus).toBe('loading');
-    await waitFor(() => expect(result.current.isAdmin).toBe(true));
-    expect(result.current.userStatus).toBe('ready');
-    expect(userRequests()).toHaveLength(1);
-  });
-
-  it('logout borra el usuario y vuelve a "idle"', async () => {
-    localStorage.setItem('token', 'jwt');
-    serveCurrentUser({ jwt: () => jsonResponse(makeUser({ role: 'ADMIN' })) });
-    const { result } = renderHook(() => useAuth(), { wrapper });
-    await waitFor(() => expect(result.current.isAdmin).toBe(true));
-
-    act(() => result.current.logout());
-
-    expect(result.current).toMatchObject({ user: null, isAdmin: false, userStatus: 'idle' });
-  });
-
-  it('un token nuevo desde otra pestaña olvida al usuario anterior y carga el de la nueva sesión', async () => {
-    localStorage.setItem('token', 'admin');
-    serveCurrentUser({
-      admin: () => jsonResponse(makeUser({ username: 'jefa', role: 'ADMIN' })),
-      normal: () => jsonResponse(makeUser({ username: 'luis', role: 'USER' })),
-    });
-    const { result } = renderHook(() => useAuth(), { wrapper });
-    await waitFor(() => expect(result.current.isAdmin).toBe(true));
-
-    storageEvent({ key: 'token', newValue: 'normal' });
-
-    // Ni un solo render con el administrador anterior asignado a la sesión nueva.
-    expect(result.current).toMatchObject({ user: null, isAdmin: false, userStatus: 'loading' });
-    await waitFor(() => expect(result.current.user?.username).toBe('luis'));
-    expect(result.current.isAdmin).toBe(false);
-  });
-
-  it.each(['antes', 'después'] as const)(
-    'una respuesta tardía de /users/me del token ANTERIOR se ignora (llega %s que la de la sesión nueva)',
-    async (order) => {
-      localStorage.setItem('token', 'viejo');
-      const oldUser = deferred<Response>();
-      const newUser = deferred<Response>();
-      serveCurrentUser({ viejo: () => oldUser.promise, nuevo: () => newUser.promise });
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      // Mientras la petición del token viejo sigue en vuelo, se entra con otra cuenta.
-      act(() => result.current.login('nuevo'));
-      expect(userRequests()[0][1]?.signal?.aborted).toBe(true);
-
-      const lateAdmin = () => jsonResponse(makeUser({ username: 'admin-anterior', role: 'ADMIN' }));
-      const freshUser = () => jsonResponse(makeUser({ username: 'nueva', role: 'USER' }));
-      if (order === 'antes') {
-        await act(async () => oldUser.resolve(lateAdmin()));
-        expect(result.current).toMatchObject({ user: null, isAdmin: false, userStatus: 'loading' });
-        await act(async () => newUser.resolve(freshUser()));
-      } else {
-        await act(async () => newUser.resolve(freshUser()));
-        await waitFor(() => expect(result.current.userStatus).toBe('ready'));
-        await act(async () => oldUser.resolve(lateAdmin()));
-      }
-
-      await waitFor(() => expect(result.current.userStatus).toBe('ready'));
-      expect(result.current.user?.username).toBe('nueva');
-      expect(result.current.isAdmin).toBe(false);
-    },
-  );
-
-  it.each([
-    ['red caída', () => Promise.reject(new TypeError('Failed to fetch'))],
-    ['error 500', () => errorResponse(500, 'INTERNAL_ERROR', 'boom')],
-  ] as const)(
-    'si /users/me falla (%s): la sesión se mantiene, isAdmin false (falla cerrado) y refreshUser reintenta',
-    async (_case, failure) => {
-      localStorage.setItem('token', 'jwt');
-      serveCurrentUser({ jwt: failure as () => Promise<Response> | Response });
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => expect(result.current.userStatus).toBe('error'));
-      expect(result.current).toMatchObject({ token: 'jwt', isAuthenticated: true, user: null, isAdmin: false });
-      expect(localStorage.getItem('token')).toBe('jwt');
-      expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
-
-      const admin: User = makeUser({ role: 'ADMIN' });
-      serveCurrentUser({ jwt: () => jsonResponse(admin) });
-      act(() => result.current.refreshUser());
-
-      expect(result.current.userStatus).toBe('loading');
-      await waitFor(() => expect(result.current.userStatus).toBe('ready'));
-      expect(result.current.isAdmin).toBe(true);
-      expect(userRequests()).toHaveLength(2);
-    },
-  );
-
-  it('un 401 en /users/me cierra la sesión UNA sola vez, aunque coincida con otros 401', async () => {
-    localStorage.setItem('token', 'caducado');
-    fetchMock.mockImplementation(async () => errorResponse(401, 'UNAUTHORIZED', 'x'));
-    const { result } = renderHook(() => useAuth(), { wrapper });
-
-    await act(async () => {
-      await apiFetch('/movies').catch(() => undefined);
-    });
-
-    await waitFor(() => expect(result.current.isAuthenticated).toBe(false));
-    expect(userRequests()).toHaveLength(1);
-    expect(screen.getAllByText(SESSION_EXPIRED)).toHaveLength(1);
-    expect(result.current).toMatchObject({ user: null, isAdmin: false, userStatus: 'idle' });
-    expect(localStorage.getItem('token')).toBeNull();
-  });
-});
-
-describe('AuthProvider: almacenamiento no disponible', () => {
-  it('si leer localStorage lanza (modo privado), arranca sin sesión en lugar de romper', () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new DOMException('Acceso denegado', 'SecurityError');
-    });
-
-    const { result } = renderHook(() => useAuth(), { wrapper });
-
-    expect(result.current.isAuthenticated).toBe(false);
-  });
-
-  it('si escribir lanza, login y logout siguen funcionando en memoria', () => {
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('Cuota excedida', 'QuotaExceededError');
-    });
-    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
-      throw new DOMException('Acceso denegado', 'SecurityError');
-    });
-    const { result } = renderHook(() => useAuth(), { wrapper });
-
-    act(() => result.current.login('abc'));
-    expect(result.current).toMatchObject({ token: 'abc', isAuthenticated: true });
-
-    act(() => result.current.logout());
-    expect(result.current.isAuthenticated).toBe(false);
+    expect(() => renderHook(() => useAuth())).toThrow('useAuth debe usarse dentro de <AuthProvider>.');
   });
 });

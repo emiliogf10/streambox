@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -28,13 +29,16 @@ import org.springframework.transaction.annotation.Transactional;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.security.AuthCookieService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * «IP conocida» del bloqueo de cuentas de extremo a extremo (hallazgo NV-2):
  * la IP sale de {@code request.getRemoteAddr()} y pasa del controlador al
- * servicio y a {@code LoginAttemptService}.
+ * servicio y a {@code LoginAttemptService}. Con el login por cookie (tarea 29)
+ * un acierto es un 204 con la cookie de sesión, y un bloqueo no debe entregar
+ * esa cookie aunque la contraseña sea correcta.
  *
  * <p>
  * Los contadores viven en memoria durante todo el contexto, así que cada test
@@ -71,7 +75,7 @@ class KnownIpLockoutIntegrationTest {
         String home = nextIp();
         String attacker = nextIp();
         String newNetwork = nextIp();
-        login(email, PASSWORD, home).andExpect(status().isOk());
+        login(email, PASSWORD, home).andExpect(status().isNoContent());
 
         for (int remaining = 4; remaining >= 1; remaining--) {
             login(email, "mal", attacker)
@@ -83,16 +87,18 @@ class KnownIpLockoutIntegrationTest {
                 .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"));
 
         login(email, PASSWORD, home)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").isNotEmpty());
+                .andExpect(status().isNoContent())
+                .andExpect(cookie().exists(AuthCookieService.COOKIE_NAME));
         login(email, PASSWORD, attacker)
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"))
-                .andExpect(jsonPath("$.token").doesNotExist());
+                .andExpect(jsonPath("$.token").doesNotExist())
+                .andExpect(cookie().doesNotExist(AuthCookieService.COOKIE_NAME));
         login(email, PASSWORD, newNetwork)
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"))
-                .andExpect(jsonPath("$.token").doesNotExist());
+                .andExpect(jsonPath("$.token").doesNotExist())
+                .andExpect(cookie().doesNotExist(AuthCookieService.COOKIE_NAME));
     }
 
     /** Desde la IP conocida, adivinar contraseñas sigue limitado (5 fallos) en su propio contador. */
@@ -101,7 +107,7 @@ class KnownIpLockoutIntegrationTest {
         String email = createUser();
         String home = nextIp();
         String elsewhere = nextIp();
-        login(email, PASSWORD, home).andExpect(status().isOk());
+        login(email, PASSWORD, home).andExpect(status().isNoContent());
 
         for (int remaining = 4; remaining >= 1; remaining--) {
             login(email, "mal", home)
@@ -152,7 +158,7 @@ class KnownIpLockoutIntegrationTest {
         String ghost = "fantasma" + SEQUENCE.getAndIncrement() + "@test.com";
         String home = nextIp();
         String attacker = nextIp();
-        login(knownOwner, PASSWORD, home).andExpect(status().isOk());
+        login(knownOwner, PASSWORD, home).andExpect(status().isNoContent());
 
         MockHttpServletResponse onRegistered = lock(registered, attacker);
         MockHttpServletResponse onGhost = lock(ghost, attacker);

@@ -201,6 +201,7 @@ Configura las siguientes variables de entorno en tu sistema o en tu IDE:
 | Variable | Descripción | Valor por Defecto / Ejemplo |
 | :--- | :--- | :--- |
 | `JWT_SECRET` | Clave secreta para firmar los tokens JWT (**obligatoria**). Texto de **al menos 32 caracteres**; la aplicación no arranca si es más corta. Genera una con `openssl rand -base64 48` | — |
+| `STREAMBOX_AUTH_COOKIE_SECURE` | Atributo `Secure` de la cookie de sesión `streambox_token` (HttpOnly, SameSite=Strict). `true` por defecto; el `docker-compose.yml` la pone a `false` porque sirve HTTP en localhost. **Ponla a `true` si sirves por HTTPS** | `true` |
 | `JWT_EXPIRATION_HOURS` | Tiempo de vida del token en horas | `24` |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Opcionales. Si ambas están definidas, al arrancar se crea el primer administrador (si no existe ya). Al crearlo, la contraseña debe cumplir la política del registro (12–64 caracteres, no común, sin el usuario ni el email) o la aplicación no arranca; si ya existe, no se valida | — |
 | `ADMIN_USERNAME` | Opcional. Nombre de usuario del administrador inicial | `admin` |
@@ -316,13 +317,14 @@ Estructura de `frontend/src/`: `pages/` (Home, Películas, Series, Mi lista, Per
 Accede a la interfaz interactiva para explorar y probar los endpoints:
 - **Swagger UI**: [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html)
 - **OpenAPI JSON**: [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs)
+- **Especificación versionada y colección de Postman**: [`docs/api/`](docs/api/README.md) (`openapi.yaml`, colección con tests y entorno local listos para importar).
 
 ---
 
 ## 🧪 Estrategia de Testing
 
 El proyecto cuenta con suites de pruebas de integración (`*IntegrationTest`) que validan:
-- Flujo completo de registro, login y consumo de endpoints autenticados con Bearer token.
+- Flujo completo de registro, login y consumo de endpoints autenticados con la cookie de sesión (o Bearer).
 - Control de acceso RBAC (rechazo 403 a usuarios convencionales en rutas de administración).
 - Comportamiento de validación Bean Validation y mapeo de excepciones en `GlobalExceptionHandler`.
 - Operaciones idempotentes y casos límite en listas de favoritos.

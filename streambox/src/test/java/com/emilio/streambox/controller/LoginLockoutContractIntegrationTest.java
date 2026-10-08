@@ -143,7 +143,10 @@ class LoginLockoutContractIntegrationTest {
                 .andExpect(header().string("Retry-After", "900"))
                 .andExpect(jsonPath("$.code").value("ACCOUNT_LOCKED"))
                 .andExpect(jsonPath("$.message").value(stillLocked("15 minutos")))
-                .andExpect(jsonPath("$.token").doesNotExist());
+                .andExpect(jsonPath("$.token").doesNotExist())
+                // El token va ahora en la cookie: el bloqueo no debe entregarla.
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .cookie().doesNotExist("streambox_token"));
     }
 
     /**
@@ -171,8 +174,9 @@ class LoginLockoutContractIntegrationTest {
 
         CLOCK.advance(Duration.ofSeconds(1));
         login(email, PASSWORD)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").isNotEmpty());
+                .andExpect(status().isNoContent())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .cookie().exists("streambox_token"));
 
         // Desde la misma IP del acierto (ya «conocida», con su propio contador) ...
         login(email, "mal")

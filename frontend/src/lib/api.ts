@@ -2,7 +2,7 @@
  * Cliente HTTP central del frontend.
  *
  * Toda llamada a la API pasa por {@link apiFetch}. Así el manejo de la sesión
- * (cabecera `Authorization`, 401) y de los errores (403, 429, red caída,
+ * (cookie HttpOnly, cabecera anti-CSRF, 401) y de los errores (403, 429, red caída,
  * respuestas que no son JSON...) vive en UN solo sitio y las pantallas solo
  * tienen que capturar un {@link ApiError} con un mensaje ya listo para el usuario.
  */
@@ -68,12 +68,18 @@ export class ApiError extends Error {
  *
  * `api.ts` no puede importar `AuthContext` (sería una dependencia circular),
  * así que es el proveedor quien se registra aquí con {@link configureAuth}.
+ *
+ * El JWT ya NO existe para JavaScript: viaja en una cookie `HttpOnly` que el
+ * navegador adjunta solo (por eso un XSS no puede leerlo). Lo que el puente
+ * comparte es una "clave de sesión" opaca (un contador) que sirve para saber a
+ * QUÉ sesión pertenece una respuesta y descartar los 401 tardíos de una sesión
+ * anterior.
  */
 interface AuthBridge {
-  /** Devuelve el token actual o `null` si no hay sesión. */
-  getToken: () => string | null;
-  /** Se invoca cuando el servidor responde 401; recibe el token que se usó. */
-  onUnauthorized: (usedToken: string | null) => void;
+  /** Clave de la sesión actual; cambia en cada inicio o cierre de sesión. */
+  getSessionKey: () => number;
+  /** Se invoca cuando el servidor responde 401; recibe la clave con la que se hizo la petición. */
+  onUnauthorized: (usedKey: number) => void;
 }
 
 let authBridge: AuthBridge | null = null;
@@ -81,11 +87,22 @@ let authBridge: AuthBridge | null = null;
 /**
  * Registra (o elimina, con `null`) el puente con la sesión. Lo llama `AuthProvider`.
  *
- * @param bridge funciones para leer el token y avisar de un 401
+ * @param bridge funciones para leer la clave de sesión y avisar de un 401
  */
 export function configureAuth(bridge: AuthBridge | null): void {
   authBridge = bridge;
 }
+
+/**
+ * Cabecera que el backend exige en toda petición no segura (defensa CSRF). Un
+ * formulario de otra web no puede añadirla sin pasar por CORS, que el backend no
+ * concede; así la cookie sola (que el navegador enviaría) no basta para actuar.
+ */
+const CSRF_HEADER = 'X-Requested-With';
+const CSRF_VALUE = 'StreamBox';
+
+/** Métodos que no modifican datos y por tanto no llevan la cabecera anti-CSRF. */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /** Valores admitidos como parámetros de consulta; `undefined`, `null` y `''` se omiten. */
 export type QueryParams = Record<string, string | number | boolean | null | undefined>;
@@ -97,8 +114,9 @@ export interface ApiFetchOptions extends Omit<RequestInit, 'body'> {
   /** Parámetros de la URL (`?page=0&size=20`), ya codificados. */
   params?: QueryParams;
   /**
-   * Endpoint público (login, registro): no se envía token y un 401 NO cierra la
-   * sesión, porque ahí significa "credenciales incorrectas", no "sesión caducada".
+   * Endpoint público (login, registro, logout): un 401 NO cierra la sesión,
+   * porque ahí significa "credenciales incorrectas", no "sesión caducada".
+   * (La cookie, al ser del navegador, se envía igualmente; el servidor la ignora.)
    */
   public?: boolean;
 }
@@ -210,7 +228,11 @@ function buildApiError(res: Response, body: unknown, isPublic: boolean): ApiErro
  * Hace una petición a la API y devuelve el cuerpo JSON ya tipado.
  *
  * Responsabilidades centralizadas aquí:
- * - Añade `Authorization: Bearer <token>` (salvo en endpoints `public`).
+ * - La sesión va en una cookie HttpOnly: `credentials: 'same-origin'` hace que el
+ *   navegador la envíe (mismo origen gracias al proxy de Vite/nginx). No hay
+ *   cabecera `Authorization` ni token en JavaScript.
+ * - Añade `X-Requested-With: StreamBox` a toda petición que no sea GET/HEAD/OPTIONS
+ *   (el backend responde 403 `CSRF_REJECTED` sin ella).
  * - Serializa `body` a JSON y construye la query a partir de `params`.
  * - Comprueba SIEMPRE `res.ok`: nada se da por bueno sin mirar el estado.
  * - 204 / cuerpo vacío: devuelve `undefined` sin llamar a `res.json()`.
@@ -232,11 +254,11 @@ function buildApiError(res: Response, body: unknown, isPublic: boolean): ApiErro
 export async function apiFetch<T = void>(path: string, options: ApiFetchOptions = {}): Promise<T> {
   const { body, params, public: isPublic = false, headers: extraHeaders, ...init } = options;
 
-  const token = isPublic ? null : (authBridge?.getToken() ?? null);
+  const sessionKey = authBridge?.getSessionKey() ?? 0;
   const headers = new Headers(extraHeaders);
   headers.set('Accept', 'application/json');
   if (body !== undefined) headers.set('Content-Type', 'application/json');
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (!SAFE_METHODS.has((init.method ?? 'GET').toUpperCase())) headers.set(CSRF_HEADER, CSRF_VALUE);
 
   let res: Response;
   let text: string;
@@ -244,6 +266,7 @@ export async function apiFetch<T = void>(path: string, options: ApiFetchOptions 
     res = await fetch(`${API_URL}${path}${buildQuery(params)}`, {
       ...init,
       headers,
+      credentials: 'same-origin',
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     text = await res.text();
@@ -271,7 +294,7 @@ export async function apiFetch<T = void>(path: string, options: ApiFetchOptions 
   }
 
   const error = buildApiError(res, parsed, isPublic);
-  if (error.sessionExpired) authBridge?.onUnauthorized(token);
+  if (error.sessionExpired) authBridge?.onUnauthorized(sessionKey);
   throw error;
 }
 

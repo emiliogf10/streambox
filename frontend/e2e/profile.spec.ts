@@ -10,7 +10,7 @@ import type { Page } from '@playwright/test';
 import { addFavoritesByTitle, addSeriesFavoritesByTitle, loginAdmin } from './support/api';
 import { ADMIN_EMAIL, ADMIN_USERNAME } from './support/config';
 import { VISIBLE_SERIES } from './support/catalog';
-import { expect, test } from './support/fixtures';
+import { expect, sessionCookie, test } from './support/fixtures';
 
 /** Abre el menú de usuario y entra en «Mi perfil», como haría una persona. */
 async function openProfileFromMenu(page: Page): Promise<void> {
@@ -112,7 +112,9 @@ test.describe('Mi perfil', () => {
     await page.getByRole('main').getByRole('button', { name: 'Cerrar sesión' }).click();
 
     await expect(page).toHaveURL(/\/login$/);
-    expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
+    // El cierre de sesión es optimista: la interfaz vuelve al login antes de que el servidor responda
+    // al POST /api/auth/logout que borra la cookie. Se espera a que desaparezca en vez de mirar una vez.
+    await expect.poll(() => sessionCookie(page)).toBeUndefined();
   });
 
   test('sin sesión, /perfil lleva al login', async ({ page }) => {

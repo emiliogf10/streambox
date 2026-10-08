@@ -73,7 +73,7 @@ function renderList(route = '/admin/peliculas') {
       </Routes>
       <LocationDetails />
     </>,
-    { route, token: 'jwt' },
+    { route, session: true },
   );
 }
 

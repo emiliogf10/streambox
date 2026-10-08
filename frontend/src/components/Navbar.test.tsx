@@ -4,8 +4,8 @@
  *
  * Protegen la muestra visible del rol: el enlace «Administrar» y la etiqueta
  * «Administrador» del menú aparecen SOLO a quien el servidor confirma como
- * `ADMIN`, y el menú enseña el nombre del usuario de la sesión. Mientras `/users/me` carga o si falla, el menú es el de siempre (sin
- * huecos ni textos «undefined») y cerrar sesión sigue funcionando. `fetch` está
+ * `ADMIN`, y el menú enseña el nombre del usuario de la sesión. Mientras se comprueba la sesión la barra solo tiene el logo; si tras
+ * iniciar sesión el usuario no carga, el menú es el de siempre (sin huecos) y cerrar sesión sigue funcionando. `fetch` está
  * simulado; la sesión y los avisos son los proveedores reales.
  *
  * Además comprueban que la barra publica su altura en `--navbar-height`, el dato
@@ -14,8 +14,9 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useAuth } from '../context/AuthContext';
 import { FavoritesProvider } from '../context/FavoritesContext';
-import { CURRENT_USER, errorResponse, jsonResponse, makeUser, renderWithProviders, routeFetch } from '../test/helpers';
+import { CURRENT_USER, errorResponse, jsonResponse, makeUser, noContentResponse, renderWithProviders, routeFetch } from '../test/helpers';
 import { UserStatusProbe } from '../test/UserStatusProbe';
 import { NAVBAR_HEIGHT_VARIABLE, Navbar } from './Navbar';
 
@@ -29,8 +30,11 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
 });
 
-/** Monta la barra con sesión iniciada; `currentUser` decide qué responde `/users/me`. */
-function renderNavbar(currentUser: () => Response | Promise<Response>) {
+/**
+ * Monta la barra con sesión iniciada y espera a que el arranque la confirme
+ * (`GET /users/me`); `currentUser` decide qué responde `/users/me`.
+ */
+async function renderNavbar(currentUser: () => Response | Promise<Response>) {
   routeFetch(fetchMock, { ...FAVORITES, [CURRENT_USER]: currentUser });
   const user = userEvent.setup();
   renderWithProviders(
@@ -38,9 +42,20 @@ function renderNavbar(currentUser: () => Response | Promise<Response>) {
       <Navbar />
       <UserStatusProbe />
     </FavoritesProvider>,
-    { token: 'jwt' },
+    { session: true },
   );
+  await screen.findByRole('button', { name: 'Menú de usuario' });
   return user;
+}
+
+/** Botón de prueba que inicia sesión con el contexto real (`login`). */
+function SignInButton() {
+  const { login } = useAuth();
+  return (
+    <button type="button" onClick={() => void login('ana@example.com', 'x').catch(() => undefined)}>
+      Entrar de prueba
+    </button>
+  );
 }
 
 /** Abre el desplegable con el botón «Menú de usuario». */
@@ -53,7 +68,7 @@ describe('Navbar: enlace «Administrar»', () => {
   const mainNav = () => screen.getByRole('navigation', { name: 'Principal' });
 
   it('un administrador ve «Administrar», que lleva a /admin, después de «Inicio», «Películas», «Series» y «Mi lista»', async () => {
-    renderNavbar(() => jsonResponse(makeUser({ role: 'ADMIN' })));
+    await renderNavbar(() => jsonResponse(makeUser({ role: 'ADMIN' })));
 
     const link = await within(mainNav()).findByRole('link', { name: 'Administrar' });
     expect(link).toHaveAttribute('href', '/admin');
@@ -69,7 +84,7 @@ describe('Navbar: enlace «Administrar»', () => {
   });
 
   it('un usuario normal NO lo ve: solo «Inicio», «Películas», «Series» y «Mi lista»', async () => {
-    renderNavbar(() => jsonResponse(makeUser({ role: 'USER' })));
+    await renderNavbar(() => jsonResponse(makeUser({ role: 'USER' })));
     await screen.findByText('estado:ready');
 
     expect(within(mainNav()).queryByRole('link', { name: 'Administrar' })).not.toBeInTheDocument();
@@ -86,7 +101,7 @@ describe('Navbar: enlace «Películas»', () => {
   const mainNav = () => screen.getByRole('navigation', { name: 'Principal' });
 
   it('«Películas» es un enlace a /peliculas: ya no hay secciones reservadas «(próximamente)»', async () => {
-    renderNavbar(() => jsonResponse(makeUser()));
+    await renderNavbar(() => jsonResponse(makeUser()));
 
     const link = within(mainNav()).getByRole('link', { name: 'Películas' });
     expect(link).toHaveAttribute('href', '/peliculas');
@@ -103,13 +118,13 @@ describe('Navbar: enlace «Películas»', () => {
       <FavoritesProvider>
         <Navbar />
       </FavoritesProvider>,
-      { token: 'jwt', route: '/peliculas?genero=4&orden=titulo-asc' },
+      { session: true, route: '/peliculas?genero=4&orden=titulo-asc' },
     );
+    await screen.findByRole('navigation', { name: 'Principal' });
 
     expect(within(mainNav()).getByRole('link', { name: 'Películas' })).toHaveAttribute('aria-current', 'page');
     expect(within(mainNav()).getByRole('link', { name: 'Inicio' })).not.toHaveAttribute('aria-current');
     expect(within(mainNav()).getByRole('link', { name: 'Series' })).not.toHaveAttribute('aria-current');
-    await screen.findByRole('navigation', { name: 'Principal' });
   });
 
   it('en la portada no está marcado (solo «Inicio»)', async () => {
@@ -118,12 +133,12 @@ describe('Navbar: enlace «Películas»', () => {
       <FavoritesProvider>
         <Navbar />
       </FavoritesProvider>,
-      { token: 'jwt', route: '/' },
+      { session: true, route: '/' },
     );
+    await screen.findByRole('navigation', { name: 'Principal' });
 
     expect(within(mainNav()).getByRole('link', { name: 'Inicio' })).toHaveAttribute('aria-current', 'page');
     expect(within(mainNav()).getByRole('link', { name: 'Películas' })).not.toHaveAttribute('aria-current');
-    await screen.findByRole('navigation', { name: 'Principal' });
   });
 });
 
@@ -131,7 +146,7 @@ describe('Navbar: enlace «Series»', () => {
   const mainNav = () => screen.getByRole('navigation', { name: 'Principal' });
 
   it('«Series» es un enlace a /series (ya no texto reservado «próximamente»)', async () => {
-    renderNavbar(() => jsonResponse(makeUser()));
+    await renderNavbar(() => jsonResponse(makeUser()));
 
     const link = within(mainNav()).getByRole('link', { name: 'Series' });
     expect(link).toHaveAttribute('href', '/series');
@@ -146,26 +161,43 @@ describe('Navbar: enlace «Series»', () => {
       <FavoritesProvider>
         <Navbar />
       </FavoritesProvider>,
-      { token: 'jwt', route: '/series/7?temporada=2' },
+      { session: true, route: '/series/7?temporada=2' },
     );
+    await screen.findByRole('navigation', { name: 'Principal' });
 
     expect(within(mainNav()).getByRole('link', { name: 'Series' })).toHaveAttribute('aria-current', 'page');
     expect(within(mainNav()).getByRole('link', { name: 'Inicio' })).not.toHaveAttribute('aria-current');
-    await screen.findByRole('navigation', { name: 'Principal' });
   });
 
-  it('mientras se carga el usuario no aparece: solo se enseña con el rol ya confirmado', () => {
-    renderNavbar(() => new Promise<Response>(() => {}));
+  it('mientras se comprueba la sesión la barra solo tiene el logo: ni enlaces, ni menú, ni «Iniciar sesión»', () => {
+    routeFetch(fetchMock, { ...FAVORITES, [CURRENT_USER]: () => new Promise<Response>(() => {}) });
+    renderWithProviders(
+      <>
+        <Navbar />
+        <UserStatusProbe />
+      </>,
+      { session: true },
+    );
 
     expect(screen.getByText('estado:loading')).toBeInTheDocument();
-    expect(within(mainNav()).queryByRole('link', { name: 'Administrar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Principal' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Menú de usuario' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Iniciar sesión' })).not.toBeInTheDocument();
   });
 
-  it('si /users/me falla tampoco aparece (falla cerrado)', async () => {
-    renderNavbar(() => errorResponse(500, 'INTERNAL_ERROR', 'boom'));
+  it('si el chequeo inicial falla (500) no se sabe el rol: no hay enlaces de sesión ni «Administrar»', async () => {
+    routeFetch(fetchMock, { ...FAVORITES, [CURRENT_USER]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom') });
+    renderWithProviders(
+      <>
+        <Navbar />
+        <UserStatusProbe />
+      </>,
+      { session: true },
+    );
     await screen.findByText('estado:error');
 
-    expect(within(mainNav()).queryByRole('link', { name: 'Administrar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Principal' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Administrar' })).not.toBeInTheDocument();
   });
 });
 
@@ -180,12 +212,12 @@ describe('Navbar: altura publicada para que el foco no quede debajo de la barra'
       <FavoritesProvider>
         <Navbar />
       </FavoritesProvider>,
-      { token: 'jwt' },
+      { session: true },
     );
+    await screen.findByRole('navigation', { name: 'Principal' });
 
     expect(NAVBAR_HEIGHT_VARIABLE).toBe('--navbar-height');
     expect(document.documentElement.style.getPropertyValue('--navbar-height')).toBe('165px');
-    await screen.findByRole('navigation', { name: 'Principal' });
 
     unmount();
     expect(document.documentElement.style.getPropertyValue('--navbar-height')).toBe('');
@@ -194,7 +226,7 @@ describe('Navbar: altura publicada para que el foco no quede debajo de la barra'
 
 describe('Navbar: menú de usuario', () => {
   it('a un usuario normal le muestra su nombre y NO la etiqueta «Administrador»', async () => {
-    const user = renderNavbar(() => jsonResponse(makeUser({ username: 'ana', role: 'USER' })));
+    const user = await renderNavbar(() => jsonResponse(makeUser({ username: 'ana', role: 'USER' })));
 
     await openMenu(user);
 
@@ -205,7 +237,7 @@ describe('Navbar: menú de usuario', () => {
   });
 
   it('a un administrador le muestra su nombre y la etiqueta «Administrador» como texto', async () => {
-    const user = renderNavbar(() => jsonResponse(makeUser({ username: 'jefa', role: 'ADMIN' })));
+    const user = await renderNavbar(() => jsonResponse(makeUser({ username: 'jefa', role: 'ADMIN' })));
 
     await openMenu(user);
 
@@ -218,7 +250,7 @@ describe('Navbar: menú de usuario', () => {
   it.each(['USER', 'ADMIN'] as const)(
     'ofrece «Mi perfil» (enlace a /perfil) encima de «Cerrar sesión» al rol %s',
     async (role) => {
-      const user = renderNavbar(() => jsonResponse(makeUser({ role })));
+      const user = await renderNavbar(() => jsonResponse(makeUser({ role })));
       await screen.findByText('estado:ready');
 
       await openMenu(user);
@@ -236,7 +268,7 @@ describe('Navbar: menú de usuario', () => {
   );
 
   it('pulsar «Mi perfil» navega a /perfil y cierra el menú', async () => {
-    const user = renderNavbar(() => jsonResponse(makeUser()));
+    const user = await renderNavbar(() => jsonResponse(makeUser()));
     await openMenu(user);
 
     await user.click(screen.getByRole('link', { name: 'Mi perfil' }));
@@ -253,37 +285,46 @@ describe('Navbar: menú de usuario', () => {
       <FavoritesProvider>
         <Navbar />
       </FavoritesProvider>,
-      { token: 'jwt', route: '/perfil' },
+      { session: true, route: '/perfil' },
     );
+    await screen.findByRole('button', { name: 'Menú de usuario' });
 
     await openMenu(user);
 
     expect(screen.getByRole('link', { name: 'Mi perfil' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('mientras /users/me carga, el menú es el de siempre: «Mi perfil» y «Cerrar sesión», sin huecos ni «undefined»', async () => {
-    const user = renderNavbar(() => new Promise<Response>(() => {}));
-
-    await openMenu(user);
-
-    expect(screen.getByText('estado:loading')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Mi perfil' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Cerrar sesión' })).toBeInTheDocument();
-    expect(screen.queryByText('Sesión iniciada como')).not.toBeInTheDocument();
-    expect(screen.queryByText('Administrador')).not.toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent('undefined');
-  });
-
-  it('si /users/me falla, el menú sigue funcionando y cerrar sesión cierra la sesión', async () => {
-    const user = renderNavbar(() => errorResponse(500, 'INTERNAL_ERROR', 'boom'));
+  it('si tras iniciar sesión /users/me falla, el menú sigue funcionando y cerrar sesión cierra la sesión', async () => {
+    // Arranque sin sesión (401); el login sale bien pero cargar el usuario falla: sesión abierta sin rol.
+    let loggedIn = false;
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [CURRENT_USER]: () =>
+        loggedIn ? errorResponse(500, 'INTERNAL_ERROR', 'boom') : errorResponse(401, 'UNAUTHORIZED', 'No autenticado.'),
+      'POST /api/auth/login': () => {
+        loggedIn = true;
+        return noContentResponse();
+      },
+      'POST /api/auth/logout': () => noContentResponse(),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <FavoritesProvider>
+        <Navbar />
+        <SignInButton />
+        <UserStatusProbe />
+      </FavoritesProvider>,
+    );
+    await user.click(await screen.findByRole('button', { name: 'Entrar de prueba' }));
     await screen.findByText('estado:error');
 
     await openMenu(user);
 
     expect(screen.queryByText('Sesión iniciada como')).not.toBeInTheDocument();
     expect(screen.queryByText('Administrador')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Mi perfil' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+    expect(await screen.findByRole('link', { name: 'Iniciar sesión' })).toBeInTheDocument();
     expect(localStorage.getItem('token')).toBeNull();
-    expect(screen.getByRole('link', { name: 'Iniciar sesión' })).toBeInTheDocument();
   });
 });

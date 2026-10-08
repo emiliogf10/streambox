@@ -48,6 +48,8 @@ public class ErrorResponse {
                     + "también da este código a los usuarios).\n"
                     + "- MOVIE_NOT_IN_FAVORITES (404): la película no está en la lista del usuario.\n"
                     + "- SERIES_NOT_IN_FAVORITES (404): la serie existe, pero no está en la lista del usuario.\n"
+                    + "- CSRF_REJECTED (403): petición no segura (POST/PUT/PATCH/DELETE) autenticada por "
+                    + "cookie sin la cabecera X-Requested-With: StreamBox.\n"
                     + "- USER_ALREADY_EXISTS (409): el nombre de usuario o el email ya están registrados.\n"
                     + "- MOVIE_ALREADY_IN_FAVORITES (409): la película ya está en la lista del usuario.\n"
                     + "- SERIES_ALREADY_IN_FAVORITES (409): la serie ya está en la lista del usuario.\n"

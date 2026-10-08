@@ -71,7 +71,7 @@ function renderDetail(
       <SearchProbe />
       <UserStatusProbe />
     </FavoritesProvider>,
-    { token: 'jwt', route },
+    { session: true, route },
   );
   return user;
 }

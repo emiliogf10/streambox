@@ -126,6 +126,9 @@ export default defineConfig({
         SPRING_DATASOURCE_PASSWORD: '',
         JWT_SECRET: JWT_SECRET,
         JWT_EXPIRATION_HOURS: '1',
+        // El backend E2E corre en http: sin esto la cookie de sesión llevaría `Secure` y
+        // el navegador no la guardaría. (`streambox.auth.cookie.secure`; en producción es `true`.)
+        STREAMBOX_AUTH_COOKIE_SECURE: 'false',
         ADMIN_EMAIL,
         ADMIN_USERNAME,
         ADMIN_PASSWORD,

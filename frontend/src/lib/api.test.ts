@@ -11,7 +11,7 @@ import { ApiError, apiFetch, configureAuth, getErrorMessage, isAbortError, rateL
 import { errorResponse, jsonResponse, noContentResponse } from '../test/helpers';
 
 const fetchMock = vi.fn<typeof fetch>();
-const onUnauthorized = vi.fn<(usedToken: string | null) => void>();
+const onUnauthorized = vi.fn<(usedKey: number) => void>();
 
 /** Devuelve `[url, init]` de la última llamada a `fetch`. */
 function lastCall(): [string, RequestInit] {
@@ -39,7 +39,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   onUnauthorized.mockReset();
   vi.stubGlobal('fetch', fetchMock);
-  configureAuth({ getToken: () => 'token-actual', onUnauthorized });
+  configureAuth({ getSessionKey: () => 7, onUnauthorized });
 });
 
 afterEach(() => {
@@ -47,30 +47,44 @@ afterEach(() => {
 });
 
 describe('apiFetch: petición saliente', () => {
-  it('añade Authorization: Bearer en un endpoint autenticado', async () => {
+  it('la sesión viaja en la cookie: credentials same-origin y NUNCA cabecera Authorization', async () => {
     fetchMock.mockResolvedValue(jsonResponse({}));
 
     await apiFetch('/movies');
 
-    expect(sentHeaders().get('Authorization')).toBe('Bearer token-actual');
+    expect(lastCall()[1].credentials).toBe('same-origin');
+    expect(sentHeaders().has('Authorization')).toBe(false);
     expect(sentHeaders().get('Accept')).toBe('application/json');
   });
 
-  it('NO envía el token a un endpoint público aunque haya sesión', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ token: 'x' }));
+  it('añade X-Requested-With: StreamBox a las peticiones no seguras (POST, PUT, PATCH, DELETE), también las públicas', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({}));
 
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'post']) {
+      await apiFetch('/x', { method });
+      expect(sentHeaders().get('X-Requested-With'), method).toBe('StreamBox');
+    }
     await apiFetch('/auth/login', { method: 'POST', body: { email: 'a@b.c' }, public: true });
-
-    expect(sentHeaders().has('Authorization')).toBe(false);
+    expect(sentHeaders().get('X-Requested-With')).toBe('StreamBox');
   });
 
-  it('no envía Authorization si no hay sesión', async () => {
-    configureAuth({ getToken: () => null, onUnauthorized });
+  it('NO añade X-Requested-With a las peticiones seguras (GET por defecto, GET explícito, HEAD)', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({}));
+
+    for (const method of [undefined, 'GET', 'HEAD']) {
+      await apiFetch('/movies', { method });
+      expect(sentHeaders().has('X-Requested-With'), String(method)).toBe(false);
+    }
+  });
+
+  it('nunca escribe nada en localStorage ni en sessionStorage', async () => {
     fetchMock.mockResolvedValue(jsonResponse({}));
 
     await apiFetch('/movies');
+    await apiFetch('/auth/login', { method: 'POST', body: {}, public: true }).catch(() => undefined);
 
-    expect(sentHeaders().has('Authorization')).toBe(false);
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
   });
 
   it('serializa el cuerpo a JSON y fija Content-Type solo cuando hay cuerpo', async () => {
@@ -150,13 +164,13 @@ describe('apiFetch: respuestas correctas', () => {
 });
 
 describe('apiFetch: 401 y sesión', () => {
-  it('401 en endpoint autenticado avisa UNA vez con el token que se usó y marca sessionExpired', async () => {
+  it('401 en endpoint autenticado avisa UNA vez con la clave de sesión que se usó y marca sessionExpired', async () => {
     fetchMock.mockResolvedValue(errorResponse(401, 'UNAUTHORIZED', 'Token inválido'));
 
     const error = await catchError(apiFetch('/movies'));
 
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
-    expect(onUnauthorized).toHaveBeenCalledWith('token-actual');
+    expect(onUnauthorized).toHaveBeenCalledWith(7);
     expect(error).toMatchObject({
       status: 401,
       sessionExpired: true,

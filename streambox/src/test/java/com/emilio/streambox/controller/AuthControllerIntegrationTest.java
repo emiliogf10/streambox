@@ -2,6 +2,7 @@ package com.emilio.streambox.controller;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -50,14 +51,14 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
-    void loginCorrectoDevuelveUnTokenValidoParaLaApi() throws Exception {
+    void loginCorrectoEntregaElTokenEnCookieYNoEnElCuerpo() throws Exception {
         MvcResult result = login("loginuser@test.com", "correct-password")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").isNotEmpty())
+                .andExpect(status().isNoContent())
+                .andExpect(cookie().exists("streambox_token"))
                 .andReturn();
 
-        String token = objectMapper.readTree(result.getResponse().getContentAsString())
-                .get("token").asText();
+        org.junit.jupiter.api.Assertions.assertEquals("", result.getResponse().getContentAsString());
+        String token = result.getResponse().getCookie("streambox_token").getValue();
 
         mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -91,8 +92,8 @@ class AuthControllerIntegrationTest {
         userRepository.save(legacy);
 
         login("legacy@test.com", "perro123")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").isNotEmpty());
+                .andExpect(status().isNoContent())
+                .andExpect(cookie().exists("streambox_token"));
     }
 
     /**
@@ -128,7 +129,7 @@ class AuthControllerIntegrationTest {
     void elEmailNoDistingueMayusculas() throws Exception {
         // El registro guarda el email en minúsculas; el login debe tolerar
         // cómo lo escriba el usuario.
-        login("LoginUser@TEST.com", "correct-password").andExpect(status().isOk());
+        login("LoginUser@TEST.com", "correct-password").andExpect(status().isNoContent());
     }
 
     @Test
@@ -142,8 +143,8 @@ class AuthControllerIntegrationTest {
                 .andExpect(status().isCreated());
 
         login("Mixed.Case@Test.com", "Secure-Pass-2026")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").isNotEmpty());
+                .andExpect(status().isNoContent())
+                .andExpect(cookie().exists("streambox_token"));
     }
 
     @Test

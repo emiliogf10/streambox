@@ -8,10 +8,10 @@
  * la app en un bucle, esta suite lo detecta con navegador y backend reales.
  */
 import type { Page } from '@playwright/test';
-import { loginAdmin, newTestUser, registerUser } from './support/api';
+import { SESSION_COOKIE, loginAdmin, newTestUser, registerUser } from './support/api';
 import { ADMIN_USERNAME, LOCKOUT_MAX_FAILURES, BACKEND_URL } from './support/config';
 import { HERO_TITLE } from './support/catalog';
-import { expect, formAlert, test } from './support/fixtures';
+import { expect, formAlert, sessionCookie, test } from './support/fixtures';
 
 /** Cuerpo de error de la API (solo lo que miran estos tests). */
 interface ErrorBody {
@@ -49,6 +49,7 @@ async function failLoginByApi(
 ): Promise<{ status: number; body: ErrorBody; retryAfter: string | undefined }> {
   const response = await request.post(`${BACKEND_URL}/api/auth/login`, {
     data: { email, password: 'contrasena-equivocada' },
+    headers: { 'X-Requested-With': 'StreamBox' }, // el backend la exige a toda petición no segura
   });
   const body = (await response.json().catch(() => ({}))) as ErrorBody;
   return { status: response.status(), body, retryAfter: response.headers()['retry-after'] };
@@ -127,7 +128,7 @@ test.describe('Login y cierre de sesión', () => {
     await expect(formAlert(page)).toContainText('Correo o contraseña incorrectos.');
     await expect(formAlert(page)).toContainText(attemptsMessage(remaining));
     await expect(page).toHaveURL(/\/login$/);
-    expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
+    expect(await sessionCookie(page)).toBeUndefined();
   });
 
   test('con el último intento el aviso pasa a singular («Te queda 1 intento»)', async ({ page, request }) => {
@@ -175,7 +176,15 @@ test.describe('Login y cierre de sesión', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Catálogo de películas' })).toBeAttached();
     await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
 
-    // La sesión se conserva al recargar (el token está en localStorage).
+    // El JWT vive en una cookie HttpOnly: el navegador la tiene, pero JavaScript no la ve
+    // (ni en `document.cookie` ni en `localStorage`).
+    const cookie = await sessionCookie(page);
+    expect(cookie?.httpOnly).toBe(true);
+    expect(cookie?.sameSite).toBe('Strict');
+    expect(await page.evaluate(() => document.cookie)).toBe('');
+    expect(await page.evaluate(() => localStorage.length)).toBe(0);
+
+    // La sesión se conserva al recargar (la cookie la envía el navegador y `/users/me` la confirma).
     await page.reload();
     await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
 
@@ -183,7 +192,9 @@ test.describe('Login y cierre de sesión', () => {
     await page.getByRole('button', { name: 'Menú de usuario' }).click();
     await page.getByRole('button', { name: 'Cerrar sesión' }).click();
     await expect(page).toHaveURL(/\/login$/);
-    expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
+    // El cierre de sesión es optimista: la interfaz vuelve al login antes de que el servidor responda
+    // al POST /api/auth/logout que borra la cookie. Se espera a que desaparezca en vez de mirar una vez.
+    await expect.poll(() => sessionCookie(page)).toBeUndefined();
 
     // Y ya no se puede volver a la zona privada.
     await page.goto('/');
@@ -232,7 +243,7 @@ test.describe('Rol en el menú de usuario (GET /api/users/me)', () => {
     await expect(page.getByText(ADMIN_USERNAME, { exact: true })).toBeVisible();
     await expect(page.getByText('Administrador', { exact: true })).toBeVisible();
 
-    // Con el token guardado, el rol se vuelve a pedir al servidor (no se guarda en el cliente).
+    // Con la cookie de sesión, el rol se vuelve a pedir al servidor (no se guarda en el cliente).
     await page.reload();
     await toggle.click();
     await expect(page.getByText('Administrador', { exact: true })).toBeVisible();
@@ -240,10 +251,25 @@ test.describe('Rol en el menú de usuario (GET /api/users/me)', () => {
 });
 
 test.describe('Sesión caducada (401)', () => {
-  test('un token inválido lleva al login UNA sola vez con UN solo aviso', async ({ page }) => {
+  test('una cookie inválida al cargar lleva al login sin aviso de «sesión caducada»', async ({ page }) => {
+    // Primer chequeo de la app (`GET /users/me`): un 401 solo significa «no hay sesión».
+    await page.context().addCookies([
+      { name: SESSION_COOKIE, value: 'token.invalido.caducado', domain: 'localhost', path: '/api', httpOnly: true },
+    ]);
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/login$/);
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByText('Tu sesión ha caducado. Inicia sesión de nuevo.')).toHaveCount(0);
+  });
+
+  test('una sesión que caduca con la app abierta lleva al login UNA sola vez con UN solo aviso', async ({
+    page,
+    user,
+    signIn,
+  }) => {
     // Registra el recorrido de rutas. En desarrollo React StrictMode ejecuta dos veces el efecto de
     // `<Navigate>`, así que se colapsan los repetidos consecutivos: lo que importa es que la secuencia
-    // sea "/" → "/login" y no un bucle ("/" → "/login" → "/" → "/login"...).
+    // sea "/series" → "/login" y no un bucle.
     const visited: string[] = [];
     page.on('framenavigated', (frame) => {
       if (frame !== page.mainFrame()) return;
@@ -251,18 +277,23 @@ test.describe('Sesión caducada (401)', () => {
       if (visited[visited.length - 1] !== pathname) visited.push(pathname);
     });
 
-    await page.goto('/login');
-    await page.evaluate(() => localStorage.setItem('token', 'token.invalido.caducado'));
+    await signIn(user);
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
+
+    // La sesión caduca en el servidor mientras la app sigue abierta: se sustituye la cookie por una inválida.
+    await page.context().addCookies([
+      { name: SESSION_COOKIE, value: 'token.invalido.caducado', domain: 'localhost', path: '/api', httpOnly: true },
+    ]);
     visited.length = 0;
 
-    // La portada lanza varias peticiones a la vez (catálogo, favoritos...): todas darán 401.
-    await page.goto('/');
+    // Navegar DENTRO de la SPA (sin recargar) a una página que pide datos nuevos: darán 401. (Mi lista no sirve: los favoritos ya están en memoria y no hay petición.)
+    await page.getByRole('link', { name: 'Series', exact: true }).first().click();
     await expect(page).toHaveURL(/\/login$/);
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByText('Tu sesión ha caducado. Inicia sesión de nuevo.')).toHaveCount(1);
-    expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
-    expect(visited).toEqual(['/', '/login']);
+    expect(visited).toEqual(['/series', '/login']);
   });
 });
 
@@ -304,7 +335,7 @@ test.describe('Demasiados intentos (429)', () => {
     await expect(formAlert(page)).not.toContainText('Demasiados intentos.');
     await expect(page.getByRole('button', { name: /^Reintentar en \d+ min( \d+ s)?$/ })).toBeDisabled();
     await expect(page).toHaveURL(/\/login$/);
-    expect(await page.evaluate(() => localStorage.getItem('token'))).toBeNull();
+    expect(await sessionCookie(page)).toBeUndefined();
   });
 
   test('cuenta bloqueada con Retry-After de 2 min 5 s: la espera se lee en minutos y segundos', async ({ page }) => {

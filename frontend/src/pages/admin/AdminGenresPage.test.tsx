@@ -32,7 +32,7 @@ const GENRES: Genre[] = [
 function renderGenres(routes: Parameters<typeof routeFetch>[1] = {}) {
   routeFetch(fetchMock, { 'GET /api/genres': () => jsonResponse(GENRES), ...routes });
   const user = userEvent.setup();
-  renderWithProviders(<AdminGenresPage />, { route: '/admin/generos', token: 'jwt' });
+  renderWithProviders(<AdminGenresPage />, { route: '/admin/generos', session: true });
   return user;
 }
 

@@ -9,8 +9,7 @@ import { FormField } from '../components/FormField';
 import { useAuth } from '../context/AuthContext';
 import { useCountdown } from '../hooks/useCountdown';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import { ApiError, apiFetch, getErrorMessage } from '../lib/api';
-import type { LoginResponse } from '../lib/types';
+import { ApiError, getErrorMessage } from '../lib/api';
 import { formatWaitTime } from '../lib/utils';
 
 /**
@@ -88,7 +87,7 @@ function RemainingAttemptsNotice({ remaining }: { remaining: number }) {
  *   intentos" y cuenta atrás en el botón.
  * - Red caída / 5xx / otros: el mensaje que ya prepara `apiFetch`.
  *
- * Al iniciar sesión solo se guarda el token con `login()`: `RedirectIfAuthenticated`
+ * `login()` del contexto hace la llamada y abre la sesión: `RedirectIfAuthenticated`
  * (en `App.tsx`) se encarga de llevar al usuario a la portada.
  */
 export function LoginPage() {
@@ -112,12 +111,8 @@ export function LoginPage() {
     }
     setLoading(true);
     try {
-      const { token } = await apiFetch<LoginResponse>('/auth/login', {
-        method: 'POST',
-        body: { email: email.trim(), password },
-        public: true, // un 401 aquí significa "credenciales incorrectas", no "sesión caducada"
-      });
-      login(token);
+      // El servidor fija la cookie de sesión (HttpOnly); no hay token que guardar.
+      await login(email.trim(), password);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setError('Correo o contraseña incorrectos.');
