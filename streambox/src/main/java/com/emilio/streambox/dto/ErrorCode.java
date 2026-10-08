@@ -48,6 +48,14 @@ public enum ErrorCode {
     UNSUPPORTED_MEDIA_TYPE,
 
     /**
+     * El cliente pidió en la cabecera {@code Accept} un formato que la API no
+     * produce (o la cabecera está mal formada): la API solo responde en JSON
+     * (406). El propio error se envía en JSON, porque de otro modo el cliente
+     * no podría leer el motivo.
+     */
+    NOT_ACCEPTABLE,
+
+    /**
      * Se ha superado el límite de peticiones permitido desde una misma IP
      * (login o registro). Va con la cabecera {@code Retry-After}.
      */

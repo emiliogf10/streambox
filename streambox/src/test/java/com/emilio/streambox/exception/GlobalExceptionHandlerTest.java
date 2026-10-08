@@ -11,8 +11,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.validation.FieldError;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 
 import com.emilio.streambox.dto.ErrorCode;
 import com.emilio.streambox.dto.ErrorResponse;
+import com.emilio.streambox.security.JsonRequestRejectedHandler;
 
 /**
  * Pruebas del contrato común de errores. Se prueban directamente los handlers
@@ -72,6 +75,24 @@ class GlobalExceptionHandlerTest {
         assertEquals("Los datos proporcionados no son válidos", body.getMessage());
         assertEquals("/api/users", body.getPath());
         assertEquals("Debe tener un formato válido", body.getValidationErrors().get("email"));
+    }
+
+    /**
+     * Un rechazo del cortafuegos HTTP que ocurre dentro de Spring MVC (cabecera
+     * leída tarde) es el 400 del cortafuegos, con su mismo mensaje y sin el de
+     * la excepción, que describe qué cadena «maliciosa» encontró. Antes caía en
+     * el manejador genérico: 500 y traza en el log.
+     */
+    @Test
+    void lateFirewallRejectionReturnsMalformedRequestInsteadOfInternalError() {
+        ResponseEntity<ErrorResponse> response = handler.handleRequestRejected(
+                new RequestRejectedException(
+                        "The request was rejected because the header value \"application/json\u0085\" is not allowed."),
+                request);
+
+        assertError(response, HttpStatus.BAD_REQUEST, ErrorCode.MALFORMED_REQUEST,
+                JsonRequestRejectedHandler.MESSAGE);
+        assertEquals(MediaType.APPLICATION_JSON, response.getHeaders().getContentType());
     }
 
     @Test

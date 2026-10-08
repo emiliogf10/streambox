@@ -69,6 +69,8 @@ public class ErrorResponse {
                     + "- ACCESS_DENIED (403): autenticado, pero sin permisos (por ejemplo, no es ADMIN).\n"
                     + "- METHOD_NOT_ALLOWED (405): el método HTTP no está soportado por la ruta.\n"
                     + "- UNSUPPORTED_MEDIA_TYPE (415): el tipo de contenido no está soportado.\n"
+                    + "- NOT_ACCEPTABLE (406): la cabecera Accept pide un formato que la API no produce; "
+                    + "la API solo responde en JSON (este error también va en JSON).\n"
                     + "- RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login o registro desde la misma "
                     + "IP; ver la cabecera Retry-After.\n"
                     + "- ACCOUNT_LOCKED (429): la cuenta está bloqueada temporalmente por logins fallidos; "

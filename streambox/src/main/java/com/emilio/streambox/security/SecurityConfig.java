@@ -12,11 +12,17 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.firewall.CompositeRequestRejectedHandler;
+import org.springframework.security.web.firewall.ObservationMarkingRequestRejectedHandler;
+import org.springframework.security.web.firewall.RequestRejectedHandler;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.ratelimit.RateLimitProperties;
 import com.emilio.streambox.security.ratelimit.RateLimitingFilter;
+
+import io.micrometer.observation.ObservationRegistry;
+import jakarta.servlet.DispatcherType;
 
 /**
  * Configuración de seguridad de la aplicación Streambox.
@@ -118,6 +124,45 @@ public class SecurityConfig {
         }
 
         /**
+         * Manejador de las peticiones que rechaza el cortafuegos HTTP de Spring
+         * Security: 400 {@code MALFORMED_REQUEST} en JSON en lugar del
+         * {@code sendError(400)} por defecto, que acababa en un 401 falso desde
+         * {@code /error} (ver {@link JsonRequestRejectedHandler}).
+         *
+         * <p>
+         * Spring Security lo encuentra solo: {@code WebSecurity} busca un bean
+         * de tipo {@link RequestRejectedHandler} al montar el
+         * {@code FilterChainProxy}. Debe haber uno solo; con dos, lo ignoraría
+         * en silencio y volvería al de por defecto.
+         * </p>
+         *
+         * <p>
+         * Sin un bean propio, Spring compone dos manejadores: uno que marca la
+         * observación de la petición (métricas y trazas de Micrometer) como
+         * fallida y otro que responde. Aquí solo se sustituye el que responde,
+         * para no perder lo primero cuando hay un registro de observaciones
+         * activo (Actuator).
+         * </p>
+         *
+         * @param errorWriter         escritor de errores JSON de seguridad
+         * @param observationRegistry registro de observaciones, si existe
+         * @return manejador de peticiones rechazadas
+         */
+        @Bean
+        public RequestRejectedHandler requestRejectedHandler(
+                        SecurityErrorResponseWriter errorWriter,
+                        ObjectProvider<ObservationRegistry> observationRegistry) {
+
+                RequestRejectedHandler json = new JsonRequestRejectedHandler(errorWriter);
+                ObservationRegistry registry = observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP);
+                if (registry.isNoop()) {
+                        return json;
+                }
+                return new CompositeRequestRejectedHandler(
+                                new ObservationMarkingRequestRejectedHandler(registry), json);
+        }
+
+        /**
          * Configura la cadena de filtros de seguridad de Spring Security.
          *
          * <p>
@@ -125,6 +170,16 @@ public class SecurityConfig {
          * </p>
          *
          * <ul>
+         * <li>Permite el despacho de error ({@link DispatcherType#ERROR}), el
+         * reenvío interno a {@code /error} que hace Tomcat tras un
+         * {@code sendError} o una excepción no controlada. Ese reenvío no lleva
+         * el usuario del token ({@link JwtAuthenticationFilter} no actúa en él),
+         * así que con la regla general recibía el 401 del punto de entrada y el
+         * cliente veía un 401 falso en lugar del error real (un 500, por
+         * ejemplo). La petición original ya pasó la autorización; el reenvío solo
+         * describe su error. No abre la ruta: un {@code GET /error} pedido por el
+         * cliente es un despacho {@code REQUEST} y sigue cayendo en
+         * {@code anyRequest().authenticated()}.</li>
          * <li>Desactiva el CSRF de Spring: la API es stateless y la defensa
          * propia está en {@link JwtAuthenticationFilter} (SameSite=Strict en la
          * cookie y cabecera {@code X-Requested-With: StreamBox} obligatoria en
@@ -185,6 +240,15 @@ public class SecurityConfig {
                                                 .accessDeniedHandler(accessDeniedHandler))
 
                                 .authorizeHttpRequests(auth -> auth
+                                                // Despacho de error (reenvio interno a /error tras
+                                                // un sendError o una excepcion): permitido para que
+                                                // el cliente reciba el codigo real y no un 401 falso.
+                                                // Solo coincide con el despacho ERROR que genera el
+                                                // propio Tomcat: un GET /error del cliente es REQUEST
+                                                // y sigue necesitando token (anyRequest, abajo).
+                                                .dispatcherTypeMatchers(DispatcherType.ERROR)
+                                                .permitAll()
+
                                                 // Registro y autenticacion son publicos. Las rutas
                                                 // salen de RateLimitingFilter para que lo publico y
                                                 // lo limitado por IP sean siempre lo mismo.

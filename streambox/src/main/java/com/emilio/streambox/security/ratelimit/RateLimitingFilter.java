@@ -3,9 +3,12 @@ package com.emilio.streambox.security.ratelimit;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
 
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.InvalidMediaTypeException;
+import org.springframework.http.MediaType;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -69,6 +72,48 @@ import jakarta.servlet.http.HttpServletResponse;
  * regla de autorización: nunca llega al login ni al registro. La regla general
  * es "se limita exactamente lo que es público".
  * </p>
+ *
+ * <h2>Qué peticiones cuentan según su {@code Content-Type}</h2>
+ * <p>
+ * Login y registro no exigen la cabecera {@code X-Requested-With} (no hay
+ * sesión que proteger) y no hay CORS, así que una web ajena puede hacer que
+ * el navegador de la víctima les envíe {@code POST} «simples», que no pasan
+ * por el preflight de CORS: con un {@code Content-Type} de la lista
+ * CORS-safelisted ({@code text/plain},
+ * {@code application/x-www-form-urlencoded}, {@code multipart/form-data}) o
+ * sin {@code Content-Type} ni cuerpo ({@code fetch(url, {method: 'POST',
+ * mode: 'no-cors'})}). Spring MVC las rechaza (415, o 400 sin cuerpo) porque
+ * {@code @RequestBody} no sabe leer esos tipos, pero antes este filtro ya las
+ * había contado: unas pocas bastaban para dejar la IP de la víctima en 429
+ * sin poder iniciar sesión ni registrarse (pista NV-A de la auditoría 2).
+ * </p>
+ *
+ * <p>
+ * Por eso esas peticiones <b>pasan sin contar</b> y siguen la cadena, donde
+ * acaban en 415/400 sin llegar al controlador, es decir, sin BCrypt ni
+ * consultas a la base de datos: no hace falta limitarlas para proteger nada.
+ * Tampoco cuenta un {@code Content-Type} mal formado: el navegador y Spring
+ * no lo analizan igual (p. ej. {@code text/plain;a=b c} es {@code text/plain}
+ * para el navegador y un error para Spring) y Spring siempre lo rechaza con
+ * 415.
+ * </p>
+ *
+ * <p>
+ * <b>Todo lo demás cuenta</b>, no solo el JSON. Se decidió así porque Spring
+ * MVC puede leer el cuerpo con más tipos que JSON: cuando se escribió este
+ * filtro, también con {@code application/yaml} (el conversor YAML de Jackson 2
+ * se registraba solo porque springdoc trae {@code jackson-dataformat-yaml}).
+ * Contar únicamente JSON habría dejado probar contraseñas o crear cuentas sin
+ * límite con {@code Content-Type: application/yaml}. Ese conversor lo quitó
+ * después {@code JsonOnlyMessageConvertersConfig} (el YAML ya recibe 415, y
+ * sigue contando), pero el filtro no depende de ello. Con este criterio, cualquier
+ * conversor que se añada mañana queda limitado sin tocar el filtro; lo único
+ * que debe cumplirse es que ningún conversor lea el login o el registro desde
+ * un tipo que no cuenta, y eso lo comprueba
+ * {@code RateLimitingContentTypeIntegrationTest}. Ninguno de los tipos que
+ * cuentan puede enviarse desde otra web sin preflight, y sin CORS el
+ * preflight falla, así que otra web no puede gastar el presupuesto.
+ * </p>
  */
 public class RateLimitingFilter extends OncePerRequestFilter {
 
@@ -80,6 +125,13 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
     /** Ruta del registro (pública y limitada, como {@link #LOGIN_PATH}). */
     public static final String REGISTER_PATH = "/api/users";
+
+    /**
+     * Tipos de la lista CORS-safelisted del estándar Fetch: los únicos con
+     * los que otra web puede enviar un {@code POST} sin preflight.
+     */
+    private static final List<MediaType> CORS_SAFELISTED_TYPES = List.of(
+            MediaType.TEXT_PLAIN, MediaType.APPLICATION_FORM_URLENCODED, MediaType.MULTIPART_FORM_DATA);
 
     private final RequestMatcher loginRequest;
     private final RequestMatcher registerRequest;
@@ -121,20 +173,90 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             FilterChain filterChain) throws ServletException, IOException {
 
         if (loginRequest.matches(request)) {
-            String ip = ClientAddress.counterKey(request.getRemoteAddr());
-            if (!loginCounter.tryAcquire(ip, loginRule.maxRequests())) {
-                reject(request, response, loginCounter.retryAfter(ip));
+            if (!acquire(request, response, loginCounter, loginRule)) {
                 return;
             }
         } else if (registerRequest.matches(request)) {
-            String ip = ClientAddress.counterKey(request.getRemoteAddr());
-            if (!registerCounter.tryAcquire(ip, registerRule.maxRequests())) {
-                reject(request, response, registerCounter.retryAfter(ip));
+            if (!acquire(request, response, registerCounter, registerRule)) {
                 return;
             }
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Gasta un hueco del contador de la IP, o responde 429 si no quedan.
+     *
+     * <p>
+     * Las peticiones que otra web puede enviar sin preflight
+     * ({@link #countsTowardsLimit(String)}) pasan sin gastar nada: Spring MVC
+     * las rechazará (415/400) antes del controlador, y contarlas solo
+     * serviría para agotar el límite de la víctima.
+     * </p>
+     *
+     * @return {@code true} si la petición puede continuar; {@code false} si ya
+     *         se ha respondido con 429
+     */
+    private boolean acquire(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            SlidingWindowCounter counter,
+            RateLimitProperties.Rule rule) throws IOException {
+
+        if (!countsTowardsLimit(request.getContentType())) {
+            return true;
+        }
+        String ip = ClientAddress.counterKey(request.getRemoteAddr());
+        if (!counter.tryAcquire(ip, rule.maxRequests())) {
+            reject(request, response, counter.retryAfter(ip));
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Indica si una petición de login o registro con este {@code Content-Type}
+     * gasta el presupuesto por IP (ver la sección «Qué peticiones cuentan» de
+     * la clase).
+     *
+     * <p>
+     * No cuentan las que otra web puede provocar sin preflight y que Spring
+     * MVC siempre rechaza: sin {@code Content-Type}, con uno mal formado o con
+     * un tipo CORS-safelisted (se comparan tipo y subtipo, sin parámetros
+     * como {@code charset} y sin distinguir mayúsculas, igual que hacen el
+     * navegador y Spring). Todo lo demás cuenta, también los tipos que hoy
+     * Spring rechazaría: es preferible contar de más algo que una web ajena
+     * no puede enviar que dejar sin límite un tipo que algún conversor sepa
+     * leer.
+     * </p>
+     *
+     * <p>
+     * Se usa el mismo valor que lee Spring MVC
+     * ({@link HttpServletRequest#getContentType()}) y el mismo analizador
+     * ({@link MediaType#parseMediaType(String)}), para que el filtro y el
+     * controlador vean el mismo tipo.
+     * </p>
+     *
+     * @param contentType valor de la cabecera; puede ser {@code null}
+     * @return {@code true} si la petición se contabiliza
+     */
+    static boolean countsTowardsLimit(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return false;
+        }
+        MediaType mediaType;
+        try {
+            mediaType = MediaType.parseMediaType(contentType);
+        } catch (InvalidMediaTypeException ex) {
+            return false;
+        }
+        for (MediaType safelisted : CORS_SAFELISTED_TYPES) {
+            if (safelisted.equalsTypeAndSubtype(mediaType)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void reject(

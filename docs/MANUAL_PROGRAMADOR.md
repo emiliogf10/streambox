@@ -103,7 +103,7 @@ Cookie: streambox_token=eyJhbGciOiJIUzI1NiJ9...
 
 **3. Tomcat** (el servidor web que Spring Boot lleva dentro) recibe la petición y la pasa por la **cadena de filtros**.
 
-**4. `RateLimitingFilter`.** Solo actúa en `POST /api/auth/login` y `POST /api/users` (los reconoce con el mismo tipo de comparador de rutas que la autorización; capítulo 11). Esta petición es un `GET`, así que la deja pasar.
+**4. `RateLimitingFilter`.** Solo actúa en `POST /api/auth/login` y `POST /api/users` (los reconoce con el mismo tipo de comparador de rutas que la autorización; capítulo 11), y en ellas solo cuenta las peticiones que otra web no podría enviar sin *preflight* (capítulo 11, «Qué peticiones gastan el límite»). Esta petición es un `GET`, así que la deja pasar.
 
 **5. `JwtAuthenticationFilter`.** Toma el token de la cookie `streambox_token` (o, si viene, de `Authorization: Bearer`, que tiene preferencia: clientes de API), valida el token (firma, caducidad, emisor), saca el email, busca el usuario en la base de datos y lo deja «apuntado» en el `SecurityContext` como usuario autenticado con su rol. Si el token vino de la cookie y la petición no es segura (POST/PUT/PATCH/DELETE), exige además la cabecera `X-Requested-With: StreamBox` (defensa CSRF): sin ella, 403 `CSRF_REJECTED`.
 
@@ -684,8 +684,8 @@ La última regla es una red de seguridad: un endpoint nuevo que se olvide de añ
 Para cada petición:
 
 1. Busca el token: primero la cabecera `Authorization: Bearer` (si existe, **manda ella**; un Bearer inválido da 401 aunque haya cookie válida) y, si no hay, la cookie `streambox_token`. Si no hay ninguna, **no hace nada** y deja pasar la petición (sin autenticar). Login, registro y logout ignoran la cookie para que una vieja no los bloquee.
-2. Extrae el token y pide a `JwtService.extractEmail(token)` que lo valide y devuelva el email. Si el token está manipulado, caducado o lo emitió otro sistema, salta una excepción: se registra un `WARN` en el log y la petición sigue **sin autenticar**.
-3. **Busca el usuario en la base de datos** por email. Si no existe (por ejemplo, se borró la cuenta), la petición sigue sin autenticar.
+2. Extrae el token y pide a `JwtService.extractEmail(token)` que lo valide y devuelva el email. Si el token está manipulado, caducado o lo emitió otro sistema, jjwt lanza una `JwtException` (o `IllegalArgumentException` si viene vacío): se registra en `DEBUG` **solo la clase** de la excepción y la petición sigue **sin autenticar**. No se registra el mensaje de jjwt, que puede repetir contenido del token que manda el cliente (p. ej. su `alg`), ni se usa `WARN`: cualquiera puede mandar tokens basura sin límite y llenaría el log; el 401 ya lo cuenta. Un token sin `subject` también es anónimo.
+3. **Busca el usuario en la base de datos** por email. Si no existe (por ejemplo, se borró la cuenta), la petición sigue sin autenticar. Esta consulta está **fuera** del `try`: si la base de datos falla, el error **no** se confunde con «sin autenticar». Antes el filtro capturaba `Exception` y una caída de la BD daba 401 a un usuario con token válido, y el frontend le cerraba la sesión. Ahora la excepción sube, Tomcat la reenvía a `/error` y el cliente recibe **500 `INTERNAL_ERROR`** (sección 9.5); el frontend muestra el error con opción de reintentar y conserva la sesión (`JwtUserLookupFailureTomcatIntegrationTest`). Que jjwt solo lance esas dos excepciones ante cualquier token hostil lo vigila `JwtServiceTest` (43 tokens maliciosos): si una versión futura lanzara otra, ese test fallaría al actualizar la librería.
 4. Crea un `AuthenticatedUser(id, email, role)` y lo guarda en el `SecurityContextHolder` con la autoridad `ROLE_<rol>`.
 5. **Defensa CSRF.** Si la autenticación vino de la **cookie** y la petición no es segura (POST/PUT/PATCH/DELETE), exige la cabecera `X-Requested-With: StreamBox`; sin ella responde 403 `CSRF_REJECTED`. Una web ajena no puede poner esa cabecera sin un preflight CORS, y aquí no hay CORS abierto. Con Bearer no hace falta (no es una credencial que el navegador envíe solo).
 
@@ -705,6 +705,24 @@ Para cada petición:
 Ambos escriben el error con `SecurityErrorResponseWriter`. Hace falta una clase aparte porque estos componentes actúan **antes** de que la petición llegue a Spring MVC, así que `GlobalExceptionHandler` no puede capturarlos.
 
 > **Detalle avanzado: `OncePerRequestFilter`.** Nuestros dos filtros se declaran como `@Bean` en `SecurityConfig`. Spring Boot registra automáticamente todo bean de tipo `Filter` también en el servidor web, así que en teoría podrían ejecutarse dos veces por petición. Heredar de `OncePerRequestFilter` lo impide: marca la petición la primera vez y se salta la segunda.
+
+### 9.5 El reenvío a `/error` y el «401 falso»
+
+Cuando algo llama a `response.sendError(...)` (o una excepción escapa de un filtro), Tomcat **reenvía la petición a `/error`** con otro tipo de despacho (`DispatcherType.ERROR`). En ese reenvío `JwtAuthenticationFilter` no vuelve a actuar (es `OncePerRequestFilter`), así que la petición llega **sin autenticar**. Antes, como `/error` no estaba permitida, cualquier error que tomara ese camino acababa en un **401 «Autenticación requerida» con `"path":"/error"`, aunque el token fuera válido**: el frontend lo trataba como sesión caducada. Casos reales encontrados (2026-10-08, tras la auditoría 2), todos con Tomcat real (MockMvc no hace el reenvío):
+
+- **URL que rechaza el cortafuegos de Spring Security** (`StrictHttpFirewall`): `/api/genres;x=1`, `/api//genres`, `/api/genres/%2e%2e/x`, `/api/genres%25`. Ahora `security/JsonRequestRejectedHandler` (un bean `RequestRejectedHandler`, que Spring Security 7 recoge solo) responde directamente **400 `MALFORMED_REQUEST`** con el formato `ErrorResponse`, con un mensaje propio (el de la excepción describe la regla y la cadena maliciosa) y `X-Content-Type-Options: nosniff`, sin pasar por `sendError`. Registra el rechazo solo a DEBUG, para que un escáner no llene el log. Ojo: el cortafuegos comprueba algunas cabeceras **cuando alguien las lee**, no al entrar. Si la primera lectura ocurre ya dentro de Spring MVC (el `Content-Type` al leer el `@RequestBody`, p. ej. con un byte `0x85`), la excepción llega a `GlobalExceptionHandler` y no a ese manejador. Por eso `GlobalExceptionHandler` también trata `RequestRejectedException` (400 con el mismo mensaje y log a DEBUG); antes daba 500 y una traza a ERROR desde una ruta pública.
+- **Errores con un `Accept` que no es JSON**: los resuelve `GlobalExceptionHandler` respondiendo siempre en JSON (capítulo 16).
+- **Cualquier otro `sendError` o excepción en un filtro**: `SecurityConfig` permite el despacho de error (`dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()`, primera regla). **No abre la ruta `/error`**: un `GET /error` pedido por el cliente es un despacho `REQUEST` y sigue exigiendo autenticación (lo prueba `ErrorDispatchTomcatIntegrationTest`). La petición original ya pasó la autorización; el reenvío solo describe su error.
+
+Al dejar pasar el despacho de error, lo que responde `/error` se ve de verdad. Lo responde **`exception/ApiErrorController`**, que sustituye al `BasicErrorController` de Spring Boot (basta con registrar un bean `ErrorController`: el de Boot lleva `@ConditionalOnMissingBean`). Su respuesta:
+
+- siempre `ErrorResponse` en JSON, también con `Accept: text/html` (nada de la página «whitelabel»);
+- el estado sale de `jakarta.servlet.error.status_code`, con la **misma tabla** estado → `code` que `GlobalExceptionHandler` (`exception/GenericHttpError`);
+- mensajes genéricos (nunca el de `sendError` ni el de la excepción) y `path` con la ruta original, no `/error`;
+- un `GET /error` pedido a mano con token responde 404, para que nadie pueda llenar el log de errores falsos.
+- pone `X-Content-Type-Options: nosniff` (con `setHeader`, para no duplicarla): los errores que nacen en Tomcat antes de la seguridad, como un `TRACE` (405), no pasan por `HeaderWriterFilter`.
+
+Como defensa extra, por si algún día vuelve a responder el controlador de Boot, `application.properties` fija `spring.web.error.include-*=never` en todos los perfiles (`ErrorDetailsNeverExposedPropertiesTest`), porque en `dev` `spring-boot-devtools` los pone a `always` y mostraría trazas. **Ojo, Spring Boot 4:** el prefijo es `spring.web.error`; el antiguo `server.error.include-*` ya no se aplica.
 
 ---
 
@@ -847,6 +865,12 @@ Ambas responden **429 Too Many Requests** con la cabecera **`Retry-After`** (seg
 - El frontend muestra «Te quedan N intentos antes de que la cuenta se bloquee 15 minutos» y, con `ACCOUNT_LOCKED`, un aviso de cuenta bloqueada con cuenta atrás en minutos y segundos (capítulo 20).
 
 **Cómo reconoce el filtro las rutas.** `RateLimitingFilter` usa los mismos `PathPatternRequestMatcher` que las reglas de autorización, y las rutas (`LOGIN_PATH`, `REGISTER_PATH`) son constantes que `SecurityConfig` también usa en su `permitAll()`: lo público y lo limitado son siempre lo mismo. **Antes había un fallo de seguridad (encontrado por `qa` en octubre de 2026):** el filtro comparaba `request.getRequestURI()` con `equals`, pero ese método devuelve la ruta **sin decodificar**, mientras que Spring MVC decodifica cada segmento. `POST /api/auth/%6cogin` (la `l` codificada) llegaba al login sin pasar por el contador, y `POST /api/%75sers` creaba cuentas sin límite. El cortafuegos de Spring Security no lo impide, porque una letra codificada es legal. Lección: **para decidir sobre una ruta, compárala igual que la compara quien la enruta.**
+
+**Qué peticiones gastan el límite por IP (según su `Content-Type`).** Login y registro no exigen la cabecera `X-Requested-With` y no hay CORS, así que una web ajena puede hacer que el navegador de la víctima les envíe `POST` «simples», los que no necesitan *preflight*: con `Content-Type` `text/plain`, `application/x-www-form-urlencoded` o `multipart/form-data` (la lista *CORS-safelisted* del estándar Fetch), o sin `Content-Type`. Spring las rechaza (415, o 400 sin cuerpo), pero **antes el filtro ya las había contado**: con unas pocas, la víctima quedaba en 429 sin poder entrar (pista NV-A de la auditoría 2, reproducida: tres `text/plain` → 415, y el login legítimo desde esa IP → 429). Ahora `RateLimitingFilter.countsTowardsLimit` **no cuenta** las peticiones sin `Content-Type`, con uno mal formado o con un tipo de esa lista (compara tipo y subtipo, sin parámetros ni mayúsculas), y **cuenta todo lo demás**. Las que no cuentan nunca llegan al controlador, así que no gastan BCrypt ni la base de datos.
+
+- **Por qué no «contar solo JSON», que parece lo obvio:** Spring MVC puede leer el cuerpo con más tipos que JSON. Cuando se hizo el arreglo, también con `application/yaml`, porque springdoc trae `jackson-dataformat-yaml` y Spring registraba su conversor solo. Contar solo JSON habría dejado probar contraseñas y crear cuentas **sin límite** con `Content-Type: application/yaml` (lo descubrió el agente `security` al comprobar el arreglo: un login YAML devolvía 204). Después se quitó el conversor YAML (capítulo 13, «Los cuerpos solo se leen en JSON»): un YAML ya da 415, **pero sigue contando**, y el filtro no depende de qué conversores haya. Lección: **una lista blanca de lo que «cuenta» es frágil si no controlas qué acepta el que viene después; aquí es más seguro excluir solo lo que se sabe inofensivo.**
+- **Por qué otra web no puede gastar el presupuesto con un tipo que sí cuenta:** cualquier otro `Content-Type` obliga al navegador a hacer un *preflight*, y sin CORS el servidor no lo autoriza.
+- **La red de seguridad:** `RateLimitingContentTypeIntegrationTest` comprueba que ningún conversor de Spring sabe leer `LoginRequest` ni `CreateUserRequest` desde un tipo que no cuenta, y que todo tipo desde el que alguno los lee sí cuenta. Si mañana se añade un conversor de formularios, ese test falla.
 
 ### 11.1 `SlidingWindowCounter`: el algoritmo
 
@@ -1010,6 +1034,12 @@ public record MovieRequest(
 **Géneros por título:** `genreIds` admite entre 1 y 20 géneros, en películas y en series (`MovieRequest.MAX_GENRES`). Sin tope, la lista acaba en un `IN (...)` sin límite dentro de `findAllById`; PostgreSQL admite como mucho 32 767 parámetros.
 
 **Decimales en campos enteros:** un número con decimales en un campo entero del JSON (`"duration": 100.5`, `"seasonNumber": 1.5`, incluso `100.0`) responde 400 `MALFORMED_REQUEST` en lugar de truncarse en silencio. Jackson trae esa conversión activada por defecto y se desactiva con `spring.jackson.deserialization.accept-float-as-int=false` en `application.properties`. Se aplica al `JsonMapper` de Jackson 3, con el que Spring Boot 4 lee los cuerpos; Jackson 2 solo lo usa `SecurityErrorResponseWriter` para escribir los 401/403. Lo más grave era `"genreIds": [5.5]`, que asignaba **otro género** (el 5). Los parámetros de consulta (`?page=1`) no se ven afectados, porque los convierte Spring. Tests: `JsonIntegerCoercionIntegrationTest`.
+
+**Los cuerpos solo se leen en JSON.** Spring MVC elige con qué «conversor» leer un `@RequestBody` según el `Content-Type`, y registra automáticamente los de cualquier formato cuya librería esté en el *classpath*. springdoc trae `jackson-dataformat-yaml`, así que **toda la API aceptaba también YAML** sin que nadie lo hubiera pedido: entrada del cliente analizada por SnakeYAML, sin necesidad, y además un `login` en YAML se saltaba el arreglo de NV-A (capítulo 11). `config/JsonOnlyMessageConvertersConfig` quita los conversores YAML con `configureMessageConverters(HttpMessageConverters.ServerBuilder)` (la API de Spring Framework 7; la de la `List` está obsoleta). Los reconoce por los tipos que anuncian (subtipo `yaml`, `x-yaml` o `*+yaml`) y no con `isCompatibleWith`, porque los conversores genéricos anuncian `*/*` y se quitarían por error. Resultado: un cuerpo YAML recibe 415 `UNSUPPORTED_MEDIA_TYPE`, pedir la respuesta con `Accept: application/yaml` da 406, y `/v3/api-docs.yaml` sigue funcionando (springdoc genera el YAML él mismo y lo devuelve como `byte[]`). `JsonOnlyRequestBodyIntegrationTest` falla si cualquier `@RequestBody` de la API se puede leer desde un tipo que no sea JSON, por ejemplo si mañana una dependencia trae un conversor XML o CBOR.
+
+**Sin multipart.** La API no tiene ninguna subida de archivos (las portadas son URLs), así que `spring.servlet.multipart.enabled=false`. Con el valor por defecto de Spring Boot, `DispatcherServlet` analizaba cualquier `multipart/form-data` (hasta 10 MB, con ficheros temporales en disco) **antes** de descubrir que el endpoint no lo acepta, también en las rutas públicas (login, registro, logout, `/actuator/health`). Ahora el cuerpo ni se lee: login y registro responden 415 (lo prueba `MultipartDisabledTomcatIntegrationTest` contra Tomcat real con un archivo de más de 1 MB, que daría 413 si se analizara). Si algún día hay subidas (p. ej. portadas a MinIO o S3), hay que reactivarlo con límites bajos y solo para esa ruta (`resolve-lazily=true`), no para toda la API.
+
+**Sin `FormContentFilter`.** Spring Boot registra por defecto un filtro que, en `PUT`, `PATCH` y `DELETE` con `application/x-www-form-urlencoded`, lee el cuerpo entero (sin límite y **antes de la autenticación**) para exponerlo como parámetros. Un anónimo podía obligar al servidor a leer 20 MB en cualquier ruta. La API no usa formularios, así que `spring.mvc.formcontent.filter.enabled=false` (`FormContentFilterDisabledTomcatIntegrationTest`). Los `POST` con formulario los sigue leyendo Tomcat, con su límite `maxPostSize` de 2 MB.
 
 Los parámetros de la URL también se validan (`@Min`/`@Max` en `page` y `size`). Para eso el controlador lleva `@Validated` en la clase. Si un parámetro no tiene el tipo correcto (`page=abc`), Spring lanza una excepción de conversión que el manejador de errores convierte en 400.
 
@@ -1327,7 +1357,8 @@ Todos los errores de la API, vengan de donde vengan, tienen la misma forma (`dto
 | `SERIES_ALREADY_IN_FAVORITES` | 409 | Añadir a la lista una serie que ya estaba |
 | `EPISODE_ALREADY_EXISTS` | 409 | Crear o mover un episodio a una temporada y número ya ocupados («Ya existe el episodio N de la temporada T») |
 | `METHOD_NOT_ALLOWED` | 405 | Método HTTP no soportado en esa ruta |
-| `UNSUPPORTED_MEDIA_TYPE` | 415 | Cuerpo que no es JSON |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | Cuerpo que no es JSON (también YAML, formulario o multipart) |
+| `NOT_ACCEPTABLE` | 406 | La cabecera `Accept` pide un formato que la API no da (solo responde en JSON) |
 | `USER_ALREADY_EXISTS` | 409 | Registro con usuario o email en uso |
 | `MOVIE_ALREADY_IN_FAVORITES` | 409 | Añadir a la lista algo que ya estaba |
 | `AMBIGUOUS_TITLE` | 409 | Varias películas con el mismo título en `/by-title` |
@@ -1348,6 +1379,10 @@ Tiene tres bloques:
    - **Jerarquía**: `MovieNotFoundException`, `GenreNotFoundException`, `UserNotFoundException`, `SeriesNotFoundException`, `EpisodeNotFoundException`, `MovieNotInFavoritesException` y `SeriesNotInFavoritesException` heredan de `ResourceNotFoundException`. Un solo manejador atiende todos los 404, y una excepción nueva «no encontrado» funciona sin tocar el manejador. (`MovieNotInFavoritesException` y `SeriesNotInFavoritesException` tienen su propio manejador para darle un código más específico; Spring siempre elige el manejador más concreto.)
 2. **Excepciones estándar de Spring MVC.** La clase **hereda de `ResponseEntityExceptionHandler`**, que ya sabe convertir cada error del framework en su código correcto (404 ruta inexistente, 405, 415, JSON ilegible…). Se sobrescriben sus métodos solo para cambiar el **formato** a `ErrorResponse`. Sin esta herencia, el manejador genérico de `Exception` capturaría todo eso y lo convertiría en 500.
 3. **El último recurso** (`@ExceptionHandler(Exception.class)`): cualquier error no previsto se registra en el log **con su traza completa** y el cliente recibe un mensaje genérico. **Nunca se devuelve el mensaje de una excepción del framework**, porque puede revelar nombres de clases, tablas o rutas internas.
+
+**Los errores salen siempre en JSON, pida lo que pida el cliente.** Cada respuesta de `GlobalExceptionHandler` fija `Content-Type: application/json` (método `jsonError`). Con un tipo concreto ya puesto, Spring no negocia con el `Accept` (la RFC 9110 permite ignorarlo). Antes, un cliente con un token válido y `Accept: application/yaml`, `application/xml` o `text/html` que provocaba un 404 o un 400 recibía un **401 falso**: el `ErrorResponse` no se podía escribir en ese formato, Spring acababa en `sendError`, Tomcat reenviaba la petición a `/error` y ese reenvío llega sin autenticar. MockMvc no hace ese reenvío, así que solo lo detecta un test con Tomcat real (`ErrorResponseAlwaysJsonTomcatIntegrationTest`). Lección: **lo que pasa tras un `sendError` solo se ve con el servidor de verdad.**
+
+Lo que no pasa por `GlobalExceptionHandler` (un `sendError`, una excepción en un filtro, una URL que rechaza el cortafuegos) lo responden `ApiErrorController` y `JsonRequestRejectedHandler` con el **mismo formato** y la misma tabla de códigos (capítulo 9.5). Así, el cliente recibe un `ErrorResponse` venga de donde venga el error.
 
 **Los 401 y 403 no pasan por aquí** (capítulo 9.4): los genera Spring Security antes de llegar a los controladores.
 
@@ -1772,8 +1807,8 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1269 | `.\mvnw.cmd test` (desde `streambox/`) |
-| Backend (PostgreSQL real) | Testcontainers | 131 | Se ejecutan con el anterior (1400 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
+| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1552 | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (PostgreSQL real) | Testcontainers | 131 | Se ejecutan con el anterior (1683 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
 | Frontend (lógica y componentes) | Vitest, Testing Library | 774 | `npm run test` (desde `frontend/`) |
 | Frontend (flujos completos) | Playwright (Chromium) | 144 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 

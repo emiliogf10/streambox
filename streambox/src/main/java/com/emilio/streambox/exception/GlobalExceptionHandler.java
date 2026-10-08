@@ -12,8 +12,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -25,6 +27,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 import com.emilio.streambox.dto.ErrorCode;
 import com.emilio.streambox.dto.ErrorResponse;
+import com.emilio.streambox.security.JsonRequestRejectedHandler;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -46,18 +49,34 @@ import jakarta.validation.ConstraintViolationException;
  * porque pueden revelar detalles internos (nombres de clases, rutas,
  * estructura del JSON esperado).
  * </p>
+ *
+ * <p>
+ * <b>Los errores salen siempre en JSON, pida lo que pida el cliente.</b> Todas
+ * las respuestas de este manejador fijan {@code Content-Type: application/json}
+ * (ver {@link #jsonError(HttpStatusCode)}). Spring MVC
+ * ({@code AbstractMessageConverterMethodProcessor#writeWithMessageConverters})
+ * solo negocia el formato con la cabecera {@code Accept} cuando la respuesta no
+ * trae ya un tipo concreto; si lo trae, lo usa tal cual y escribe con el
+ * conversor JSON. Sin esto, un {@code Accept: application/yaml} (o XML, o HTML)
+ * hacía que el propio manejador fallara al escribir el {@code ErrorResponse};
+ * Spring acababa en {@code sendError}, Tomcat reenviaba a {@code /error} y la
+ * seguridad respondía un 401 falso en lugar del 404, 400, 406 o 415 real (ver
+ * {@code ErrorResponseAlwaysJsonTomcatIntegrationTest}). Responder el error en
+ * JSON aunque el cliente pidiera otra cosa lo permite el estándar (RFC 9110,
+ * apartado 12.5.1: si ninguna representación encaja con {@code Accept}, el
+ * servidor puede responder 406 o ignorar la cabecera) y es lo útil para el
+ * cliente: recibe el código real y el {@code code} estable de la API.
+ * </p>
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     private static final String VALIDATION_MESSAGE = "Los datos proporcionados no son válidos";
-    private static final String MALFORMED_MESSAGE =
-            "La petición no se puede interpretar. Revisa el formato de los datos";
+    private static final String MALFORMED_MESSAGE = GenericHttpError.MALFORMED_MESSAGE;
     private static final String INTEGRITY_MESSAGE =
             "No se puede completar la operación porque entra en conflicto con datos existentes";
-    private static final String INTERNAL_ERROR_MESSAGE =
-            "Se ha producido un error interno. Inténtalo de nuevo más tarde";
+    private static final String INTERNAL_ERROR_MESSAGE = GenericHttpError.INTERNAL_ERROR_MESSAGE;
 
     // ------------------------------------------------------------------
     // Excepciones de dominio
@@ -145,7 +164,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 Instant.now(), status.value(), status.getReasonPhrase(),
                 ErrorCode.INVALID_CREDENTIALS, exception.getMessage(), request.getRequestURI(),
                 null, exception.getRemainingAttempts());
-        return ResponseEntity.status(status).body(error);
+        return jsonError(status).body(error);
     }
 
     @ExceptionHandler(AmbiguousTitleException.class)
@@ -200,6 +219,40 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             DataIntegrityViolationException exception, HttpServletRequest request) {
         return buildErrorResponse(HttpStatus.CONFLICT, ErrorCode.DATA_INTEGRITY_VIOLATION,
                 INTEGRITY_MESSAGE, request);
+    }
+
+    /**
+     * Petición rechazada por el cortafuegos HTTP de Spring Security
+     * ({@code StrictHttpFirewall}) <b>dentro</b> de Spring MVC: 400
+     * {@code MALFORMED_REQUEST}, igual que cuando la rechaza antes de la
+     * cadena de filtros.
+     *
+     * <p>
+     * <b>Por qué llega aquí.</b> El cortafuegos comprueba las cabeceras de
+     * forma perezosa, cuando alguien las lee. Si la primera lectura de una
+     * cabecera no válida ocurre dentro de Spring MVC (por ejemplo, el
+     * {@code Content-Type} al preparar el {@code @RequestBody}), la excepción
+     * ya no pasa por {@code FilterChainProxy} ni por su
+     * {@code JsonRequestRejectedHandler}: sin este método la atrapaba
+     * {@link #handleUnexpectedException} y respondía 500 con una línea
+     * {@code ERROR} y su traza. En una ruta pública como el login, cualquiera
+     * podía llenar el log de errores falsos.
+     * </p>
+     *
+     * <p>
+     * Se responde con el mismo mensaje que {@code JsonRequestRejectedHandler},
+     * para que el cliente no note en qué momento se rechazó, y el de la
+     * excepción (qué regla saltó y con qué cadena) solo va al log en
+     * {@code DEBUG}, como allí.
+     * </p>
+     */
+    @ExceptionHandler(RequestRejectedException.class)
+    public ResponseEntity<ErrorResponse> handleRequestRejected(
+            RequestRejectedException exception, HttpServletRequest request) {
+        LOGGER.debug("Petición rechazada por el cortafuegos HTTP dentro de Spring MVC: {}",
+                exception.getMessage());
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, ErrorCode.MALFORMED_REQUEST,
+                JsonRequestRejectedHandler.MESSAGE, request);
     }
 
     /**
@@ -277,6 +330,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
      * Punto común por el que pasan el resto de excepciones estándar de Spring
      * MVC (404 de ruta inexistente, 405, 415, 406...). Se sustituye el
      * {@code ProblemDetail} por defecto por el {@link ErrorResponse} de la API.
+     * El código y el mensaje salen de {@link GenericHttpError}, la misma tabla
+     * que usa {@link ApiErrorController} para los errores que llegan por el
+     * despacho de error de Tomcat: un mismo estado da el mismo {@code code}
+     * venga por donde venga.
      */
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(
@@ -284,34 +341,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpStatusCode statusCode, WebRequest request) {
 
         HttpStatus status = HttpStatus.valueOf(statusCode.value());
-
         if (status.is5xxServerError()) {
             LOGGER.error("Error al procesar {}", path(request), exception);
-            return body(status, ErrorCode.INTERNAL_ERROR, INTERNAL_ERROR_MESSAGE,
-                    request, headers, null);
         }
-
-        ErrorCode code;
-        String message;
-        switch (status) {
-            case NOT_FOUND -> {
-                code = ErrorCode.RESOURCE_NOT_FOUND;
-                message = "El recurso solicitado no existe";
-            }
-            case METHOD_NOT_ALLOWED -> {
-                code = ErrorCode.METHOD_NOT_ALLOWED;
-                message = "El método HTTP no está permitido para este recurso";
-            }
-            case UNSUPPORTED_MEDIA_TYPE -> {
-                code = ErrorCode.UNSUPPORTED_MEDIA_TYPE;
-                message = "El tipo de contenido no está soportado";
-            }
-            default -> {
-                code = ErrorCode.MALFORMED_REQUEST;
-                message = MALFORMED_MESSAGE;
-            }
-        }
-        return body(status, code, message, request, headers, null);
+        GenericHttpError error = GenericHttpError.forStatus(status);
+        return body(status, error.code(), error.message(), request, headers, null);
     }
 
     // ------------------------------------------------------------------
@@ -329,7 +363,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ErrorResponse error = new ErrorResponse(
                 Instant.now(), status.value(), status.getReasonPhrase(),
                 code, message, request.getRequestURI(), validationErrors);
-        return ResponseEntity.status(status).body(error);
+        return jsonError(status).body(error);
     }
 
     /** 429 con la cabecera {@code Retry-After} en segundos. */
@@ -337,7 +371,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             ErrorCode code, TooManyRequestsException exception, HttpServletRequest request) {
         ResponseEntity<ErrorResponse> response = buildErrorResponse(
                 HttpStatus.TOO_MANY_REQUESTS, code, exception.getMessage(), request);
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+        return jsonError(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER,
                         String.valueOf(exception.getRetryAfter().toSeconds()))
                 .body(response.getBody());
@@ -350,7 +384,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ErrorResponse error = new ErrorResponse(
                 Instant.now(), status.value(), status.getReasonPhrase(),
                 code, message, path(request), validationErrors);
-        return ResponseEntity.status(status).headers(headers).body(error);
+        // contentType después de headers: si Spring hubiera puesto otro tipo
+        // en las cabeceras de la excepción, gana el JSON.
+        return jsonError(status).headers(headers).contentType(MediaType.APPLICATION_JSON).body(error);
+    }
+
+    /**
+     * Inicio de toda respuesta de error: el estado y {@code Content-Type:
+     * application/json} ya fijado, para que Spring no negocie el formato con el
+     * {@code Accept} del cliente (ver el Javadoc de la clase).
+     *
+     * @param status código HTTP del error
+     * @return constructor de la respuesta con el tipo JSON fijado
+     */
+    private static ResponseEntity.BodyBuilder jsonError(HttpStatusCode status) {
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON);
     }
 
     private static String path(WebRequest request) {

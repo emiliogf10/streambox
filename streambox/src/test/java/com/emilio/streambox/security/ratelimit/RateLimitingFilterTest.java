@@ -161,6 +161,60 @@ class RateLimitingFilterTest {
     }
 
     // ------------------------------------------------------------------
+    // Content-Type (pista NV-A de la auditoría 2)
+    // ------------------------------------------------------------------
+
+    /**
+     * Lo que otra web puede enviar sin preflight (tipos CORS-safelisted, sin
+     * {@code Content-Type}) y lo mal formado pasa sin gastar el hueco: el
+     * login JSON posterior desde la misma IP sigue pasando.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "text/plain", "TEXT/PLAIN; charset=UTF-8", "application/x-www-form-urlencoded",
+            "multipart/form-data; boundary=x", "", "json", "text/plain;a=b c"
+    })
+    void lasPeticionesQueOtraWebPuedeEnviarNoGastanElHueco(String contentType) throws Exception {
+        for (String path : new String[] { "/api/auth/login", "/api/users" }) {
+            for (int i = 0; i < 3; i++) {
+                MockHttpServletRequest request = post(path);
+                request.setContentType(contentType);
+                assertPassed(request);
+            }
+        }
+
+        assertPassed(post("/api/auth/login"));
+        assertPassed(post("/api/users"));
+    }
+
+    /** Sin {@code Content-Type} (un {@code fetch} {@code no-cors} sin cuerpo) tampoco cuenta. */
+    @Test
+    void unaPeticionSinContentTypeNoGastaElHueco() throws Exception {
+        MockHttpServletRequest request = post("/api/auth/login");
+        request.setContentType(null);
+        assertPassed(request);
+
+        assertPassed(post("/api/auth/login"));
+    }
+
+    /**
+     * Todo lo que no es CORS-safelisted cuenta: cualquier forma de JSON y
+     * también YAML u otros tipos, aunque Spring MVC los rechace con 415.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "application/json; charset=UTF-8", "Application/JSON", "application/vnd.api+json",
+            "application/yaml", "application/xml", "*/*"
+    })
+    void elRestoDeTiposGastaElHueco(String contentType) throws Exception {
+        MockHttpServletRequest first = post("/api/auth/login");
+        first.setContentType(contentType);
+        assertPassed(first);
+
+        assertRejected(post("/api/auth/login"));
+    }
+
+    // ------------------------------------------------------------------
     // Utilidades
     // ------------------------------------------------------------------
 
@@ -174,10 +228,16 @@ class RateLimitingFilterTest {
         return request("POST", rawPath);
     }
 
-    /** Petición con la ruta tal cual (sin volver a codificarla), como llega al contenedor. */
+    /**
+     * Petición con la ruta tal cual (sin volver a codificarla), como llega al
+     * contenedor. Lleva {@code Content-Type: application/json}, como el
+     * cliente real: sin él el filtro no la contaría (ver los tests de
+     * {@code Content-Type}) y los tests de rutas no probarían nada.
+     */
     private static MockHttpServletRequest request(String method, String rawPath) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, rawPath);
         request.setRemoteAddr(IP);
+        request.setContentType("application/json");
         return request;
     }
 
