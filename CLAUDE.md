@@ -38,6 +38,8 @@ Docker (desde la raíz; ver cap. 4.6 del manual): `docker compose up -d --build`
 
 **Maven y Docker:** los tests del paquete `postgres` usan Testcontainers (`postgres:16`) y **se omiten solos si Docker no está en marcha**. Solo ellos: `.\mvnw.cmd test "-Dtest=Postgres*"`; sin ellos: `"-Dtest=!Postgres*"`. Dos procesos de Maven a la vez en `streambox/` se pisan (`target/`): un solo agente con Maven cada vez.
 
+**El editor también escribe en `target/`:** la extensión Java del IDE del autor (Antigravity, basado en VS Code) compila en `target/classes` y `target/test-classes`. Si su espacio de trabajo Java se corrompe, deja clases con «Unresolved compilation problem» y `mvnw test` falla en el descubrimiento (`ClassNotFoundException` de una clase que sí existe) aunque el código esté bien. Solución en Maven: `.\mvnw.cmd clean test`. Solución en el editor (los archivos «en rojo»): comando «Java: Clean Java Language Server Workspace».
+
 ## Reglas de trabajo
 
 - **No hagas commit ni push** salvo que se te pida. Si se pide, mensajes en español con prefijo (`feat:`, `fix:`...).
@@ -64,7 +66,7 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 
 ## Base de datos: Flyway manda
 
-- El esquema lo gestiona **Flyway** (`src/main/resources/db/migration`, hoy `V1` a `V3`; mira la carpeta para la última). Si se crean tablas nuevas, añádelas también a `docs/supabase-seguridad.sql` (RLS). Hibernate solo **valida** (`ddl-auto=validate` en dev, prod y test).
+- El esquema lo gestiona **Flyway** (`src/main/resources/db/migration`, hoy `V1` a `V3`; mira la carpeta para la última). Un *callback* de Flyway solo para PostgreSQL (`db/callback/postgresql/afterMigrate__close_public_api.sql`, activado con `spring.flyway.locations=…{vendor}`) cierra cada arranque las tablas de `public` a la API pública de Supabase (RLS sin políticas, sin permisos para `anon`/`authenticated`, solo si esos roles existen): **las tablas nuevas ya no hay que añadirlas a mano** a `docs/supabase-seguridad.sql` (queda como respaldo manual con el mismo bloque). Hibernate solo **valida** (`ddl-auto=validate` en dev, prod y test).
 - Cambiar una entidad = **entidad + migración nueva** (`V<N+1>__descripcion.sql`). **Nunca edites una migración ya aplicada.**
 - SQL portable: debe funcionar en PostgreSQL y en H2 (modo PostgreSQL), porque los tests usan H2. Si algo es específico de PostgreSQL, hay que decirlo y la tarea de Testcontainers (plan nº 22) pasa a ser necesaria.
 - Los índices y restricciones se prueban en `FlywaySchemaIntegrationTest`.
@@ -73,11 +75,11 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 
 - JWT stateless (`JwtService`, `JwtProperties` con secreto ≥32 caracteres validado al arrancar, `issuer=streambox`). El filtro lee el usuario de la BD en cada petición, así que un cambio de rol es inmediato.
 - Roles `USER` y `ADMIN`. Los endpoints personales cuelgan de `/api/users/me/...` y usan el id **del token** (`@AuthenticationPrincipal AuthenticatedUser`), nunca un id de la URL (evita IDOR).
-- Rate limiting: `RateLimitingFilter` (por IP, login y registro; reconoce las rutas con `PathPatternRequestMatcher`, **nunca** comparando `getRequestURI()`, que llega sin decodificar) y `LoginAttemptService` (bloqueo de cuenta: 5 fallos/15 min; los fallos responden 401 con `remainingAttempts` y el que agota los intentos, 429 `ACCOUNT_LOCKED`; el límite por IP es 429 `RATE_LIMIT_EXCEEDED`). Contadores en memoria. Los tests suben los límites en `application-test.properties`; los de rate limiting los bajan con `@TestPropertySource` y usan IPs/emails únicos por test.
+- Rate limiting: `RateLimitingFilter` (por IP, login y registro; reconoce las rutas con `PathPatternRequestMatcher`, **nunca** comparando `getRequestURI()`, que llega sin decodificar) y `LoginAttemptService` (bloqueo de cuenta: 5 fallos/15 min; los fallos responden 401 con `remainingAttempts` y el que agota los intentos, 429 `ACCOUNT_LOCKED`; el límite por IP es 429 `RATE_LIMIT_EXCEEDED`). **«IP conocida»**: una IP desde la que ya se inició sesión con éxito con una cuenta (máx. 5 por cuenta, 30 días; `lockout.max-known-ips`, `lockout.known-ip-ttl`) tiene su propio contador (email+IP, 5 fallos/15 min) y no sufre el bloqueo de la cuenta: así nadie puede mantener bloqueado al titular (ni al admin) fallando su login a propósito; la IP sale de `getRemoteAddr()` y `AuthenticationService.login` la recibe (ver cap. 11.2 del manual). Los contadores están en memoria, con tope de claves (`rate-limit.max-keys`, expulsa la más antigua) y las IPv6 se agrupan por `/64` (`ClientAddress`). Los tests suben los límites en `application-test.properties`; los de rate limiting los bajan con `@TestPropertySource` y usan IPs/emails únicos por test (cuidado: tras un login correcto, esa IP pasa a ser «conocida» y sus fallos van a otro contador).
 - Contraseñas de cuentas nuevas: `security/password/PasswordPolicy` (12–64 caracteres, ≤72 bytes por BCrypt, no común, sin usuario/email). El login no exige mínimo (cuentas antiguas), solo un máximo de 1024.
-- Catálogo: lectura (`GET`/`HEAD`) para autenticados y cualquier otro método sobre `/api/movies/**`, `/api/genres/**` y `/api/series/**` solo `ADMIN` (regla de cierre en `SecurityConfig`). `/api/admin/**` (vistas de gestión) solo `ADMIN`. **Añade la regla antes que el endpoint**: si no, nace abierto a cualquier autenticado.
+- Catálogo: lectura (`GET`/`HEAD`) para autenticados y cualquier otro método sobre `/api/movies/**`, `/api/genres/**` y `/api/series/**` solo `ADMIN` (regla de cierre en `SecurityConfig`). `/api/admin/**` (vistas de gestión) solo `ADMIN`. **Añade la regla antes que el endpoint**: si no, nace abierto a cualquier autenticado. **Las reglas de recursos privilegiados van por ruta, no por método** (`/api/users` es ADMIN salvo el `POST` de registro): una regla atada a `GET` deja pasar `HEAD`.
 - Series sin episodios: invisibles para los usuarios y **indistinguibles de una inexistente** (mismo 404 y mismo cuerpo en todas las rutas públicas); ver cap. 15 bis del manual.
-- Los administradores solo se crean con `AdminAccountInitializer` (`ADMIN_EMAIL`/`ADMIN_PASSWORD`; la política de contraseñas se aplica solo al crearlo); el registro público siempre crea `USER`.
+- Los administradores solo se crean con `AdminAccountInitializer` (`ADMIN_EMAIL`/`ADMIN_PASSWORD`; la política de contraseñas se aplica solo al crearlo; si ya existe una cuenta con ese email que no es ADMIN, **el arranque falla** con un mensaje claro y nunca se promueve); el registro público siempre crea `USER`.
 - Actuator: solo `health` (público, sin detalles) e `info` (con token). Perfil `prod`: Swagger desactivado, logs JSON, sin SQL en logs.
 - Nunca secretos en el repositorio. `application-local.properties` está ignorado.
 
@@ -88,7 +90,7 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 - Cada bug corregido deja un test que falla sin el arreglo.
 - Lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia real) se prueba también contra PostgreSQL real en `src/test/.../postgres/` (extiende `PostgresIntegrationTestSupport`); H2 puede ocultar diferencias (ya ocultó un bug de búsqueda).
 - Frontend: lógica y componentes con Vitest + Testing Library (`*.test.ts(x)` junto al código, utilidades en `src/test/`); flujos completos con Playwright en `frontend/e2e/`. Localiza por rol/etiqueta, no con `data-testid`.
-- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 1272 con Docker —1153 con H2 y 119 contra PostgreSQL real—; sin Docker salen 1248 ejecutados con 95 omitidos, porque cada parametrizado omitido cuenta como uno; 779 de Vitest y 143 E2E + 24 de capturas omitidas).
+- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 1387 con Docker —1256 con H2 y 131 contra PostgreSQL real—; sin Docker se omiten los de PostgreSQL (cada parametrizado omitido cuenta como uno, así que el recuento de omitidos no coincide con el de métodos); 779 de Vitest y 143 E2E + 24 de capturas omitidas).
 - Vitest no espera tiempo real: los debounces se prueban con `src/test/fakeTimers.ts`. Los E2E que modifican el catálogo van en el proyecto `catalogo-mutable` de Playwright, que corre al final.
 
 ## Frontend: estado actual
@@ -109,6 +111,15 @@ SPA en `frontend/src/` organizada en `pages/`, `components/`, `context/`, `hooks
 - **Perfil** (`/perfil`, `pages/ProfilePage.tsx`, enlace «Mi perfil» en el menú de usuario): solo muestra datos reales (`useAuth` + `useFavorites`, sin peticiones propias). No hay historial, suscripción ni «Editar perfil» (pendiente en el plan: exige endpoints nuevos). El correo es el `subject` del JWT: cambiarlo cerraría la sesión. Ver cap. 20.10 del manual.
 
 Pendiente: la revisión visual humana. Al tocar el frontend verifica con `npm run build`, `npm run lint` (debe dar código 0), `npm run test` y, si afecta a flujos o a la maquetación, `npm run test:e2e`.
+
+## Grafo de conocimiento (graphify)
+
+`graphify-out/` (ignorado por git; solo existe en la máquina del autor) contiene un grafo del repositorio: código (AST) + conceptos y decisiones de la documentación (ADRs, manual, plan), con comunidades nombradas en español.
+
+- **Úsalo antes de explorar a ciegas.** Para preguntas de arquitectura o «¿qué toca X?», lee primero `graphify-out/GRAPH_REPORT.md` o consulta con `graphify query "<pregunta>"`, `graphify path "A" "B"` o `graphify explain "X"` (el ejecutable está en `C:\Users\Emilio\AppData\Roaming\Python\Python314\Scripts`, fuera del `PATH`; o `python -m graphify ...`). Contrasta con el código antes de afirmar algo: el AST tiene aristas colgantes hacia librerías externas.
+- **Código:** se actualiza solo tras cada commit (hook `post-commit` de graphify, sin modelo de lenguaje). A mano: `PYTHONHASHSEED=0 graphify update .`. **Hay que fijar `PYTHONHASHSEED=0`**: sin él, la agrupación cambia en cada ejecución y se pierden los nombres de las comunidades.
+- **Documentación** (`docs/`, `README.md`, `CLAUDE.md`, ADRs, agentes, CI): el hook no la procesa. Tras cambios importantes en ella, ejecuta `/graphify --update`, que hace la extracción semántica.
+- **`.graphifyignore`** excluye `application-local.properties` y los `.env`: no lo relajes. Tras reconstruir, comprueba que `graph.json` no contiene credenciales.
 
 ## Agentes (`.claude/agents/`)
 

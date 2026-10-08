@@ -12,6 +12,7 @@ import com.emilio.streambox.service.AuthenticationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 /**
@@ -57,16 +58,19 @@ public class AuthController {
                     + "INVALID_CREDENTIALS, mensaje «Email o contraseña incorrectos»). El cuerpo incluye "
                     + "remainingAttempts: intentos que le quedan a la cuenta ya descontado este fallo "
                     + "(siempre 1 o más); si el siguiente intento también falla y era el último, la "
-                    + "cuenta se bloquea y se responde 429 ACCOUNT_LOCKED. Es idéntico exista o no el email"),
+                    + "cuenta se bloquea y se responde 429 ACCOUNT_LOCKED. Desde una misma IP de origen es idéntico "
+                    + "exista o no el email"),
             @ApiResponse(responseCode = "429", description = "Demasiados intentos; la cabecera Retry-After "
                     + "indica los segundos que hay que esperar. Código ACCOUNT_LOCKED: la cuenta está "
                     + "bloqueada por logins fallidos (lo devuelve el fallo que agota los intentos y "
                     + "cualquier intento durante el bloqueo, aunque la contraseña sea correcta; el mensaje "
-                    + "dice cuántos minutos dura). Código RATE_LIMIT_EXCEEDED: demasiadas peticiones de "
+                    + "dice cuántos minutos dura; no se aplica a una IP desde la que el titular ya inició "
+                    + "sesión con éxito, que tiene su propio contador con los mismos límites). "
+                    + "Código RATE_LIMIT_EXCEEDED: demasiadas peticiones de "
                     + "login desde esta IP")
     })
-    public LoginResponse login(@Valid @RequestBody LoginRequest request) {
+    public LoginResponse login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
 
-        return authenticationService.login(request.getEmail(), request.getPassword());
+        return authenticationService.login(request.getEmail(), request.getPassword(), httpRequest.getRemoteAddr());
     }
 }

@@ -174,7 +174,13 @@ class LoginLockoutContractIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").isNotEmpty());
 
+        // Desde la misma IP del acierto (ya «conocida», con su propio contador) ...
         login(email, "mal")
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.remainingAttempts").value(4));
+        // ... y desde otra IP desconocida, que usa el contador de la CUENTA: el
+        // acierto no debe haber dejado su reserva allí (si no, saldrían 3).
+        login(email, "mal", "203.0.113.201")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.remainingAttempts").value(4));
     }
@@ -294,6 +300,17 @@ class LoginLockoutContractIntegrationTest {
 
     private ResultActions login(String email, String password) throws Exception {
         return mockMvc.perform(post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("email", email, "password", password))));
+    }
+
+    /** Login desde una IP de origen concreta ({@code getRemoteAddr()}). */
+    private ResultActions login(String email, String password, String remoteAddr) throws Exception {
+        return mockMvc.perform(post("/api/auth/login")
+                .with(request -> {
+                    request.setRemoteAddr(remoteAddr);
+                    return request;
+                })
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("email", email, "password", password))));
     }

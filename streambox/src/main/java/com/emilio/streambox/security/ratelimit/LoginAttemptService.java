@@ -22,14 +22,15 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter.Reservation;
  *
  * <h2>Cómo se usa</h2>
  * <ol>
- * <li>{@link #reserveAttempt(String)} antes de comprobar la contraseña: si la
- * cuenta ya está bloqueada lanza {@link AccountLockedException}; si no, apunta
- * el intento <b>como si fuera a fallar</b> y lo devuelve.</li>
+ * <li>{@link #reserveAttempt(String, String)} antes de comprobar la contraseña:
+ * si la cuenta ya está bloqueada (para esa IP, ver más abajo) lanza
+ * {@link AccountLockedException}; si no, apunta el intento <b>como si fuera a
+ * fallar</b> y lo devuelve.</li>
  * <li>Si la contraseña es incorrecta, {@link #recordFailure(LoginAttempt)}
  * devuelve los intentos que quedan o, si este fallo agota el máximo, lanza
  * {@link AccountLockedException}.</li>
  * <li>Si es correcta, {@link #recordSuccess(LoginAttempt)} borra los fallos
- * acumulados.</li>
+ * acumulados y anota la IP como «conocida» de la cuenta.</li>
  * </ol>
  *
  * <p>
@@ -67,25 +68,107 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter.Reservation;
  * una misma ventana.
  * </p>
  *
+ * <h2>IP conocida: el bloqueo no deja fuera al titular (hallazgo NV-2)</h2>
  * <p>
- * Contrapartida conocida: alguien puede bloquear a propósito la cuenta de
- * otra persona fallando su login. Se acepta porque el bloqueo es temporal
- * (los fallos caducan solos pasada la ventana).
+ * Un bloqueo por email que rechaza el login aunque la contraseña sea correcta
+ * se puede <b>renovar</b>: un anónimo que falle 5 veces cada 15 minutos
+ * (unas 20 peticiones por hora) mantiene la cuenta, también la de un
+ * administrador, bloqueada indefinidamente. Se mitiga así:
  * </p>
+ * <ul>
+ * <li>Una IP pasa a ser «conocida» de una cuenta <b>solo tras un login
+ * correcto</b> (contraseña verificada); ver {@link KnownIpRegistry} (máximo
+ * de IPs por cuenta, caducidad y memoria acotada, configurables en
+ * {@code streambox.security.rate-limit.lockout.*}).</li>
+ * <li>Una IP <b>desconocida</b> usa el contador de la cuenta, como siempre. Sus
+ * fallos bloquean a las demás IPs desconocidas, pero <b>no afectan a las IPs
+ * conocidas</b>.</li>
+ * <li>Una IP <b>conocida</b> usa su <b>propio contador</b> (email + IP) con los
+ * mismos límites: adivinar contraseñas desde ella sigue limitado a 5 fallos
+ * cada 15 minutos, y sus fallos <b>no bloquean la cuenta</b> para las demás
+ * IPs. Un login correcto reinicia el contador contra el que se reservó.</li>
+ * <li>Respuestas indistinguibles <b>desde la misma IP de origen</b>: para esa
+ * IP, las respuestas (401 con {@code remainingAttempts}, 429
+ * {@code ACCOUNT_LOCKED} con el mismo mensaje) y el trabajo son idénticos
+ * para un email que existe o no y para una IP conocida o no, de modo que quien
+ * consulta desde un solo origen no puede deducir nada de ello. Un email
+ * inexistente nunca tiene IPs conocidas, porque solo se anotan tras un login
+ * correcto. Lo que <b>no</b> se garantiza es la indistinguibilidad al
+ * <b>cruzar dos orígenes</b> bajo una IP compartida (ver las limitaciones).</li>
+ * <li>La IP es {@code request.getRemoteAddr()} agrupada con
+ * {@link ClientAddress#counterKey(String)} (IPv6 por /64), el mismo criterio que
+ * el límite por IP del filtro; nunca se lee {@code X-Forwarded-For} a mano.</li>
+ * </ul>
+ *
+ * <p>
+ * <b>Limitaciones conocidas</b> (se aceptan, ver el hallazgo NV-2):
+ * </p>
+ * <ul>
+ * <li>El estado (contadores e IPs conocidas) está <b>en memoria</b>: se pierde
+ * al reiniciar y no se comparte entre réplicas, igual que los demás
+ * contadores. Tras un reinicio nadie es «conocido» hasta su próximo login
+ * correcto.</li>
+ * <li>Un primer login desde una <b>IP nueva</b> (otro dispositivo, otra red)
+ * durante un bloqueo de la cuenta sigue rechazado hasta que caduque: la
+ * contraseña correcta no basta para entrar desde una IP desconocida, porque
+ * entonces el bloqueo no protegería de la fuerza bruta.</li>
+ * <li>Detrás de un proxy o NAT que agrupe a varios clientes (o un /64 con
+ * varios usuarios), la «IP conocida» es la del proxy: cualquiera tras él que
+ * comparta la IP del titular comparte su contador, y sus fallos pueden dejar
+ * fuera al titular en esa IP durante la ventana.</li>
+ * <li><b>IP compartida (CGNAT móvil, red de empresa o campus, salida de VPN,
+ * un /64 compartido).</b> Quien comparta salida con el titular tiene una IP
+ * que <i>sí</i> es conocida para la cuenta, y de ahí salen dos efectos
+ * acotados. (a) <b>Oráculo de «login correcto reciente»:</b> llenando el
+ * contador de la cuenta desde otra IP y comprobando si desde la IP compartida
+ * recibe 401 (conocida: usa su contador) o 429 (desconocida: usa el de la
+ * cuenta), averigua si esa IP tuvo un login correcto reciente en esa cuenta.
+ * Exige co-localización con la víctima y unos 6 intentos por sonda (5 para
+ * llenar el contador de la cuenta más el de comprobación). Lo que filtra es
+ * solo que esa cuenta existe y se usó desde esa IP; no hay fuga de
+ * contraseñas. (b) <b>Doble
+ * presupuesto de fuerza bruta en esa IP:</b> hay dos contadores distintos
+ * (el de la cuenta, 5 fallos, mientras la IP era desconocida; y el de
+ * (email, IP), otros 5, desde que el titular la «conoce»), de modo que en una
+ * misma ventana puede gastar hasta 10 fallos en lugar de 5. Se acepta porque
+ * requiere compartir IP con el titular y el límite por IP y la política de
+ * contraseñas siguen aplicándose.</li>
+ * <li>Alguien puede seguir bloqueando a propósito la cuenta para las IPs
+ * desconocidas fallando su login; el bloqueo es temporal (los fallos caducan
+ * solos pasada la ventana) y el titular entra desde sus IPs conocidas.</li>
+ * </ul>
  */
 @Service
 public class LoginAttemptService {
 
+    /**
+     * Separador entre el email y la IP en la clave del contador de IP conocida.
+     * No puede aparecer en una IP, así que la clave es inequívoca aunque el
+     * email contenga este carácter.
+     */
+    private static final char KEY_SEPARATOR = '|';
+
     private final int maxFailures;
+
+    /** Fallos por cuenta (clave: email); lo usan las IPs desconocidas. */
     private final SlidingWindowCounter failures;
+
+    /** Fallos por cuenta e IP conocida (clave: email + IP), con los mismos límites. */
+    private final SlidingWindowCounter knownIpFailures;
+
+    private final KnownIpRegistry knownIps;
 
     /**
      * @param properties límites configurados
      * @param clock      reloj de la aplicación
      */
     public LoginAttemptService(RateLimitProperties properties, Clock clock) {
-        this.maxFailures = properties.lockout().maxFailures();
-        this.failures = new SlidingWindowCounter(properties.lockout().window(), clock);
+        RateLimitProperties.Lockout lockout = properties.lockout();
+        this.maxFailures = lockout.maxFailures();
+        this.failures = new SlidingWindowCounter(lockout.window(), clock, properties.maxKeys());
+        this.knownIpFailures = new SlidingWindowCounter(lockout.window(), clock, properties.maxKeys());
+        this.knownIps = new KnownIpRegistry(
+                properties.maxKeys(), lockout.maxKnownIps(), lockout.knownIpTtl(), clock);
     }
 
     /**
@@ -99,17 +182,29 @@ public class LoginAttemptService {
      * lado seguro.
      * </p>
      *
+     * <p>
+     * Si la IP es «conocida» de la cuenta se reserva en el contador propio de
+     * (email, IP); si no, en el de la cuenta (ver la explicación de la clase).
+     * </p>
+     *
      * @param email email con el que se intenta iniciar sesión
+     * @param ip    dirección remota del cliente ({@code getRemoteAddr()}); si es
+     *              {@code null} se trata como desconocida
      * @return intento reservado, que se cierra con
      *         {@link #recordFailure(LoginAttempt)} o {@link #recordSuccess(LoginAttempt)}
-     * @throws AccountLockedException si la cuenta ya está bloqueada (aunque la
-     *                                contraseña fuera a ser correcta)
+     * @throws AccountLockedException si la cuenta ya está bloqueada para esa IP
+     *                                (aunque la contraseña fuera a ser correcta)
      */
-    public LoginAttempt reserveAttempt(String email) {
+    public LoginAttempt reserveAttempt(String email, String ip) {
         String key = normalize(email);
-        Reservation reservation = failures.reserve(key, maxFailures)
-                .orElseThrow(() -> alreadyLocked(key));
-        return new LoginAttempt(key, reservation);
+        String client = ClientAddress.counterKey(ip);
+        boolean known = knownIps.isKnown(key, client);
+
+        SlidingWindowCounter counter = known ? knownIpFailures : failures;
+        String counterKey = counterKey(key, client, known);
+        Reservation reservation = counter.reserve(counterKey, maxFailures)
+                .orElseThrow(() -> alreadyLocked(counter, counterKey));
+        return new LoginAttempt(key, client, known, reservation);
     }
 
     /**
@@ -122,22 +217,24 @@ public class LoginAttemptService {
      * reserva, el fallo se vuelve a apuntar.
      * </p>
      *
-     * @param attempt intento devuelto por {@link #reserveAttempt(String)}
+     * @param attempt intento devuelto por {@link #reserveAttempt(String, String)}
      * @return intentos que quedan antes del bloqueo (siempre &ge; 1)
      * @throws AccountLockedException si este fallo es el que agota los
      *                                intentos o, en una carrera, si al volver a
      *                                apuntarlo la cuenta ya estaba bloqueada
      */
     public int recordFailure(LoginAttempt attempt) {
-        int position = failures.confirm(attempt.key(), attempt.reservation(), maxFailures);
+        SlidingWindowCounter counter = counterOf(attempt);
+        String counterKey = counterKeyOf(attempt);
+        int position = counter.confirm(counterKey, attempt.reservation(), maxFailures);
         if (position == 0) {
             // Solo en una carrera: un acierto borró la reserva y, antes de
             // volver a apuntarla, otros fallos ya habían llenado la ventana.
-            throw alreadyLocked(attempt.key());
+            throw alreadyLocked(counter, counterKey);
         }
         int remaining = maxFailures - position;
         if (remaining <= 0) {
-            Duration retryAfter = retryAfter(attempt.key());
+            Duration retryAfter = retryAfter(counter, counterKey);
             throw new AccountLockedException(
                     "Has superado el número máximo de intentos. La cuenta queda bloqueada durante "
                             + minutes(retryAfter) + ".",
@@ -148,23 +245,46 @@ public class LoginAttemptService {
 
     /**
      * Borra los fallos acumulados (incluido el intento reservado) tras un
-     * login correcto.
+     * login correcto y anota la IP como «conocida» de la cuenta (o renueva su
+     * plazo).
      *
      * <p>
-     * También borra las reservas de otros intentos que estén en curso; si
-     * alguno de ellos falla después, {@link #recordFailure(LoginAttempt)} lo
-     * vuelve a apuntar como un fallo posterior a este acierto.
+     * Solo se borra el contador contra el que se reservó el intento: el de la
+     * cuenta si la IP era desconocida, el de (email, IP) si era conocida.
+     * También borra las reservas de otros intentos que estén en curso en ese
+     * contador; si alguno de ellos falla después,
+     * {@link #recordFailure(LoginAttempt)} lo vuelve a apuntar como un fallo
+     * posterior a este acierto.
      * </p>
      *
-     * @param attempt intento devuelto por {@link #reserveAttempt(String)}
+     * <p>
+     * Hay que llamarlo <b>únicamente</b> con la contraseña verificada de una
+     * cuenta que existe: es lo que impide que un intento fallido, o un email
+     * inexistente, «conozcan» una IP.
+     * </p>
+     *
+     * @param attempt intento devuelto por {@link #reserveAttempt(String, String)}
      */
     public void recordSuccess(LoginAttempt attempt) {
-        failures.reset(attempt.key());
+        counterOf(attempt).reset(counterKeyOf(attempt));
+        knownIps.remember(attempt.key(), attempt.ip());
+    }
+
+    private SlidingWindowCounter counterOf(LoginAttempt attempt) {
+        return attempt.knownIp() ? knownIpFailures : failures;
+    }
+
+    private static String counterKeyOf(LoginAttempt attempt) {
+        return counterKey(attempt.key(), attempt.ip(), attempt.knownIp());
+    }
+
+    private static String counterKey(String email, String ip, boolean knownIp) {
+        return knownIp ? email + KEY_SEPARATOR + ip : email;
     }
 
     /** Excepción de una cuenta que ya estaba bloqueada antes de este intento. */
-    private AccountLockedException alreadyLocked(String key) {
-        Duration retryAfter = retryAfter(key);
+    private AccountLockedException alreadyLocked(SlidingWindowCounter counter, String counterKey) {
+        Duration retryAfter = retryAfter(counter, counterKey);
         return new AccountLockedException(
                 "La cuenta está bloqueada temporalmente por demasiados intentos fallidos. "
                         + "Inténtalo de nuevo en " + minutes(retryAfter) + ".",
@@ -175,8 +295,8 @@ public class LoginAttemptService {
      * Tiempo hasta que se libere un intento, redondeado hacia arriba a
      * segundos (lo que se envía en {@code Retry-After}) y de al menos 1 s.
      */
-    private Duration retryAfter(String key) {
-        long seconds = (failures.retryAfter(key).toMillis() + 999) / 1000;
+    private Duration retryAfter(SlidingWindowCounter counter, String counterKey) {
+        long seconds = (counter.retryAfter(counterKey).toMillis() + 999) / 1000;
         return Duration.ofSeconds(Math.max(seconds, 1));
     }
 
@@ -196,10 +316,16 @@ public class LoginAttemptService {
     /**
      * Intento de login reservado.
      *
-     * @param key         email normalizado (clave del contador)
-     * @param reservation reserva en el contador de fallos
+     * @param key         email normalizado
+     * @param ip          clave de la IP del cliente ({@link ClientAddress}); puede
+     *                    ser {@code null}
+     * @param knownIp     si la IP era «conocida» de la cuenta al reservar: decide
+     *                    contra qué contador se reservó y se cierra el intento
+     *                    (se fija al reservar para no mezclar contadores si
+     *                    cambia mientras se comprueba la contraseña)
+     * @param reservation reserva en el contador correspondiente
      */
-    public record LoginAttempt(String key, Reservation reservation) {
+    public record LoginAttempt(String key, String ip, boolean knownIp, Reservation reservation) {
 
         /**
          * @return número de orden del intento en la ventana en el momento de

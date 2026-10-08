@@ -29,6 +29,16 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounterTest.MutableC
 class LoginAttemptServiceTest {
 
     private static final String EMAIL = "ana@test.com";
+    private static final String IP = "203.0.113.5";
+
+    /**
+     * Otra IP desconocida, distinta de {@link #IP}. Tras un login correcto
+     * desde una IP esta pasa a ser «conocida» y sus fallos posteriores van a su
+     * propio contador (que parte vacío), así que un test que quiera comprobar
+     * el contador de la CUENTA después de un acierto debe hacer el acierto
+     * desde una IP y los fallos posteriores desde la otra, nunca desde la misma.
+     */
+    private static final String STRANGER_IP = "198.51.100.77";
 
     private final MutableClock clock = new MutableClock();
     private final LoginAttemptService service = new LoginAttemptService(properties(5, Duration.ofMinutes(15)), clock);
@@ -64,7 +74,7 @@ class LoginAttemptServiceTest {
         clock.advance(Duration.ofMinutes(10));
 
         AccountLockedException locked =
-                assertThrows(AccountLockedException.class, () -> service.reserveAttempt(EMAIL));
+                assertThrows(AccountLockedException.class, () -> service.reserveAttempt(EMAIL, IP));
         assertEquals(Duration.ofMinutes(5), locked.getRetryAfter());
         assertEquals("La cuenta está bloqueada temporalmente por demasiados intentos fallidos. "
                 + "Inténtalo de nuevo en 5 minutos.", locked.getMessage());
@@ -93,22 +103,55 @@ class LoginAttemptServiceTest {
         assertEquals(4, fail(EMAIL));
     }
 
+    /**
+     * Los fallos salen de una IP desconocida ({@link #IP}, que nunca acierta) y
+     * el acierto, de OTRA IP desconocida ({@link #STRANGER_IP}): ambos usan el
+     * contador de la cuenta, así que el acierto tiene que borrarlo. Si el
+     * acierto viniera de la misma IP que los fallos posteriores, esa IP pasaría
+     * a ser «conocida», sus fallos irían a otro contador (vacío) y el test
+     * daría 4 restantes aunque el contador de la cuenta no se hubiera
+     * reiniciado.
+     */
     @Test
     void unLoginCorrectoBorraLosFallos() {
         failTimes(EMAIL, 3);
-        service.recordSuccess(service.reserveAttempt(EMAIL));
+        service.recordSuccess(service.reserveAttempt(EMAIL, STRANGER_IP));
 
         assertEquals(4, fail(EMAIL));
     }
 
     @Test
     void conLaContrasenaCorrectaEnElUltimoIntentoNoSeBloquea() {
-        // Bloquea el quinto FALLO, no el quinto intento.
+        // Bloquea el quinto FALLO, no el quinto intento. El acierto sale de otra
+        // IP desconocida (ver unLoginCorrectoBorraLosFallos).
         failTimes(EMAIL, 4);
-        LoginAttempt fifth = service.reserveAttempt(EMAIL);
+        LoginAttempt fifth = service.reserveAttempt(EMAIL, STRANGER_IP);
         service.recordSuccess(fifth);
 
         assertEquals(4, fail(EMAIL));
+    }
+
+    /**
+     * Caso explícito: fallos desde una IP desconocida A, acierto desde otra IP
+     * desconocida B (reserva en el contador de la cuenta y lo reinicia) y
+     * fallos posteriores otra vez desde A, que sigue siendo desconocida: empiezan
+     * de nuevo en 4 restantes y el quinto fallo bloquea, sin arrastrar ni los
+     * fallos anteriores ni la reserva del acierto. Quitar el reinicio del
+     * contador de la cuenta en {@code recordSuccess} hace fallar este test.
+     */
+    @Test
+    void fallosDesdeIpDesconocidaAciertoDesdeOtraIpDesconocidaYLosFallosPosterioresEmpiezanEnCuatro() {
+        failTimes(EMAIL, 4);                                          // A: 4 fallos de 5
+
+        service.recordSuccess(service.reserveAttempt(EMAIL, STRANGER_IP));   // B acierta
+
+        assertEquals(4, fail(EMAIL));
+        assertEquals(3, fail(EMAIL));
+        assertEquals(2, fail(EMAIL));
+        assertEquals(1, fail(EMAIL));
+        assertThrows(AccountLockedException.class, () -> fail(EMAIL));
+        // B ahora es conocida: tiene su propio contador y no le afecta el bloqueo de A.
+        assertEquals(4, failFrom(EMAIL, STRANGER_IP));
     }
 
     // ------------------------------------------------------------------
@@ -124,10 +167,10 @@ class LoginAttemptServiceTest {
      */
     @Test
     void unLoginCorrectoSimultaneoNoProvocaUnFalsoBloqueoYLosFallosEnCursoSeCuentan() {
-        LoginAttempt first = service.reserveAttempt(EMAIL);
+        LoginAttempt first = service.reserveAttempt(EMAIL, IP);
         List<LoginAttempt> inFlight = new ArrayList<>();
         for (int i = 0; i < 4; i++) {
-            inFlight.add(service.reserveAttempt(EMAIL));
+            inFlight.add(service.reserveAttempt(EMAIL, IP));
         }
 
         service.recordSuccess(first);
@@ -138,8 +181,9 @@ class LoginAttemptServiceTest {
         }
         assertEquals(List.of(4, 3, 2, 1), remaining);
 
-        // Los cuatro quedaron contados: el siguiente fallo es el quinto y bloquea.
-        assertThrows(AccountLockedException.class, () -> fail(EMAIL));
+        // Los cuatro quedaron contados en el contador de la cuenta: el siguiente
+        // fallo de una IP desconocida es el quinto y bloquea.
+        assertThrows(AccountLockedException.class, () -> failFrom(EMAIL, STRANGER_IP));
     }
 
     /**
@@ -154,7 +198,7 @@ class LoginAttemptServiceTest {
         clock.advance(Duration.ofMinutes(10));
         failTimes(EMAIL, 3);                                   // t = 10 min
         clock.advance(Duration.ofMinutes(5).minusMillis(100));
-        LoginAttempt fifth = service.reserveAttempt(EMAIL);    // t = 15 min - 100 ms
+        LoginAttempt fifth = service.reserveAttempt(EMAIL, IP);    // t = 15 min - 100 ms
         assertEquals(5, fifth.number());
 
         clock.advance(Duration.ofMillis(200));                 // caduca el fallo de t = 0
@@ -171,10 +215,12 @@ class LoginAttemptServiceTest {
      */
     @Test
     void siAlVolverAApuntarElFalloLaCuentaYaEstaBloqueadaSeRespondeBloqueada() {
-        LoginAttempt stale = service.reserveAttempt(EMAIL);
-        service.recordSuccess(service.reserveAttempt(EMAIL));
-        failTimes(EMAIL, 4);
-        assertThrows(AccountLockedException.class, () -> fail(EMAIL));
+        LoginAttempt stale = service.reserveAttempt(EMAIL, IP);
+        service.recordSuccess(service.reserveAttempt(EMAIL, IP));
+        for (int i = 0; i < 4; i++) {
+            failFrom(EMAIL, STRANGER_IP);
+        }
+        assertThrows(AccountLockedException.class, () -> failFrom(EMAIL, STRANGER_IP));
 
         AccountLockedException locked = assertThrows(AccountLockedException.class,
                 () -> service.recordFailure(stale));
@@ -216,7 +262,7 @@ class LoginAttemptServiceTest {
         clock.advance(Duration.ofMillis(14 * 60_000 + 59_500)); // quedan 0,5 s
 
         AccountLockedException locked =
-                assertThrows(AccountLockedException.class, () -> service.reserveAttempt(EMAIL));
+                assertThrows(AccountLockedException.class, () -> service.reserveAttempt(EMAIL, IP));
         assertEquals(Duration.ofSeconds(1), locked.getRetryAfter());
         assertTrue(locked.getMessage().endsWith("Inténtalo de nuevo en 1 minuto."));
     }
@@ -247,7 +293,7 @@ class LoginAttemptServiceTest {
                 start.await();
                 LoginAttempt attempt;
                 try {
-                    attempt = service.reserveAttempt(EMAIL);
+                    attempt = service.reserveAttempt(EMAIL, IP);
                 } catch (AccountLockedException e) {
                     lockedAtReservation.incrementAndGet();
                     return null;
@@ -279,7 +325,11 @@ class LoginAttemptServiceTest {
 
     /** Reserva un intento y lo marca como fallido; devuelve los intentos restantes. */
     private int fail(String email) {
-        return service.recordFailure(service.reserveAttempt(email));
+        return failFrom(email, IP);
+    }
+
+    private int failFrom(String email, String ip) {
+        return service.recordFailure(service.reserveAttempt(email, ip));
     }
 
     private void failTimes(String email, int times) {
@@ -290,6 +340,6 @@ class LoginAttemptServiceTest {
 
     private static RateLimitProperties properties(int maxFailures, Duration window) {
         RateLimitProperties.Rule rule = new RateLimitProperties.Rule(100, Duration.ofMinutes(1));
-        return new RateLimitProperties(rule, rule, new RateLimitProperties.Lockout(maxFailures, window));
+        return new RateLimitProperties(rule, rule, new RateLimitProperties.Lockout(maxFailures, window, 5, Duration.ofDays(30)), 100_000);
     }
 }

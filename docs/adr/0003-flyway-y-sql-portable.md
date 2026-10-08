@@ -11,7 +11,7 @@ Al principio Hibernate creaba y modificaba las tablas solo (`ddl-auto=update`). 
 - Las restricciones (`UNIQUE`, `CHECK`, claves foráneas con nombre) viven en la base de datos, no solo en el código: protegen aunque alguien escriba SQL a mano o dos peticiones compitan.
 - Las bases creadas antes de Flyway se **adoptan** (`baseline-on-migrate`, versión 0; `V1` es idempotente).
 - El SQL de las migraciones debe ser **portable** entre PostgreSQL y H2 en modo PostgreSQL. Lo específico de PostgreSQL se declara y se prueba con Testcontainers ([0009](0009-estrategia-de-tests.md)).
-- Las tablas nuevas se añaden también a `docs/supabase-seguridad.sql` (RLS), porque la base de desarrollo está en Supabase.
+- Lo específico de PostgreSQL que no es una migración (cerrar la API pública de Supabase con RLS y `REVOKE`) vive en un *callback* `afterMigrate` en `db/callback/{vendor}`: con H2 no existe ese directorio y no se ejecuta nada. Cierra también las tablas de migraciones futuras sin que nadie tenga que acordarse. `docs/supabase-seguridad.sql` queda como respaldo manual.
 
 ## Alternativas descartadas
 - **`ddl-auto=update`:** cómodo, pero sin control ni historial; descartado tras detectar que no aplica restricciones nuevas a tablas existentes.

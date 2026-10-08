@@ -40,7 +40,8 @@ class RateLimitingFilterTest {
             new RateLimitProperties(
                     new RateLimitProperties.Rule(1, Duration.ofMinutes(1)),
                     new RateLimitProperties.Rule(1, Duration.ofHours(1)),
-                    new RateLimitProperties.Lockout(5, Duration.ofMinutes(15))),
+                    new RateLimitProperties.Lockout(5, Duration.ofMinutes(15), 5, Duration.ofDays(30)),
+                    100_000),
             new MutableClock(),
             new SecurityErrorResponseWriter(),
             PathPatternRequestMatcher.withDefaults());
@@ -108,8 +109,66 @@ class RateLimitingFilterTest {
     }
 
     // ------------------------------------------------------------------
+    // IPv6 agrupada por /64 (hallazgo NV-5)
+    // ------------------------------------------------------------------
+
+    /**
+     * Rotar de dirección dentro del mismo /64 (lo que permite a un atacante un
+     * simple prefijo IPv6) no multiplica el límite: antes cada dirección tenía
+     * su contador y el límite por IP no limitaba nada.
+     */
+    @Test
+    void lasDireccionesIpv6DelMismoPrefijo64CompartenContador() throws Exception {
+        assertPassed(postFrom("2001:db8:aaaa:1:0:0:0:1", "/api/auth/login"));
+
+        assertRejected(postFrom("2001:db8:aaaa:1:ffff:eeee:dddd:cccc", "/api/auth/login"));
+        assertRejected(postFrom("2001:0db8:aaaa:0001::9", "/api/auth/login"));
+    }
+
+    /** Un /64 distinto es otro cliente y tiene su propio contador. */
+    @Test
+    void losPrefijos64DistintosNoCompartenContador() throws Exception {
+        assertPassed(postFrom("2001:db8:bbbb:1::1", "/api/auth/login"));
+
+        assertPassed(postFrom("2001:db8:bbbb:2::1", "/api/auth/login"));
+        assertPassed(postFrom("2001:db8:cccc:1::1", "/api/auth/login"));
+    }
+
+    /** El registro también agrupa por /64, y su contador es independiente del de login. */
+    @Test
+    void elRegistroTambienAgrupaLasIpv6Por64() throws Exception {
+        assertPassed(postFrom("2001:db8:dddd:1::1", "/api/users"));
+
+        assertRejected(postFrom("2001:db8:dddd:1::2", "/api/users"));
+        assertPassed(postFrom("2001:db8:dddd:1::2", "/api/auth/login"));
+    }
+
+    /** La IPv4 sigue contándose por dirección completa, sin agrupar. */
+    @Test
+    void laIpv4SeCuentaPorDireccion() throws Exception {
+        assertPassed(postFrom("192.0.2.50", "/api/auth/login"));
+
+        assertPassed(postFrom("192.0.2.51", "/api/auth/login"));
+        assertRejected(postFrom("192.0.2.50", "/api/auth/login"));
+    }
+
+    /** Una IPv4 escrita como IPv6 («::ffff:a.b.c.d») cuenta como esa IPv4. */
+    @Test
+    void unaIpv4MapeadaEnIpv6CuentaComoLaIpv4() throws Exception {
+        assertPassed(postFrom("192.0.2.60", "/api/auth/login"));
+
+        assertRejected(postFrom("::ffff:192.0.2.60", "/api/auth/login"));
+    }
+
+    // ------------------------------------------------------------------
     // Utilidades
     // ------------------------------------------------------------------
+
+    private static MockHttpServletRequest postFrom(String remoteAddr, String rawPath) {
+        MockHttpServletRequest request = request("POST", rawPath);
+        request.setRemoteAddr(remoteAddr);
+        return request;
+    }
 
     private static MockHttpServletRequest post(String rawPath) {
         return request("POST", rawPath);

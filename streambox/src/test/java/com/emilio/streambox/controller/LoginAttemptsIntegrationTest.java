@@ -130,14 +130,25 @@ class LoginAttemptsIntegrationTest {
                 .andExpect(jsonPath("$.token").isNotEmpty());
     }
 
+    /**
+     * Los fallos salen de una IP desconocida A y el acierto de otra IP
+     * desconocida B, de modo que ambos usan el contador de la CUENTA y el
+     * acierto tiene que borrarlo. Los fallos posteriores vuelven a salir de A
+     * (todavía desconocida). Si el acierto y los fallos posteriores salieran
+     * de la misma IP, esa IP pasaría a ser «conocida», sus fallos irían a otro
+     * contador vacío y el test no detectaría que el de la cuenta no se
+     * reinicia.
+     */
     @Test
     void unLoginCorrectoReiniciaLosIntentosRestantes() throws Exception {
         createUser("att4");
-        login("att4@test.com", "mal").andExpect(jsonPath("$.remainingAttempts").value(2));
-        login("att4@test.com", "mal").andExpect(jsonPath("$.remainingAttempts").value(1));
-        login("att4@test.com", PASSWORD).andExpect(status().isOk());
+        String failingIp = nextIp();
+        String successIp = nextIp();
+        login("att4@test.com", "mal", failingIp).andExpect(jsonPath("$.remainingAttempts").value(2));
+        login("att4@test.com", "mal", failingIp).andExpect(jsonPath("$.remainingAttempts").value(1));
+        login("att4@test.com", PASSWORD, successIp).andExpect(status().isOk());
 
-        login("att4@test.com", "mal")
+        login("att4@test.com", "mal", failingIp)
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.remainingAttempts").value(2));
     }

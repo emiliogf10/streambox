@@ -133,6 +133,11 @@ public class SecurityConfig {
          * ({@code GET}/{@code HEAD}) es para cualquier usuario autenticado y
          * cualquier otro método queda reservado a {@code ADMIN}, de modo que
          * un endpoint de escritura nuevo nace protegido.</li>
+         * <li>{@code /api/users} (el listado de cuentas) es solo para
+         * {@code ADMIN} con cualquier método salvo {@code POST} (registro,
+         * público). La regla es por ruta y no por método: con
+         * {@code HEAD}, que Spring MVC atiende con el {@code @GetMapping},
+         * un usuario corriente ejecutaba el listado.</li>
          * <li>Exige autenticación para cualquier otro endpoint, incluidos los
          * personales de {@code /api/users/me/**} (como los favoritos de
          * series), que usan el id del token y nunca uno de la URL.</li>
@@ -189,8 +194,17 @@ public class SecurityConfig {
                                                 .requestMatchers("/api/admin/**")
                                                 .hasRole("ADMIN")
 
-                                                // Solo ADMIN puede listar todos los usuarios.
-                                                .requestMatchers(HttpMethod.GET, "/api/users")
+                                                // Solo ADMIN puede listar todos los usuarios. La regla
+                                                // es POR RUTA (cualquier metodo), no solo para GET:
+                                                // HEAD cae en el @GetMapping de Spring MVC, asi que
+                                                // con una regla solo de GET un USER ejecutaba el
+                                                // listado completo y veia el Content-Length (que
+                                                // delata cuantas cuentas hay). El unico metodo publico
+                                                // de esta ruta, POST (registro), ya se permitio arriba.
+                                                // La coincidencia es exacta: /api/users/me y
+                                                // /api/users/me/** no entran aqui y siguen siendo
+                                                // "autenticado" (anyRequest).
+                                                .requestMatchers(RateLimitingFilter.REGISTER_PATH)
                                                 .hasRole("ADMIN")
 
                                                 // Cualquier usuario autenticado puede consultar peliculas.

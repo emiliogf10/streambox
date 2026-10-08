@@ -18,6 +18,7 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounterTest.MutableC
 class LoginAttemptServiceEdgeCasesTest {
 
     private static final String EMAIL = "eva@test.com";
+    private static final String IP = "203.0.113.6";
 
     private final MutableClock clock = new MutableClock();
 
@@ -29,12 +30,12 @@ class LoginAttemptServiceEdgeCasesTest {
     void conMaximoUnoElPrimerFalloYaBloqueaSinPasarPorUn401ConCero() {
         LoginAttemptService service = service(1);
 
-        LoginAttempt first = service.reserveAttempt(EMAIL);
+        LoginAttempt first = service.reserveAttempt(EMAIL, IP);
         AccountLockedException locked = assertThrows(AccountLockedException.class,
                 () -> service.recordFailure(first));
 
         assertEquals(Duration.ofMinutes(15), locked.getRetryAfter());
-        assertThrows(AccountLockedException.class, () -> service.reserveAttempt(EMAIL));
+        assertThrows(AccountLockedException.class, () -> service.reserveAttempt(EMAIL, IP));
     }
 
     /**
@@ -45,18 +46,18 @@ class LoginAttemptServiceEdgeCasesTest {
     void losFallosCaducanJustoAlCumplirseLaVentana() {
         LoginAttemptService service = service(5);
         for (int i = 0; i < 4; i++) {
-            service.recordFailure(service.reserveAttempt(EMAIL));
+            service.recordFailure(service.reserveAttempt(EMAIL, IP));
         }
         assertThrows(AccountLockedException.class,
-                () -> service.recordFailure(service.reserveAttempt(EMAIL)));
+                () -> service.recordFailure(service.reserveAttempt(EMAIL, IP)));
 
         clock.advance(Duration.ofMinutes(15).minusMillis(1));
         AccountLockedException stillLocked =
-                assertThrows(AccountLockedException.class, () -> service.reserveAttempt(EMAIL));
+                assertThrows(AccountLockedException.class, () -> service.reserveAttempt(EMAIL, IP));
         assertEquals(Duration.ofSeconds(1), stillLocked.getRetryAfter());
 
         clock.advance(Duration.ofMillis(1));
-        assertEquals(1, service.reserveAttempt(EMAIL).number());
+        assertEquals(1, service.reserveAttempt(EMAIL, IP).number());
     }
 
     /**
@@ -66,16 +67,16 @@ class LoginAttemptServiceEdgeCasesTest {
     @Test
     void emailsParecidosNoCompartenContador() {
         LoginAttemptService service = service(2);
-        service.recordFailure(service.reserveAttempt("eva@test.com"));
+        service.recordFailure(service.reserveAttempt("eva@test.com", IP));
 
-        assertEquals(1, service.recordFailure(service.reserveAttempt("eva@test.es")));
-        assertEquals(1, service.recordFailure(service.reserveAttempt("eva.m@test.com")));
+        assertEquals(1, service.recordFailure(service.reserveAttempt("eva@test.es", IP)));
+        assertEquals(1, service.recordFailure(service.reserveAttempt("eva.m@test.com", IP)));
     }
 
     private LoginAttemptService service(int maxFailures) {
         RateLimitProperties.Rule rule = new RateLimitProperties.Rule(100, Duration.ofMinutes(1));
         return new LoginAttemptService(
-                new RateLimitProperties(rule, rule, new RateLimitProperties.Lockout(maxFailures, Duration.ofMinutes(15))),
+                new RateLimitProperties(rule, rule, new RateLimitProperties.Lockout(maxFailures, Duration.ofMinutes(15), 5, Duration.ofDays(30)), 100_000),
                 clock);
     }
 }

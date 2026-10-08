@@ -1,0 +1,18 @@
+# Archivos que graphify NO debe leer al construir el grafo de conocimiento (graphify-out/).
+# Mismo formato que .gitignore.
+
+# ⚠ Credenciales: nunca deben entrar en el grafo (ver CLAUDE.md).
+**/application-local*.properties
+.env
+.env.*
+!.env.example
+
+# Imágenes de ejemplo: el análisis de visión no aporta nada sobre la arquitectura.
+frontend/public/covers/
+frontend/public/*.svg
+
+# Generados o sin valor estructural.
+frontend/package-lock.json
+frontend/playwright-report/
+frontend/test-results/
+graphify-out/

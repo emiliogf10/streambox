@@ -71,6 +71,21 @@ Cuando un agente diga que necesita algo de otra área ("hace falta regla en `Sec
 - Actualiza `docs/PLAN_DE_ACCION.md` (tarea hecha, tests, pendientes nuevos), el `README.md` si cambia algo visible (endpoints, variables, comandos) y `docs/MANUAL_PROGRAMADOR.md` si el cambio altera cómo funciona algo de lo que explica.
 - Informe final al usuario, en español: qué se pidió, cómo se repartió, qué cambió (con rutas), resultado real de los tests/build, qué queda pendiente o a revisar a mano (p. ej. comprobaciones visuales del frontend) y, si procede, la explicación pedagógica del cambio.
 
+## Auditorías de seguridad (skill `security-audit`)
+
+Para una auditoría completa sigue la skill `security-audit` (Cloudflare, `~/.claude/skills/security-audit/`), con estos papeles adaptados al equipo:
+
+| Papel en la skill | Quién lo hace aquí |
+| :--- | :--- |
+| *Parent* (coordina, único que escribe los archivos de la ejecución) | Tú, el orquestador |
+| Agentes de reconocimiento y cazadores (`research`/`general`) | `security` (uno por unidad; en paralelo, porque no ejecutan Maven) |
+| Críticos de cobertura | `qa`, recién lanzado (no reutilices un agente que haya cazado) |
+| Verificadores independientes de cada candidato | `qa` o `security` recién lanzados, distintos del cazador que lo encontró |
+
+- La salida va **fuera del repositorio**: `~/security-audit-skill/streambox/run-<N>`. Cada agente recibe su `agents/<id>/scratch/` y no escribe en ningún otro sitio. Durante la auditoría nadie modifica código; los arreglos se encargan después, como tarea normal.
+- En cada encargo recuerda las reglas críticas del proyecto: no leer `application-local.properties`, no tocar Supabase, no ejecutar la app ni Maven salvo en un entorno aislado.
+- Los validadores de la skill (`validate-findings.cjs`, `validate-coverage-ledger.cjs`) **no funcionan en Windows** (exigen `O_NOFOLLOW`/`O_NONBLOCK`). Ejecútalos en un contenedor: `docker run --rm --network none -v "<skill>:/skill:ro" -v "<run>:/run:ro" node:24-alpine node /skill/validate-findings.cjs ...`.
+
 ## Reglas inquebrantables
 
 - **No hagas commit ni push** salvo petición expresa del usuario (y los agentes tampoco).

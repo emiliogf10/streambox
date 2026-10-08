@@ -102,7 +102,7 @@ La base de todos los endpoints es `/api`.
 | `POST` | `/api/users` | Público | Registro de nuevos usuarios (contraseña de 12 a 64 caracteres, no común y sin el usuario ni el email; 400 con el motivo en `validationErrors.password`) |
 | `POST` | `/api/auth/login` | Público | Autenticación mediante email y contraseña; retorna JWT. Un fallo responde 401 con `remainingAttempts`; al 5.º, 429 `ACCOUNT_LOCKED` |
 | `GET` | `/api/users/me` | `USER`, `ADMIN` | Consulta los datos del usuario autenticado |
-| `GET` | `/api/users` | `ADMIN` | Lista todos los usuarios registrados |
+| `GET` | `/api/users` | `ADMIN` | Lista todos los usuarios registrados (la regla es por ruta: cualquier método salvo el `POST` de registro, `HEAD` incluido, exige `ADMIN`) |
 
 ### 2. Mi Lista (Favoritos del Usuario)
 | Método | Endpoint | Acceso | Descripción |
@@ -146,7 +146,7 @@ La base de todos los endpoints es `/api`.
 | `GET` / `DELETE` | `/api/users/me/favorites/series` | `USER`, `ADMIN` | Series de «Mi lista» / vaciarlas |
 | `POST` / `DELETE` | `/api/users/me/favorites/series/{seriesId}` | `USER`, `ADMIN` | Añadir / quitar una serie de «Mi lista» |
 
-> **Si usas Supabase:** al arrancar la app, Flyway aplica `V3` (crea las tablas de series). Después vuelve a ejecutar `docs/supabase-seguridad.sql` para cerrar también esas tablas a la API pública de Supabase.
+> **Si usas Supabase:** al arrancar la app, Flyway aplica `V3` (crea las tablas de series) y un *callback* propio (`db/callback/postgresql/afterMigrate__close_public_api.sql`) cierra automáticamente todas las tablas de `public` a la API pública de Supabase (RLS sin políticas y sin permisos para `anon`/`authenticated`). Ya no hace falta ejecutar `docs/supabase-seguridad.sql` a mano; queda como respaldo. Ojo: actúa sobre **todas** las tablas del esquema `public` de ese proyecto y el primer arranque lo aplica (sin tocar datos); si el proyecto aloja otra app que use la Data API, quita el callback con `spring.flyway.locations=classpath:db/migration`. Revisa el log de arranque: un `WARNING` de ese callback significa que algo sigue abierto.
 
 ### 6. Operación
 | Método | Endpoint | Acceso | Descripción |
@@ -241,6 +241,8 @@ Solo se exponen `health` e `info`; el resto de endpoints de Actuator (`env`, `be
 | Intentos de login por IP | 10 por minuto | `429` `RATE_LIMIT_EXCEEDED` + `Retry-After` |
 | Registros por IP | 5 por hora | `429` `RATE_LIMIT_EXCEEDED` + `Retry-After` |
 | Cuenta bloqueada tras logins fallidos | 5 fallos en 15 min (los fallos previos responden 401 con `remainingAttempts`: 4, 3, 2, 1) | `429` `ACCOUNT_LOCKED` + `Retry-After` |
+
+**IP conocida.** Para que nadie pueda mantener bloqueada la cuenta de otra persona (ni la del administrador) fallando su login a propósito, el bloqueo no se aplica a una IP desde la que ya se inició sesión con éxito con esa cuenta: esa IP tiene su propio contador de 5 fallos en 15 minutos y sus fallos no bloquean a nadie más. Se recuerdan hasta 5 IPs por cuenta durante 30 días (`lockout.max-known-ips`, `lockout.known-ip-ttl`). Los contadores tienen un tope de claves (`streambox.security.rate-limit.max-keys`, 100 000 por contador; al llenarse se olvida la clave más antigua) y las direcciones IPv6 se agrupan por `/64`. Detalle y limitaciones en el capítulo 11 del manual.
 
 Configurable en `streambox.security.rate-limit.*` (`application.properties`). Los contadores están en memoria: con varias réplicas de la aplicación cada una lleva su propia cuenta. Detrás de un proxy inverso el perfil `prod` activa `server.forward-headers-strategy=native` para ver la IP real del cliente.
 

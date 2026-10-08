@@ -73,16 +73,20 @@ public class AuthenticationService {
      *
      * @param email    correo electrónico del usuario
      * @param password contraseña en texto plano
+     * @param clientIp dirección remota del cliente ({@code request.getRemoteAddr()},
+     *                 nunca {@code X-Forwarded-For} a mano): decide si el
+     *                 bloqueo de la cuenta le aplica como IP conocida o
+     *                 desconocida (ver {@link LoginAttemptService})
      * @return respuesta con el token JWT
      * @throws InvalidCredentialsException si el email no existe o la contraseña es
      *         incorrecta; lleva los intentos que quedan antes del bloqueo
      * @throws AccountLockedException si la cuenta está bloqueada temporalmente
      *         por demasiados intentos fallidos, o si este fallo agota los intentos
      */
-    public LoginResponse login(String email, String password) {
+    public LoginResponse login(String email, String password, String clientIp) {
 
         return new LoginResponse(
-                jwtService.generateToken(authenticate(email, password)));
+                jwtService.generateToken(authenticate(email, password, clientIp)));
     }
 
     /**
@@ -103,21 +107,26 @@ public class AuthenticationService {
      * </p>
      *
      * <p>
-     * Los intentos restantes y el bloqueo dependen solo del email, no de si la
-     * cuenta existe: la respuesta a un email registrado con contraseña
+     * Los intentos restantes y el bloqueo dependen del email y de si la IP es
+     * «conocida» de la cuenta, pero no de si la cuenta existe: <b>desde la
+     * misma IP de origen</b>, la respuesta a un email registrado con contraseña
      * incorrecta y a uno inexistente es idéntica (estado, código, mensaje y
-     * {@code remainingAttempts}).
+     * {@code remainingAttempts}). Bajo una IP compartida con el titular, quien
+     * cruce dos orígenes puede notar la diferencia entre IP conocida y
+     * desconocida; es una limitación conocida y acotada (ver
+     * {@link LoginAttemptService}).
      * </p>
      *
      * @param email    dirección de correo electrónico del usuario
      * @param password contraseña proporcionada durante el inicio de sesión
+     * @param clientIp dirección remota del cliente
      * @return usuario autenticado correctamente
      * @throws InvalidCredentialsException si el correo electrónico no existe o
      *                          la contraseña proporcionada es incorrecta
      * @throws AccountLockedException si la cuenta está bloqueada o este fallo
      *                          agota los intentos
      */
-    private User authenticate(String email, String password) {
+    private User authenticate(String email, String password, String clientIp) {
 
         // El registro guarda el email normalizado (trim + minúsculas); el login
         // debe normalizarlo igual o el usuario no podría entrar escribiéndolo
@@ -134,7 +143,7 @@ public class AuthenticationService {
         // reserva atómica impide que muchas peticiones simultáneas prueben más
         // contraseñas de las permitidas. Se cuenta tanto si el usuario existe
         // como si no, para que el bloqueo no revele qué emails están registrados.
-        LoginAttempt attempt = loginAttemptService.reserveAttempt(normalizedEmail);
+        LoginAttempt attempt = loginAttemptService.reserveAttempt(normalizedEmail, clientIp);
 
         // Con usuario inexistente se compara contra un hash falso para que el
         // coste (BCrypt) y, por tanto, el tiempo de respuesta sean parecidos.
@@ -152,6 +161,8 @@ public class AuthenticationService {
             throw new InvalidCredentialsException(INVALID_CREDENTIALS_MESSAGE, remainingAttempts);
         }
 
+        // Solo aquí, con la contraseña verificada de una cuenta que existe, la
+        // IP pasa a ser "conocida" de la cuenta (ver LoginAttemptService).
         loginAttemptService.recordSuccess(attempt);
 
         return user;

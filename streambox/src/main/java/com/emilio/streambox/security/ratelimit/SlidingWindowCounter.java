@@ -3,8 +3,8 @@ package com.emilio.streambox.security.ratelimit;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
-import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -25,32 +25,65 @@ import java.util.Optional;
  * compartido (por ejemplo Redis).
  * </p>
  *
+ * <h2>Memoria acotada</h2>
  * <p>
- * Es seguro para uso concurrente. Las claves caducadas se eliminan de forma
- * periódica para que un atacante no pueda llenar la memoria con claves
- * distintas.
+ * El contador nunca guarda más de {@code maxKeys} claves vivas, por muchas
+ * claves distintas que le lleguen (IPs rotadas, emails inventados...). Las
+ * claves están ordenadas por el instante de su <b>último evento registrado</b>
+ * (las lecturas y los rechazos no cambian el orden), de modo que:
+ * </p>
+ * <ul>
+ * <li>Las caducadas se eliminan <b>desde el principio del orden</b>, en cada
+ * operación, hasta encontrar la primera viva: cuesta lo que se elimina y no
+ * recorre todo el mapa (antes se recorría entero, bajo el cerrojo, cada 500
+ * operaciones, y las claves no tenían tope).</li>
+ * <li><b>Política al llenarse:</b> para insertar una clave nueva con el mapa
+ * lleno se purgan primero las caducadas y, si sigue lleno, se <b>expulsa la
+ * clave con la actividad más antigua</b>. Es una decisión consciente: se prefiere
+ * olvidar claves viejas a rechazar las nuevas, porque rechazar permitiría a un
+ * atacante agotar el mapa con claves falsas y dejar sin login ni registro a
+ * todo el mundo. El precio es que, con un volumen de claves distintas superior
+ * al tope dentro de una misma ventana, un atacante con muchísimas
+ * direcciones podría hacer que se olvide el contador de otra clave; el tope
+ * (100 000 por defecto) lo hace costoso, y las IPv6 se agrupan por /64
+ * ({@link ClientAddress}) para que rotar direcciones no baste.</li>
+ * </ul>
+ *
+ * <p>
+ * Es seguro para uso concurrente.
  * </p>
  */
 public final class SlidingWindowCounter {
 
-    /** Cada cuántas operaciones se revisan y eliminan las claves caducadas. */
-    private static final int PURGE_EVERY = 500;
+    /** Capacidad inicial de la cola de cada clave: casi todas guardan muy pocos eventos. */
+    private static final int INITIAL_QUEUE_CAPACITY = 4;
 
     private final long windowMillis;
     private final Clock clock;
-    private final Map<String, ArrayDeque<Event>> events = new HashMap<>();
-    private int operations;
+    private final int maxKeys;
+
+    /**
+     * Eventos por clave. El orden de iteración es el del último evento
+     * registrado de cada clave (la primera es la más antigua).
+     */
+    private final Map<String, ArrayDeque<Event>> events = new LinkedHashMap<>();
 
     /** Identificador del siguiente evento; único en este contador y creciente. */
     private long nextEventId;
 
     /**
-     * @param window duración de la ventana
-     * @param clock  reloj usado para medir el tiempo (inyectable en tests)
+     * @param window  duración de la ventana
+     * @param clock   reloj usado para medir el tiempo (inyectable en tests)
+     * @param maxKeys número máximo de claves vivas (mayor que cero)
+     * @throws IllegalArgumentException si {@code maxKeys} no es positivo
      */
-    public SlidingWindowCounter(Duration window, Clock clock) {
+    public SlidingWindowCounter(Duration window, Clock clock, int maxKeys) {
+        if (maxKeys <= 0) {
+            throw new IllegalArgumentException("maxKeys debe ser positivo");
+        }
         this.windowMillis = window.toMillis();
         this.clock = clock;
+        this.maxKeys = maxKeys;
     }
 
     /**
@@ -99,13 +132,14 @@ public final class SlidingWindowCounter {
      *         evento rechazado no se registra)
      */
     public synchronized Optional<Reservation> reserve(String key, int max) {
-        ArrayDeque<Event> queue = prunedQueue(key, true);
-        if (queue.size() >= max) {
+        ArrayDeque<Event> queue = liveQueue(key);
+        int size = queue == null ? 0 : queue.size();
+        if (size >= max) {
             return Optional.empty();
         }
         Event event = newEvent();
-        queue.addLast(event);
-        return Optional.of(new Reservation(event.id(), queue.size()));
+        append(key, queue, event);
+        return Optional.of(new Reservation(event.id(), size + 1));
     }
 
     /**
@@ -130,21 +164,24 @@ public final class SlidingWindowCounter {
      *         {@code 0} si ya no estaba y no cabe uno nuevo
      */
     public synchronized int confirm(String key, Reservation reservation, int max) {
-        ArrayDeque<Event> queue = prunedQueue(key, true);
+        ArrayDeque<Event> queue = liveQueue(key);
         int position = 0;
-        for (Event event : queue) {
-            position++;
-            if (event.id() == reservation.id()) {
-                return position;
+        if (queue != null) {
+            for (Event event : queue) {
+                position++;
+                if (event.id() == reservation.id()) {
+                    return position;
+                }
             }
         }
-        if (queue.size() >= max) {
+        int size = queue == null ? 0 : queue.size();
+        if (size >= max) {
             return 0;
         }
         // El evento original ya no está en la cola, así que reutilizar su
         // identificador no crea duplicados.
-        queue.addLast(new Event(clock.millis(), reservation.id()));
-        return queue.size();
+        append(key, queue, new Event(clock.millis(), reservation.id()));
+        return size + 1;
     }
 
     /**
@@ -153,7 +190,7 @@ public final class SlidingWindowCounter {
      * @param key clave a contabilizar
      */
     public synchronized void record(String key) {
-        prunedQueue(key, true).addLast(newEvent());
+        append(key, liveQueue(key), newEvent());
     }
 
     /**
@@ -161,7 +198,7 @@ public final class SlidingWindowCounter {
      * @return número de eventos de la clave dentro de la ventana actual
      */
     public synchronized int count(String key) {
-        ArrayDeque<Event> queue = prunedQueue(key, false);
+        ArrayDeque<Event> queue = liveQueue(key);
         return queue == null ? 0 : queue.size();
     }
 
@@ -171,8 +208,8 @@ public final class SlidingWindowCounter {
      *         ventana (es decir, hasta que se libere un hueco); cero si no hay eventos
      */
     public synchronized Duration retryAfter(String key) {
-        ArrayDeque<Event> queue = prunedQueue(key, false);
-        if (queue == null || queue.isEmpty()) {
+        ArrayDeque<Event> queue = liveQueue(key);
+        if (queue == null) {
             return Duration.ZERO;
         }
         long remaining = queue.peekFirst().timestamp() + windowMillis - clock.millis();
@@ -188,39 +225,86 @@ public final class SlidingWindowCounter {
         events.remove(key);
     }
 
+    /**
+     * @return número de claves que se guardan ahora mismo (nunca supera el
+     *         tope); incluye las que han caducado y aún no se han purgado
+     */
+    public synchronized int size() {
+        return events.size();
+    }
+
     private Event newEvent() {
         return new Event(clock.millis(), nextEventId++);
     }
 
-    private ArrayDeque<Event> prunedQueue(String key, boolean create) {
-
-        if (++operations % PURGE_EVERY == 0) {
-            purgeExpired();
-        }
+    /**
+     * Cola de eventos vivos de la clave, o {@code null} si no tiene ninguno.
+     * Purga antes las claves caducadas del principio del orden y recorta los
+     * eventos caducados de esta; si se queda vacía, borra la clave.
+     */
+    private ArrayDeque<Event> liveQueue(String key) {
+        purgeExpired();
 
         ArrayDeque<Event> queue = events.get(key);
         if (queue == null) {
-            if (!create) {
-                return null;
-            }
-            queue = new ArrayDeque<>();
-            events.put(key, queue);
+            return null;
         }
-
         long threshold = clock.millis() - windowMillis;
         while (!queue.isEmpty() && queue.peekFirst().timestamp() <= threshold) {
             queue.removeFirst();
         }
+        if (queue.isEmpty()) {
+            events.remove(key);
+            return null;
+        }
         return queue;
     }
 
+    /**
+     * Añade el evento a la clave y la coloca al final del orden. Si la clave
+     * es nueva ({@code queue == null}) y el mapa está lleno, hace sitio antes.
+     */
+    private void append(String key, ArrayDeque<Event> queue, Event event) {
+        ArrayDeque<Event> target = queue;
+        if (target == null) {
+            makeRoom();
+            target = new ArrayDeque<>(INITIAL_QUEUE_CAPACITY);
+        } else {
+            // Sacar y volver a meter la clave la lleva al final del orden
+            // (put sobre una clave existente no la reordena).
+            events.remove(key);
+        }
+        target.addLast(event);
+        events.put(key, target);
+    }
+
+    /**
+     * Elimina las claves caducadas del principio del orden, hasta la primera
+     * viva. Como el orden es el del último evento de cada clave, todas las
+     * siguientes tienen un último evento igual o más reciente y siguen vivas:
+     * no hace falta recorrer el mapa entero.
+     */
     private void purgeExpired() {
         long threshold = clock.millis() - windowMillis;
         for (Iterator<ArrayDeque<Event>> it = events.values().iterator(); it.hasNext();) {
             ArrayDeque<Event> queue = it.next();
             if (queue.isEmpty() || queue.peekLast().timestamp() <= threshold) {
                 it.remove();
+            } else {
+                return;
             }
+        }
+    }
+
+    /**
+     * Garantiza que cabe una clave más: ya se han purgado las caducadas, así
+     * que si sigue lleno se expulsa la clave con la actividad más antigua.
+     */
+    private void makeRoom() {
+        while (events.size() >= maxKeys) {
+            Iterator<ArrayDeque<Event>> it = events.values().iterator();
+            it.next();
+            it.remove();
         }
     }
 

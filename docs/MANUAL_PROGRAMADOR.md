@@ -247,7 +247,7 @@ Puntos que conviene entender:
 - **SSL.** `sslmode=require` es obligatorio: Supabase no acepta conexiones sin cifrar.
 - **Usuario.** Con el pooler es `postgres.<id-del-proyecto>`, no solo `postgres`.
 - **El esquema lo crea Flyway** al arrancar contra la base vacía (aplica `V1` y `V2`), igual que en local.
-- **Seguridad: la API pública de Supabase.** Supabase publica automáticamente una API REST sobre el esquema `public`, accesible con una clave pública. Como las tablas viven ahí, **hay que cerrarla** ejecutando [`docs/supabase-seguridad.sql`](supabase-seguridad.sql) una vez creadas las tablas (activa RLS sin políticas y retira permisos a `anon` y `authenticated`). La aplicación no se ve afectada porque conecta con el rol `postgres`, que se salta RLS. No es una migración de Flyway porque `ENABLE ROW LEVEL SECURITY` es específico de PostgreSQL y H2 (los tests) no lo entiende. Si una migración futura crea tablas nuevas, hay que añadirlas a ese script.
+- **Seguridad: la API pública de Supabase.** Supabase publica automáticamente una API REST sobre el esquema `public`, accesible con una clave pública, y da privilegios por defecto a los roles `anon` y `authenticated`. Como las tablas viven ahí, hay que cerrarla. **Desde la auditoría de octubre de 2026 lo hace la propia aplicación**, en cada arranque: un *callback* de Flyway (`db/callback/postgresql/afterMigrate__close_public_api.sql`, sección 5.4) activa RLS sin políticas en todas las tablas de `public`, retira los privilegios a `anon` y `authenticated` (también sobre secuencias y funciones) y cambia los privilegios por defecto para que lo que se cree después nazca cerrado. La aplicación no se ve afectada porque conecta con el rol `postgres`, propietario de las tablas, que se salta RLS. [`docs/supabase-seguridad.sql`](supabase-seguridad.sql) queda como **respaldo manual** (el mismo bloque, para aplicarlo sin arrancar la app). *Por qué:* antes era un paso manual que solo protegía las tablas que existían el día que se ejecutaba, y las que creaba Flyway después (las de series, por ejemplo) nacían abiertas hasta que alguien se acordaba de repetirlo. **Alcance:** el callback actúa sobre **todas** las tablas y funciones del esquema `public`, no solo las de StreamBox. Si ese mismo proyecto de Supabase aloja otra aplicación que usa la Data API con sus propias políticas RLS, se la rompería; para esa situación se quita la ubicación del callback (`spring.flyway.locations=classpath:db/migration`) y se aplica el cierre a mano solo a las tablas propias. Además, **el primer arranque contra tu Supabase aplica RLS y retira privilegios a `anon`/`authenticated`** (lo mismo que ya hiciste con el script; no toca datos). Lo que sigue sin poder hacer el código: ver cuál es el estado real de tu proyecto Supabase. Lo más robusto es **desactivar la Data API del proyecto** (StreamBox accede por conexión directa), y mirar el log de arranque: un `WARNING` de este callback significa que algo sigue abierto.
 - **Mover los datos** de una base a otra: ver `docs/PLAN_DE_ACCION.md` (migración a Supabase). Los `id` se conservan, y por eso hay que comprobar que las secuencias de identidad quedan por encima del mayor `id` (si no, el siguiente `INSERT` chocaría con una fila existente).
 
 ### 4.6 Docker y CI
@@ -400,6 +400,26 @@ Al arrancar, Flyway:
 3. Guarda en el historial cada migración aplicada junto a un **checksum** (una huella de su contenido).
 
 **Regla de oro: nunca edites una migración ya aplicada**, ni siquiera un comentario. Flyway recalcula el checksum, ve que no coincide con el guardado y se niega a arrancar. Para cambiar algo, crea una migración nueva (`V3__...`).
+
+#### Callbacks: SQL que no es una migración (`afterMigrate`)
+
+Además de las migraciones versionadas, Flyway ejecuta **callbacks**: scripts que se lanzan en un momento concreto del ciclo. `afterMigrate__*.sql` se ejecuta **después de cada `migrate`, aunque no hubiera nada que migrar**. No lleva versión, no queda en `flyway_schema_history` y no tiene checksum, así que se puede mejorar sin romper las bases ya migradas.
+
+El proyecto tiene uno, **solo para PostgreSQL**, que cierra la API pública de Supabase (capítulo 4.5): `src/main/resources/db/callback/postgresql/afterMigrate__close_public_api.sql`. Se activa con
+
+```properties
+spring.flyway.locations=classpath:db/migration,classpath:db/callback/{vendor}
+```
+
+Spring Boot sustituye `{vendor}` por `postgresql` o `h2` según la base conectada. Con H2 (los tests) busca `db/callback/h2`, que no existe, y no ejecuta nada: ni `ENABLE ROW LEVEL SECURITY` ni los roles de Supabase existen allí. Con un PostgreSQL sin los roles `anon`/`authenticated` (docker compose, local) comprueba `pg_roles` y no hace nada.
+
+Decisiones que merece la pena saber defender:
+
+- **Idempotente**: solo hace `ALTER TABLE` donde RLS aún no está activo, porque ese comando pide un bloqueo exclusivo de la tabla y no se quiere pedir en cada arranque.
+- **Sin `FORCE ROW LEVEL SECURITY`**: el propietario (el rol de la aplicación y de Flyway) debe seguir saltándose RLS.
+- **Avisa en lugar de abortar si faltan permisos** (error `42501`): endurece algo que ya estaba abierto, no es un requisito de funcionamiento, y un fallo de permisos no se arregla reintentando; abortar convertiría un fallo de seguridad en una caída total. A cambio hay que vigilar el log. Cualquier otro error sí aborta.
+- **No toca objetos de extensiones** (`pg_depend`, `deptype = 'e'`): no son de StreamBox y revocar sus funciones rompería la extensión.
+- Se prueba contra PostgreSQL real (`PostgresPublicApiClosureIntegrationTest`, con roles al estilo Supabase y un propietario no superusuario) y las pruebas fallan si se quita el callback.
 
 #### Adopción de bases antiguas (baseline)
 
@@ -634,7 +654,7 @@ Se evalúan **de arriba abajo** y gana la primera que coincide:
 | :--- | :--- |
 | `POST /api/users`, `POST /api/auth/login` | Cualquiera (registro y login) |
 | `/api/admin/**` (cualquier método) | Solo `ADMIN` (vistas de gestión, p. ej. series sin episodios) |
-| `GET /api/users` | Solo `ADMIN` |
+| `/api/users` con **cualquier método salvo `POST`** (el listado de cuentas; `GET`, `HEAD`, `PUT`...) | Solo `ADMIN` |
 | `GET`, `HEAD /api/movies/**` | Cualquier usuario autenticado |
 | `POST`, `PUT`, `PATCH`, `DELETE /api/movies/**` | Solo `ADMIN` |
 | `GET`, `HEAD /api/genres/**` | Cualquier usuario autenticado |
@@ -645,6 +665,8 @@ Se evalúan **de arriba abajo** y gana la primera que coincide:
 | `/actuator/health`, `/actuator/health/**` | Cualquiera (comprobaciones de salud) |
 | `/v3/api-docs/**`, `/swagger-ui/**` | Cualquiera (en `prod` están desactivados) |
 | **Todo lo demás** (`anyRequest()`) | Cualquier usuario autenticado |
+
+**La regla de `/api/users` es por ruta, no por método** (auditoría de octubre de 2026). Antes decía solo «`GET /api/users` → `ADMIN`». Pero `HEAD /api/users` no coincidía con esa regla, caía en `anyRequest().authenticated()` y Spring MVC lo atendía con el `@GetMapping`: cualquier usuario normal ejecutaba el listado completo de cuentas y, como Tomcat envía `Content-Length` en el `HEAD`, deducía cuántas cuentas hay (125 bytes con 1 usuario, 387 con 3). Se reprodujo con una prueba contra el Tomcat real. **Lección: una regla de autorización atada a un método HTTP deja fuera a los demás; para recursos privilegiados, escribe la regla por ruta** (como ya se hace con `/api/admin/**`). La coincidencia es exacta: `/api/users/me` y `/api/users/me/**` no entran en ella y siguen siendo «autenticado».
 
 La última regla es una red de seguridad: un endpoint nuevo que se olvide de añadir aquí queda **protegido por defecto**, no abierto. Por ejemplo, `/api/users/me` y `/api/users/me/favorites` caen en ella.
 
@@ -800,7 +822,7 @@ Hay dos protecciones contra la fuerza bruta, complementarias:
 | Protección | Clase | Clave | Límite por defecto | Protege contra |
 | :--- | :--- | :--- | :--- | :--- |
 | **Por IP** | `RateLimitingFilter` | IP del cliente | Login: 10/min. Registro: 5/h | Un atacante que prueba muchas cuentas desde una IP |
-| **Por cuenta** | `LoginAttemptService` | Email | 5 fallos en 15 min | Un atacante que prueba muchas contraseñas contra una cuenta desde muchas IPs |
+| **Por cuenta** | `LoginAttemptService` | Email (y, para una «IP conocida», email + IP; ver 11.2) | 5 fallos en 15 min | Un atacante que prueba muchas contraseñas contra una cuenta desde muchas IPs |
 
 Ambas responden **429 Too Many Requests** con la cabecera **`Retry-After`** (segundos que hay que esperar), que el frontend usa para la cuenta atrás. Se distinguen por el `code`: **`RATE_LIMIT_EXCEEDED`** (límite por IP) o **`ACCOUNT_LOCKED`** (cuenta bloqueada).
 
@@ -810,8 +832,9 @@ Ambas responden **429 Too Many Requests** con la cabecera **`Retry-After`** (seg
 | :--- | :--- |
 | Fallos 1.º a 4.º | 401 `INVALID_CREDENTIALS` «Email o contraseña incorrectos» con **`remainingAttempts`** = 4, 3, 2, 1 |
 | 5.º fallo | 429 `ACCOUNT_LOCKED` + `Retry-After: 900` «Has superado el número máximo de intentos. La cuenta queda bloqueada durante 15 minutos.» |
-| Cualquier intento durante el bloqueo (también con la contraseña correcta) | 429 `ACCOUNT_LOCKED` con el tiempo que falta («…Inténtalo de nuevo en N minutos.») |
-| Login correcto | 200; borra los fallos acumulados |
+| Cualquier intento durante el bloqueo (también con la contraseña correcta) desde una IP **desconocida** | 429 `ACCOUNT_LOCKED` con el tiempo que falta («…Inténtalo de nuevo en N minutos.») |
+| Intento desde una **IP conocida** de esa cuenta mientras otros la tienen bloqueada | Se procesa con normalidad (contraseña correcta → 200); sus propios fallos tienen su contador de 5 en 15 min (ver 11.2) |
+| Login correcto | 200; borra los fallos acumulados del contador contra el que se reservó y deja esa IP como «conocida» |
 
 - `remainingAttempts` son los intentos que le quedan a la cuenta **con este fallo ya descontado**. Por eso nunca vale 0: el fallo que agota los intentos ya responde 429. En el resto de errores de la API el campo **no aparece** (ni siquiera como `null`).
 - **No revela qué emails existen:** los números, los mensajes, las cabeceras y el bloqueo son idénticos para un email registrado y para uno inexistente (lo comprueba `LoginLockoutContractIntegrationTest`, que también mide que los tiempos de respuesta sean parecidos).
@@ -832,16 +855,35 @@ IP 1.2.3.4 → [12:00:05, 12:00:07, 12:00:30, ...]
 - **`retryAfter(clave)`**: cuánto falta para que el evento más antiguo salga de la ventana, es decir, para que se libere un hueco.
 - **`reserve` / `confirm` / `reset`**: los usa el bloqueo por cuenta. `reserve` aparta el intento antes de comprobar la contraseña (devuelve una `Reservation` con id), `confirm` lo deja apuntado como fallo y devuelve su **posición real** en la ventana, y `reset` borra los fallos tras un login correcto.
 - **¿Por qué la posición real y no el número de la reserva?** Durante los ~100 ms de BCrypt pueden pasar cosas: un login correcto simultáneo borra la cola entera, o caduca un fallo antiguo. Si se decidiera con el número obtenido al reservar, de cinco intentos simultáneos en los que el primero acierta, los otros cuatro responderían 3, 2, 1 y un 429 con la cuenta sin bloquear. `confirm` vuelve a apuntar la reserva si un acierto la borró (con el mismo id, para no contarla dos veces).
-- **Limpieza periódica**: cada 500 operaciones borra las claves caducadas, para que un atacante no pueda llenar la memoria con millones de IPs distintas.
+- **Tope de claves (`streambox.security.rate-limit.max-keys`, 100 000 por contador).** Antes solo se borraban las claves caducadas cada 500 operaciones, pero una ventana larga (la de registro dura 1 hora) deja vivas todas las claves nuevas: un atacante con muchísimas IPs distintas podía llenar el *heap*. Ahora el mapa es un `LinkedHashMap` ordenado por el **último evento registrado**; en cada operación se purgan las caducadas desde la cabeza (se para en la primera viva, así que cuesta poco) y, si aun así está lleno, se **expulsa la clave con la actividad más antigua**. Se prefirió olvidar claves viejas a rechazar las nuevas: rechazarlas dejaría a cualquier usuario nuevo sin poder entrar ni registrarse mientras dure el ataque. Contrapartida: con más de `max-keys` claves distintas en una misma ventana se puede olvidar el contador de otro; por eso las IPv6 se agrupan (ver abajo). Con los valores por defecto el peor caso ronda los 30 MB por contador.
+- **IPv6 por /64.** Un atacante con IPv6 suele controlar un bloque `/64` entero (2⁶⁴ direcciones) y rotar dentro de él para no repetir clave. `ClientAddress.counterKey` convierte cualquier IPv6 en la clave de su `/64` (`2001:db8:1:2::/64`), trata `::ffff:a.b.c.d` como la IPv4 `a.b.c.d` y deja la IPv4 como está (una clave por dirección). **Nunca resuelve nombres (DNS):** `InetAddress.getByName` solo trata un texto como literal IPv6 si empieza por un dígito hexadecimal, `:` o `[`, y cualquier otra cadena iría al DNS; por eso solo se analiza texto con hexadecimales, `:` y `.` (más una zona `%eth0` opcional, que se descarta) y se entrega entre corchetes, de modo que un texto raro devuelve error en vez de consultar un servidor. Cualquier otra cadena se usa tal cual como clave.
 - **`synchronized`**: todos los métodos están sincronizados porque Tomcat atiende muchas peticiones a la vez en hilos distintos.
 
 **¿Por qué «deslizante»?** Con una ventana fija (por ejemplo, «10 por minuto natural»), un atacante podría hacer 10 intentos a las 12:00:59 y otros 10 a las 12:01:00. La ventana deslizante mira siempre «los últimos 60 segundos» desde ahora.
 
-### 11.2 Limitaciones conocidas
+### 11.2 La «IP conocida»: que el bloqueo no se pueda usar como arma contra el titular
+
+**El problema (auditoría de seguridad, octubre de 2026).** El bloqueo por cuenta rechaza el login aunque la contraseña sea correcta. Un anónimo que sepa el email de otra persona (el registro responde «el correo ya está en uso») solo necesita **5 fallos cada 15 minutos**, unas 20 peticiones por hora desde una sola IP, para mantener esa cuenta bloqueada **indefinidamente**: cada vez que caduca un fallo, ocupa el hueco. Con el email del administrador, la aplicación se queda sin nadie que gestione el catálogo. Se reprodujo con una prueba sobre `LoginAttemptService` y un reloj simulado: 480 peticiones del atacante en 24 h simuladas y los 288 intentos del titular rechazados.
+
+**La solución.** Una IP pasa a ser **«conocida» para una cuenta** cuando alguien ha iniciado sesión con éxito en ella desde esa IP (contraseña verificada: un intento fallido o un email inexistente nunca «conocen» una IP). Cuando entra un intento:
+
+| Origen del intento | Contador que se usa | Qué pasa con los fallos |
+| :--- | :--- | :--- |
+| IP **desconocida** | El de la cuenta (`email`), como siempre | Bloquean a las IPs desconocidas; **no** afectan a las conocidas |
+| IP **conocida** | El suyo propio (`email\|ip`), con los mismos límites (5 en 15 min) | Solo bloquean a esa IP; **no** afectan a la cuenta ni a otras IPs |
+
+Así el titular sigue entrando desde su casa aunque un atacante tenga la cuenta bloqueada para el resto del mundo. El atacante no puede hacer que su IP sea «conocida» sin conocer la contraseña, y adivinar contraseñas desde una IP conocida sigue limitado a 5 fallos por 15 minutos (más el límite por IP del filtro). **Pero no es un cierre total:** protege al titular que ya ha entrado antes desde esa IP (ver las limitaciones de abajo).
+
+- **Respuestas idénticas desde la misma IP.** Los códigos, mensajes y cabeceras (401 con `remainingAttempts`, 429 `ACCOUNT_LOCKED`) son idénticos para IP conocida o desconocida y para email existente o inexistente **cuando se consulta desde la misma IP**; el 429 no revela si la IP era conocida (lo comprueban los tests). **Excepción conocida (revisión independiente de `qa`, octubre de 2026):** si el atacante comparte salida con el titular (NAT móvil, red de empresa o campus, VPN, un `/64` compartido), su IP *sí* es conocida para la cuenta, y entonces puede (a) distinguir si esa cuenta tiene un login correcto reciente desde esa IP, cruzando dos orígenes (llena el contador de la cuenta desde otra IP y mira si desde la IP compartida recibe 401 o 429), y (b) puede gastar hasta **10 fallos por ventana desde esa IP en lugar de 5** (5 en el contador de la cuenta mientras la IP era desconocida y otros 5 en el de `email|ip` desde que el titular la «conoce»). Requiere estar co-localizado con la víctima y unos 6 intentos por sonda; no filtra contraseñas.
+- **La IP sale de `request.getRemoteAddr()`** (el mismo criterio que `RateLimitingFilter`; nunca se lee `X-Forwarded-For` a mano). `AuthController` la pasa a `AuthenticationService.login(email, password, clientIp)`.
+- **`KnownIpRegistry`** guarda por cuenta un conjunto acotado: máximo 5 IPs (`streambox.security.rate-limit.lockout.max-known-ips`), expulsando la más antigua, con caducidad de 30 días desde el último acierto (`…lockout.known-ip-ttl`), y como mucho `max-keys` cuentas. Solo crece con logins correctos de cuentas reales.
+- **Limitaciones.** Un administrador con IP dinámica o móvil, un reinicio, la caducidad de 30 días o un dispositivo nuevo hacen que su IP sea desconocida, y entonces el ataque original sigue funcionando contra su primer login. *Alternativa estructural, no implementada:* una **cookie de dispositivo** firmada con HMAC y ligada al email, emitida en el login correcto; no depende de la IP ni del reinicio (el atacante no puede presentarla). Queda como decisión pendiente en el plan. El estado vive en memoria (se pierde al reiniciar, como los contadores: tras un reinicio nadie es «conocido» hasta su siguiente acierto). Un **primer** login desde una IP nueva mientras la cuenta está bloqueada sigue rechazado hasta que caduque el bloqueo, y se puede seguir bloqueando a propósito para las IPs desconocidas. Tras un proxy, un NAT o un `/64` compartido, la «IP conocida» es la del grupo: quien la comparta con el titular comparte su contador.
+
+### 11.3 Limitaciones conocidas
 
 - **Vive en memoria.** Si la aplicación se ejecuta en varias copias (réplicas), cada una lleva su cuenta y el límite real se multiplica; un reinicio lo pone a cero. Para escalar habría que moverlo a un almacén compartido como Redis.
-- **La IP.** Se usa `request.getRemoteAddr()`. Detrás de un proxy inverso (nginx, un balanceador) esa IP sería la del proxy; por eso el perfil `prod` activa `server.forward-headers-strategy=native`, que hace que Tomcat lea la IP real de la cabecera `X-Forwarded-For`. **Nunca se lee esa cabecera a mano**: un cliente podría falsificarla para evadir el límite.
-- **Bloqueo como arma.** Alguien puede bloquear 15 minutos la cuenta de otra persona fallando su login a propósito. Se acepta porque es temporal.
+- **La IP.** Se usa `request.getRemoteAddr()`. Detrás de un proxy inverso (nginx, un balanceador) esa IP sería la del proxy; por eso el perfil `prod` activa `server.forward-headers-strategy=native`, que hace que Tomcat lea la IP real de la cabecera `X-Forwarded-For`. **Nunca se lee esa cabecera a mano**: un cliente podría falsificarla para evadir el límite. Si se pone otro proxy (p. ej. un terminador TLS) delante de nginx, hay que configurar `set_real_ip_from`/`real_ip_header` en nginx: de lo contrario todos los clientes compartirían IP y, con ella, el límite por IP y la «IP conocida».
+- **Bloqueo como arma.** Alguien puede seguir bloqueando 15 minutos la cuenta de otra persona fallando su login a propósito, **pero ya no al titular que entra desde una IP conocida** (11.2). Se acepta porque es temporal y acotado.
 
 Los fallos se cuentan **también para emails que no existen**: si solo se contaran los existentes, el bloqueo delataría qué emails están registrados.
 
@@ -859,7 +901,11 @@ El registro público siempre crea `USER`. Los administradores solo se crean así
 
 1. Defines `ADMIN_EMAIL` y `ADMIN_PASSWORD` (y opcionalmente `ADMIN_USERNAME`) antes de arrancar.
 2. Al arrancar, `AdminAccountInitializer.run` valida los datos (email con `@`, usuario de 3 a 50 caracteres).
-3. Si ya existe un usuario con ese email, **no lo toca** (nunca sobrescribe una contraseña) y **no valida la contraseña configurada**: validarla solo serviría para que una instalación que funcionaba dejara de arrancar al endurecerse la política. Si esa contraseña no cumple la política, escribe un aviso en el log **sin la contraseña ni la regla que falla** (sería una pista sobre la contraseña de una cuenta activa). Si el nombre de usuario lo tiene otra cuenta, falla con un mensaje claro.
+3. Si ya existe un usuario con ese email **y es `ADMIN`**, **no lo toca** (nunca sobrescribe una contraseña) y **no valida la contraseña configurada**: validarla solo serviría para que una instalación que funcionaba dejara de arrancar al endurecerse la política. Si esa contraseña no cumple la política, escribe un aviso en el log **sin la contraseña ni la regla que falla** (sería una pista sobre la contraseña de una cuenta activa).
+   - **Si existe una cuenta con ese email que NO es `ADMIN`, la aplicación no arranca**, con un error que nombra `ADMIN_EMAIL` y dice qué hacer (elegir otro email o corregir/eliminar esa cuenta). **Nunca se promueve** una cuenta existente. *Por qué (auditoría de octubre de 2026):* antes bastaba `existsByEmail` y se daba por hecho que «el administrador ya existe». Como el registro es público, un anónimo que adivinara el email (o registrara el usuario `admin`) antes de que el operador configurase `ADMIN_*` dejaba la instancia **sin administrador** y con un log INFO que afirmaba lo contrario. Ahora el fallo es ruidoso, no silencioso.
+   - El mensaje también sugiere la salida si lo que quieres es arrancar sin administrador: dejar `ADMIN_EMAIL`/`ADMIN_PASSWORD` vacíos.
+   - Si el nombre de usuario lo tiene otra cuenta, también falla, con un mensaje que nombra `ADMIN_USERNAME`.
+   - La carrera entre «comprobar» y «guardar» (otra réplica, un registro simultáneo) se traduce al mismo error claro; si lo que ya existe es un `ADMIN` con ese email, no es un error.
 4. Si no existe, comprueba que `ADMIN_PASSWORD` cumple **la misma política que el registro** (capítulo 10.5). Si no, **la aplicación no arranca** y el error dice qué regla falla, nunca la contraseña. Después lo crea con rol `ADMIN` y la contraseña cifrada.
 
 Sin esas variables, no hace nada. Por eso, en el día a día, no tienes que preocuparte de él.
@@ -1152,7 +1198,7 @@ Las series se añadieron en octubre de 2026. Este capítulo reúne cómo funcion
 - `user_favorite_series`: «Mi lista» de series.
 - **Cascadas en la base de datos:** al borrar una serie se borran sus episodios, sus géneros y sus favoritos; al borrar un usuario, sus favoritos de series.
 - V3 **solo crea** tablas e índices (es segura sobre una base con datos), todas las restricciones tienen nombre (`pk_`, `fk_`, `ck_`, `uk_`, `idx_`) y **no usa `IF NOT EXISTS`**: si existiera ya una tabla `series` distinta, es mejor que falle de forma visible a que la adopte en silencio.
-- **Supabase:** las tablas nuevas nacen sin RLS. Tras arrancar la app con V3, hay que volver a ejecutar `docs/supabase-seguridad.sql`, que ya incluye las cuatro (capítulo 4.5).
+- **Supabase:** las tablas de V3 nacen sin RLS, pero el callback de Flyway (sección 5.4) las cierra en el mismo arranque; ya no hay que repetir el script a mano (capítulo 4.5). *(El aviso que lleva `V3__create_series.sql` en su cabecera quedó obsoleto, pero no se puede editar sin cambiar su checksum.)*
 
 En Java (`entity/Series`, `entity/Episode`): `Episode.series` es `LAZY` con `@OnDelete(CASCADE)`. No se usa `CascadeType.REMOVE`, que cargaría y borraría los episodios uno a uno cuando la base de datos ya lo hace. **No hay colección `Series.episodes`**, porque los episodios se piden siempre con una consulta ordenada y una colección invitaría al N+1. **Tampoco hay colección de series favoritas en `User`**, porque el filtro JWT carga `User` en cada petición. Los favoritos de series son `INSERT`/`DELETE` nativos en `SeriesRepository`, como los de películas.
 
@@ -1717,8 +1763,8 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1153 | `.\mvnw.cmd test` (desde `streambox/`) |
-| Backend (PostgreSQL real) | Testcontainers | 119 | Se ejecutan con el anterior (1272 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos es menor (95) |
+| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1256 | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (PostgreSQL real) | Testcontainers | 131 | Se ejecutan con el anterior (1387 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
 | Frontend (lógica y componentes) | Vitest, Testing Library | 779 | `npm run test` (desde `frontend/`) |
 | Frontend (flujos completos) | Playwright (Chromium) | 143 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 

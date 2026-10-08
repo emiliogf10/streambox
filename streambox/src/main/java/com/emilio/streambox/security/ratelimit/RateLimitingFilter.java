@@ -36,6 +36,15 @@ import jakarta.servlet.http.HttpServletResponse;
  * se lee a mano porque un cliente podría falsificarla para evadir el límite.
  * </p>
  *
+ * <p>
+ * Las direcciones IPv6 se agrupan por prefijo /64 ({@link ClientAddress}): un
+ * atacante con un /64 tiene 2<sup>64</sup> direcciones, y contar cada una por
+ * separado le permitiría saltarse el límite y llenar los contadores de claves.
+ * La IPv4 se cuenta por dirección. Los contadores tienen un tope de claves
+ * ({@code streambox.security.rate-limit.max-keys}), ver
+ * {@link SlidingWindowCounter}.
+ * </p>
+ *
  * <h2>Cómo se reconoce la ruta</h2>
  * <p>
  * Con los mismos {@link PathPatternRequestMatcher} que usan las reglas de
@@ -100,8 +109,8 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         this.registerRequest = matchers.matcher(HttpMethod.POST, REGISTER_PATH);
         this.loginRule = properties.login();
         this.registerRule = properties.register();
-        this.loginCounter = new SlidingWindowCounter(loginRule.window(), clock);
-        this.registerCounter = new SlidingWindowCounter(registerRule.window(), clock);
+        this.loginCounter = new SlidingWindowCounter(loginRule.window(), clock, properties.maxKeys());
+        this.registerCounter = new SlidingWindowCounter(registerRule.window(), clock, properties.maxKeys());
         this.errorWriter = errorWriter;
     }
 
@@ -112,13 +121,13 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             FilterChain filterChain) throws ServletException, IOException {
 
         if (loginRequest.matches(request)) {
-            String ip = request.getRemoteAddr();
+            String ip = ClientAddress.counterKey(request.getRemoteAddr());
             if (!loginCounter.tryAcquire(ip, loginRule.maxRequests())) {
                 reject(request, response, loginCounter.retryAfter(ip));
                 return;
             }
         } else if (registerRequest.matches(request)) {
-            String ip = request.getRemoteAddr();
+            String ip = ClientAddress.counterKey(request.getRemoteAddr());
             if (!registerCounter.tryAcquire(ip, registerRule.maxRequests())) {
                 reject(request, response, registerCounter.retryAfter(ip));
                 return;

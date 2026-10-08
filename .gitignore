@@ -70,3 +70,6 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 .next/
+
+# Grafo de conocimiento de graphify (se regenera; ver .graphifyignore y CLAUDE.md)
+graphify-out/

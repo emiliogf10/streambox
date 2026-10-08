@@ -13,12 +13,15 @@ import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
+import com.emilio.streambox.entity.Role;
+import com.emilio.streambox.entity.User;
 import com.emilio.streambox.repository.UserRepository;
 
 import ch.qos.logback.classic.Level;
@@ -46,6 +49,12 @@ class AdminAccountInitializerEdgeCasesTest {
         userRepository = mock(UserRepository.class);
     }
 
+    private static User account(Role role) {
+        User user = new User();
+        user.setRole(role);
+        return user;
+    }
+
     private AdminAccountInitializer initializer(String email, String username, String password) {
         return new AdminAccountInitializer(
                 new AdminProperties(email, username, password), userRepository, new BCryptPasswordEncoder());
@@ -59,7 +68,7 @@ class AdminAccountInitializerEdgeCasesTest {
      */
     @Test
     void siYaExisteArrancaConContrasenasQueLaPoliticaNuevaRechazaria() {
-        when(userRepository.existsByEmail("admin@test.com")).thenReturn(true);
+        when(userRepository.findByEmail("admin@test.com")).thenReturn(Optional.of(account(Role.ADMIN)));
         String tooLong = "Lince-Iberico-Donana-2026!Halcon-Peregrino-Gredos#Oso-Pardo-Somie";
         String tooManyBytes = "Contraseña-" + "ñ".repeat(31);
         assertEquals(65, tooLong.length());
@@ -82,7 +91,7 @@ class AdminAccountInitializerEdgeCasesTest {
      */
     @Test
     void siYaExisteArrancaAunqueLaContrasenaConfiguradaSeaCortaYSoloAvisa() {
-        when(userRepository.existsByEmail("admin@test.com")).thenReturn(true);
+        when(userRepository.findByEmail("admin@test.com")).thenReturn(Optional.of(account(Role.ADMIN)));
         String shortPassword = "Corta-1";
 
         List<ILoggingEvent> logs = captureLogs(() -> assertDoesNotThrow(
@@ -102,7 +111,7 @@ class AdminAccountInitializerEdgeCasesTest {
     /** Si la contraseña configurada cumple la política, no hay aviso. */
     @Test
     void siYaExisteYLaContrasenaCumpleNoHayAviso() {
-        when(userRepository.existsByEmail("admin@test.com")).thenReturn(true);
+        when(userRepository.findByEmail("admin@test.com")).thenReturn(Optional.of(account(Role.ADMIN)));
 
         List<ILoggingEvent> logs = captureLogs(
                 () -> initializer("admin@test.com", "admin", "una-contraseña-larga-123").run(null));

@@ -1,76 +1,73 @@
--- =============================================================================
--- supabase-seguridad.sql  (RESPALDO MANUAL: no es una migración de Flyway)
--- =============================================================================
+-- ===================================================================
+-- CALLBACK afterMigrate (SOLO PostgreSQL): cierra la API publica de Supabase.
 --
--- AHORA LO HACE LA APLICACION SOLA
---   Desde la correccion de la pista NV-4 de la auditoria de seguridad, el
---   backend cierra la API publica de Supabase automaticamente tras CADA
---   `migrate` de Flyway (tambien en los arranques sin migraciones nuevas):
---     streambox/src/main/resources/db/callback/postgresql/afterMigrate__close_public_api.sql
---   Las tablas que cree una migracion futura quedan cerradas en ese mismo
---   arranque, sin que nadie tenga que acordarse de repetir este paso.
+-- NO es una migracion versionada: no lleva version, no queda en
+-- flyway_schema_history, no tiene checksum y Flyway lo ejecuta tras CADA
+-- `migrate`, incluidos los arranques en los que no hay nada que migrar. Por eso
+-- tambien protege las tablas que cree una migracion futura (V4, V5...) sin que
+-- nadie tenga que acordarse de nada. Vive en una ubicacion propia del motor
+-- (`classpath:db/callback/{vendor}`, ver spring.flyway.locations): con H2, la
+-- base de los tests, Spring Boot busca db/callback/h2, que no existe, y no se
+-- ejecuta nada. ENABLE ROW LEVEL SECURITY y los roles de Supabase no existen en H2.
 --
---   Este script SOLO sirve para aplicar lo mismo SIN arrancar la aplicacion
---   (p. ej. para cerrar una base ya existente antes de la primera vez que la
---   app se conecte, o para repararla si el callback avisó de que no pudo). El
---   bloque DO de abajo es una copia EXACTA del cuerpo del callback; un test
---   (PostgresPublicApiClosureIntegrationTest) comprueba que siguen iguales, asi
---   que si editas uno edita el otro.
---
--- EL PROBLEMA QUE RESUELVE
+-- EL PROBLEMA
 --   Supabase publica automaticamente una API REST (PostgREST) sobre el esquema
---   `public`, accesible con la clave publica ("anon") y con la de los usuarios
---   de Supabase Auth ("authenticated"). Las tablas que crea Flyway viven en
---   `public` y Supabase les concede privilegios por defecto a esos roles, asi
---   que, sin esto, esa clave permitiria leer la tabla `users` (emails y hashes
---   de contrasena).
+--   `public` con los roles `anon` (clave publica) y `authenticated` (usuarios de
+--   Supabase Auth). Las tablas que crea Flyway viven en `public`, y Supabase les
+--   concede privilegios a esos roles por defecto (ALTER DEFAULT PRIVILEGES). La
+--   aplicacion NO usa esa API: conecta con el rol propietario (`postgres`), que
+--   se salta RLS. Pero la API es una segunda puerta a las mismas tablas (`users`
+--   con emails y hashes incluidos) y hasta ahora solo se cerraba a mano con
+--   docs/supabase-seguridad.sql, que protege unicamente las tablas existentes
+--   el dia que se ejecuta: las tablas nuevas de una migracion nacian abiertas.
 --
--- QUE HACE (defensa en profundidad)
---   1. Si no existen los roles `anon` ni `authenticated` (PostgreSQL local,
---      docker compose) no hace nada y no falla.
---   2. En TODAS las tablas de `public` que existan (incluida
---      flyway_schema_history; no hay lista que mantener ni falla si falta una,
---      p. ej. en una base sin las series de V3): activa RLS SIN politicas (con
---      RLS y sin politicas esos roles no ven ninguna fila; NO se usa FORCE, el
---      propietario sigue saltandose RLS) y les retira todos los privilegios.
---   3. Retira los privilegios sobre secuencias y funciones de `public` (en
---      funciones tambien a PUBLIC, que es quien concede EXECUTE por defecto).
---   4. ALTER DEFAULT PRIVILEGES: lo que se cree despues nace sin privilegios.
---   No toca objetos que pertenezcan a una extension.
---   La aplicacion NO se ve afectada: Spring Boot conecta con el rol `postgres`
---   (o `postgres.<id-del-proyecto>` por el pooler), que es propietario de las
---   tablas y en Supabase se salta RLS.
+-- QUE HACE (defensa en profundidad, en este orden)
+--   1. Si NO existen los roles `anon` ni `authenticated` (docker compose,
+--      PostgreSQL local, Testcontainers) no hace nada y no falla.
+--   2. En cada tabla de `public` (incluida flyway_schema_history): activa RLS
+--      SIN politicas (con RLS y sin politicas esos roles no ven ninguna fila) y
+--      les retira todos los privilegios. Tambien retira los de las vistas.
+--      NO usa FORCE ROW LEVEL SECURITY: el propietario debe seguir saltandose
+--      RLS, porque es el rol con el que conecta la aplicacion y Flyway.
+--   3. Retira sus privilegios sobre secuencias y funciones/procedimientos de
+--      `public`. En funciones se retira tambien a PUBLIC, porque PostgreSQL
+--      concede EXECUTE a PUBLIC por defecto y, sin eso, revocar solo a `anon`
+--      no cierra nada (heredan de PUBLIC).
+--   4. ALTER DEFAULT PRIVILEGES: los objetos que se creen DESPUES por el rol que
+--      ejecuta Flyway, por los propietarios de las tablas y por `postgres`
+--      nacen sin privilegios para esos roles. Es una segunda barrera: el propio
+--      callback del siguiente arranque cierra lo que se haya escapado.
+--   No toca objetos que pertenecen a una extension (p. ej. pgcrypto instalada en
+--   `public`): no son de StreamBox y revocar sus funciones romperia la extension.
 --
--- COMO EJECUTARLO
---   Pegalo ENTERO en el "SQL Editor" del panel de Supabase, con el rol
---   `postgres` (el que usa por defecto), y pulsa "Run". Es idempotente: se puede
---   ejecutar cuantas veces haga falta. Si algo no se puede cambiar por falta de
---   privilegios, avisa con un WARNING (pestana "Messages") en vez de fallar: un
---   WARNING significa que ese objeto sigue abierto.
+-- IDEMPOTENTE: se puede ejecutar todas las veces que haga falta. Solo hace
+-- ALTER TABLE donde RLS aun no esta activo (ese comando pide un bloqueo
+-- exclusivo de la tabla, y no queremos pedirlo en cada arranque).
 --
--- COMO COMPROBARLO
---   En el panel: Advisors > Security Advisor no debe mostrar tablas sin RLS.
---   O con SQL (ambas consultas deben salir vacias):
---     SELECT tablename FROM pg_tables
---      WHERE schemaname = 'public' AND NOT rowsecurity;
---     SELECT table_name, grantee, privilege_type
---       FROM information_schema.role_table_grants
---      WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated');
+-- COMPROMISO: FALLAR CERRADO O NO BLOQUEAR EL ARRANQUE
+--   Si una sentencia falla por falta de privilegios (42501: p. ej. el rol que
+--   ejecuta Flyway no es propietario de una tabla heredada, o es un rol de
+--   pooler sin permiso para cambiar los privilegios por defecto de otro rol),
+--   NO se aborta: se emite un RAISE WARNING que Flyway muestra en el log y se
+--   sigue con el resto de objetos. Se prefiere esto a "fallar cerrado" (abortar
+--   y que la aplicacion no arranque) porque este callback endurece algo que ya
+--   estaba abierto antes de el, no es un requisito de funcionamiento, y un fallo
+--   de permisos NO se arregla reintentando: una aplicacion que no arranca por
+--   esto convertiria un fallo de seguridad en una caida total sin ningun
+--   beneficio. A cambio hay que VIGILAR el log: un "WARNING" de este callback
+--   significa que algo sigue abierto. Solo se captura el error 42501; cualquier
+--   otro (un error de verdad) SI aborta el arranque. Para comprobar el
+--   resultado: docs/supabase-seguridad.sql (apartado COMO COMPROBARLO).
 --
--- LO QUE NO CUBRE (y hay que revisar en el panel de Supabase)
---   * Es privilegio de objeto, no de esquema: `anon` y `authenticated` conservan
---     USAGE sobre el esquema `public` (hace falta para otros usos de Supabase).
---   * Otros esquemas expuestos por la Data API (Settings > API > Exposed
---     schemas) y las funciones que se creen en el futuro: PostgreSQL concede
---     EXECUTE a PUBLIC por defecto y eso no se puede revocar solo para
---     `public`; el siguiente arranque de la app las cierra.
---   * Lo mas robusto es desactivar la Data API del proyecto si no se usa
---     (Settings > API), porque StreamBox accede por conexion directa.
+-- IMPACTO EN DATOS EXISTENTES: ninguno. No modifica filas ni columnas. La
+-- aplicacion no se ve afectada porque conecta con el propietario de las tablas.
+-- Si algun dia se conecta con un rol que NO sea propietario ni tenga BYPASSRLS,
+-- dejara de ver filas: RLS sin politicas lo bloquea todo para ese rol.
 --
--- NO ES PORTABLE: ENABLE ROW LEVEL SECURITY y los roles de Supabase son de
--- PostgreSQL (H2 no los entiende), por eso no es una migracion versionada: rompería
--- los tests con H2.
--- =============================================================================
+-- Cuidado al editar: Flyway sustituye los marcadores de posicion de la forma
+-- dolar + llave (tambien dentro de comentarios), asi que no los escribas; y el
+-- cuerpo de DO va entre $callback$ para que sus `;` no corten la sentencia.
+-- ===================================================================
 
 DO $callback$
 DECLARE
