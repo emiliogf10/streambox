@@ -11,6 +11,67 @@ servers:
 - url: http://localhost:8080
   description: Backend local (perfil dev)
 paths:
+  /api/users/me/password:
+    put:
+      tags:
+      - password-controller
+      summary: Cambia mi contraseña
+      description: 'Cambia la contraseña de la cuenta autenticada comprobando antes la actual. Cierra todas las demás sesiones
+        de la cuenta (sus refresh tokens quedan revocados) y mantiene la actual: la respuesta trae en Set-Cookie un streambox_token
+        y un streambox_refresh nuevos (una sesión nueva, así que tampoco sirve una copia anterior del refresh token de esta).
+        Los JWT de acceso ya emitidos a otras sesiones no se pueden revocar: siguen valiendo hasta caducar (como mucho 15
+        minutos), pero ya no se pueden renovar. Si la contraseña actual es incorrecta no se cambia nada.'
+      operationId: changePassword
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+        required: true
+      responses:
+        '204':
+          description: Contraseña cambiada; sin cuerpo, con las cookies streambox_token y streambox_refresh nuevas en Set-Cookie
+        '400':
+          description: 'Código CURRENT_PASSWORD_INCORRECT: la contraseña actual no es correcta (mensaje en validationErrors.currentPassword;
+            gasta uno de los 5 intentos). Código VALIDATION_ERROR: datos no válidos, con un mensaje por campo en validationErrors:
+            currentPassword vacía o de más de 1024 caracteres; newPassword que no cumple la política (12 a 64 caracteres,
+            como mucho 72 bytes, no común, sin el nombre de usuario ni la parte del email anterior a la @) o igual a la actual.
+            Los errores de la política no gastan intento'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 'Código RATE_LIMIT_EXCEEDED: demasiados intentos con la contraseña actual incorrecta (5 cada 15 minutos
+            por cuenta); la cabecera Retry-After indica los segundos que hay que esperar. No bloquea el login'
+          headers:
+            Retry-After:
+              description: Segundos que hay que esperar antes de volver a intentarlo (entero, mínimo 1).
+              required: true
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
   /api/series/{seriesId}/episodes/{episodeId}:
     put:
       tags:
@@ -1291,6 +1352,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/auth/logout-all:
+    post:
+      tags:
+      - auth-controller
+      summary: Cierra sesión en todos los dispositivos
+      description: 'Revoca todas las sesiones de la cuenta autenticada, incluida la actual: ningún refresh token suyo vuelve
+        a servir para renovar. Borra las cookies streambox_token y streambox_refresh de esta petición (Set-Cookie con Max-Age=0).
+        Sin cuerpo. Los JWT de acceso ya emitidos son stateless y no se pueden revocar: siguen valiendo hasta caducar (como
+        mucho 15 minutos), pero ya no se pueden renovar.'
+      operationId: logoutAll
+      responses:
+        '204':
+          description: Todas las sesiones revocadas y cookies borradas
+        '401':
+          description: El usuario no está autenticado (no se revoca ni se borra nada)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 'Código INTERNAL_ERROR: no se han podido revocar las sesiones (por ejemplo, la base de datos no responde).
+            No se borran las cookies: el cliente debe reintentar en lugar de dar las sesiones por cerradas'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
   /api/auth/login:
     post:
       tags:
@@ -1364,6 +1461,57 @@ paths:
                 $ref: '#/components/schemas/UserResponse'
         '401':
           description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+    patch:
+      tags:
+      - user-controller
+      summary: Cambia mi nombre de usuario
+      description: 'Cambia el nombre de usuario de la cuenta autenticada. El nombre se normaliza (sin espacios ni caracteres
+        invisibles en los extremos y con los espacios interiores repetidos reducidos a uno) y debe tener entre 3 y 50 caracteres.
+        Si coincide con el actual se responde 200 sin cambios. El correo electrónico, el rol y la contraseña no se pueden
+        cambiar aquí: enviarlos da 400.'
+      operationId: updateCurrentUser
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+        required: true
+      responses:
+        '200':
+          description: Nombre cambiado (o sin cambios si era el mismo)
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: 'Datos no válidos (código VALIDATION_ERROR, un mensaje por campo en validationErrors): nombre ausente
+            o de longitud no válida tras normalizarlo, o se ha enviado email, role o password'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: El nombre de usuario ya está en uso (código USER_ALREADY_EXISTS)
           content:
             application/json:
               schema:
@@ -1754,6 +1902,26 @@ paths:
       - bearerAuth: []
 components:
   schemas:
+    ChangePasswordRequest:
+      type: object
+      properties:
+        currentPassword:
+          type: string
+          description: 'Contraseña actual de la cuenta. Si no es correcta: 400 CURRENT_PASSWORD_INCORRECT; tras 5 fallos en
+            15 minutos, 429.'
+          example: mi-contraseña-de-siempre
+          maxLength: 1024
+          minLength: 0
+        newPassword:
+          type: string
+          description: 'Contraseña nueva: entre 12 y 64 caracteres y como máximo 72 bytes en UTF-8, no común ni trivial, sin
+            el nombre de usuario ni la parte del email anterior a la @, y distinta de la actual.'
+          example: tres palabras al azar 2026
+          maxLength: 64
+          minLength: 12
+      required:
+      - currentPassword
+      - newPassword
     EpisodeRequest:
       type: object
       properties:
@@ -2058,6 +2226,18 @@ components:
       required:
       - email
       - password
+    UpdateProfileRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          description: Nuevo nombre de usuario. Se quitan los espacios (y caracteres invisibles) de los extremos y los interiores
+            repetidos se reducen a uno; tras ello debe tener entre 3 y 50 caracteres y no estar en uso por otra cuenta.
+          example: cinefila_88
+          maxLength: 50
+          minLength: 3
+      required:
+      - username
     SeriesResponse:
       type: object
       properties:
@@ -2188,6 +2368,9 @@ components:
 
             - VALIDATION_ERROR (400): datos o parámetros no válidos; el detalle por campo va en validationErrors.
 
+            - CURRENT_PASSWORD_INCORRECT (400): al cambiar la contraseña, la actual no es correcta; el detalle va en validationErrors.currentPassword.
+            No es un 401: la sesión sigue siendo válida.
+
             - MALFORMED_REQUEST (400 y otros 4xx genéricos): la petición no se puede interpretar (JSON mal formado, tipos
             incorrectos).
 
@@ -2206,7 +2389,8 @@ components:
             (este error también va en JSON).
 
             - RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login, registro o renovación de sesión (POST /api/auth/refresh)
-            desde la misma IP; ver la cabecera Retry-After.
+            desde la misma IP, o demasiados intentos con la contraseña actual incorrecta en PUT /api/users/me/password (por
+            cuenta: 5 cada 15 minutos); ver la cabecera Retry-After.
 
             - ACCOUNT_LOCKED (429): la cuenta está bloqueada temporalmente por logins fallidos; ver la cabecera Retry-After.
 
@@ -2235,6 +2419,7 @@ components:
           - SERIES_NOT_IN_FAVORITES
           - CSRF_REJECTED
           - SESSION_EXPIRED
+          - CURRENT_PASSWORD_INCORRECT
           example: RESOURCE_NOT_FOUND
         message:
           type: string
@@ -2249,8 +2434,8 @@ components:
           type: object
           additionalProperties:
             type: string
-          description: 'Solo en los 400 con código VALIDATION_ERROR: un mensaje por cada campo o parámetro no válido (nombre
-            del campo → mensaje). En el resto de errores no aparece (no se envía con null).'
+          description: 'Solo en los 400 con código VALIDATION_ERROR o CURRENT_PASSWORD_INCORRECT: un mensaje por cada campo
+            o parámetro no válido (nombre del campo → mensaje). En el resto de errores no aparece (no se envía con null).'
           example:
             title: El título es obligatorio
         remainingAttempts:

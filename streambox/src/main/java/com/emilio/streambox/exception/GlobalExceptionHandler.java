@@ -179,6 +179,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 exception.getMessage(), request);
     }
 
+    /**
+     * Cambio de contraseña con la contraseña actual incorrecta: 400
+     * {@code CURRENT_PASSWORD_INCORRECT} con el detalle en el campo
+     * {@code currentPassword}, para que el formulario lo muestre junto a él.
+     */
+    @ExceptionHandler(CurrentPasswordIncorrectException.class)
+    public ResponseEntity<ErrorResponse> handleCurrentPasswordIncorrect(
+            CurrentPasswordIncorrectException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, ErrorCode.CURRENT_PASSWORD_INCORRECT,
+                exception.getMessage(), request,
+                Map.of(CurrentPasswordIncorrectException.FIELD, exception.getMessage()));
+    }
+
     @ExceptionHandler(AmbiguousTitleException.class)
     public ResponseEntity<ErrorResponse> handleAmbiguousTitle(
             AmbiguousTitleException exception, HttpServletRequest request) {

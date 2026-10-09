@@ -143,9 +143,9 @@ export function configureAuth(bridge: AuthBridge | null): void {
 //    la que SALIÓ; si al recibir su 401 la generación ya es otra, es que alguien
 //    renovó mientras viajaba (salió con la cookie vieja): basta con repetirla. Las
 //    demás pestañas avisan de sus renovaciones por un `BroadcastChannel`.
-// 3. **Las operaciones que cambian las cookies van en fila** (login, logout y
-//    refresh, con el Web Lock {@link SESSION_LOCK_NAME}, común a todas las
-//    pestañas). Así un refresh no se cruza con un logout: si la respuesta del
+// 3. **Las operaciones que cambian las cookies van en fila** (login, logout,
+//    refresh, cambio de contraseña y logout global, con el Web Lock
+//    {@link SESSION_LOCK_NAME}, común a todas las pestañas). Así un refresh no se cruza con un logout: si la respuesta del
 //    refresh llegara después de la del logout, volvería a dejar en el navegador
 //    una cookie de acceso válida y, al recargar, se «resucitaría» la sesión.
 // ---------------------------------------------------------------------------
@@ -156,6 +156,23 @@ export function configureAuth(bridge: AuthBridge | null): void {
  * posible) y se ejecutan dentro del lock de sesión.
  */
 const SESSION_COOKIE_PATHS = new Set(['/auth/login', '/auth/logout', '/auth/refresh']);
+
+/**
+ * Rutas AUTENTICADAS que también cambian las cookies de sesión: el cambio de
+ * contraseña (entrega cookies de una sesión nueva y revoca la anterior) y
+ * «Cerrar sesión en todos los dispositivos» (revoca todas y las borra).
+ *
+ * Van dentro del lock de sesión por el mismo motivo que login y logout: si un
+ * refresh (de esta u otra pestaña) saliera con el refresh token viejo y su
+ * respuesta llegara DESPUÉS, el servidor lo rechazaría como revocado y su
+ * `Set-Cookie` de borrado se llevaría por delante las cookies nuevas (o, en el
+ * logout global, podría devolver unas válidas). A diferencia de
+ * {@link SESSION_COOKIE_PATHS}, un 401 aquí sí se arregla renovando: la
+ * petición necesita un JWT de acceso válido, y tras 15 minutos en el perfil ya
+ * habrá caducado. No hay bloqueo mutuo: el lock solo abarca cada envío, se
+ * suelta antes de renovar y la repetición vuelve a cogerlo.
+ */
+const SESSION_ROTATING_PATHS = new Set(['/users/me/password', '/auth/logout-all']);
 
 /** Ruta de la renovación de la sesión. */
 const REFRESH_PATH = '/auth/refresh';
@@ -574,11 +591,12 @@ export async function apiFetch<T = void>(path: string, options: ApiFetchOptions 
     credentials: 'same-origin',
     body: body === undefined ? undefined : JSON.stringify(body),
   };
-  const send = () => sendRequest(url, requestInit);
+  const send =
+    SESSION_COOKIE_PATHS.has(path) || SESSION_ROTATING_PATHS.has(path)
+      ? () => withSessionLock(() => sendRequest(url, { ...requestInit, signal: lockedRequestSignal(init.signal) }))
+      : () => sendRequest(url, requestInit);
 
-  const first = SESSION_COOKIE_PATHS.has(path)
-    ? await withSessionLock(() => sendRequest(url, { ...requestInit, signal: lockedRequestSignal(init.signal) }))
-    : await send();
+  const first = await send();
 
   if (first.res.status === 401 && mayRenewSession(path, isPublic, sessionKey)) {
     // Cancelada: nadie espera ya la respuesta; no se gasta un refresh por ella.

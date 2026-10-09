@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,7 +23,11 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.emilio.streambox.entity.Role;
+import com.emilio.streambox.entity.User;
+import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.AuthCookieService;
+import com.emilio.streambox.security.JwtService;
 
 import jakarta.servlet.http.Cookie;
 
@@ -67,6 +72,8 @@ class RefreshAndLogoutDatabaseFailureIntegrationTest {
     private static final String DB_ERROR_MESSAGE = "Conexión rechazada por el servidor de base de datos";
 
     @Autowired private MockMvc mockMvc;
+    @Autowired private UserRepository userRepository;
+    @Autowired private JwtService jwtService;
     @MockitoBean private RefreshTokenService refreshTokenService;
 
     /** Logout sin poder revocar: 500, sin borrar cookies y sin filtrar el detalle de la BD. */
@@ -99,6 +106,38 @@ class RefreshAndLogoutDatabaseFailureIntegrationTest {
                 .andReturn().getResponse();
 
         assertNoCookiesAndNoInternalDetail(response);
+    }
+
+    /**
+     * Cerrar sesión en todos los dispositivos sin poder revocar: 500, sin
+     * borrar cookies y sin filtrar el detalle de la BD (el cliente debe
+     * reintentar, no dar las sesiones por cerradas).
+     */
+    @Test
+    void conLaBaseDeDatosCaidaElLogoutAllDa500YNoBorraLasCookies() throws Exception {
+        User user = new User();
+        user.setUsername("logoutall-bd-caida");
+        user.setEmail("logoutall@bd-caida.test");
+        user.setPassword("no-se-usa");
+        user.setRole(Role.USER);
+        user.setCreatedAt(Instant.now());
+        user = userRepository.save(user);
+        try {
+            doThrow(new DataAccessResourceFailureException(DB_ERROR_MESSAGE))
+                    .when(refreshTokenService).revokeAllSessions(user.getId());
+
+            MockHttpServletResponse response = mockMvc.perform(post("/api/auth/logout-all")
+                            .header("X-Requested-With", "StreamBox")
+                            .cookie(new Cookie(AuthCookieService.COOKIE_NAME, jwtService.generateToken(user)),
+                                    new Cookie(AuthCookieService.REFRESH_COOKIE_NAME, WELL_FORMED_TOKEN)))
+                    .andExpect(status().isInternalServerError())
+                    .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                    .andReturn().getResponse();
+
+            assertNoCookiesAndNoInternalDetail(response);
+        } finally {
+            userRepository.delete(user);
+        }
     }
 
     private static void assertNoCookiesAndNoInternalDetail(MockHttpServletResponse response) throws Exception {

@@ -1,5 +1,6 @@
 import { useId, useRef } from 'react';
 import { Button } from './Button';
+import { FormAlert } from './FormAlert';
 import { Modal } from './Modal';
 
 /** Propiedades de {@link ConfirmDialog}. */
@@ -11,6 +12,14 @@ interface ConfirmDialogProps {
   confirmLabel: string;
   /** Mientras es `true` (operación en curso) no se puede cancelar y el botón de confirmar se bloquea. */
   busy?: boolean;
+  /** Texto del botón de confirmar mientras `busy` (por defecto «Procesando...»); mejor si dice qué se está haciendo. */
+  busyLabel?: string;
+  /**
+   * Error de la última confirmación. Se enseña DENTRO del diálogo (que sigue
+   * abierto) para que se pueda reintentar con el mismo botón o cancelar sin
+   * perder el contexto de lo que se estaba confirmando.
+   */
+  error?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -31,6 +40,8 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   busy = false,
+  busyLabel = 'Procesando...',
+  error = '',
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -56,12 +67,13 @@ export function ConfirmDialog({
         <p id={descriptionId} className="mb-6 text-sm leading-relaxed text-muted">
           {description}
         </p>
+        <FormAlert message={error} />
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <Button ref={cancelRef} variant="outline" onClick={onCancel} disabled={busy}>
             Cancelar
           </Button>
           <Button variant="danger" onClick={onConfirm} disabled={busy}>
-            {busy ? 'Procesando...' : confirmLabel}
+            {busy ? busyLabel : confirmLabel}
           </Button>
         </div>
       </div>

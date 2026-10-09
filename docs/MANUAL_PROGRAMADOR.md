@@ -840,6 +840,13 @@ Así, un token de acceso robado vale como mucho 15 minutos, y cerrar sesión **s
 
 **Logout:** exige `X-Requested-With: StreamBox`; sin ella, 403 `CSRF_REJECTED` sin revocar nada ni borrar cookies. ¿Por qué, si es «solo» cerrar sesión? Un formulario de otra web no manda las cookies (SameSite=Strict), pero la respuesta de esa navegación sí traería los `Set-Cookie` que las borran: cualquier web podría cerrarte la sesión por fastidiar. Con la cabecera hace falta un *preflight* que, sin CORS, falla. Con ella, revoca la familia del *refresh token* de la cookie (si la hay) y borra las dos cookies; responde 204 aunque no haya sesión. Si la base de datos falla, responde 500 **sin** borrar las cookies, y el frontend avisa en vez de fingir que cerró (capítulo 19.2). Un token de acceso copiado sigue valiendo hasta su `exp` (≤15 min), pero ya no se puede renovar.
 
+**Cambiar la contraseña (`PUT /api/users/me/password`) y cerrar sesión en todos los dispositivos (`POST /api/auth/logout-all`).** Decisiones del autor: cambiar la contraseña cierra las **demás** sesiones y mantiene la actual; «todos los dispositivos» cierra **todas**, también la actual.
+
+- **Cambio de contraseña** (`PasswordController` → `PasswordChangeService`): exige la contraseña actual (si no coincide, **400** `CURRENT_PASSWORD_INCORRECT`, no 401: la sesión es válida y un 401 haría que el frontend intentara renovar y te echara), aplica `PasswordPolicy` a la nueva y comprueba que sea distinta (solo después de verificar la actual, para no dar pistas). **Límite de intentos** por cuenta (`PasswordChangeAttemptService`: 5 fallos en 15 min → 429): sin él, quien te robe la sesión podría adivinar tu contraseña actual por fuerza bruta. BCrypt se calcula **fuera** de la transacción, y al guardar se bloquea la fila del usuario y se comprueba que el hash no ha cambiado entre medias (dos cambios cruzados: el segundo recibe 400 en vez de pisar al primero).
+- **Cómo se mantiene la sesión actual:** la cookie `streambox_refresh` tiene `Path=/api/auth`, así que el navegador **no la envía** a `/api/users/me/password` y el servidor no sabe cuál es «tu» sesión. Por eso revoca **todas** (`revokeAllSessions`, en dos pasadas por la misma carrera de READ COMMITTED que `revokeWholeFamily`) y abre una nueva para esta petición, en la misma transacción que guarda el hash: la respuesta (204) trae cookies nuevas, sigues dentro y una copia antigua de tu *refresh token* ya no sirve.
+- **Logout en todos los dispositivos:** revoca todas las sesiones del usuario y borra las dos cookies; con la BD caída responde 500 sin borrarlas.
+- **Lo que no cubre (asumido):** el token de acceso de los otros dispositivos sigue valiendo **hasta 15 minutos** (es *stateless*); los textos de la interfaz lo dicen. Cortarlo al instante exigiría una columna «credenciales cambiadas en» que el filtro comparase con el `iat` del JWT.
+
 **Limpieza:** `RefreshTokenCleanupConfig` programa cada hora `deleteExpired`, que borra las sesiones caducadas y los tokens caducados hace más de 3 días. Se conservan unos días los rotados porque son los que delatan una reutilización. Se desactiva con `streambox.auth.refresh.cleanup.enabled=false` (así está en el perfil `test`).
 
 **El frontend** (`lib/api.ts`) no ve nunca ninguno de los dos tokens. Si una petición recibe 401, pide un refresh (uno solo aunque fallen varias a la vez) y repite la petición una vez (capítulo 19.2).
@@ -1851,19 +1858,28 @@ Mientras se carga el usuario, se trata como usuario normal (falla cerrado). En l
 
 **Enlaces:** el estado vacío de la sección «Películas» de «Mi lista» lleva a `/peliculas`. El vacío general de «Mi lista» lleva a la portada, que mezcla películas y series.
 
-### 20.10 Perfil (`pages/ProfilePage.tsx` + `lib/profile.ts`)
+### 20.10 Perfil (`pages/ProfilePage.tsx`, `components/profile/` + `lib/profile.ts`)
 
 `/perfil` responde a «¿quién soy y qué he guardado?». Se llega desde **«Mi perfil»** en el menú de usuario de la barra (no está en la fila de navegación principal, que ya va justa de ancho). Es una ruta privada dentro de `AppShell`, como «Mi lista».
 
-**De dónde sale cada dato.** La página no hace ninguna petición propia: el usuario (nombre, correo, rol y fecha de alta) viene de `useAuth()` (`GET /api/users/me`) y las películas y series de `useFavorites()`, que `AppShell` ya cargó. Por eso no hay «títulos vistos», «horas», suscripción ni idioma: el modelo de datos no tiene historial de reproducción ni planes, y **no se inventan datos** para que la pantalla se parezca a un diseño.
+**De dónde sale cada dato.** Para ENSEÑAR los datos la página no hace ninguna petición propia (las únicas son las de «Editar perfil», abajo): el usuario (nombre, correo, rol y fecha de alta) viene de `useAuth()` (`GET /api/users/me`) y las películas y series de `useFavorites()`, que `AppShell` ya cargó. Por eso no hay «títulos vistos», «horas», suscripción ni idioma: el modelo de datos no tiene historial de reproducción ni planes, y **no se inventan datos** para que la pantalla se parezca a un diseño.
 
 **Qué enseña:**
 
-- *Cabecera:* avatar con la inicial, el rol (en mayúsculas con CSS `uppercase`, para que el lector de pantalla lea «Administrador» y no deletree), el nombre (el `<h1>`), «Miembro desde octubre de 2026» (formateado en UTC: la API da un instante UTC y, sin fijar la zona, un alta a las 00:30 del día 1 podría salir en el mes anterior), «Panel de administración» (solo `isAdmin`) y «Cerrar sesión». No hay «Editar perfil»: exigiría endpoints nuevos y un botón que no hace nada es peor que no tenerlo (queda en el plan como pendiente).
+- *Cabecera:* avatar con la inicial, el rol (en mayúsculas con CSS `uppercase`, para que el lector de pantalla lea «Administrador» y no deletree), el nombre (el `<h1>`), «Miembro desde octubre de 2026» (formateado en UTC: la API da un instante UTC y, sin fijar la zona, un alta a las 00:30 del día 1 podría salir en el mes anterior), «Panel de administración» (solo `isAdmin`) y «Cerrar sesión». No hay un botón «Editar perfil» genérico: cada dato se cambia en su fila de «Cuenta».
 - *Estadísticas:* películas en la lista, series en la lista y géneros distintos. Son una lista de descripción (`dl`): pares etiqueta → valor. Solo se pintan con la lista ya cargada; con la lista cargando, un «0» sería falso.
-- *Cuenta:* nombre, correo y contraseña. Los puntos son fijos (no se conoce la contraseña) y los lectores leen «Oculta».
+- *Cuenta* (`components/profile/AccountCard.tsx`): nombre, correo y contraseña. El nombre y la contraseña tienen un botón «Cambiar» (nombre accesible «Cambiar nombre» / «Cambiar contraseña») que abre su formulario en línea; el correo dice «No se puede cambiar: es el dato con el que inicias sesión.» (decisión del autor: es el `subject` del JWT y cambiarlo sin verificar el correo nuevo abriría la puerta a robos de cuenta). La contraseña no se muestra («No se muestra por seguridad.»): ya no hay puntos, que parecían un campo editable.
+- *Sesiones* (`components/profile/SessionsCard.tsx`): «Cerrar sesión en todos los dispositivos».
 - *Tus géneros:* los 6 más frecuentes de la lista con su recuento. `countGenres` cuenta **por id de género** (no por nombre) y cada título cuenta una vez por género; orden: recuento descendente, nombre e id.
 - *De tu lista:* hasta 5 títulos, primero películas (`FavoritesContext` las da de más reciente a más antigua) y después series, con el enlace «Ver toda mi lista». Reutiliza `MovieCard` y `SeriesCard`.
+
+**Editar perfil.** Tres acciones, cada una con su estado de envío, éxito y error, y ninguna cierra la sesión por un 400 (solo un 401 sin arreglo, que gestiona `apiFetch`):
+
+- *Nombre* (`UsernameForm`, `PATCH /api/users/me` con **solo** `{username}`): se normaliza como el servidor (`normalizeUsername`: recorta y reduce espacios) y se valida la longitud 3–50 (`usernameError`, compartida con el registro). Si no cambia, se cierra sin petición. Con el 200, `updateUser` de `AuthContext` sustituye el usuario por el de la respuesta: la cabecera y la barra cambian al instante, sin volver a pedir `/users/me`. El 409 `USER_ALREADY_EXISTS` y el 400 con `validationErrors.username` van junto al campo (con el foco); lo demás, en un aviso del formulario. Aviso: «Nombre de usuario cambiado a «X».». **No se avisa a las demás pestañas**: el canal `session-changed` les haría vaciar la caché y mostrar «Comprobando tu sesión...» por un dato cosmético (los permisos los decide el servidor); lo verán al recargar.
+- *Contraseña* (`PasswordForm`, `PUT /api/users/me/password` con `{currentPassword, newPassword}`): actual, nueva y repetición, validadas antes de enviar con `validatePasswordChange` (actual obligatoria, 12–64, distinta de la actual, repetición igual: así no se gastan los 5 intentos). `CURRENT_PASSWORD_INCORRECT` va junto a «Contraseña actual», cada `validationErrors` junto a su campo y el 429 muestra «Demasiados intentos con una contraseña actual incorrecta. Podrás volver a intentarlo en N.» con el botón «Reintentar en N» (`useCountdown`, como el login). Con el 204 llegan cookies nuevas y esta sesión sigue; aviso: «Contraseña cambiada. Se han cerrado tus otras sesiones; en otros dispositivos puede tardar hasta 15 minutos.» (su JWT de acceso vale hasta caducar).
+- *Todos los dispositivos* (`logoutAll` de `AuthContext` → `logoutAllOnServer` de `lib/logout.ts`, `POST /api/auth/logout-all`): `ConfirmDialog` (ahora con `busyLabel` y `error`) con el foco en «Cancelar». Con el 204, como el logout: sesión cerrada, aviso a las demás pestañas, `/login` y «Se ha cerrado la sesión en todos tus dispositivos. En los demás puede tardar hasta 15 minutos en cerrarse.». Con 500/red el servidor no ha borrado las cookies: la sesión sigue y el diálogo queda abierto con el motivo para reintentar (sin reintento automático, a diferencia del logout).
+
+**Lock de sesión.** El cambio de contraseña y el logout global cambian las cookies, así que `apiFetch` los mete en el mismo Web Lock que login, logout y refresh (`SESSION_ROTATING_PATHS` en `lib/api.ts`): si un refresh con el token viejo respondiera después, su `Set-Cookie` de borrado se llevaría las cookies nuevas. A diferencia del login, un 401 suyo sí se renueva: el lock solo abarca cada envío, se suelta para renovar y la repetición vuelve a cogerlo.
 
 **Dos fuentes, cada una con sus tres estados.** El usuario (cargando, error con «Reintentar» → `refreshUser`) y la lista (cargando, error con «Reintentar» → `reload`). Si la lista falla, la cuenta sigue visible y el error aparece solo dentro de la tarjeta «Tus géneros» (`ErrorState` con la prop `compact`, que no reserva media pantalla).
 
@@ -1871,7 +1887,7 @@ Mientras se carga el usuario, se trata como usuario normal (falla cerrado). En l
 
 **Accesibilidad.** Un solo `<h1>` (mientras carga o si falla, «Mi perfil»; con el usuario cargado, su nombre), secciones con `<h2>`, `<dl>` para los pares etiqueta-valor y el avatar `aria-hidden`. En el menú de usuario, «Mi perfil» es un `NavLink` (marca `aria-current` cuando ya estás en `/perfil`) y va **antes** de «Cerrar sesión»: con el teclado, el primer Tab desde el botón del menú llega a «Mi perfil» y el segundo a «Cerrar sesión» (lo comprueba el E2E de accesibilidad).
 
-**Tests:** `lib/profile.test.ts` (lógica pura), `pages/ProfilePage.test.tsx` (usuario y administrador, estados, lista vacía y llena), casos nuevos en `Navbar.test.tsx` y `App.test.tsx` (la ruta exige sesión) y `e2e/profile.spec.ts` (flujo completo y 320/375 px sin scroll horizontal).
+**Tests:** `lib/profile.test.ts` (lógica pura), `lib/validation.test.ts` (`normalizeUsername`, `validatePasswordChange`), `lib/api.test.ts` (las dos rutas en el lock y el 401 que se renueva), `pages/ProfilePage.test.tsx` (usuario y administrador, estados, lista vacía y llena, y cada éxito y error del contrato de «Editar perfil», incluida la cuenta atrás del 429 y el 500/502 del logout global), casos nuevos en `Navbar.test.tsx` y `App.test.tsx` (la ruta exige sesión) y `e2e/profile.spec.ts` (flujo completo, 320/375 px sin scroll horizontal, cambiar el nombre y verlo en la barra, cambiar la contraseña y entrar solo con la nueva, y cerrar sesión en todos los dispositivos; en los dos últimos, el refresh token de otra sesión deja de valer).
 ---
 
 ## 21. Frontend: accesibilidad, estilos e imágenes
@@ -1932,9 +1948,9 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1680 | `.\mvnw.cmd test` (desde `streambox/`) |
-| Backend (PostgreSQL real) | Testcontainers | 146 | Se ejecutan con el anterior (1826 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 897 | `npm run test` (desde `frontend/`) |
+| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1742 | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (PostgreSQL real) | Testcontainers | 147 | Se ejecutan con el anterior (1889 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 920 | `npm run test` (desde `frontend/`) |
 | Frontend (flujos completos) | Playwright (Chromium) | 150 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend

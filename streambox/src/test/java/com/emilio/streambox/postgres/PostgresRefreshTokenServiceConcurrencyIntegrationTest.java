@@ -105,6 +105,23 @@ class PostgresRefreshTokenServiceConcurrencyIntegrationTest extends PostgresInte
     }
 
     /**
+     * La misma carrera con «cerrar sesión en todos los dispositivos» (o un
+     * cambio de contraseña), que revoca por usuario: el {@code UPDATE} por
+     * {@code user_id} espera a B y no ve C. Sin la segunda pasada de
+     * {@code revokeAllSessions}, la sesión que estaba renovando en ese momento
+     * sobrevivía al cierre de todas.
+     */
+    @Test
+    void cerrarTodasLasSesionesDuranteUnaRotacionRevocaTambienElSucesorRecienCreado() throws Exception {
+        assertRevocationDuringRotationRevokesSuccessor("todas", oldToken -> {
+            Long userId = jdbc.queryForObject("SELECT user_id FROM refresh_tokens WHERE token_hash = ?",
+                    Long.class, sha256Hex(oldToken));
+            refreshTokenService.revokeAllSessions(userId);
+            return "revocadas";
+        }, "revocadas");
+    }
+
+    /**
      * Prepara la familia A → B (A rotado hace un minuto, fuera de la gracia),
      * deja sin confirmar una rotación real B → C y, mientras, ejecuta
      * {@code revocation} con A. Comprueba que la revocación espera a la

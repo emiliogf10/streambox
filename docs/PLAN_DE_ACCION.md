@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **1826** | 1680 con H2 y 146 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **897** | |
-| E2E (Playwright) | **150** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
+| Backend (JUnit) | **1889** | 1742 con H2 y 147 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
+| Frontend (Vitest) | **920** | |
+| E2E (Playwright) | **154** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
 
@@ -132,6 +132,12 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - Hecho el 2026-10-04: 12–64 caracteres, 72 bytes, lista de ~200 comunes, 5 caracteres distintos y sin usuario ni email.
   - Quedan: secuencias (`qwertyuiopasd`, `234567890123`); los espacios cuentan como caracteres distintos; invisibles **en medio** de la contraseña (`pass`+U+200B+`word1234` pasa la lista); y comparar con listas de contraseñas filtradas (HIBP, *k-anonymity*).
 - **Código de error del 401 (mejora 19)** — *Baja · BAJA*. El token ausente usa `INVALID_CREDENTIALS`; crear `UNAUTHENTICATED`.
+- **Editar perfil: incidencias bajas de la revisión de `qa`** (2026-10-09) — *Baja · BAJA*
+  1. (`security`) Las «IP conocidas» de la cuenta no se olvidan al cambiar la contraseña ni con `logout-all`: quien entró con la contraseña robada conserva su IP como conocida 30 días (con su propio contador, sin sufrir el bloqueo de la cuenta). Olvidarlas en `PasswordChangeService.replaceCredentials` (y quizá en `logoutAll`).
+  2. (`frontend`) Autocompletado: `PasswordForm` sin campo de usuario oculto (el gestor de contraseñas no actualiza la credencial guardada) y `UsernameForm` con `autoComplete="username"` (el navegador puede proponer el correo). Propuesta: `<input type="email" autoComplete="username" value={email} readOnly hidden>` y `autoComplete="nickname"`.
+  3. (`backend`) Normalización del nombre: los caracteres de formato (`\p{Cf}`) interiores no se quitan (`bo\u200Bb` sigue siendo gemelo de `bob`) y `AdminAccountInitializer` solo hace `trim()`.
+  4. (`frontend`) Si la respuesta de `PUT /password` se pierde tras confirmarse, el usuario reintenta con la vieja y lee «La contraseña actual no es correcta»: añadir una pista en el error de red.
+  - Huecos de test (`qa`): dos cambios de contraseña simultáneos contra PostgreSQL real; N intentos en paralelo con la actual incorrecta (como mucho 5 BCrypt).
 - **Login con una sesión anterior en el navegador** — *Baja · BAJA* (`security`). El login no revoca la familia del `streambox_refresh` que pudiera traer el navegador (solo pasa tras un logout fallido y otro login); esa sesión antigua vive hasta caducar (7 días). Arreglo: si el login trae esa cookie, `revokeFamilyOf`. (Revisión de `qa`, 2026-10-09.)
 - **Filtros registrados dos veces** — *Baja · BAJA* (`security`). `RateLimitingFilter` y `JwtAuthenticationFilter` son `@Bean` de tipo `Filter`, así que Spring Boot también los registra como filtros globales del servidor. Hoy no hace daño (`OncePerRequestFilter` evita la segunda ejecución), pero lo limpio es un `FilterRegistrationBean#setEnabled(false)` para cada uno.
 
@@ -209,11 +215,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - **Episodios favoritos** sueltos.
   - **Tráileres**, y una imagen horizontal `backdropUrl` para el banner.
   - **Valoraciones**: me gusta o estrellas, y nota media.
-- **Editar perfil** (2026-10-07) — *Opcional · MEDIA*
-  - El botón de la captura de referencia no se hizo porque exige backend nuevo.
-  - Propuesta: `PATCH /api/users/me` para el nombre y `PUT /api/users/me/password` (contraseña actual + nueva con `PasswordPolicy`, con límite de intentos como el login).
-  - **Decisión de diseño:** el correo es el `subject` del JWT y la identidad del login; cambiarlo cerraría la sesión (o exigiría reemitir el token). Mejor dejarlo fuera o hacerlo aparte.
-  - Reparto: `backend` + `security` (endpoints, política, rate limiting) y `frontend` (formulario).
+- ✅ ~~**Editar perfil**~~ — **hecho el 2026-10-09** (ver el [historial](#4-historial-de-trabajos)): cambiar nombre, cambiar contraseña y cerrar sesión en todos los dispositivos. El email no se puede cambiar (decisión del autor).
 - **Perfil: historial y suscripción** (2026-10-07) — *Opcional · ALTA*. La captura de referencia mostraba títulos vistos, horas, vistos recientemente y suscripción. No hay nada de eso en el modelo de datos: solo tendría sentido si se añade historial de reproducción (tabla nueva + endpoint).
 
 ### 2.10 Tests, herramientas y notas informativas
@@ -351,6 +353,16 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
 
+### 2026-10-09 · Editar perfil: nombre, contraseña y cerrar sesión en todos los dispositivos
+
+- **Decisiones del autor:** el email **no** se puede cambiar; cambiar la contraseña cierra las **demás** sesiones y mantiene la actual; «Cerrar sesión en todos los dispositivos» cierra **todas**, también la actual.
+- **Backend** (`backend`): `PATCH /api/users/me` cambia solo el nombre (`email`/`role`/`password` → 400; 409 si está en uso, también ante la carrera con `UNIQUE`). El registro usa ya la misma normalización del nombre (antes solo `trim()`: permitía un «gemelo» con espacio duro).
+- **Seguridad** (`security`): `PUT /api/users/me/password` (exige la actual: si no, 400 `CURRENT_PASSWORD_INCORRECT`; `PasswordPolicy`; 5 fallos en 15 min por cuenta → 429; BCrypt fuera de la transacción y comprobación de que el hash no cambió entre medias). Como la cookie del *refresh* (`Path=/api/auth`) no viaja a esa ruta, revoca **todas** las sesiones y abre una nueva para la actual en la misma transacción. `POST /api/auth/logout-all` revoca todas y borra las cookies. Los otros dispositivos pueden tardar hasta 15 min (token de acceso *stateless*). Manual cap. 10.4 bis.
+- **Frontend** (`frontend`): tarjetas «Cuenta» (nombre y contraseña editables; el correo, explicado como no editable) y «Sesiones» (con confirmación) en `/perfil` (`components/profile/*`); cambio de contraseña y logout global dentro del Web Lock de sesión; comprobado con `agent-browser` a 375 y 1280 px, como USER y ADMIN.
+- **Documentación de la API:** OpenAPI regenerado (40 operaciones) y colección de Postman ampliada: **Newman 79/79 peticiones y 147/147 aserciones**.
+- **Revisión de `qa`:** apta (sin incidencias críticas ni altas; 2 mutaciones detectadas). Las 4 bajas quedan en la sección 2.
+- **Tests:** backend de 1826 a **1889**; Vitest de 897 a **920**; E2E de 150 a **154**. Hubo dos cortes por el límite de sesión de la API, retomados desde `docs/TRABAJO_EN_CURSO.md` (ya borrado).
+
 ### 2026-10-09 · Los avisos de una pestaña oculta ya no se pierden (revisión visual del autor)
 
 - **Problema** (lo vio el autor al probar dos pestañas): el aviso «Se ha cerrado la sesión en otra pestaña…» salía en la pestaña de fondo y su cuenta atrás de 5 s corría igual; al volver a ella ya había desaparecido. Pasaba con cualquier aviso nacido en una pestaña oculta.
@@ -452,7 +464,7 @@ Cada arreglo, revisado por `qa`, encontró el siguiente. Todos tienen un test qu
 Solo frontend, con el agente `frontend`; el orquestador verificó después con las suites reales y capturas. Ruta privada nueva `/perfil`, desde «Mi perfil» en el menú de usuario. Diseño tomado de una captura de referencia, pero con los tokens, la tipografía y los componentes de la app.
 
 - **Qué muestra (todo con datos reales):** cabecera (avatar con la inicial, rol, nombre, «Miembro desde mes año», «Panel de administración» solo para ADMIN y «Cerrar sesión»); estadísticas «Películas / Series en mi lista» y «Géneros distintos»; tarjeta «Cuenta» (nombre, correo, contraseña oculta); tarjeta «Tus géneros» (los 6 más frecuentes de la lista, con recuento); y «De tu lista» (hasta 5 títulos, primero películas y luego series, con «Ver toda mi lista»).
-- **Qué de la captura NO se hizo y por qué:** «títulos vistos», «horas este mes» y «vistos recientemente» (no hay historial de reproducción), la tarjeta de suscripción y las preferencias de idioma y subtítulos (no existen esos conceptos). **«Editar perfil» no se implementó:** ver [2.9](#29-funcionalidades-nuevas).
+- **Qué de la captura NO se hizo y por qué:** «títulos vistos», «horas este mes» y «vistos recientemente» (no hay historial de reproducción), la tarjeta de suscripción y las preferencias de idioma y subtítulos (no existen esos conceptos). **«Editar perfil»** se hizo después, el 2026-10-09 (ver arriba en el historial).
 - **Código:** `pages/ProfilePage.tsx`, `lib/profile.ts` (funciones puras: `countGenres`, `pickListPreview`, `formatMemberSince`, `avatarInitial`, `roleLabel`), `components/ExploreLink.tsx` (extraído de «Mi lista» para compartirlo) y prop `compact` en `ErrorState`. Sin peticiones nuevas: el usuario viene de `AuthContext` y las listas de `FavoritesContext`. Si la lista falla o carga, la cuenta sigue visible y solo la tarjeta de géneros lo cuenta.
 - **Textos revisados por rol y estado:** con la lista vacía hay un único estado vacío (en «Tus géneros») y «Explorar películas» solo se pinta si hay películas visibles; «De tu lista» solo existe con la lista llena, así que «Ver toda mi lista» nunca lleva a una lista vacía.
 - **Tests:** Vitest de 729 a 772; E2E de 135 a 143 (`e2e/profile.spec.ts`, 8, incluido 320/375 px sin scroll horizontal). Cambio legítimo en `accessibility.spec.ts`: el menú de usuario tiene ahora dos acciones, así que el primer Tab llega a «Mi perfil».

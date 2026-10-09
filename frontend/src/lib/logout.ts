@@ -112,3 +112,62 @@ export async function logoutOnServer(canRetry: () => boolean = () => true): Prom
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// «Cerrar sesión en todos los dispositivos» (`POST /api/auth/logout-all`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Aviso de éxito del cierre global. Dice la verdad sobre los otros dispositivos:
+ * sus refresh tokens quedan revocados al momento, pero el JWT de acceso que ya
+ * tengan no se puede revocar (es *stateless*) y vale hasta 15 minutos más.
+ */
+export const LOGOUT_ALL_DONE =
+  'Se ha cerrado la sesión en todos tus dispositivos. En los demás puede tardar hasta 15 minutos en cerrarse.';
+
+/** Aviso si no se llegó al servidor (red caída o 502/503/504 del proxy). */
+export const LOGOUT_ALL_FAILED_NETWORK =
+  'No se han podido cerrar las sesiones: no hay conexión con el servidor. Tu sesión sigue abierta; inténtalo de nuevo.';
+
+/**
+ * Aviso si el servidor respondió con otro 5xx. El backend revoca ANTES de borrar
+ * las cookies, así que con un 500 no se ha cerrado nada: ni aquí ni en los demás.
+ */
+export const LOGOUT_ALL_FAILED_SERVER =
+  'No se han podido cerrar las sesiones: el servidor ha tenido un problema. No se ha cerrado ninguna; inténtalo de nuevo.';
+
+/** Aviso para cualquier otro rechazo (403, 429...): no se inventa un motivo que no se conoce. */
+export const LOGOUT_ALL_FAILED_OTHER = 'No se han podido cerrar las sesiones. Tu sesión sigue abierta; inténtalo de nuevo.';
+
+/**
+ * Pide al servidor que cierre TODAS las sesiones de la cuenta, incluida esta
+ * (`POST /api/auth/logout-all`). Nunca lanza.
+ *
+ * Diferencias con {@link logoutOnServer}, y por qué:
+ * - **No es `public`**: el servidor necesita saber de quién son las sesiones (lo
+ *   saca del JWT). Si el de acceso caducó, `apiFetch` renueva y repite; si ya no
+ *   se puede renovar, cierra la sesión con su aviso de «sesión caducada».
+ * - **Un 401 no es éxito**: en el logout normal significa «ya no había sesión»;
+ *   aquí, que el servidor no llegó a revocar las DEMÁS. Se devuelve como fallo
+ *   (quien llama ve que la sesión ya cambió y no enseña nada más).
+ * - **Sin reintento automático**: se lanza desde un diálogo de confirmación que
+ *   sigue abierto con el error y el mismo botón para reintentar; un reintento
+ *   oculto solo alargaría la espera.
+ *
+ * Va en el lock de sesión (ver `SESSION_ROTATING_PATHS` en `api.ts`).
+ */
+export async function logoutAllOnServer(): Promise<LogoutResult> {
+  try {
+    await apiFetch('/auth/logout-all', { method: 'POST' });
+    return { closed: true };
+  } catch (error) {
+    // Un 2xx con cuerpo ilegible: el servidor respondió con éxito y el Set-Cookie ya llegó.
+    if (error instanceof ApiError && error.status >= 200 && error.status < 300) return { closed: true };
+    if (!(error instanceof ApiError)) return { closed: false, message: LOGOUT_ALL_FAILED_OTHER };
+    if (error.status === 0 || UNREACHABLE_STATUSES.has(error.status)) {
+      return { closed: false, message: LOGOUT_ALL_FAILED_NETWORK };
+    }
+    if (error.status >= 500) return { closed: false, message: LOGOUT_ALL_FAILED_SERVER };
+    return { closed: false, message: LOGOUT_ALL_FAILED_OTHER };
+  }
+}

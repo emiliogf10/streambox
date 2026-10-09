@@ -7,7 +7,15 @@
  * lo hace `RegisterPage`, que tiene su propio test).
  */
 import { describe, expect, it } from 'vitest';
-import { PASSWORD_MAX, PASSWORD_MIN, USERNAME_MAX, USERNAME_MIN, validateRegistration } from './validation';
+import {
+  PASSWORD_MAX,
+  PASSWORD_MIN,
+  USERNAME_MAX,
+  USERNAME_MIN,
+  normalizeUsername,
+  validatePasswordChange,
+  validateRegistration,
+} from './validation';
 
 /** Datos válidos de partida; cada test cambia solo un campo. */
 const valid = { username: 'ana', email: 'ana@example.com', password: 'Faro-nube-2026' };
@@ -83,5 +91,44 @@ describe('validateRegistration', () => {
     const errors = validateRegistration({ username: 'a', email: 'x', password: '1' });
 
     expect(Object.keys(errors).sort()).toEqual(['email', 'password', 'username']);
+  });
+});
+
+describe('normalizeUsername (como el servidor en PATCH /api/users/me)', () => {
+  it('quita los espacios de los extremos y reduce a uno los interiores repetidos', () => {
+    expect(normalizeUsername('  ana   maría	 ')).toBe('ana maría');
+    expect(normalizeUsername('ana')).toBe('ana');
+  });
+});
+
+describe('validatePasswordChange', () => {
+  const valid = { currentPassword: 'vieja', newPassword: 'n'.repeat(PASSWORD_MIN), confirmPassword: 'n'.repeat(PASSWORD_MIN) };
+
+  it('sin errores con datos válidos (la actual no aplica la política: cuentas antiguas)', () => {
+    expect(validatePasswordChange(valid)).toEqual({});
+  });
+
+  it('exige la contraseña actual y la repetición', () => {
+    expect(validatePasswordChange({ ...valid, currentPassword: '', confirmPassword: '' })).toEqual({
+      currentPassword: 'Introduce tu contraseña actual.',
+      confirmPassword: 'Repite la nueva contraseña.',
+    });
+  });
+
+  it.each([PASSWORD_MIN - 1, PASSWORD_MAX + 1])('una nueva de %i caracteres tiene el mismo error que el registro', (length) => {
+    const newPassword = 'n'.repeat(length);
+    expect(validatePasswordChange({ ...valid, newPassword, confirmPassword: newPassword }).newPassword).toBe(
+      `La contraseña debe tener entre ${PASSWORD_MIN} y ${PASSWORD_MAX} caracteres.`,
+    );
+  });
+
+  it('la nueva debe ser distinta de la actual y la repetición coincidir (sin recortar espacios)', () => {
+    const same = 'misma-contraseña-larga';
+    expect(validatePasswordChange({ currentPassword: same, newPassword: same, confirmPassword: same }).newPassword).toBe(
+      'La nueva contraseña debe ser distinta de la actual.',
+    );
+    expect(validatePasswordChange({ ...valid, confirmPassword: `${valid.newPassword} ` }).confirmPassword).toBe(
+      'Las contraseñas no coinciden.',
+    );
   });
 });

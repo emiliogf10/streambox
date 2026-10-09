@@ -2,6 +2,7 @@ package com.emilio.streambox.controller;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.emilio.streambox.dto.LoginRequest;
 import com.emilio.streambox.exception.SessionExpiredException;
 import com.emilio.streambox.security.AuthCookieService;
+import com.emilio.streambox.security.AuthenticatedUser;
 import com.emilio.streambox.security.refresh.RefreshTokenService;
 import com.emilio.streambox.security.refresh.SessionTokens;
 import com.emilio.streambox.service.AuthenticationService;
@@ -20,6 +22,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -28,7 +31,8 @@ import jakarta.validation.Valid;
  * Controlador REST de la autenticación ({@code /api/auth}).
  *
  * <p>
- * Es público: no requiere token, porque su función es precisamente
+ * Es público (salvo {@code /logout-all}, que necesita saber de quién son las
+ * sesiones): no requiere token, porque su función es precisamente
  * entregarlo. La lógica está en {@link AuthenticationService} (credenciales,
  * bloqueo de cuentas) y en {@link RefreshTokenService} (rotación y revocación
  * de los refresh tokens); aquí solo se traducen sus resultados a cookies.
@@ -231,6 +235,55 @@ public class AuthController {
             HttpServletResponse response) {
 
         refreshTokenService.revokeFamilyOf(refreshToken);
+        response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.clearingCookie());
+        response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.clearingRefreshCookie());
+    }
+
+    /**
+     * Cierra la sesión en todos los dispositivos: revoca todas las familias de
+     * refresh tokens del usuario, también la de esta petición, y borra las dos
+     * cookies.
+     *
+     * <p>
+     * A diferencia del logout, <b>exige estar autenticado</b> (regla en
+     * {@code SecurityConfig}): necesita saber de quién son las sesiones, y lo
+     * toma del token ({@link AuthenticatedUser}), nunca del cliente. Por eso no
+     * necesita la regla especial de la cabecera CSRF del logout: por cookie,
+     * {@code JwtAuthenticationFilter} exige {@code X-Requested-With} como en
+     * cualquier petición no segura; un formulario de otra web no lleva la
+     * cookie ({@code SameSite=Strict}), recibe un 401 antes de llegar aquí y su
+     * respuesta no borra nada. Con {@code Authorization: Bearer} no hace falta
+     * la cabecera (el navegador no adjunta el Bearer solo).
+     * </p>
+     *
+     * <p>
+     * Como en el logout, primero se revoca y después se borran las cookies: si
+     * la base de datos falla, 500 sin tocar las cookies, y el cliente puede
+     * reintentar.
+     * </p>
+     *
+     * @param principal usuario autenticado de la petición
+     * @param response  respuesta en la que se añaden los {@code Set-Cookie} de borrado
+     */
+    @PostMapping("/logout-all")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @SecurityRequirement(name = "bearerAuth")
+    @Operation(summary = "Cierra sesión en todos los dispositivos", description = "Revoca todas las sesiones "
+            + "de la cuenta autenticada, incluida la actual: ningún refresh token suyo vuelve a servir para "
+            + "renovar. Borra las cookies streambox_token y streambox_refresh de esta petición (Set-Cookie con "
+            + "Max-Age=0). Sin cuerpo. Los JWT de acceso ya emitidos son stateless y no se pueden revocar: "
+            + "siguen valiendo hasta caducar (como mucho 15 minutos), pero ya no se pueden renovar.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Todas las sesiones revocadas y cookies borradas"),
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado (no se revoca ni "
+                    + "se borra nada)"),
+            @ApiResponse(responseCode = "500", description = "Código INTERNAL_ERROR: no se han podido revocar "
+                    + "las sesiones (por ejemplo, la base de datos no responde). No se borran las cookies: el "
+                    + "cliente debe reintentar en lugar de dar las sesiones por cerradas")
+    })
+    public void logoutAll(@AuthenticationPrincipal AuthenticatedUser principal, HttpServletResponse response) {
+
+        refreshTokenService.revokeAllSessions(principal.id());
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.clearingCookie());
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.clearingRefreshCookie());
     }

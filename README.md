@@ -104,6 +104,9 @@ La base de todos los endpoints es `/api`.
 | `POST` | `/api/auth/refresh` | Público (cookie `streambox_refresh`) | Renueva la sesión sin contraseña: 204 con un JWT nuevo y el refresh token rotado. Exige `X-Requested-With: StreamBox` (403 `CSRF_REJECTED`); 401 `SESSION_EXPIRED` si el refresh no sirve (reutilizar uno ya rotado revoca la sesión); 429 por IP |
 | `POST` | `/api/auth/logout` | Público | Revoca la sesión del refresh token de la cookie y borra las dos cookies; 204 (403 `CSRF_REJECTED` sin `X-Requested-With: StreamBox`) |
 | `GET` | `/api/users/me` | `USER`, `ADMIN` | Consulta los datos del usuario autenticado |
+| `PATCH` | `/api/users/me` | `USER`, `ADMIN` | Cambia el nombre de usuario (`{"username"}`); el email, el rol y la contraseña no se cambian aquí (400); 409 si el nombre está en uso |
+| `PUT` | `/api/users/me/password` | `USER`, `ADMIN` | Cambia la contraseña (`{"currentPassword","newPassword"}`): 204 con cookies nuevas; cierra todas las demás sesiones; 400 `CURRENT_PASSWORD_INCORRECT`; 429 tras 5 fallos en 15 min |
+| `POST` | `/api/auth/logout-all` | `USER`, `ADMIN` | Cierra la sesión en todos los dispositivos, incluido este (revoca todas las sesiones y borra las cookies); 204 |
 | `GET` | `/api/users` | `ADMIN` | Lista todos los usuarios registrados (la regla es por ruta: cualquier método salvo el `POST` de registro, `HEAD` incluido, exige `ADMIN`) |
 
 ### 2. Mi Lista (Favoritos del Usuario)

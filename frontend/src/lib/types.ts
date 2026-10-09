@@ -110,6 +110,17 @@ export interface RegisterRequest {
   password: string;
 }
 
+/** Cuerpo de `PATCH /api/users/me` (cambiar mi nombre). Solo `username`: enviar `email`, `role` o `password` da 400. */
+export interface UpdateProfileRequest {
+  username: string;
+}
+
+/** Cuerpo de `PUT /api/users/me/password` (cambiar mi contraseña; responde 204 con cookies nuevas). */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
 /**
  * Cuerpo de `POST /api/movies` y `PUT /api/movies/{id}` (`MovieRequest`, solo
  * administradores). `PUT` sustituye la película completa, así que alta y

@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { announceSessionChange, apiFetch, configureAuth, isAbortError } from '../lib/api';
-import { logoutOnServer } from '../lib/logout';
+import { LOGOUT_ALL_DONE, logoutAllOnServer, logoutOnServer } from '../lib/logout';
+import type { LogoutResult } from '../lib/logout';
 import type { User } from '../lib/types';
 import { useToast } from './ToastContext';
 import { SESSION_CLOSED_ELSEWHERE, SESSION_SWITCHED_ELSEWHERE } from '../lib/sessionMessages';
@@ -79,6 +80,23 @@ interface AuthContextValue {
    * reintento): los botones «Cerrar sesión» lo usan para mostrar «Cerrando sesión...».
    */
   isLoggingOut: boolean;
+  /**
+   * «Cerrar sesión en todos los dispositivos» (`POST /auth/logout-all`): revoca
+   * todas las sesiones de la cuenta, incluida esta. Como {@link AuthContextValue.logout},
+   * solo cierra la sesión en pantalla si el servidor lo confirma (y entonces
+   * avisa a las demás pestañas y muestra un aviso de éxito). Nunca lanza:
+   * devuelve el resultado (con el aviso si falló, para enseñarlo en el diálogo)
+   * o `null` si no hizo nada (ya había un cierre en curso, no había sesión o la
+   * sesión cambió mientras tanto, p. ej. caducó).
+   */
+  logoutAll: () => Promise<LogoutResult | null>;
+  /**
+   * Sustituye el usuario mostrado por el que devuelve el servidor tras editarlo
+   * (`PATCH /users/me`), sin volver a pedirlo ni pasar por «cargando». Se ignora
+   * si es de otra cuenta o no hay usuario cargado (respuesta tardía de una
+   * sesión anterior).
+   */
+  updateUser: (user: User) => void;
 }
 
 /**
@@ -166,6 +184,15 @@ const AuthContext = createContext<AuthContextValue | null>(null);
  * `onSessionChangedElsewhere`). Sin esto, una pestaña con la sesión de A seguía
  * mostrando a A (y su lista) mientras sus peticiones ya salían con la cookie de C.
  * Las renovaciones también se coordinan entre pestañas (`lib/api.ts`).
+ *
+ * **Editar el perfil no se anuncia.** Cambiar el nombre (`updateUser`) o la
+ * contraseña no cambia QUIÉN está dentro: misma cuenta y mismas cookies (la
+ * contraseña las renueva, pero son comunes a todas las pestañas). Reutilizar
+ * `session-changed` haría que cada pestaña vaciara su caché, volviera a
+ * descargar «Mi lista» y enseñara «Comprobando tu sesión...» por un dato
+ * cosmético; el nombre no decide nada (los permisos los comprueba el servidor)
+ * y las demás pestañas lo verán al recargar. «Cerrar sesión en todos los
+ * dispositivos» sí se anuncia: ahí la sesión se cierra, como en el logout.
  *
  * Debe ir dentro de `ToastProvider` (muestra el aviso de sesión caducada) y de
  * `QueryClientProvider` (vacía la caché al cambiar de sesión).
@@ -255,6 +282,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoggingOut(false);
     }
   }, [applySession, toast]);
+
+  /**
+   * Cierre de sesión en todos los dispositivos. Mismo esquema que `logout` (y
+   * comparte con él `isLoggingOut`: no tiene sentido lanzar los dos a la vez),
+   * pero sin reintento automático: lo pide un diálogo que sigue abierto con el
+   * error para reintentar (ver `logoutAllOnServer`).
+   */
+  const logoutAll = useCallback(async (): Promise<LogoutResult | null> => {
+    if (sessionRef.current === 'none' || loggingOutRef.current) return null;
+    loggingOutRef.current = true;
+    setIsLoggingOut(true);
+    const startEpoch = epochRef.current;
+    try {
+      const result = await logoutAllOnServer();
+      // Un 401 sin arreglo ya cerró la sesión (con su aviso) mientras tanto.
+      if (epochRef.current !== startEpoch) return null;
+      if (result.closed) {
+        applySession('none');
+        announceSessionChange();
+        toast.success(LOGOUT_ALL_DONE);
+      }
+      return result;
+    } finally {
+      loggingOutRef.current = false;
+      setIsLoggingOut(false);
+    }
+  }, [applySession, toast]);
+
+  const updateUser = useCallback(
+    (next: User) => {
+      const current = resultRef.current;
+      if (current?.epoch !== epochRef.current || current.user?.id !== next.id) return;
+      storeResult({ ...current, user: next });
+    },
+    [storeResult],
+  );
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -403,8 +466,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       isLoggingOut,
+      logoutAll,
+      updateUser,
     }),
-    [session, current, user, userStatus, refreshUser, login, logout, isLoggingOut],
+    [session, current, user, userStatus, refreshUser, login, logout, isLoggingOut, logoutAll, updateUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

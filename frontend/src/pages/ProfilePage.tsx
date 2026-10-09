@@ -10,6 +10,9 @@ import { LoadingState } from '../components/LoadingState';
 import { MovieCard } from '../components/MovieCard';
 import { MovieDetailsModal } from '../components/MovieDetailsModal';
 import { SeriesCard } from '../components/SeriesCard';
+import { AccountCard } from '../components/profile/AccountCard';
+import { ProfileCard } from '../components/profile/ProfileCard';
+import { SessionsCard } from '../components/profile/SessionsCard';
 import { useAuth } from '../context/AuthContext';
 import { useFavorites } from '../context/FavoritesContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -20,35 +23,6 @@ import type { Movie, Series, User } from '../lib/types';
 
 /** Cuántos géneros enseña la tarjeta «Tus géneros» (los más frecuentes; más serían una nube de etiquetas). */
 const TOP_GENRES = 6;
-
-/** Texto que oyen los lectores de pantalla en lugar de los puntos de la contraseña (no se conoce ni se revela). */
-const HIDDEN_PASSWORD_LABEL = 'Oculta';
-
-/** Clases comunes de las tarjetas de datos: la misma superficie que el menú de usuario y las tarjetas del panel. */
-const CARD_CLASS = 'rounded-xl border border-line bg-surface p-5';
-
-/** Propiedades de {@link ProfileCard}. */
-interface ProfileCardProps {
-  title: string;
-  children: ReactNode;
-}
-
-/**
- * Tarjeta con título (`<h2>`) para agrupar datos del perfil. Es una `section`
- * con nombre accesible, así que aparece como región en la lista de puntos de
- * referencia del lector de pantalla.
- */
-function ProfileCard({ title, children }: ProfileCardProps) {
-  const headingId = useId();
-  return (
-    <section aria-labelledby={headingId} className={CARD_CLASS}>
-      <h2 id={headingId} className="mb-4 text-lg font-bold tracking-tight text-white">
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
 
 /** Propiedades de {@link ProfileHeader}. */
 interface ProfileHeaderProps {
@@ -70,8 +44,8 @@ interface ProfileHeaderProps {
  * - El avatar es decorativo (`aria-hidden`): su inicial repite el nombre del `<h1>`.
  * - «Panel de administración» solo se pinta con `isAdmin` (confirmado por el
  *   servidor). Es interfaz, no seguridad: el backend responde 403 a un `USER`.
- * - No hay «Editar perfil»: cambiar nombre, correo o contraseña exige endpoints
- *   que no existen, y un botón que no hace nada sería peor que no tenerlo.
+ * - «Editar perfil» no es un botón de la cabecera: cada dato se cambia en su
+ *   fila de la tarjeta «Cuenta» ({@link AccountCard}), junto al valor que cambia.
  * - «Cerrar sesión» espera la confirmación del servidor: mientras tanto dice
  *   «Cerrando sesión...» con `aria-disabled` (no `disabled`, que sacaría el foco
  *   del botón y obligaría a buscarlo de nuevo si falla y hay que reintentar).
@@ -133,22 +107,6 @@ function Stat({ value, label }: StatProps) {
     <div className="flex flex-col-reverse gap-1 rounded-xl border border-line bg-surface px-5 py-4">
       <dt className="text-sm text-muted">{label}</dt>
       <dd className="text-4xl font-bold tracking-tight text-white tabular-nums">{value}</dd>
-    </div>
-  );
-}
-
-/** Propiedades de {@link AccountRow}. */
-interface AccountRowProps {
-  label: string;
-  children: ReactNode;
-}
-
-/** Fila «etiqueta: valor» de la tarjeta «Cuenta» (un grupo `dt`/`dd`). */
-function AccountRow({ label, children }: AccountRowProps) {
-  return (
-    <div className="border-t border-line py-3 first:border-t-0 first:pt-0 last:pb-0">
-      <dt className="text-sm text-muted">{label}</dt>
-      <dd className="mt-0.5 break-all text-white">{children}</dd>
     </div>
   );
 }
@@ -291,8 +249,10 @@ function ListPreview({ movies, series, onOpenMovie }: ListPreviewProps) {
  *
  * **De dónde sale cada dato (no hay nada inventado).** El usuario viene de
  * `GET /api/users/me` (`AuthContext`) y todo lo demás de la lista compartida de
- * favoritos (`FavoritesContext`, que `AppShell` ya cargó): no hace falta ninguna
- * petición propia. Por eso no hay «títulos vistos», «horas», suscripción ni
+ * favoritos (`FavoritesContext`, que `AppShell` ya cargó): para enseñarlo no
+ * hace falta ninguna petición propia. Las únicas son las de «Editar perfil»
+ * (nombre y contraseña en {@link AccountCard}; cerrar sesión en todos los
+ * dispositivos en {@link SessionsCard}). Por eso no hay «títulos vistos», «horas», suscripción ni
  * preferencias de idioma: no existen ni historial de reproducción ni planes.
  *
  * **Estados.** Dos fuentes independientes, cada una con los tres estados:
@@ -358,18 +318,10 @@ export function ProfilePage() {
         )}
 
         <div className="grid items-start gap-4 lg:grid-cols-2">
-          <ProfileCard title="Cuenta">
-            <dl>
-              <AccountRow label="Nombre">{user.username}</AccountRow>
-              <AccountRow label="Correo">{user.email}</AccountRow>
-              <AccountRow label="Contraseña">
-                <span aria-hidden="true" className="tracking-widest">
-                  ••••••••
-                </span>
-                <span className="sr-only">{HIDDEN_PASSWORD_LABEL}</span>
-              </AccountRow>
-            </dl>
-          </ProfileCard>
+          <div className="flex flex-col gap-4">
+            <AccountCard user={user} />
+            <SessionsCard />
+          </div>
           <GenresCard
             status={status}
             errorMessage={errorMessage}

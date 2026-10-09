@@ -55,7 +55,11 @@ import com.emilio.streambox.security.JwtService;
  *   <li>Si llega un token ya revocado, alguien tiene una copia (el legítimo
  *       siempre usa el último): se revoca <b>toda la familia</b>, y el ladrón y
  *       la víctima tienen que volver a iniciar sesión. Se registra a
- *       {@code WARN} con el usuario y la familia, nunca el token.</li>
+ *       {@code WARN} con el usuario y la familia, nunca el token (solo si
+ *       quedaba algún token vivo; ver {@code revokeFamilyOnReuse}).</li>
+ *   <li>{@link #revokeAllSessions(Long)} cierra todas las familias del
+ *       usuario («cerrar sesión en todos los dispositivos» y cambio de
+ *       contraseña).</li>
  *   <li><b>Gracia</b> ({@code reuse-grace}, 10 s): dos pestañas que despiertan
  *       a la vez mandan el mismo token; la segunda llega cuando la primera ya
  *       lo ha rotado. Si el token se rotó hace menos de la gracia y su sucesor
@@ -205,6 +209,47 @@ public class RefreshTokenService {
     }
 
     /**
+     * Cierra <b>todas</b> las sesiones del usuario: revoca los tokens activos
+     * de todas sus familias ({@code POST /api/auth/logout-all} y cambio de
+     * contraseña).
+     *
+     * <p>
+     * Dos pasadas, por la misma carrera de READ COMMITTED que
+     * {@code revokeWholeFamily}: si otra petición está rotando un token del
+     * usuario (B → C), la primera sentencia espera a B y lo salta (ya
+     * revocado), pero no ve C, insertado después de empezar; la segunda, que
+     * empieza cuando la rotación ya ha confirmado, sí lo revoca. Una rotación
+     * que empiece después de la primera pasada encuentra su token ya
+     * bloqueado por esta transacción, espera y lo lee revocado.
+     * </p>
+     *
+     * <p>
+     * Lo que no cubre: un <b>login</b> que termine a la vez abre una familia
+     * nueva que puede quedar fuera (no hay ninguna fila previa que bloquear).
+     * Es un login con credenciales válidas en ese instante, no una sesión
+     * anterior que sobreviva. Tampoco revoca los JWT de acceso ya emitidos:
+     * son stateless y siguen valiendo hasta caducar (15 minutos como mucho),
+     * pero ya no se pueden renovar.
+     * </p>
+     *
+     * <p>
+     * Se une a la transacción de quien llama (el cambio de contraseña revoca y
+     * abre la familia nueva en la misma). Las sentencias masivas vacían la
+     * sesión de Hibernate: las entidades cargadas antes quedan desacopladas.
+     * </p>
+     *
+     * @param userId id del usuario (sale del token, nunca del cliente)
+     * @return número de tokens revocados entre las dos pasadas
+     */
+    @Transactional
+    public int revokeAllSessions(Long userId) {
+
+        Instant now = clock.instant();
+        int revoked = refreshTokenRepository.revokeAllByUserId(userId, now);
+        return revoked + refreshTokenRepository.revokeAllByUserId(userId, now);
+    }
+
+    /**
      * Revoca todos los tokens activos de la familia, también el sucesor que
      * una rotación simultánea esté creando en ese momento.
      *
@@ -301,9 +346,22 @@ public class RefreshTokenService {
     }
 
     /**
-     * Reutilización de un token ya revocado: alguien tiene una copia. Se
-     * revoca la familia entera y se avisa a {@code WARN}, con el usuario y la
-     * familia para poder investigar, nunca con el token ni su hash.
+     * Uso de un token ya revocado (fuera de la gracia). Se revoca la familia
+     * entera y, si quedaba algún token vivo, se avisa a {@code WARN}, con el
+     * usuario y la familia para poder investigar, nunca con el token ni su
+     * hash.
+     *
+     * <p>
+     * <b>Por qué solo avisa si revoca algo.</b> Si la familia tenía un token
+     * vivo, alguien la estaba usando con un token más nuevo que el presentado:
+     * hay dos copias de la sesión, posible robo. Si ya no quedaba ninguno, la
+     * sesión estaba cerrada (logout, «cerrar sesión en todos los
+     * dispositivos», cambio de contraseña o un robo ya detectado) y lo normal
+     * es que sea el propio dispositivo, que aún no lo sabe, el que intenta
+     * renovar: no hay nada que proteger y un {@code WARN} sería una falsa
+     * alarma por cada dispositivo tras cerrar todas las sesiones. Va a
+     * {@code DEBUG}. La respuesta es el mismo 401 en los dos casos.
+     * </p>
      */
     private void revokeFamilyOnReuse(RefreshToken token, Instant now) {
 
@@ -312,8 +370,13 @@ public class RefreshTokenService {
         Long userId = token.getUser().getId();
         UUID familyId = token.getFamilyId();
         int revoked = revokeWholeFamily(familyId, now);
-        LOGGER.warn("Reutilización de un refresh token ya revocado (posible robo): se revoca la familia {} "
-                + "del usuario {} ({} tokens activos revocados)", familyId, userId, revoked);
+        if (revoked > 0) {
+            LOGGER.warn("Reutilización de un refresh token ya revocado (posible robo): se revoca la familia {} "
+                    + "del usuario {} ({} tokens activos revocados)", familyId, userId, revoked);
+        } else {
+            LOGGER.debug("Refresh con un token de una sesión ya cerrada (familia {} del usuario {})",
+                    familyId, userId);
+        }
     }
 
     /**

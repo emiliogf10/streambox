@@ -63,6 +63,9 @@ public class ErrorResponse {
                     + "- DATA_INTEGRITY_VIOLATION (409): la operación choca con una restricción de los datos.\n"
                     + "- VALIDATION_ERROR (400): datos o parámetros no válidos; el detalle por campo va en "
                     + "validationErrors.\n"
+                    + "- CURRENT_PASSWORD_INCORRECT (400): al cambiar la contraseña, la actual no es correcta; "
+                    + "el detalle va en validationErrors.currentPassword. No es un 401: la sesión sigue "
+                    + "siendo válida.\n"
                     + "- MALFORMED_REQUEST (400 y otros 4xx genéricos): la petición no se puede interpretar "
                     + "(JSON mal formado, tipos incorrectos).\n"
                     + "- INVALID_CREDENTIALS (401): email o contraseña incorrectos en el login, o token "
@@ -75,7 +78,9 @@ public class ErrorResponse {
                     + "- NOT_ACCEPTABLE (406): la cabecera Accept pide un formato que la API no produce; "
                     + "la API solo responde en JSON (este error también va en JSON).\n"
                     + "- RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login, registro o renovación de "
-                    + "sesión (POST /api/auth/refresh) desde la misma IP; ver la cabecera Retry-After.\n"
+                    + "sesión (POST /api/auth/refresh) desde la misma IP, o demasiados intentos con la "
+                    + "contraseña actual incorrecta en PUT /api/users/me/password (por cuenta: 5 cada 15 "
+                    + "minutos); ver la cabecera Retry-After.\n"
                     + "- ACCOUNT_LOCKED (429): la cuenta está bloqueada temporalmente por logins fallidos; "
                     + "ver la cabecera Retry-After.\n"
                     + "- INTERNAL_ERROR (500 u otro 5xx): error no controlado en el servidor.";
@@ -105,9 +110,9 @@ public class ErrorResponse {
             example = "/api/movies/42", requiredMode = Schema.RequiredMode.REQUIRED)
     private final String path;
 
-    @Schema(description = "Solo en los 400 con código VALIDATION_ERROR: un mensaje por cada campo o "
-            + "parámetro no válido (nombre del campo → mensaje). En el resto de errores no aparece "
-            + "(no se envía con null).",
+    @Schema(description = "Solo en los 400 con código VALIDATION_ERROR o CURRENT_PASSWORD_INCORRECT: un "
+            + "mensaje por cada campo o parámetro no válido (nombre del campo → mensaje). En el resto de "
+            + "errores no aparece (no se envía con null).",
             example = "{\"title\": \"El título es obligatorio\"}",
             requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     private final Map<String, String> validationErrors;

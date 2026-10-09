@@ -1,5 +1,6 @@
 /**
- * Validación del formulario de registro en el cliente.
+ * Validación en el cliente de los formularios de cuenta: registro y «Editar
+ * perfil» (nombre y contraseña).
  *
  * Replica las restricciones de `CreateUserRequest` (backend) para dar
  * respuesta inmediata sin ir al servidor. Es solo comodidad: la validación del
@@ -45,9 +46,8 @@ export type RegisterErrors = Partial<Record<keyof RegisterRequest, string>>;
 export function validateRegistration(values: RegisterRequest): RegisterErrors {
   const errors: RegisterErrors = {};
 
-  if (values.username.length < USERNAME_MIN || values.username.length > USERNAME_MAX) {
-    errors.username = `El nombre de usuario debe tener entre ${USERNAME_MIN} y ${USERNAME_MAX} caracteres.`;
-  }
+  const usernameProblem = usernameError(values.username);
+  if (usernameProblem) errors.username = usernameProblem;
 
   if (!values.email) {
     errors.email = 'Introduce tu correo electrónico.';
@@ -55,9 +55,81 @@ export function validateRegistration(values: RegisterRequest): RegisterErrors {
     errors.email = 'Introduce un correo electrónico válido.';
   }
 
-  if (values.password.length < PASSWORD_MIN || values.password.length > PASSWORD_MAX) {
-    errors.password = `La contraseña debe tener entre ${PASSWORD_MIN} y ${PASSWORD_MAX} caracteres.`;
+  const passwordProblem = newPasswordLengthError(values.password);
+  if (passwordProblem) errors.password = passwordProblem;
+
+  return errors;
+}
+
+/**
+ * Error de longitud de un nombre de usuario (registro y «Editar perfil»), o
+ * `undefined` si es válido. Recibe el nombre ya normalizado.
+ *
+ * @param username nombre ya recortado (ver {@link normalizeUsername})
+ */
+export function usernameError(username: string): string | undefined {
+  return username.length < USERNAME_MIN || username.length > USERNAME_MAX
+    ? `El nombre de usuario debe tener entre ${USERNAME_MIN} y ${USERNAME_MAX} caracteres.`
+    : undefined;
+}
+
+/** Error de longitud de una contraseña NUEVA (registro y cambio de contraseña), o `undefined` si es válida. */
+export function newPasswordLengthError(password: string): string | undefined {
+  return password.length < PASSWORD_MIN || password.length > PASSWORD_MAX
+    ? `La contraseña debe tener entre ${PASSWORD_MIN} y ${PASSWORD_MAX} caracteres.`
+    : undefined;
+}
+
+/**
+ * Normaliza un nombre de usuario como lo hará el servidor en `PATCH /api/users/me`:
+ * sin espacios en los extremos y con los interiores repetidos reducidos a uno.
+ * Así la longitud que se comprueba aquí es la que medirá él, y «ana  » no cuenta
+ * como un cambio respecto a «ana». (El servidor quita además caracteres
+ * invisibles; ese caso raro lo resuelve su propio error.)
+ *
+ * @param username texto tal cual lo escribió el usuario
+ */
+export function normalizeUsername(username: string): string {
+  return username.trim().replace(/\s+/g, ' ');
+}
+
+/** Datos del formulario «Cambiar contraseña»: los del cuerpo más la repetición, que no se envía. */
+export interface PasswordChangeValues {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
+/** Errores por campo del formulario «Cambiar contraseña»; un campo sin error no aparece. */
+export type PasswordChangeErrors = Partial<Record<keyof PasswordChangeValues, string>>;
+
+/**
+ * Comprueba el formulario «Cambiar contraseña» antes de enviarlo.
+ *
+ * Replica lo que el servidor puede saber sin consultar nada: que haya
+ * contraseña actual, la longitud de la nueva (la misma regla que el registro) y
+ * que sea distinta de la actual. Lo que solo sabe él (que la actual sea la
+ * correcta, que la nueva no sea común ni contenga tu usuario o correo) llega en
+ * `validationErrors` y se pinta junto al campo. Comprobarlo aquí además ahorra
+ * intentos: el servidor solo deja 5 fallos de la contraseña actual cada 15 minutos.
+ *
+ * Las contraseñas nunca se recortan: los espacios cuentan.
+ *
+ * @param values los tres campos del formulario
+ * @returns los errores encontrados; objeto vacío si todo es válido
+ */
+export function validatePasswordChange(values: PasswordChangeValues): PasswordChangeErrors {
+  const errors: PasswordChangeErrors = {};
+  if (!values.currentPassword) errors.currentPassword = 'Introduce tu contraseña actual.';
+
+  const lengthProblem = newPasswordLengthError(values.newPassword);
+  if (lengthProblem) errors.newPassword = lengthProblem;
+  else if (values.newPassword === values.currentPassword) {
+    errors.newPassword = 'La nueva contraseña debe ser distinta de la actual.';
   }
+
+  if (!values.confirmPassword) errors.confirmPassword = 'Repite la nueva contraseña.';
+  else if (values.confirmPassword !== values.newPassword) errors.confirmPassword = 'Las contraseñas no coinciden.';
 
   return errors;
 }

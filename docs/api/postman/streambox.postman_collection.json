@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "36f1cc7d-d712-5ceb-bd83-b75fec0d4c79",
     "name": "StreamBox API",
-    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend (solo para las carpetas con peticiones de administrador).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8 y cierra las sesiones en la 9. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Límites**: login, registro y refresh tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 3 de los 10 logins por minuto y 3 de las 30 renovaciones por minuto: a la tercera ejecución en una hora el registro responde 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` más alto. No la ejecutes en bucle contra un entorno real.",
+    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend (solo para las carpetas con peticiones de administrador).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9 y en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Límites**: login, registro y refresh tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 7 de los 10 logins por minuto y 6 de las 30 renovaciones por minuto: a la tercera ejecución en una hora el registro responde 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` más alto. No la ejecutes en bucle contra un entorno real.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -39,6 +39,22 @@
     },
     {
       "key": "episodeId",
+      "value": ""
+    },
+    {
+      "key": "adminUsername",
+      "value": ""
+    },
+    {
+      "key": "userNewPassword",
+      "value": "otra frase distinta para el cambio de clave"
+    },
+    {
+      "key": "preChangeRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "otherDeviceRefreshToken",
       "value": ""
     }
   ],
@@ -658,7 +674,10 @@
                   "  const us = pm.response.json();",
                   "  pm.expect(us).to.be.an(\"array\").that.is.not.empty;",
                   "  us.forEach(u => pm.expect(u).to.not.have.property(\"password\"));",
-                  "});"
+                  "});",
+                  "// Guarda el nombre del ADMIN: la petición «Cambiar mi nombre a uno ocupado (409)» lo usa.",
+                  "const admin = pm.response.json().find(u => u.email === pm.environment.get(\"adminEmail\"));",
+                  "pm.collectionVariables.set(\"adminUsername\", admin ? admin.username : \"\");"
                 ]
               }
             }
@@ -666,6 +685,151 @@
           "protocolProfileBehavior": {
             "disableCookies": true
           }
+        },
+        {
+          "name": "Cambiar mi nombre de usuario (PATCH /api/users/me)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "Solo el nombre de usuario: el email (identidad del login y `subject` del JWT), el rol y la contraseña no se cambian aquí (enviarlos da 400). El nombre se normaliza (extremos y espacios repetidos) y debe tener 3-50 caracteres. Por cookie, así que lleva `X-Requested-With` (lo añade el *pre-request* de la colección).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"  {{userUsername}}   editado \"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Devuelve el usuario con el nombre nuevo (normalizado) y el mismo email\", function () {",
+                  "  const u = pm.response.json();",
+                  "  pm.expect(u.username).to.eql(pm.environment.get(\"userUsername\") + \" editado\");",
+                  "  pm.expect(u.email).to.eql(pm.environment.get(\"userEmail\"));",
+                  "  pm.expect(u).to.not.have.property(\"password\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cambiar mi nombre a uno ocupado (409)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "Usa el nombre del ADMIN (guardado al listar usuarios): el nombre de usuario es único.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{adminUsername}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Cuerpo de error con code USER_ALREADY_EXISTS\", function () { pm.expect(pm.response.json().code).to.eql(\"USER_ALREADY_EXISTS\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Restaurar mi nombre de usuario (200)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "Deja el nombre como estaba para que la colección se pueda volver a ejecutar sobre la misma base.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{userUsername}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200 con el nombre original\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().username).to.eql(pm.environment.get(\"userUsername\"));",
+                  "});"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -2873,6 +3037,690 @@
               ]
             },
             "description": "La sesión del ADMIN también queda revocada en el servidor."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Cuerpo de error con code SESSION_EXPIRED\", function () { pm.expect(pm.response.json().code).to.eql(\"SESSION_EXPIRED\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Cuenta: contraseña y cerrar todas las sesiones",
+      "description": "Va al final porque cambiar la contraseña y `logout-all` cierran sesiones. Inicia sesión otra vez con el USER, cambia su contraseña (400 con la actual incorrecta o la nueva no válida; 204 correcto, con cookies nuevas y las demás sesiones revocadas), comprueba que el login con la vieja falla y con la nueva funciona, **restaura la contraseña original** (para poder repetir la ejecución) y cierra todas las sesiones con `POST /api/auth/logout-all`. Si cortas la ejecución entre el cambio y la restauración, la contraseña del USER queda en `userNewPassword`.",
+      "item": [
+        {
+          "name": "Login usuario (nueva sesión)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "La carpeta 9 cerró la sesión del USER: se abre otra por cookies.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Guarda el refresh token de esta sesión\", function () {",
+                  "  const c = setCookie(\"streambox_refresh\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_refresh\").to.be.a(\"string\");",
+                  "  pm.collectionVariables.set(\"preChangeRefreshToken\", cookieValue(c));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cambiar contraseña con la actual incorrecta (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "password"
+              ]
+            },
+            "description": "Exige la contraseña actual: quien tenga la sesión abierta (un portátil olvidado) no puede cambiarla sin conocerla. Cada fallo gasta uno de los 5 intentos por cuenta cada 15 minutos (luego 429 `RATE_LIMIT_EXCEEDED`; no bloquea el login). Un cambio correcto pone el contador a cero.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"esta no es la contraseña actual\",\n  \"newPassword\": \"{{userNewPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Code CURRENT_PASSWORD_INCORRECT con el mensaje en validationErrors.currentPassword\", function () {",
+                  "  const e = pm.response.json();",
+                  "  pm.expect(e.code).to.eql(\"CURRENT_PASSWORD_INCORRECT\");",
+                  "  pm.expect(e.validationErrors).to.have.property(\"currentPassword\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cambiar contraseña con una nueva no válida (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "password"
+              ]
+            },
+            "description": "La nueva debe cumplir la política del registro (12-64 caracteres, no común, sin el nombre ni el email) y ser distinta de la actual. Estos errores no gastan intento.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{userPassword}}\",\n  \"newPassword\": \"corta\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Code VALIDATION_ERROR con el mensaje en validationErrors.newPassword\", function () {",
+                  "  const e = pm.response.json();",
+                  "  pm.expect(e.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(e.validationErrors).to.have.property(\"newPassword\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cambiar contraseña (204, cookies nuevas)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "password"
+              ]
+            },
+            "description": "Responde 204 con un `streambox_token` y un `streambox_refresh` nuevos (el jar los guarda: esta sesión sigue abierta) y revoca todas las demás sesiones de la cuenta, incluida la copia anterior del refresh token de esta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{userPassword}}\",\n  \"newPassword\": \"{{userNewPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204 sin cuerpo\", function () {",
+                  "  pm.response.to.have.status(204);",
+                  "  pm.expect(pm.response.text()).to.eql(\"\");",
+                  "});",
+                  "pm.test(\"Entrega una sesión nueva: JWT y refresh token nuevos\", function () {",
+                  "  const t = setCookie(\"streambox_token\");",
+                  "  const r = setCookie(\"streambox_refresh\");",
+                  "  pm.expect(t, \"falta Set-Cookie streambox_token\").to.be.a(\"string\");",
+                  "  pm.expect(cookieValue(t)).to.match(/^[\\w-]+\\.[\\w-]+\\.[\\w-]+$/);",
+                  "  pm.expect(r, \"falta Set-Cookie streambox_refresh\").to.be.a(\"string\");",
+                  "  pm.expect(r).to.match(/HttpOnly/).and.match(/SameSite=Strict/);",
+                  "  pm.expect(cookieValue(r)).to.not.eql(pm.collectionVariables.get(\"preChangeRefreshToken\"));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh con el token de antes del cambio (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "streambox_refresh={{preChangeRefreshToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Reenvía a mano el refresh token del login de esta carpeta: el cambio de contraseña lo ha revocado."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Cuerpo de error con code SESSION_EXPIRED\", function () { pm.expect(pm.response.json().code).to.eql(\"SESSION_EXPIRED\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Mi usuario tras el cambio (200)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "La sesión que cambió la contraseña sigue abierta con las cookies nuevas."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login con la contraseña vieja (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Con el jar desactivado para no tocar la sesión abierta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Cuerpo de error con code INVALID_CREDENTIALS\", function () { pm.expect(pm.response.json().code).to.eql(\"INVALID_CREDENTIALS\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login con la contraseña nueva (204)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Con el jar desactivado para no sustituir la sesión abierta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userNewPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Restaurar la contraseña original (204)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "password"
+              ]
+            },
+            "description": "Deja la contraseña como estaba para poder repetir la ejecución. Como todo cambio, revoca las demás sesiones (también la del paso anterior) y renueva la actual.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{userNewPassword}}\",\n  \"newPassword\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Guarda el refresh token de la sesión renovada\", function () {",
+                  "  const c = setCookie(\"streambox_refresh\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_refresh\").to.be.a(\"string\");",
+                  "  pm.collectionVariables.set(\"userRefreshToken\", cookieValue(c));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login en otro dispositivo (204)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Con el jar desactivado: una segunda sesión viva justo antes del `logout-all`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204 (la contraseña original vuelve a valer)\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Guarda el refresh token de la segunda sesión\", function () {",
+                  "  const c = setCookie(\"streambox_refresh\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_refresh\").to.be.a(\"string\");",
+                  "  pm.collectionVariables.set(\"otherDeviceRefreshToken\", cookieValue(c));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Cerrar sesión en todos los dispositivos (204)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout-all"
+              ]
+            },
+            "description": "Revoca todas las sesiones de la cuenta autenticada (la cuenta sale del JWT, nunca de la URL), incluida la actual, y borra las dos cookies. Por cookie, así que lleva `X-Requested-With`. Los JWT de acceso ya emitidos son stateless: valen hasta caducar (15 min como mucho), pero no se renuevan."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204 sin cuerpo\", function () {",
+                  "  pm.response.to.have.status(204);",
+                  "  pm.expect(pm.response.text()).to.eql(\"\");",
+                  "});",
+                  "pm.test(\"Borra las dos cookies (Set-Cookie con Max-Age=0)\", function () {",
+                  "  pm.expect(setCookie(\"streambox_token\")).to.match(/Max-Age=0/);",
+                  "  pm.expect(setCookie(\"streambox_refresh\")).to.match(/Max-Age=0/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mi usuario tras el logout-all (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "El jar ya no tiene cookies."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh de esta sesión tras el logout-all (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "streambox_refresh={{userRefreshToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Reenvía a mano el refresh token que estaba vigente: la revocación es en el servidor."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Cuerpo de error con code SESSION_EXPIRED\", function () { pm.expect(pm.response.json().code).to.eql(\"SESSION_EXPIRED\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Refresh del otro dispositivo tras el logout-all (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "streambox_refresh={{otherDeviceRefreshToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "La otra sesión de la cuenta también queda cerrada: eso distingue `logout-all` de `logout`."
           },
           "response": [],
           "event": [

@@ -101,3 +101,41 @@ export function avatarInitial(username: string): string {
 export function roleLabel(role: Role): string {
   return role === 'ADMIN' ? 'Administrador' : 'Usuario';
 }
+
+// ---------------------------------------------------------------------------
+// «Editar perfil»: textos de los avisos (aquí y no en los componentes para que
+// los tests los usen sin copiarlos y para no romper el *fast refresh*).
+// ---------------------------------------------------------------------------
+
+/**
+ * Aviso tras cambiar el nombre (`PATCH /api/users/me`). El nombre sale de la
+ * respuesta del servidor, que lo normaliza: es el que se ha guardado de verdad.
+ *
+ * @param username nombre devuelto por el servidor
+ */
+export function usernameChangedMessage(username: string): string {
+  return `Nombre de usuario cambiado a «${username}».`;
+}
+
+/**
+ * Aviso tras cambiar la contraseña. Dice lo que pasa con las demás sesiones
+ * sin exagerar: sus refresh tokens quedan revocados al momento, pero el JWT de
+ * acceso que ya tengan sigue valiendo hasta que caduque (como mucho 15 minutos).
+ */
+export const PASSWORD_CHANGED =
+  'Contraseña cambiada. Se han cerrado tus otras sesiones; en otros dispositivos puede tardar hasta 15 minutos.';
+
+/**
+ * Mensaje del 429 del cambio de contraseña (5 fallos de la contraseña actual
+ * cada 15 minutos). Se calcula UNA vez al recibir el error (va en una región
+ * `role="alert"`; si cambiara cada segundo se volvería a leer entero): la cuenta
+ * atrás viva está en el botón.
+ *
+ * @param seconds espera indicada por `Retry-After`, ya formateada; `undefined` si no vino
+ */
+export function passwordRateLimitMessage(seconds?: string): string {
+  const intro = 'Demasiados intentos con una contraseña actual incorrecta.';
+  return seconds !== undefined
+    ? `${intro} Podrás volver a intentarlo en ${seconds}.`
+    : `${intro} Inténtalo de nuevo más tarde.`;
+}

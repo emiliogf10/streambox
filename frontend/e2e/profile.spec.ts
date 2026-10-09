@@ -1,16 +1,18 @@
 /**
  * E2E de «Mi perfil» (`/perfil`): se llega desde el menú de usuario, enseña los
  * datos reales de la cuenta y un resumen de «Mi lista», distingue al
- * administrador y cabe en móvil sin scroll horizontal.
+ * administrador y cabe en móvil sin scroll horizontal. «Editar perfil»: cambiar
+ * el nombre (se ve en la barra), cambiar la contraseña (esta sesión sigue, las
+ * demás no se renuevan, solo vale la nueva) y cerrar sesión en todos los dispositivos.
  *
  * No modifica el catálogo (solo añade favoritos a cuentas propias de cada test),
  * así que corre en el proyecto principal junto al resto.
  */
-import type { Page } from '@playwright/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 import { addFavoritesByTitle, addSeriesFavoritesByTitle, loginAdmin } from './support/api';
-import { ADMIN_EMAIL, ADMIN_USERNAME } from './support/config';
+import { ADMIN_EMAIL, ADMIN_USERNAME, BACKEND_URL } from './support/config';
 import { VISIBLE_SERIES } from './support/catalog';
-import { expect, sessionCookie, test } from './support/fixtures';
+import { expect, formAlert, sessionCookie, test } from './support/fixtures';
 
 /** Abre el menú de usuario y entra en «Mi perfil», como haría una persona. */
 async function openProfileFromMenu(page: Page): Promise<void> {
@@ -39,9 +41,10 @@ test.describe('Mi perfil', () => {
     const account = page.getByRole('region', { name: 'Cuenta' });
     await expect(account.getByText(user.username)).toBeVisible();
     await expect(account.getByText(user.email)).toBeVisible();
-    // La contraseña nunca se revela: puntos a la vista y «Oculta» para el lector de pantalla.
-    await expect(account.getByText('••••••••')).toBeVisible();
-    await expect(account.getByText('Oculta')).toBeAttached();
+    // La contraseña nunca se revela (ni con puntos, que parecían un campo); el correo no se puede cambiar.
+    await expect(account.getByText('No se muestra por seguridad.')).toBeVisible();
+    await expect(account.getByText('No se puede cambiar: es el dato con el que inicias sesión.')).toBeVisible();
+    await expect(account.getByRole('button')).toHaveCount(2);
 
     // Un usuario normal no ve el acceso al panel ni se presenta como administrador.
     await expect(page.getByRole('link', { name: 'Panel de administración' })).toHaveCount(0);
@@ -109,7 +112,7 @@ test.describe('Mi perfil', () => {
     await signIn(user);
     await page.goto('/perfil');
 
-    await page.getByRole('main').getByRole('button', { name: 'Cerrar sesión' }).click();
+    await page.getByRole('main').getByRole('button', { name: 'Cerrar sesión', exact: true }).click();
 
     await expect(page).toHaveURL(/\/login$/);
     // El cierre NO es optimista: solo se llega al login tras la respuesta del servidor al
@@ -169,4 +172,143 @@ test.describe('Mi perfil en pantallas estrechas', () => {
       expect(genres!.y).toBeGreaterThan(account!.y + account!.height - 1);
     });
   }
+});
+
+/**
+ * Pide una renovación con el refresh token que guardó el `request` de Playwright
+ * al registrar al usuario (`createUserWithToken` inicia sesión por API): hace de
+ * «otro dispositivo» con su propia sesión. Devuelve el estado HTTP.
+ */
+async function refreshFromOtherDevice(request: APIRequestContext): Promise<number> {
+  const response = await request.post(`${BACKEND_URL}/api/auth/refresh`, {
+    headers: { 'X-Requested-With': 'StreamBox' },
+  });
+  return response.status();
+}
+
+/** Inicia sesión con el formulario, como una persona. */
+async function loginWithForm(page: Page, email: string, password: string): Promise<void> {
+  await page.getByLabel('Correo electrónico').fill(email);
+  await page.getByLabel('Contraseña').fill(password);
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+}
+
+test.describe('Editar perfil', () => {
+  test('cambiar el nombre lo actualiza al instante en el perfil y en la barra', async ({ page, user, signIn }) => {
+    await signIn(user);
+    await page.goto('/perfil');
+    const newName = `nuevo_${user.username.slice(-10)}`;
+
+    const account = page.getByRole('region', { name: 'Cuenta' });
+    await account.getByRole('button', { name: 'Cambiar nombre' }).click();
+    const input = account.getByRole('textbox', { name: 'Nuevo nombre de usuario' });
+    await expect(input).toBeFocused();
+    await input.fill(`  ${newName}  `);
+    await account.getByRole('button', { name: 'Guardar' }).click();
+
+    await expect(page.getByRole('heading', { level: 1, name: newName })).toBeVisible();
+    await expect(page.getByText(`Nombre de usuario cambiado a «${newName}».`)).toBeVisible();
+    await expect(account.getByRole('button', { name: 'Cambiar nombre' })).toBeFocused();
+    await page.getByRole('button', { name: 'Menú de usuario' }).click();
+    await expect(page.getByText('Sesión iniciada como').locator('xpath=following-sibling::p[1]')).toHaveText(newName);
+
+    // Lo ha guardado el servidor: sigue ahí al recargar.
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 1, name: newName })).toBeVisible();
+  });
+
+  test('cambiar la contraseña mantiene esta sesión, cierra las demás y solo vale la nueva', async ({
+    page,
+    request,
+    user,
+    signIn,
+  }) => {
+    const newPassword = 'Bruma-Cometa-Atril-82';
+    await signIn(user);
+    await page.goto('/perfil');
+
+    const account = page.getByRole('region', { name: 'Cuenta' });
+    await account.getByRole('button', { name: 'Cambiar contraseña' }).click();
+    // Primero con la actual mal: el error va junto a su campo y la sesión sigue.
+    await page.getByLabel('Contraseña actual').fill('no-es-la-mia-123');
+    await page.getByLabel('Nueva contraseña', { exact: true }).fill(newPassword);
+    await page.getByLabel('Repite la nueva contraseña').fill(newPassword);
+    const form = page.getByRole('form', { name: 'Cambiar contraseña' });
+    await form.getByRole('button', { name: 'Cambiar contraseña' }).click();
+    await expect(page.getByLabel('Contraseña actual')).toHaveAccessibleDescription('La contraseña actual no es correcta');
+    await expect(page.getByLabel('Contraseña actual')).toBeFocused();
+
+    await page.getByLabel('Contraseña actual').fill(user.password);
+    await form.getByRole('button', { name: 'Cambiar contraseña' }).click();
+
+    await expect(
+      page.getByText(
+        'Contraseña cambiada. Se han cerrado tus otras sesiones; en otros dispositivos puede tardar hasta 15 minutos.',
+      ),
+    ).toBeVisible();
+    // Esta sesión sigue (con cookies nuevas) y la del «otro dispositivo» ya no se puede renovar.
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 1, name: user.username })).toBeVisible();
+    expect(await refreshFromOtherDevice(request)).toBe(401);
+
+    // Se sale y se vuelve a entrar: la vieja ya no vale; la nueva sí.
+    await page.getByRole('main').getByRole('button', { name: 'Cerrar sesión', exact: true }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    await loginWithForm(page, user.email, user.password);
+    await expect(formAlert(page)).toContainText('Correo o contraseña incorrectos.');
+    await page.getByLabel('Contraseña').fill(newPassword);
+    await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+    await expect(page).toHaveURL(/\/$/);
+  });
+
+  test('«Cerrar sesión en todos los dispositivos» pide confirmación, cierra esta y las demás y lleva al login', async ({
+    page,
+    request,
+    user,
+    signIn,
+  }) => {
+    await signIn(user);
+    await page.goto('/perfil');
+
+    await page.getByRole('button', { name: 'Cerrar sesión en todos los dispositivos' }).click();
+    const dialog = page.getByRole('alertdialog', { name: '¿Cerrar sesión en todos los dispositivos?' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+    // Cancelar no cierra nada.
+    await dialog.getByRole('button', { name: 'Cancelar' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole('heading', { level: 1, name: user.username })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Cerrar sesión en todos los dispositivos' }).click();
+    await dialog.getByRole('button', { name: 'Cerrar todas las sesiones' }).click();
+
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(
+      page.getByText(
+        'Se ha cerrado la sesión en todos tus dispositivos. En los demás puede tardar hasta 15 minutos en cerrarse.',
+      ),
+    ).toBeVisible();
+    expect(await sessionCookie(page)).toBeUndefined();
+    expect(await refreshFromOtherDevice(request)).toBe(401);
+  });
+
+  test('a 375 px, con el formulario de contraseña abierto, la página no se desplaza en horizontal', async ({
+    page,
+    user,
+    signIn,
+  }) => {
+    await signIn(user);
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto('/perfil');
+
+    const account = page.getByRole('region', { name: 'Cuenta' });
+    await account.getByRole('button', { name: 'Cambiar contraseña' }).click();
+    await expect(page.getByLabel('Repite la nueva contraseña')).toBeVisible();
+
+    const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+  });
 });

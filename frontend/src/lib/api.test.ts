@@ -706,6 +706,54 @@ describe('apiFetch: renovación de la sesión (refresh token)', () => {
       expect(locks.requested).toEqual([SESSION_LOCK_NAME, SESSION_LOCK_NAME, SESSION_LOCK_NAME]);
     });
 
+    it('el cambio de contraseña y el logout global también van en el lock (cambian las cookies)', async () => {
+      serve({
+        'PUT /api/users/me/password': () => noContentResponse(),
+        'POST /api/auth/logout-all': () => noContentResponse(),
+      });
+
+      await apiFetch('/users/me/password', { method: 'PUT', body: { currentPassword: 'a', newPassword: 'b' } });
+      await apiFetch('/auth/logout-all', { method: 'POST' });
+
+      expect(locks.requested).toEqual([SESSION_LOCK_NAME, SESSION_LOCK_NAME]);
+    });
+
+    it('a diferencia del login, un 401 del cambio de contraseña SÍ se renueva: suelta el lock, renueva y repite dentro de él', async () => {
+      let renewed = false;
+      serve({
+        'PUT /api/users/me/password': () => (renewed ? noContentResponse() : errorResponse(401, 'INVALID_CREDENTIALS', 'x')),
+        [REFRESH]: () => {
+          renewed = true;
+          return noContentResponse();
+        },
+      });
+
+      await apiFetch('/users/me/password', { method: 'PUT', body: { currentPassword: 'a', newPassword: 'b' } });
+
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        '/api/users/me/password',
+        '/api/auth/refresh',
+        '/api/users/me/password',
+      ]);
+      // Envío, refresh y repetición: cada uno coge el lock por separado (no hay bloqueo mutuo).
+      expect(locks.requested).toEqual([SESSION_LOCK_NAME, SESSION_LOCK_NAME, SESSION_LOCK_NAME]);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+    });
+
+    it('si otra pestaña está renovando, el cambio de contraseña espera a que suelte el lock', async () => {
+      const held = locks.hold(SESSION_LOCK_NAME);
+      await held.acquired;
+      serve({ 'PUT /api/users/me/password': () => noContentResponse() });
+
+      const pending = apiFetch('/users/me/password', { method: 'PUT', body: {} });
+      await flush();
+      expect(fetchMock).not.toHaveBeenCalled();
+      held.release();
+
+      await expect(pending).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('las peticiones normales no pasan por el lock', async () => {
       serve({ [MOVIES]: () => jsonResponse('m') });
 

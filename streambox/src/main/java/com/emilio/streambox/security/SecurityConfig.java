@@ -43,6 +43,18 @@ import jakarta.servlet.DispatcherType;
 public class SecurityConfig {
 
         /**
+         * «Cerrar sesión en todos los dispositivos» ({@code POST}, en
+         * {@code AuthController}): solo autenticado.
+         */
+        public static final String LOGOUT_ALL_PATH = "/api/auth/logout-all";
+
+        /**
+         * Cambio de contraseña ({@code PUT}, en {@code PasswordController}):
+         * solo autenticado.
+         */
+        public static final String PASSWORD_PATH = "/api/users/me/password";
+
+        /**
          * Crea el componente encargado de cifrar y verificar contraseñas
          * mediante el algoritmo BCrypt.
          *
@@ -202,6 +214,9 @@ public class SecurityConfig {
          * público). La regla es por ruta y no por método: con
          * {@code HEAD}, que Spring MVC atiende con el {@code @GetMapping},
          * un usuario corriente ejecutaba el listado.</li>
+         * <li>{@value #LOGOUT_ALL_PATH} y {@value #PASSWORD_PATH} exigen
+         * autenticación con una regla explícita, antes que las demás de sus
+         * prefijos.</li>
          * <li>Exige autenticación para cualquier otro endpoint, incluidos los
          * personales de {@code /api/users/me/**} (como los favoritos de
          * series), que usan el id del token y nunca uno de la URL.</li>
@@ -271,6 +286,16 @@ public class SecurityConfig {
                                                 .requestMatchers(HttpMethod.POST,
                                                                 JwtAuthenticationFilter.LOGOUT_PATH)
                                                 .permitAll()
+
+                                                // Cerrar sesion en todos los dispositivos y cambiar la
+                                                // contraseña: solo autenticado (usan el id del token).
+                                                // Explicitas aunque anyRequest() ya lo exige: si algun
+                                                // dia se abre /api/auth/** o /api/users/**, estas no se
+                                                // abren con ellas. Por ruta y no por metodo (cualquier
+                                                // otro metodo da 405 a un autenticado, nunca se ejecuta
+                                                // sin token).
+                                                .requestMatchers(LOGOUT_ALL_PATH, PASSWORD_PATH)
+                                                .authenticated()
 
                                                 // Vistas de gestion (p. ej. /api/admin/series, que
                                                 // incluye series sin episodios, ocultas a los

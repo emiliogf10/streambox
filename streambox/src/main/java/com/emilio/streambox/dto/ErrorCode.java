@@ -57,8 +57,10 @@ public enum ErrorCode {
 
     /**
      * Se ha superado el límite de peticiones permitido desde una misma IP
-     * (login, registro o renovación de sesión con {@code POST /api/auth/refresh}).
-     * Va con la cabecera {@code Retry-After}.
+     * (login, registro o renovación de sesión con {@code POST /api/auth/refresh})
+     * o, por cuenta, el de intentos con la contraseña actual incorrecta al
+     * cambiarla ({@code PUT /api/users/me/password}). Va con la cabecera
+     * {@code Retry-After}.
      */
     RATE_LIMIT_EXCEEDED,
 
@@ -112,5 +114,20 @@ public enum ErrorCode {
      * familia). Es distinto de {@link #INVALID_CREDENTIALS} porque aquí no hay
      * credenciales que corregir: el cliente debe volver a la pantalla de login.
      */
-    SESSION_EXPIRED
+    SESSION_EXPIRED,
+
+    /**
+     * {@code PUT /api/users/me/password}: la contraseña actual enviada no es la
+     * de la cuenta (400, con el detalle en {@code validationErrors.currentPassword}).
+     *
+     * <p>
+     * Es un 400 y no un 401 a propósito: el usuario <b>sí</b> está autenticado
+     * (su sesión es válida); lo incorrecto es un dato del formulario. Un 401
+     * haría que el frontend intentara renovar la sesión y, al repetirse, la
+     * cerrara. Tampoco es un 403 (falta de permisos). Tiene código propio, y no
+     * {@link #VALIDATION_ERROR}, porque no es un fallo de formato: el cliente
+     * puede tratarlo aparte (por ejemplo, vaciar solo ese campo).
+     * </p>
+     */
+    CURRENT_PASSWORD_INCORRECT
 }
