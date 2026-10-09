@@ -27,7 +27,8 @@ import { ApiError, SESSION_CHANNEL_NAME, apiFetch } from '../lib/api';
 import { SESSION_CLOSED_ELSEWHERE, SESSION_SWITCHED_ELSEWHERE } from '../lib/sessionMessages';
 import { LOGOUT_FAILED_NETWORK, LOGOUT_FAILED_OTHER, LOGOUT_FAILED_SERVER, LOGOUT_RETRY_DELAY_MS } from '../lib/logout';
 import type { User } from '../lib/types';
-import { installManualTimers } from '../test/fakeTimers';
+import { installManualTimers, passTime } from '../test/fakeTimers';
+import { setPageVisibility } from '../test/pageVisibility';
 import { installFakeLocks } from '../test/webLocks';
 import {
   REFRESH_SESSION,
@@ -885,6 +886,8 @@ describe('AuthProvider: cambios de sesión en OTRA pestaña (session-changed)', 
 
   afterEach(() => {
     otherTab.close();
+    // Por si un test con reloj falso falla antes de devolverlo: que no contagie al siguiente.
+    vi.useRealTimers();
   });
 
   /** Espera a que el canal (asíncrono, como en el navegador) entregue lo pendiente. */
@@ -1012,6 +1015,33 @@ describe('AuthProvider: cambios de sesión en OTRA pestaña (session-changed)', 
     expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(0);
     await flushChannel();
     expect(received).toEqual([]);
+  });
+
+  it('con esta pestaña OCULTA, el aviso «se cerró en otra pestaña» no caduca: al volver está y dura sus 5 s', async () => {
+    // Reloj falso desde el principio: el aviso no debe caducar aunque «pase» mucho más que su duración.
+    installManualTimers({ withDate: true });
+    let loggedIn = true;
+    serve({ 'GET /api/users/me': () => (loggedIn ? jsonResponse(makeUser()) : UNAUTHORIZED()) });
+    const { result } = await startApp();
+
+    setPageVisibility('hidden');
+    loggedIn = false;
+    await act(async () => {
+      otherTab.postMessage({ type: 'session-changed' });
+      // El canal entrega en otra vuelta del bucle de eventos; `setImmediate` no lo falsea el reloj manual.
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(false));
+
+    // El usuario sigue en la otra pestaña bastante más que los 5 s del aviso.
+    passTime(60_000);
+    setPageVisibility('visible');
+
+    expect(screen.getByRole('status')).toHaveTextContent(SESSION_CLOSED_ELSEWHERE);
+    passTime(4999);
+    expect(screen.getByText(SESSION_CLOSED_ELSEWHERE)).toBeInTheDocument();
+    passTime(1);
+    expect(screen.queryByText(SESSION_CLOSED_ELSEWHERE)).not.toBeInTheDocument();
   });
 
   it('una pestaña sin sesión (en el login) descubre la sesión iniciada en otra y avisa de quién ha entrado', async () => {

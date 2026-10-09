@@ -33,9 +33,14 @@ import { vi } from 'vitest';
  * Sin él, `findBy*`, `waitFor` y user-event se quedarían esperando un
  * `setTimeout` que nunca vence y el test se colgaría. Este puente, recomendado
  * por la documentación de Vitest, hace que avancen el reloj falso en su lugar.
+ *
+ * @param options.withDate falsea también `Date` (avanza solo con {@link passTime}).
+ *        Hace falta cuando el código MIDE el tiempo transcurrido con `Date.now()`,
+ *        como la pausa de los avisos al ocultar la pestaña (`components/Toast`). No
+ *        es el valor por defecto para no cambiar la fecha que ven los demás tests.
  */
-export function installManualTimers(): void {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+export function installManualTimers({ withDate = false }: { withDate?: boolean } = {}): void {
+  vi.useFakeTimers({ toFake: withDate ? ['setTimeout', 'clearTimeout', 'Date'] : ['setTimeout', 'clearTimeout'] });
   vi.stubGlobal('jest', { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) });
 }
 

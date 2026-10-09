@@ -1486,10 +1486,10 @@ frontend/src/
 │                       genéricas del catálogo (PosterCard, PosterRow, FeaturedBanner, MetaTags), comunes a películas y series
 ├── context/            estado compartido: AuthContext, ToastContext, FavoritesContext
 ├── hooks/              lógica reutilizable: useCatalog/usePagedCatalog, useMovieFilters, useSeriesCatalog, useSeriesDetail, useModalDialog,
-│                       useCountdown, useGenres, useDebouncedValue, useAdminSearchList, useCatalogDelete...
+│                       useCountdown, useGenres, useDebouncedValue, useAdminSearchList, useCatalogDelete, usePageVisible...
 ├── lib/                sin React: api.ts, types.ts, utils.ts, catalog.ts, series.ts, movieFilters.ts, validation.ts, movieValidation.ts,
 │                       seriesValidation.ts, episodeValidation.ts, profile.ts, posterFallback.ts
-└── test/               utilidades de los tests (setup, helpers, fakeTimers)
+└── test/               utilidades de los tests (setup, helpers, fakeTimers, pageVisibility)
 ```
 
 ### 18.2 Proveedores y rutas (`App.tsx`)
@@ -1731,7 +1731,14 @@ Tres detalles añadidos tras la revisión de `qa`:
 
 ### 20.4 Avisos (`context/ToastContext.tsx`)
 
-`useToast()` ofrece `success`, `error`, `info` y `errorFrom(error, mensajePorDefecto)`. Máximo 4 a la vez; desaparecen solos (5 s, o 9 s los errores, que necesitan más tiempo de lectura) y se pausan al pasar el ratón o el foco por encima. `errorFrom` ignora los errores de sesión caducada, que ya tienen su propio aviso.
+`useToast()` ofrece `success`, `error`, `info` y `errorFrom(error, mensajePorDefecto)`. Máximo 4 a la vez; desaparecen solos (5 s, o 9 s los errores, que necesitan más tiempo de lectura) y se pausan al pasar el ratón o el foco por encima (al salir, la cuenta vuelve a empezar entera). `errorFrom` ignora los errores de sesión caducada, que ya tienen su propio aviso.
+
+**Avisos en una pestaña oculta.** Con dos pestañas abiertas, cerrar la sesión en una hace que la otra, en segundo plano, avise «Se ha cerrado la sesión en otra pestaña…» (señal `session-changed`, cap. 19). Antes ese aviso caducaba a los 5 s aunque nadie mirase esa pestaña, y al volver ya no estaba. Ahora se tiene en cuenta `document.visibilityState` (hook `hooks/usePageVisible`, con `useSyncExternalStore` y el evento `visibilitychange`):
+
+- **Si el aviso nace con la pestaña oculta**, `ToastProvider` lo guarda pero no lo pinta (`revealed: false`) hasta que la pestaña vuelve a verse. Como la cuenta atrás vive en `Toast` y empieza al montarse, dura sus segundos completos a partir de ese momento. Además, así un lector de pantalla lo anuncia al volver: las regiones `aria-live` solo anuncian *cambios*, y un cambio en una pestaña de fondo no se anuncia (si se hubiera insertado entonces, al volver estaría ahí, en silencio).
+- **Si la pestaña se oculta con el aviso ya en pantalla**, `Toast` pausa la cuenta atrás y, al volver, sigue con el tiempo que le **quedaba** (lo mide con `Date.now()` al pausar y lo guarda en un `ref`). El aviso no se desmonta, así que no se anuncia dos veces; por lo mismo, los avisos ya pintados se marcan `revealed: true` y no se esconden si la pestaña se vuelve a ocultar.
+
+Solo `'hidden'` cuenta como oculta (el antiguo `'prerender'` cuenta como visible, para no dejar nada esperando para siempre). Tests: `context/ToastContext.test.tsx` (reloj falso con `Date`, `installManualTimers({ withDate: true })`, y visibilidad simulada con `test/pageVisibility.ts`) y, de punta a punta, el de la pestaña oculta en `context/AuthContext.test.tsx`.
 
 ### 20.5 Buscador (`components/SearchBar.tsx`)
 
@@ -1927,7 +1934,7 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 | :--- | :--- | :--- | :--- |
 | Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1680 | `.\mvnw.cmd test` (desde `streambox/`) |
 | Backend (PostgreSQL real) | Testcontainers | 146 | Se ejecutan con el anterior (1826 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 889 | `npm run test` (desde `frontend/`) |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 897 | `npm run test` (desde `frontend/`) |
 | Frontend (flujos completos) | Playwright (Chromium) | 150 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend

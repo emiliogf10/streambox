@@ -38,7 +38,7 @@
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
 | Backend (JUnit) | **1826** | 1680 con H2 y 146 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **889** | |
+| Frontend (Vitest) | **897** | |
 | E2E (Playwright) | **150** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
@@ -189,7 +189,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - Durante una búsqueda, el título accesible de la tabla ya describe la búsqueda nueva mientras se ven las filas antiguas (atenuadas, `aria-busy`).
   - En 375 px «Administrar» es solo un icono (con nombre accesible).
   - Con zoom del 400 % o el móvil en horizontal, la barra fija (165–213 px) ocupa mucho: valorar no fijarla en pantallas bajas.
-- **Portadas pesadas en `public/covers/`** — *Media · BAJA* (decisión tuya). Desde el commit de las series hay 23 JPG que suman **unos 19 MB** (algunas de más de 1 MB; la más grande, 2,2 MB), frente a las 10 WebP originales de unos 90 kB. Se descargan al ver el catálogo. **No se han tocado** porque tu base de datos (Supabase) las referencia por su nombre (`/covers/…jpg`). Propuesta: recomprimirlas **con el mismo nombre** (600 px de ancho, como las WebP, y calidad ~80), lo que las dejaría en unos 2–3 MB en total sin cambiar ninguna URL; exige una herramienta de imagen (Pillow o `sharp`) que hoy no está instalada.
+- ✅ ~~**Portadas pesadas en `public/covers/`**~~ — **hecho el 2026-10-09**: las 21 JPG recomprimidas **con el mismo nombre** (máx. 800 px de ancho, calidad 82, progresivas, sin metadatos): de 17,9 MB a 3,5 MB (la carpeta, de 19 MB a 4,4 MB). Ninguna URL cambia, así que tu base de datos no se toca. E2E 150/150.
 - **E2E de dos pestañas** — *Baja · BAJA* (`frontend`). La propagación de la sesión entre pestañas está probada con Vitest (dos canales) y a mano con `agent-browser`, pero no con un E2E (`context.newPage()` en `e2e/auth.spec.ts`).
 - **Detalles del frontend (limpieza y auditoría)** — *Opcional · BAJA*
   - `public/favicon.svg` es el logo por defecto de Vite (decisión de diseño).
@@ -350,6 +350,13 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-10-09 · Los avisos de una pestaña oculta ya no se pierden (revisión visual del autor)
+
+- **Problema** (lo vio el autor al probar dos pestañas): el aviso «Se ha cerrado la sesión en otra pestaña…» salía en la pestaña de fondo y su cuenta atrás de 5 s corría igual; al volver a ella ya había desaparecido. Pasaba con cualquier aviso nacido en una pestaña oculta.
+- **Arreglo** (`frontend`, `context/ToastContext.tsx`, `components/Toast.tsx`, `hooks/usePageVisible.ts`): un aviso que nace con la pestaña oculta **no se pinta hasta que vuelves** a ella (así el lector de pantalla lo anuncia en ese momento y una sola vez) y dura entonces sus 5 s (9 s los errores); uno que ya estaba en pantalla **pausa** su cuenta atrás al ocultarse la pestaña y sigue con el tiempo que le quedaba.
+- **Tests:** Vitest de 889 a **897** (`ToastContext.test.tsx`, nuevo, y un caso de `session-changed` con la pestaña oculta); fallan sin el arreglo. E2E 150/150. Comprobado con `agent-browser` en dos pestañas reales (la de fondo informa `hidden`; el aviso apareció al volver tras 12 y 22 s).
+- **Recompresión de portadas** (el mismo día, orquestador): ver la sección 2.8.
 
 ### 2026-10-09 · Revisión de la migración, sesión entre pestañas, documentación de la API y análisis final
 
