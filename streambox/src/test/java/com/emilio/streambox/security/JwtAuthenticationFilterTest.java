@@ -285,7 +285,8 @@ class JwtAuthenticationFilterTest {
     @Test
     void conJjwtRealElContenidoDelTokenNoLlegaAlLog() throws Exception {
         JwtService realService = new JwtService(
-                new JwtProperties("secreto-de-prueba-con-mas-de-treinta-y-dos-caracteres", 1));
+                new JwtProperties("secreto-de-prueba-con-mas-de-treinta-y-dos-caracteres",
+                        java.time.Duration.ofMinutes(15)));
         String header = base64Url("{\"alg\":\"" + CLIENT_CONTROLLED + "\"}");
         String hostileToken = header + "." + base64Url("{\"sub\":\"x\"}") + ".firma";
 

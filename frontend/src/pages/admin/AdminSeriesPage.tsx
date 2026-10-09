@@ -13,7 +13,9 @@ import { Pagination } from '../../components/Pagination';
 import { useAdminSearchList } from '../../hooks/useAdminSearchList';
 import { useCatalogDelete } from '../../hooks/useCatalogDelete';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
 import { apiFetch } from '../../lib/api';
+import { queryKeys } from '../../lib/queryKeys';
 import { formatEpisodeCount, formatSeasonCount, formatSeriesYears, isOnAir } from '../../lib/series';
 import type { PageResponse, Series } from '../../lib/types';
 import { AdminRowActions } from './AdminRowActions';
@@ -30,7 +32,7 @@ const PAGE_SIZE = 10;
  * filtra por título y ordena alfabéticamente; sin texto, lo último añadido
  * primero, igual que el listado de películas.
  *
- * Función de módulo (estable): `useAdminSearchList` la usa como dependencia de la carga.
+ * Recibe el `signal` de TanStack: si se cambia de página o de búsqueda antes de que responda, se cancela.
  */
 function fetchSeries(query: string, page: number, signal: AbortSignal): Promise<PageResponse<Series>> {
   const params = query
@@ -77,11 +79,15 @@ function deleteDescription(series: Series): string {
 export function AdminSeriesPage() {
   useDocumentTitle('Series · Administración');
   const location = useLocation();
-  const list = useAdminSearchList(fetchSeries, 'No se pudieron cargar las series.');
+  const invalidateCatalog = useInvalidateCatalog();
+  // Tras borrar (o saber que ya no estaba) se invalida la raíz: este listado se refresca y, con él,
+  // los listados públicos y «Mi lista» de quien tuviera el título.
+  const refreshAfterDelete = () => void invalidateCatalog('series');
+  const list = useAdminSearchList(queryKeys.series.admin, fetchSeries, 'No se pudieron cargar las series.');
   // Desestructurado: el resultado incluye una ref (`headingRef`) y leer propiedades de ese objeto al pintar
   // es lo que el analizador (regla `react(refs)`) no puede distinguir de leer `ref.current`.
   const { pending: toDelete, ask: askDelete, cancel: cancelDelete, confirm: confirmDelete, deleting, headingRef } =
-    useCatalogDelete(seriesDeletePath, list.reload);
+    useCatalogDelete(seriesDeletePath, refreshAfterDelete);
   const { query, page, data } = list;
 
   const returnState: ReturnToState = { returnTo: `${location.pathname}${location.search}` };

@@ -36,12 +36,13 @@ export interface CatalogDelete<T extends Deletable> {
  *   usuarios, así que se espera al servidor antes de quitar la fila.
  * - **404 = ya estaba borrado** (otra persona u otra pestaña): el estado
  *   deseado ya se cumple, se informa sin tono de error.
- * - Al terminar (bien o mal) se llama a `onSettled` para recargar el listado.
+ * - Al terminar (bien o mal) se llama a `onSettled`: el panel invalida la caché
+ *   del catálogo, que recarga el listado y avisa a los listados públicos.
  * - Tras borrar, el foco va al título de la sección **al cerrarse el
  *   diálogo**: mientras está abierto el resto de la página es inerte.
  *
  * @param deletePath ruta de la API que borra `item` (p. ej. `` (s) => `/series/${s.id}` ``)
- * @param onSettled se llama al terminar, haya ido bien o mal (normalmente, recargar)
+ * @param onSettled se llama al terminar, haya ido bien o mal (normalmente, invalidar el catálogo)
  */
 export function useCatalogDelete<T extends Deletable>(
   deletePath: (item: T) => string,

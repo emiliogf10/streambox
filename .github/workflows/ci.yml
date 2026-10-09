@@ -359,14 +359,19 @@ jobs:
       - name: Levantar el stack (db, backend y nginx)
         run: docker compose --env-file "$STREAMBOX_ENV_FILE" up -d --no-build --wait --wait-timeout 180
 
-      # Tres comprobaciones con curl contra nginx, la única puerta de
+      # Cuatro comprobaciones con curl contra nginx, la única puerta de
       # entrada, igual que un navegador:
       #   1. "/" sirve la SPA (200) con la cabecera Content-Security-Policy.
       #   2. "/api/movies" sin token: 401 con el error en JSON (el proxy
       #      llega al backend y la seguridad funciona).
-      #   3. Login del administrador: responde 204 con la cookie de sesión HttpOnly
-      #      (Flyway creó el esquema en PostgreSQL y el administrador se creó al
-      #      arrancar), y con esa cookie /api/users/me dice que es ADMIN.
+      #   3. Login del administrador: responde 204 con las dos cookies de sesión
+      #      (streambox_token con Path=/api y streambox_refresh con
+      #      Path=/api/auth, ambas HttpOnly y SameSite=Strict; Flyway creó el
+      #      esquema en PostgreSQL y el administrador se creó al arrancar), y con
+      #      ellas /api/users/me dice que es ADMIN.
+      #   4. Refresh: POST /api/auth/refresh con la cookie del refresh responde
+      #      204 con las dos cookies rotadas (la tabla refresh_tokens de V4
+      #      funciona en PostgreSQL) y la sesión sigue valiendo.
       # Sin jq a propósito (grep y sed): el mismo script funciona en el
       # Git Bash de Windows para reproducir la prueba en local.
       - name: Prueba de humo con curl
@@ -375,14 +380,26 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           fail() { echo "::error::$1"; exit 1; }
+          # check_cookie <cabeceras> <nombre> <ruta> <quién>: la respuesta fija
+          # esa cookie con HttpOnly, SameSite=Strict y exactamente esa Path
+          # (el ";" o el fin de línea tras la ruta evita que /api acepte /api/auth).
+          check_cookie() {
+            # "|| true": con pipefail, que no esté haría fallar la asignación
+            # en silencio en lugar de dar el mensaje de abajo.
+            line="$(grep -i "^set-cookie: $2=" "$1" | tr -d '\r' || true)"
+            [ -n "$line" ] || fail "$4 no fijó la cookie $2"
+            echo "$line" | grep -qi '; *HttpOnly' || fail "$4: la cookie $2 no es HttpOnly"
+            echo "$line" | grep -qi '; *SameSite=Strict' || fail "$4: la cookie $2 no es SameSite=Strict"
+            echo "$line" | grep -qE "; *Path=$3(;|$)" || fail "$4: la cookie $2 no tiene Path=$3"
+          }
 
-          echo "1/3 Portada"
+          echo "1/4 Portada"
           status="$(curl -sS -o /dev/null -D "$tmp/home.headers" -w '%{http_code}' "$base_url/")"
           [ "$status" = "200" ] || fail "GET / devolvió $status (se esperaba 200)"
           grep -qi '^content-security-policy:' "$tmp/home.headers" \
             || fail "GET / no lleva la cabecera Content-Security-Policy"
 
-          echo "2/3 API sin token"
+          echo "2/4 API sin token"
           status="$(curl -sS -o "$tmp/movies.json" -D "$tmp/movies.headers" -w '%{http_code}' "$base_url/api/movies")"
           [ "$status" = "401" ] || fail "GET /api/movies sin token devolvió $status (se esperaba 401)"
           grep -qi '^content-type: application/json' "$tmp/movies.headers" \
@@ -390,7 +407,7 @@ jobs:
           grep -q '"code":"INVALID_CREDENTIALS"' "$tmp/movies.json" \
             || fail "El 401 de /api/movies no trae el código de error esperado"
 
-          echo "3/3 Login del administrador"
+          echo "3/4 Login del administrador"
           admin_email="$(sed -n 's/^ADMIN_EMAIL=//p' "$STREAMBOX_ENV_FILE")"
           admin_password="$(sed -n 's/^ADMIN_PASSWORD=//p' "$STREAMBOX_ENV_FILE")"
           status="$(curl -sS -o /dev/null -D "$tmp/login.headers" -c "$tmp/cookies.txt" -w '%{http_code}' \
@@ -398,11 +415,23 @@ jobs:
             --data "{\"email\":\"$admin_email\",\"password\":\"$admin_password\"}" \
             "$base_url/api/auth/login")"
           [ "$status" = "204" ] || fail "El login del administrador devolvió $status (se esperaba 204)"
-          grep -qi '^set-cookie: streambox_token=.*HttpOnly' "$tmp/login.headers" || fail "El login no fijó la cookie streambox_token HttpOnly"
+          check_cookie "$tmp/login.headers" streambox_token '/api' "El login"
+          check_cookie "$tmp/login.headers" streambox_refresh '/api/auth' "El login"
           status="$(curl -sS -o "$tmp/me.json" -b "$tmp/cookies.txt" -w '%{http_code}' \
             "$base_url/api/users/me")"
           [ "$status" = "200" ] || fail "GET /api/users/me con la cookie devolvió $status (se esperaba 200)"
           grep -q '"role":"ADMIN"' "$tmp/me.json" || fail "El usuario de la sesión no es ADMIN"
+
+          echo "4/4 Renovación de sesión con el refresh token"
+          # curl solo envía streambox_refresh a /api/auth/* (Path de la cookie),
+          # igual que el navegador; -c guarda las cookies rotadas.
+          status="$(curl -sS -o /dev/null -D "$tmp/refresh.headers" -b "$tmp/cookies.txt" -c "$tmp/cookies.txt" \
+            -w '%{http_code}' -X POST -H 'X-Requested-With: StreamBox' "$base_url/api/auth/refresh")"
+          [ "$status" = "204" ] || fail "POST /api/auth/refresh devolvió $status (se esperaba 204)"
+          check_cookie "$tmp/refresh.headers" streambox_token '/api' "El refresh"
+          check_cookie "$tmp/refresh.headers" streambox_refresh '/api/auth' "El refresh"
+          status="$(curl -sS -o /dev/null -b "$tmp/cookies.txt" -w '%{http_code}' "$base_url/api/users/me")"
+          [ "$status" = "200" ] || fail "GET /api/users/me tras el refresh devolvió $status (se esperaba 200)"
 
           echo "Prueba de humo superada."
 

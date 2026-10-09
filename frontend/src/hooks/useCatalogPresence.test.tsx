@@ -9,7 +9,9 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../context/ToastContext';
+import { createTestQueryClient } from '../test/queryClient';
 import { errorResponse, jsonResponse, makePage, makeSeries, routeFetch } from '../test/helpers';
 import { useCatalogPresence } from './useCatalogPresence';
 
@@ -17,12 +19,20 @@ const fetchMock = vi.fn<typeof fetch>();
 
 const ANY_SERIES = 'GET /api/series?page=0&size=1&sort=createdAt&direction=desc';
 
-/** `usePagedCatalog` necesita `ToastProvider`. */
+/** Caché nueva en cada test: ninguno ve lo que cargó otro. */
+let queryClient = createTestQueryClient();
+
+/** `usePagedCatalog` necesita la caché de TanStack Query y `ToastProvider`. */
 function wrapper({ children }: { children: ReactNode }) {
-  return <ToastProvider>{children}</ToastProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>{children}</ToastProvider>
+    </QueryClientProvider>
+  );
 }
 
 beforeEach(() => {
+  queryClient = createTestQueryClient();
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
 });

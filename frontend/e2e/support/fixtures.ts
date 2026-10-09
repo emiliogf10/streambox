@@ -6,8 +6,10 @@
  *    Cada test tiene la suya, por eso son independientes y paralelizables.
  *  - `signIn`: función que deja la sesión abierta en el navegador sin pasar por
  *    el formulario (siembra en el contexto del navegador la cookie `streambox_token`,
- *    HttpOnly como la real, que es lo que haría el login).
- *    Los tests que prueban el formulario de login NO la usan.
+ *    HttpOnly como la real, que es lo que haría el login). Solo esa: sin el refresh
+ *    token (`streambox_refresh`), así que esa sesión NO se renueva (un 401 es sesión
+ *    caducada). Dura 15 minutos, de sobra para un test.
+ *    Los tests que prueban el formulario de login o la renovación NO la usan.
  *  - `failOnPageErrors` (automático): una excepción JavaScript no capturada en la
  *    página (un fallo de React, un `undefined`...) hace fallar el test aunque la
  *    UI "parezca" funcionar.

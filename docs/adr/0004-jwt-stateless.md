@@ -1,12 +1,12 @@
 # 0004. Autenticación con JWT sin estado y rol consultado a la base en cada petición
 
-**Estado:** Aceptada. El **almacenamiento del token en el navegador** se revisará en la tarea 29 del plan.
+**Estado:** Aceptada. El almacenamiento del token cambió en la tarea 29 (cookie HttpOnly, recogido abajo). **Sustituida en parte por el [0011](0011-token-corto-y-refresh-rotatorio.md)** (2026-10-08): el token de acceso dura 15 minutos y hay *refresh tokens* revocables; lo de la caducidad de 24 h y la alternativa descartada de los *refresh tokens* ya no rige.
 
 ## Contexto
 La API la consume una SPA y podría consumirla otro cliente. Se busca no depender de una sesión en memoria del servidor (para poder tener varias réplicas) y que revocar o cambiar un rol sea inmediato.
 
 ## Decisión
-- **JWT firmado** (JJWT 0.12.6, HMAC) emitido en `POST /api/auth/login`, con `issuer=streambox` y caducidad configurable (`JWT_EXPIRATION_HOURS`, 24 por defecto). El secreto (`JWT_SECRET`) debe tener ≥ 32 caracteres y se valida al arrancar; nunca va al repositorio.
+- **JWT firmado** (JJWT 0.12.6, HMAC) emitido en `POST /api/auth/login`, con `issuer=streambox` y caducidad configurable (`JWT_EXPIRATION_HOURS`, 24 por defecto; **hoy sustituido por `jwt.access-token-ttl`, 15 minutos, más *refresh tokens*: ver el ADR 0011**). El secreto (`JWT_SECRET`) debe tener ≥ 32 caracteres y se valida al arrancar; nunca va al repositorio.
 - Sesión **stateless**: Spring Security no crea `HttpSession`.
 - El token **no lleva el rol**: `JwtAuthenticationFilter` lee el usuario de la base en cada petición, así que un cambio de rol o un borrado de usuario surte efecto al instante. El coste es una consulta por petición.
 - Roles `USER` y `ADMIN`. El registro público siempre crea `USER`; los administradores solo nacen de `AdminAccountInitializer` (`ADMIN_EMAIL`/`ADMIN_PASSWORD`).

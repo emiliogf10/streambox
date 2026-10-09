@@ -13,7 +13,9 @@ import { Pagination } from '../../components/Pagination';
 import { useAdminSearchList } from '../../hooks/useAdminSearchList';
 import { useCatalogDelete } from '../../hooks/useCatalogDelete';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
 import { apiFetch } from '../../lib/api';
+import { queryKeys } from '../../lib/queryKeys';
 import type { Movie, PageResponse } from '../../lib/types';
 import { formatDuration } from '../../lib/utils';
 import { AdminRowActions } from './AdminRowActions';
@@ -25,7 +27,7 @@ const PAGE_SIZE = 10;
 
 /**
  * Pide una página: con texto, la búsqueda por título (orden alfabético); sin texto, lo último añadido primero.
- * Es una función de módulo (estable) porque `useAdminSearchList` la usa como dependencia de la carga.
+ * Recibe el `signal` de TanStack: si se cambia de página o de búsqueda antes de que responda, se cancela.
  */
 function fetchMovies(query: string, page: number, signal: AbortSignal): Promise<PageResponse<Movie>> {
   return query
@@ -39,7 +41,7 @@ function fetchMovies(query: string, page: number, signal: AbortSignal): Promise<
       });
 }
 
-/** Ruta del `DELETE` de una película (estable, por lo mismo que {@link fetchMovies}). */
+/** Ruta del `DELETE` de una película. */
 const movieDeletePath = (movie: Movie) => `/movies/${movie.id}`;
 
 /**
@@ -68,11 +70,15 @@ const movieDeletePath = (movie: Movie) => `/movies/${movie.id}`;
 export function AdminMoviesPage() {
   useDocumentTitle('Películas · Administración');
   const location = useLocation();
-  const list = useAdminSearchList(fetchMovies, 'No se pudieron cargar las películas.');
+  const invalidateCatalog = useInvalidateCatalog();
+  // Tras borrar (o saber que ya no estaba) se invalida la raíz: este listado se refresca y, con él,
+  // los listados públicos y «Mi lista» de quien tuviera el título.
+  const refreshAfterDelete = () => void invalidateCatalog('movies');
+  const list = useAdminSearchList(queryKeys.movies.admin, fetchMovies, 'No se pudieron cargar las películas.');
   // Desestructurado: el resultado incluye una ref (`headingRef`) y leer propiedades de ese objeto al pintar
   // es lo que el analizador (regla `react(refs)`) no puede distinguir de leer `ref.current`.
   const { pending: toDelete, ask: askDelete, cancel: cancelDelete, confirm: confirmDelete, deleting, headingRef } =
-    useCatalogDelete(movieDeletePath, list.reload);
+    useCatalogDelete(movieDeletePath, refreshAfterDelete);
   const { query, page, data } = list;
 
   const returnState: ReturnToState = { returnTo: `${location.pathname}${location.search}` };

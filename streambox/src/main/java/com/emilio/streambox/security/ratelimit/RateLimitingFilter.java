@@ -12,19 +12,24 @@ import org.springframework.http.MediaType;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.WebUtils;
 
 import com.emilio.streambox.dto.ErrorCode;
+import com.emilio.streambox.security.AuthCookieService;
+import com.emilio.streambox.security.JwtAuthenticationFilter;
 import com.emilio.streambox.security.SecurityErrorResponseWriter;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Limita por IP cuántas veces se puede llamar a los endpoints públicos más
- * sensibles: el inicio de sesión ({@code POST /api/auth/login}) y el registro
- * ({@code POST /api/users}).
+ * sensibles: el inicio de sesión ({@code POST /api/auth/login}), el registro
+ * ({@code POST /api/users}) y la renovación de sesión
+ * ({@code POST /api/auth/refresh}).
  *
  * <p>
  * Al superar el límite responde {@code 429 Too Many Requests} con la cabecera
@@ -114,6 +119,53 @@ import jakarta.servlet.http.HttpServletResponse;
  * cuentan puede enviarse desde otra web sin preflight, y sin CORS el
  * preflight falla, así que otra web no puede gastar el presupuesto.
  * </p>
+ *
+ * <h2>El refresh ({@code POST /api/auth/refresh})</h2>
+ * <p>
+ * Tiene su propio límite por IP ({@code rate-limit.refresh}, 30 por minuto:
+ * el frontend hace un refresh cada 15 minutos por navegador, así que sobra
+ * margen incluso para muchas personas tras la misma IP). Cada petición busca
+ * un token en la base de datos, de ahí el límite.
+ * </p>
+ *
+ * <p>
+ * La regla del {@code Content-Type} no sirve aquí: el refresh no tiene cuerpo,
+ * así que una petición sin {@code Content-Type} sí llega al controlador y, con
+ * esa regla, quedaría <b>sin límite</b>. El criterio equivalente es la
+ * cabecera {@code X-Requested-With: StreamBox}, que el endpoint exige (403
+ * {@code CSRF_REJECTED} sin ella, en {@code JwtAuthenticationFilter}, antes de
+ * tocar la base de datos): una cabecera propia obliga al navegador a hacer
+ * preflight, que falla sin CORS, así que otra web no puede enviarla. Por eso
+ * <b>cuentan todas las peticiones con la cabecera</b> (y con la cookie del
+ * refresh, ver el párrafo siguiente), tengan o no
+ * {@code Content-Type}, y las que no la llevan pasan sin contar hasta su 403:
+ * una web ajena no puede agotar el límite de la víctima, y quien llame
+ * directamente (sin navegador) con la cabecera queda limitado.
+ * </p>
+ *
+ * <p>
+ * <b>Tampoco cuentan las que no traen la cookie {@code streambox_refresh}</b>
+ * (o la traen vacía). Cada visita sin sesión hace un refresh así al arrancar:
+ * {@code GET /api/users/me} da 401 y el frontend no puede saber si hay refresh
+ * token, porque la cookie es HttpOnly. Si contaran, 30 visitas por minuto desde
+ * la misma IP (una oficina tras un NAT) dejarían a todos en 429 nada más abrir
+ * la aplicación, también a quien sí tiene sesión. No limitarlas no expone nada:
+ * {@code AuthController} las rechaza con el 401 {@code SESSION_EXPIRED} sin
+ * llamar al servicio (ni base de datos ni conexión del pool).
+ * </p>
+ *
+ * <p>
+ * Un valor <b>mal formado</b> sí cuenta, aunque también se rechace sin base de
+ * datos. El navegador solo guarda las cookies que fija el servidor, que siempre
+ * tienen buen formato, así que un valor imposible solo lo manda un cliente que
+ * no es la aplicación: contarlo no perjudica a nadie legítimo y evita que esas
+ * peticiones sean gratis. Y no abre un ataque nuevo contra los vecinos de NAT:
+ * quien comparta la IP ya puede gastar el límite con tokens de buen formato
+ * inventados. La cookie se lee con {@link WebUtils#getCookie}, igual que
+ * {@code @CookieValue} en el controlador: si el filtro no cuenta una petición,
+ * el controlador ve {@code null} o un valor en blanco y la rechaza antes del
+ * servicio.
+ * </p>
  */
 public class RateLimitingFilter extends OncePerRequestFilter {
 
@@ -127,6 +179,12 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     public static final String REGISTER_PATH = "/api/users";
 
     /**
+     * Ruta de la renovación de sesión con el refresh token (pública y
+     * limitada, como {@link #LOGIN_PATH}; ver «El refresh» en la clase).
+     */
+    public static final String REFRESH_PATH = "/api/auth/refresh";
+
+    /**
      * Tipos de la lista CORS-safelisted del estándar Fetch: los únicos con
      * los que otra web puede enviar un {@code POST} sin preflight.
      */
@@ -135,10 +193,13 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
     private final RequestMatcher loginRequest;
     private final RequestMatcher registerRequest;
+    private final RequestMatcher refreshRequest;
     private final RateLimitProperties.Rule loginRule;
     private final RateLimitProperties.Rule registerRule;
+    private final RateLimitProperties.Rule refreshRule;
     private final SlidingWindowCounter loginCounter;
     private final SlidingWindowCounter registerCounter;
+    private final SlidingWindowCounter refreshCounter;
     private final SecurityErrorResponseWriter errorWriter;
 
     /**
@@ -159,10 +220,13 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         this.loginRequest = matchers.matcher(HttpMethod.POST, LOGIN_PATH);
         this.registerRequest = matchers.matcher(HttpMethod.POST, REGISTER_PATH);
+        this.refreshRequest = matchers.matcher(HttpMethod.POST, REFRESH_PATH);
         this.loginRule = properties.login();
         this.registerRule = properties.register();
+        this.refreshRule = properties.refresh();
         this.loginCounter = new SlidingWindowCounter(loginRule.window(), clock, properties.maxKeys());
         this.registerCounter = new SlidingWindowCounter(registerRule.window(), clock, properties.maxKeys());
+        this.refreshCounter = new SlidingWindowCounter(refreshRule.window(), clock, properties.maxKeys());
         this.errorWriter = errorWriter;
     }
 
@@ -173,11 +237,21 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             FilterChain filterChain) throws ServletException, IOException {
 
         if (loginRequest.matches(request)) {
-            if (!acquire(request, response, loginCounter, loginRule)) {
+            if (!acquire(request, response, loginCounter, loginRule,
+                    countsTowardsLimit(request.getContentType()))) {
                 return;
             }
         } else if (registerRequest.matches(request)) {
-            if (!acquire(request, response, registerCounter, registerRule)) {
+            if (!acquire(request, response, registerCounter, registerRule,
+                    countsTowardsLimit(request.getContentType()))) {
+                return;
+            }
+        } else if (refreshRequest.matches(request)) {
+            // Sin cuerpo: el criterio no es el Content-Type sino la cabecera
+            // CSRF y la cookie del refresh (ver «El refresh» en el Javadoc de
+            // la clase).
+            if (!acquire(request, response, refreshCounter, refreshRule,
+                    JwtAuthenticationFilter.hasCsrfHeader(request) && hasRefreshCookie(request))) {
                 return;
             }
         }
@@ -189,12 +263,17 @@ public class RateLimitingFilter extends OncePerRequestFilter {
      * Gasta un hueco del contador de la IP, o responde 429 si no quedan.
      *
      * <p>
-     * Las peticiones que otra web puede enviar sin preflight
-     * ({@link #countsTowardsLimit(String)}) pasan sin gastar nada: Spring MVC
-     * las rechazará (415/400) antes del controlador, y contarlas solo
-     * serviría para agotar el límite de la víctima.
+     * Las peticiones que otra web puede enviar sin preflight pasan sin gastar
+     * nada ({@code counts} a {@code false}): se rechazarán antes del
+     * controlador (415/400 en login y registro, 403 en el refresh), y
+     * contarlas solo serviría para agotar el límite de la víctima. Tampoco
+     * gasta un refresh sin cookie, que el controlador rechaza sin llamar al
+     * servicio.
      * </p>
      *
+     * @param counts si esta petición gasta presupuesto (ver
+     *               {@link #countsTowardsLimit(String)} y
+     *               {@link JwtAuthenticationFilter#hasCsrfHeader})
      * @return {@code true} si la petición puede continuar; {@code false} si ya
      *         se ha respondido con 429
      */
@@ -202,9 +281,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             HttpServletRequest request,
             HttpServletResponse response,
             SlidingWindowCounter counter,
-            RateLimitProperties.Rule rule) throws IOException {
+            RateLimitProperties.Rule rule,
+            boolean counts) throws IOException {
 
-        if (!countsTowardsLimit(request.getContentType())) {
+        if (!counts) {
             return true;
         }
         String ip = ClientAddress.counterKey(request.getRemoteAddr());
@@ -257,6 +337,25 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         }
         return true;
+    }
+
+    /**
+     * Indica si la petición trae la cookie {@code streambox_refresh} con algún
+     * valor (aunque esté mal formado: ese caso cuenta, ver «El refresh» en la
+     * clase).
+     *
+     * <p>
+     * Se busca con {@link WebUtils#getCookie}, el mismo método que usa
+     * {@code @CookieValue}: si hay varias cookies con ese nombre, el filtro y
+     * el controlador miran la misma (la primera).
+     * </p>
+     *
+     * @param request petición de refresh
+     * @return {@code true} si la cookie está y su valor no está en blanco
+     */
+    static boolean hasRefreshCookie(HttpServletRequest request) {
+        Cookie cookie = WebUtils.getCookie(request, AuthCookieService.REFRESH_COOKIE_NAME);
+        return cookie != null && cookie.getValue() != null && !cookie.getValue().isBlank();
     }
 
     private void reject(

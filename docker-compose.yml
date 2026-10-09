@@ -128,10 +128,14 @@ services:
       DB_USERNAME: ${POSTGRES_USER:-streambox}
       DB_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD. Copia .env.example como .env y rellénalo.}
       JWT_SECRET: ${JWT_SECRET:?Falta JWT_SECRET (mínimo 32 caracteres). Genera uno con openssl rand -base64 48 y ponlo en .env.}
-      JWT_EXPIRATION_HOURS: ${JWT_EXPIRATION_HOURS:-24}
-      # Cookie de sesion sin "Secure": este compose sirve HTTP en localhost y el
+      # Vida del JWT de acceso (cookie streambox_token); la sesion larga la
+      # mantiene el refresh token (cookie streambox_refresh, 7 dias por uso y
+      # 30 como mucho). Maximo 1h.
+      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-15m}
+      # Cookies de sesion sin "Secure": este compose sirve HTTP en localhost y el
       # navegador no guardaria una cookie Secure. Detras de HTTPS (produccion)
-      # ponla a true en .env.
+      # ponla a true en .env. Con el perfil prod y false, el backend avisa con un
+      # WARN al arrancar (es lo esperado aqui).
       STREAMBOX_AUTH_COOKIE_SECURE: ${STREAMBOX_AUTH_COOKIE_SECURE:-false}
       # Administrador inicial (opcional): si ADMIN_EMAIL y ADMIN_PASSWORD
       # están vacíos, no se crea ninguno.

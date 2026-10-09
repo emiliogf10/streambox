@@ -411,6 +411,33 @@ describe('MoviesPage: cambiar filtros', () => {
     await expectCount('1 película');
   });
 
+  it('«Atrás» a un filtro ya visto lo pinta desde la caché: sin esqueleto y sin repetir la petición', async () => {
+    const user = await renderReady({
+      [searchKey({ genreId: 4 })]: () => jsonResponse(makePage([hero])),
+      [searchKey({ genreId: 7 })]: () => jsonResponse(makePage([others[0], others[1]])),
+    });
+    await user.selectOptions(genreSelect(), 'Drama');
+    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    await expectCount('1 película');
+    await user.selectOptions(genreSelect(), 'Terror');
+    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    await expectCount('2 películas');
+
+    await user.click(screen.getByRole('button', { name: 'Atrás del navegador' }));
+
+    // Cada combinación de filtros tiene su entrada en la caché (la clave lleva los filtros de la URL).
+    expect(await screen.findByText('busqueda:?genero=4')).toBeInTheDocument();
+    expect(screen.queryByText('Buscando películas...')).not.toBeInTheDocument();
+    await expectCount('1 película');
+    expect(callsWith('genreId=4')).toHaveLength(1);
+
+    // Y quitar los filtros vuelve al catálogo que ya estaba cargado.
+    await user.click(screen.getByRole('button', { name: 'Atrás del navegador' }));
+    expect(await screen.findByText('busqueda:')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Estreno estrella' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === CATALOG_0.slice(4))).toHaveLength(1);
+  });
+
   it('el año se aplica al escribir uno válido; uno fuera de rango marca el error y no cambia la URL', async () => {
     const user = await renderReady({
       [searchKey({ releaseYear: 2014 })]: () => jsonResponse(makePage([others[2]])),

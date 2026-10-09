@@ -1,7 +1,7 @@
 # Especificación OpenAPI 3.1 de la API de StreamBox.
-# Generada con springdoc (GET /v3/api-docs) desde el backend de la rama main y convertida a YAML;
+# Generada con springdoc (GET /v3/api-docs) desde el backend real y convertida a YAML;
 # solo se ha cambiado `servers`. Para regenerarla: ver docs/api/README.md.
-# Autenticación: JWT Bearer (estado actual; la tarea 29 lo cambiará a cookie HttpOnly).
+# Autenticación: cookies HttpOnly (streambox_token + streambox_refresh) o Authorization: Bearer; ver README.
 openapi: 3.1.0
 info:
   title: Streambox API
@@ -57,7 +57,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -75,6 +77,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     delete:
       tags:
@@ -106,7 +109,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -118,6 +123,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/series/{id}:
     get:
@@ -154,6 +160,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     put:
       tags:
@@ -194,7 +201,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -206,6 +215,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     delete:
       tags:
@@ -230,7 +240,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -242,6 +254,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/movies/{id}:
     get:
@@ -277,6 +290,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     put:
       tags:
@@ -317,7 +331,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -329,6 +345,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     delete:
       tags:
@@ -354,7 +371,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -366,6 +385,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/genres/{id}:
     put:
@@ -408,7 +428,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -426,6 +448,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     delete:
       tags:
@@ -457,7 +480,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -475,6 +500,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/users:
     get:
@@ -505,6 +531,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     post:
       tags:
@@ -577,6 +604,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Película no encontrada
           content:
@@ -590,6 +624,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     delete:
       tags:
@@ -613,6 +648,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: La película no existe o no está en mi lista
           content:
@@ -620,6 +662,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/users/me/favorites/series/{seriesId}:
     post:
@@ -644,6 +687,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: La serie no existe o no tiene episodios
           content:
@@ -657,6 +707,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     delete:
       tags:
@@ -681,6 +732,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: 'La serie no estaba en mi lista: SERIES_NOT_IN_FAVORITES si es una serie con episodios; RESOURCE_NOT_FOUND
             ("Serie no encontrada") si no existe o no tiene episodios, sin distinguir entre ambos casos'
@@ -689,6 +747,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/users/me/favorites/by-title:
     post:
@@ -713,6 +772,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: No existe una película con el título indicado
           content:
@@ -726,6 +792,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     delete:
       tags:
@@ -749,6 +816,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: La película no existe o no está en mi lista
           content:
@@ -762,6 +836,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/series:
     get:
@@ -825,6 +900,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     post:
       tags:
@@ -859,7 +935,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -871,6 +949,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/series/{seriesId}/episodes:
     post:
@@ -913,7 +992,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -931,6 +1012,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/movies:
     get:
@@ -993,6 +1075,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     post:
       tags:
@@ -1027,7 +1110,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -1039,6 +1124,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/genres:
     get:
@@ -1063,6 +1149,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     post:
       tags:
@@ -1096,7 +1183,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: El usuario no tiene permisos de administrador
+          description: 'El usuario no tiene permisos de administrador. También 403 con código CSRF_REJECTED si la petición
+            se autentica por la cookie streambox_token y le falta la cabecera X-Requested-With: StreamBox (defensa CSRF; con
+            Authorization: Bearer no se exige)'
           content:
             application/json:
               schema:
@@ -1108,13 +1197,112 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
+  /api/auth/refresh:
+    post:
+      tags:
+      - auth-controller
+      summary: Renueva la sesión
+      description: 'Entrega un JWT de acceso nuevo (cookie streambox_token) a partir del refresh token de la cookie streambox_refresh,
+        sin pedir la contraseña. Sin cuerpo. Solo lee la cookie streambox_refresh: ignora streambox_token y la cabecera Authorization.
+        Exige la cabecera X-Requested-With: StreamBox (defensa CSRF). Cada uso rota el refresh token: el viejo queda revocado
+        y llega uno nuevo en Set-Cookie (vida de 7 días, sin pasar de 30 días desde el login). Reutilizar un refresh token
+        ya rotado se trata como un robo y revoca la sesión entera (también el token nuevo), salvo en los 10 segundos siguientes
+        a la rotación: así dos pestañas que renuevan a la vez no se cierran la sesión; la segunda recibe solo el JWT nuevo,
+        sin Set-Cookie de streambox_refresh, porque el navegador ya tiene el sucesor.'
+      operationId: refresh
+      parameters:
+      - name: streambox_refresh
+        in: cookie
+        description: Refresh token (cookie HttpOnly streambox_refresh que fija el login; el navegador la envía solo)
+        required: false
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Sesión renovada; sin cuerpo. Set-Cookie con streambox_token y, salvo en la gracia de un refresh simultáneo,
+            con el streambox_refresh nuevo
+        '401':
+          description: 'Código SESSION_EXPIRED: el refresh token falta, no existe, ha caducado (él o su sesión de 30 días),
+            está revocado (logout) o se ha reutilizado (y entonces se revoca toda la sesión). Mismo cuerpo en todos los casos.
+            La respuesta borra las dos cookies: hay que volver a iniciar sesión'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: falta la cabecera X-Requested-With: StreamBox. No se mira el refresh token ni
+            se gasta el límite por IP'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 'Código RATE_LIMIT_EXCEEDED: demasiadas renovaciones desde esta IP (30 por minuto por defecto); la
+            cabecera Retry-After indica los segundos que hay que esperar. Solo cuentan las peticiones con la cabecera X-Requested-With
+            y con la cookie streambox_refresh: sin cookie (visita sin sesión) la respuesta es siempre el 401 SESSION_EXPIRED'
+          headers:
+            Retry-After:
+              description: Segundos que hay que esperar antes de volver a intentarlo (entero, mínimo 1).
+              required: true
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/auth/logout:
+    post:
+      tags:
+      - auth-controller
+      summary: Cierra sesión
+      description: 'Revoca en el servidor la sesión del refresh token de la cookie streambox_refresh (sus tokens dejan de
+        servir para renovar) y borra las cookies streambox_token y streambox_refresh (Set-Cookie con Max-Age=0). Es público
+        e idempotente: responde 204 haya o no sesión, y con un refresh token desconocido o ya revocado. Exige la cabecera
+        X-Requested-With: StreamBox (defensa CSRF, también con Authorization: Bearer): sin ella otra web podría borrar las
+        cookies de la víctima. El JWT de acceso es stateless y no se puede revocar: una copia seguiría valiendo hasta su caducidad
+        (como mucho 15 minutos por defecto), pero ya no se podría renovar.'
+      operationId: logout
+      parameters:
+      - name: streambox_refresh
+        in: cookie
+        description: Refresh token de la sesión que se cierra (cookie HttpOnly streambox_refresh); opcional
+        required: false
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Sesión revocada (si la había) y cookies borradas
+        '403':
+          description: 'Código CSRF_REJECTED: falta la cabecera X-Requested-With: StreamBox. No se revoca nada ni se borran
+            las cookies: la sesión sigue abierta'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 'Código INTERNAL_ERROR: no se ha podido revocar la sesión (por ejemplo, la base de datos no responde).
+            No se borran las cookies: la sesión sigue viva en el servidor y el cliente debe reintentar el logout en lugar
+            de darla por cerrada'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/auth/login:
     post:
       tags:
       - auth-controller
       summary: Inicia sesión
-      description: Autentica un usuario mediante su correo electrónico y contraseña y devuelve un token JWT.
+      description: 'Autentica un usuario mediante su correo electrónico y contraseña. Los tokens no van en el cuerpo: se entregan
+        en dos cookies HttpOnly; SameSite=Strict (Secure según la configuración). streambox_token: JWT de acceso, Path=/api,
+        Max-Age = su vida (15 minutos por defecto). streambox_refresh: refresh token opaco, Path=/api/auth (solo viaja a login,
+        refresh y logout), Max-Age = su vida (7 días). Cuando el JWT caduca, POST /api/auth/refresh entrega uno nuevo sin
+        volver a pedir la contraseña. Las peticiones POST/PUT/PATCH/DELETE autenticadas por cookie deben llevar la cabecera
+        X-Requested-With: StreamBox (403 CSRF_REJECTED si falta). También se acepta Authorization: Bearer con el JWT de acceso
+        (clientes de API), sin esa cabecera extra.'
       operationId: login
       requestBody:
         content:
@@ -1123,12 +1311,8 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
         required: true
       responses:
-        '200':
-          description: Autenticación realizada correctamente
-          content:
-            '*/*':
-              schema:
-                $ref: '#/components/schemas/LoginResponse'
+        '204':
+          description: Autenticación correcta; sin cuerpo, con las cookies streambox_token y streambox_refresh en Set-Cookie
         '400':
           description: 'Los datos proporcionados no son válidos (email con formato incorrecto, contraseña vacía o de más de
             1024 caracteres). No gasta intento de la cuenta. En el login no se aplica la política de longitud del registro:
@@ -1141,7 +1325,7 @@ paths:
           description: 'Credenciales incorrectas (código INVALID_CREDENTIALS, mensaje «Email o contraseña incorrectos»). El
             cuerpo incluye remainingAttempts: intentos que le quedan a la cuenta ya descontado este fallo (siempre 1 o más);
             si el siguiente intento también falla y era el último, la cuenta se bloquea y se responde 429 ACCOUNT_LOCKED.
-            Es idéntico exista o no el email'
+            Desde una misma IP de origen es idéntico exista o no el email'
           content:
             application/json:
               schema:
@@ -1149,8 +1333,9 @@ paths:
         '429':
           description: 'Demasiados intentos; la cabecera Retry-After indica los segundos que hay que esperar. Código ACCOUNT_LOCKED:
             la cuenta está bloqueada por logins fallidos (lo devuelve el fallo que agota los intentos y cualquier intento
-            durante el bloqueo, aunque la contraseña sea correcta; el mensaje dice cuántos minutos dura). Código RATE_LIMIT_EXCEEDED:
-            demasiadas peticiones de login desde esta IP'
+            durante el bloqueo, aunque la contraseña sea correcta; el mensaje dice cuántos minutos dura; no se aplica a una
+            IP desde la que el titular ya inició sesión con éxito, que tiene su propio contador con los mismos límites). Código
+            RATE_LIMIT_EXCEEDED: demasiadas peticiones de login desde esta IP'
           headers:
             Retry-After:
               description: Segundos que hay que esperar antes de volver a intentarlo (entero, mínimo 1).
@@ -1184,6 +1369,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/users/me/favorites:
     get:
@@ -1208,6 +1394,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     delete:
       tags:
@@ -1224,7 +1411,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/users/me/favorites/series:
     get:
@@ -1250,6 +1445,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
     delete:
       tags:
@@ -1266,7 +1462,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/series/search:
     get:
@@ -1347,6 +1551,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/movies/search:
     get:
@@ -1427,6 +1632,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/admin/series:
     get:
@@ -1501,6 +1707,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
   /api/admin/series/{id}:
     get:
@@ -1543,6 +1750,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
+      - cookieAuth: []
       - bearerAuth: []
 components:
   schemas:
@@ -1850,11 +2058,6 @@ components:
       required:
       - email
       - password
-    LoginResponse:
-      type: object
-      properties:
-        token:
-          type: string
     SeriesResponse:
       type: object
       properties:
@@ -1964,6 +2167,9 @@ components:
 
             - SERIES_NOT_IN_FAVORITES (404): la serie existe, pero no está en la lista del usuario.
 
+            - CSRF_REJECTED (403): petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie sin la cabecera X-Requested-With:
+            StreamBox. POST /api/auth/refresh y POST /api/auth/logout la exigen siempre, también con Authorization: Bearer.
+
             - USER_ALREADY_EXISTS (409): el nombre de usuario o el email ya están registrados.
 
             - MOVIE_ALREADY_IN_FAVORITES (409): la película ya está en la lista del usuario.
@@ -1987,13 +2193,20 @@ components:
 
             - INVALID_CREDENTIALS (401): email o contraseña incorrectos en el login, o token ausente, caducado o no válido.
 
+            - SESSION_EXPIRED (401): POST /api/auth/refresh no puede renovar la sesión (refresh token ausente, caducado, revocado
+            o reutilizado); hay que volver a iniciar sesión.
+
             - ACCESS_DENIED (403): autenticado, pero sin permisos (por ejemplo, no es ADMIN).
 
             - METHOD_NOT_ALLOWED (405): el método HTTP no está soportado por la ruta.
 
             - UNSUPPORTED_MEDIA_TYPE (415): el tipo de contenido no está soportado.
 
-            - RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login o registro desde la misma IP; ver la cabecera Retry-After.
+            - NOT_ACCEPTABLE (406): la cabecera Accept pide un formato que la API no produce; la API solo responde en JSON
+            (este error también va en JSON).
+
+            - RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login, registro o renovación de sesión (POST /api/auth/refresh)
+            desde la misma IP; ver la cabecera Retry-After.
 
             - ACCOUNT_LOCKED (429): la cuenta está bloqueada temporalmente por logins fallidos; ver la cabecera Retry-After.
 
@@ -2012,6 +2225,7 @@ components:
           - MALFORMED_REQUEST
           - METHOD_NOT_ALLOWED
           - UNSUPPORTED_MEDIA_TYPE
+          - NOT_ACCEPTABLE
           - RATE_LIMIT_EXCEEDED
           - ACCOUNT_LOCKED
           - GENRE_ALREADY_EXISTS
@@ -2019,6 +2233,8 @@ components:
           - EPISODE_ALREADY_EXISTS
           - SERIES_ALREADY_IN_FAVORITES
           - SERIES_NOT_IN_FAVORITES
+          - CSRF_REJECTED
+          - SESSION_EXPIRED
           example: RESOURCE_NOT_FOUND
         message:
           type: string
@@ -2053,7 +2269,18 @@ components:
       - status
       - timestamp
   securitySchemes:
+    cookieAuth:
+      type: apiKey
+      description: 'Autenticación principal (navegador): el JWT de acceso viaja en la cookie HttpOnly streambox_token que
+        fija POST /api/auth/login (Path=/api, 15 minutos; se renueva con POST /api/auth/refresh). Las peticiones no seguras
+        (POST, PUT, PATCH, DELETE) autenticadas por esta cookie deben llevar además la cabecera X-Requested-With: StreamBox
+        (defensa CSRF); si falta, 403 CSRF_REJECTED. Si la petición trae Authorization: Bearer, manda el Bearer y la cookie
+        no se mira. Swagger UI no puede fijar esta cookie: para probar desde aquí usa bearerAuth.'
+      name: streambox_token
+      in: cookie
     bearerAuth:
       type: http
+      description: 'Alternativa para clientes de API sin navegador: el mismo JWT de acceso (el valor de la cookie streambox_token)
+        en la cabecera Authorization: Bearer. Con Bearer no se exige X-Requested-With (no hay riesgo de CSRF).'
       scheme: bearer
       bearerFormat: JWT

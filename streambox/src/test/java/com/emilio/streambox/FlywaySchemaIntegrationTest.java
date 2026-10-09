@@ -17,7 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Comprueba el esquema que producen las migraciones de Flyway: índices,
  * claves foráneas con borrado en cascada y restricciones de integridad
- * (películas en {@code V1}/{@code V2}; series y episodios en {@code V3}).
+ * (películas en {@code V1}/{@code V2}; series y episodios en {@code V3};
+ * refresh tokens en {@code V4}).
  *
  * <p>
  * Que las entidades coincidan con las tablas ya lo verifica Hibernate
@@ -260,7 +261,155 @@ class FlywaySchemaIntegrationTest {
                 jdbc.update("INSERT INTO user_favorite_series (user_id, series_id) VALUES (?, ?)", userId, seriesId));
     }
 
+    // --- V4: refresh tokens ---
+
+    /** Hash válido: 64 caracteres hexadecimales en minúsculas (lo que guarda el servicio). */
+    private static final String HASH_A = "a".repeat(64);
+    private static final String HASH_B = "0123456789abcdef".repeat(4);
+
+    @Test
+    void v4EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '4' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    @Test
+    void existenLosIndicesDeRefreshTokens() {
+        List<String> indexes = jdbc.queryForList(
+                "SELECT LOWER(INDEX_NAME) FROM INFORMATION_SCHEMA.INDEXES", String.class);
+
+        assertTrue(indexes.contains("idx_refresh_tokens_user_id"), "falta índice de tokens por usuario");
+        assertTrue(indexes.contains("idx_refresh_tokens_family_id"), "falta índice de tokens por familia");
+        assertTrue(indexes.contains("idx_refresh_tokens_replaced_by_id"), "falta índice del sucesor (ON DELETE SET NULL)");
+    }
+
+    /** Borrar el usuario borra sus tokens; borrar el sucesor deja a NULL el enlace del predecesor. */
+    @Test
+    void lasClavesForaneasDeRefreshTokensTienenLaPoliticaDeBorradoEsperada() {
+        java.util.Map<String, String> rules = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT LOWER(CONSTRAINT_NAME) AS NAME, DELETE_RULE AS RULE"
+                        + " FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS")
+                .forEach(r -> rules.put((String) r.get("NAME"), (String) r.get("RULE")));
+
+        assertEquals("CASCADE", rules.get("fk_refresh_tokens_user"));
+        assertEquals("SET NULL", rules.get("fk_refresh_tokens_replaced_by"));
+    }
+
+    @Test
+    void borrarUnUsuarioBorraSusRefreshTokensYNoLosDeOtros() {
+        long userId = insertUser("tokengone");
+        long otherId = insertUser("tokenstays");
+        insertToken(userId, HASH_A, java.util.UUID.randomUUID(), null);
+        insertToken(otherId, HASH_B, java.util.UUID.randomUUID(), null);
+
+        jdbc.update("DELETE FROM users WHERE id = ?", userId);
+
+        assertEquals(1, count("refresh_tokens"));
+        assertEquals(otherId, jdbc.queryForObject("SELECT user_id FROM refresh_tokens", Long.class));
+    }
+
+    @Test
+    void borrarElSucesorDejaAlPredecesorRevocadoYSinEnlace() {
+        long userId = insertUser("tokenchain");
+        java.util.UUID family = java.util.UUID.randomUUID();
+        long next = insertToken(userId, HASH_B, family, null);
+        long previous = insertToken(userId, HASH_A, family, null);
+        jdbc.update("UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP, replaced_by_id = ? WHERE id = ?",
+                next, previous);
+
+        jdbc.update("DELETE FROM refresh_tokens WHERE id = ?", next);
+
+        assertEquals(null, jdbc.queryForObject("SELECT replaced_by_id FROM refresh_tokens WHERE id = ?",
+                Long.class, previous));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM refresh_tokens WHERE id = ? AND revoked_at IS NOT NULL",
+                Integer.class, previous));
+    }
+
+    @Test
+    void elHashDelTokenEsUnico() {
+        long userId = insertUser("tokendup");
+        insertToken(userId, HASH_A, java.util.UUID.randomUUID(), null);
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertToken(userId, HASH_A, java.util.UUID.randomUUID(), null));
+    }
+
+    /**
+     * El CHECK de formato impide guardar el token en claro por error: solo
+     * acepta 64 caracteres hexadecimales en minúsculas.
+     */
+    @Test
+    void laBaseDeDatosRechazaHashesQueNoSonSha256EnHexadecimal() {
+        long userId = insertUser("tokenformat");
+        java.util.UUID family = java.util.UUID.randomUUID();
+
+        assertThrows(DataIntegrityViolationException.class, () -> insertToken(userId, "a".repeat(63), family, null));
+        assertThrows(DataIntegrityViolationException.class, () -> insertToken(userId, "A".repeat(64), family, null));
+        // Un token base64url de 64 caracteres (como sería uno en claro) tiene letras fuera de a-f
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertToken(userId, "Zq3-_x" + "a".repeat(58), family, null));
+        assertThrows(DataIntegrityViolationException.class, () -> insertToken(userId, "g".repeat(64), family, null));
+        assertEquals(0, count("refresh_tokens"));
+    }
+
+    @Test
+    void laBaseDeDatosRechazaCaducidadesImposibles() {
+        long userId = insertUser("tokendates");
+        java.time.OffsetDateTime now = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC);
+
+        // Caduca en el mismo instante en que nace
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertToken(userId, HASH_A, now, now, now.plusDays(1)));
+        // Caduca después que su familia
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertToken(userId, HASH_A, now, now.plusDays(2), now.plusDays(1)));
+        assertEquals(0, count("refresh_tokens"));
+
+        // Límite válido: caduca justo cuando la familia
+        insertToken(userId, HASH_A, now, now.plusDays(1), now.plusDays(1));
+        assertEquals(1, count("refresh_tokens"));
+    }
+
+    @Test
+    void unTokenConSucesorDebeEstarRevocadoYNoPuedeSucederseASiMismo() {
+        long userId = insertUser("tokenrevoked");
+        java.util.UUID family = java.util.UUID.randomUUID();
+        long next = insertToken(userId, HASH_B, family, null);
+        long previous = insertToken(userId, HASH_A, family, null);
+
+        assertThrows(DataIntegrityViolationException.class, () ->
+                jdbc.update("UPDATE refresh_tokens SET replaced_by_id = ? WHERE id = ?", next, previous));
+        assertThrows(DataIntegrityViolationException.class, () ->
+                jdbc.update("UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP, replaced_by_id = id WHERE id = ?",
+                        previous));
+    }
+
+    @Test
+    void unRefreshTokenNecesitaUnUsuarioExistente() {
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertToken(987654L, HASH_A, java.util.UUID.randomUUID(), null));
+    }
+
     // --- Utilidades ---
+
+    /** Token válido de un día (familia de siete) con el sucesor indicado. */
+    private long insertToken(long userId, String hash, java.util.UUID family, Long replacedById) {
+        java.time.OffsetDateTime now = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC);
+        jdbc.update("INSERT INTO refresh_tokens (user_id, token_hash, family_id, created_at, expires_at,"
+                + " family_expires_at, replaced_by_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                userId, hash, family, now, now.plusDays(1), now.plusDays(7), replacedById);
+        return jdbc.queryForObject("SELECT id FROM refresh_tokens WHERE token_hash = ?", Long.class, hash);
+    }
+
+    private void insertToken(long userId, String hash, java.time.OffsetDateTime createdAt,
+            java.time.OffsetDateTime expiresAt, java.time.OffsetDateTime familyExpiresAt) {
+        jdbc.update("INSERT INTO refresh_tokens (user_id, token_hash, family_id, created_at, expires_at,"
+                + " family_expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+                userId, hash, java.util.UUID.randomUUID(), createdAt, expiresAt, familyExpiresAt);
+    }
 
     private long insertSeries(String title, int releaseYear, Integer endYear) {
         jdbc.update("INSERT INTO series (title, description, release_year, end_year, image_url, created_at)"

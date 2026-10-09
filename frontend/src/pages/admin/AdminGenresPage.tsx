@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Pencil, Tags, Trash } from 'lucide-react';
 import { Button } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
@@ -9,9 +10,11 @@ import { FormField } from '../../components/FormField';
 import { LoadingState } from '../../components/LoadingState';
 import { useToast } from '../../context/ToastContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
-import { sortGenres, useGenres } from '../../hooks/useGenres';
+import { useGenres } from '../../hooks/useGenres';
+import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
 import { ApiError, apiFetch } from '../../lib/api';
 import { GENRE_NAME_MAX, GENRE_NAME_MIN, validateGenreName } from '../../lib/movieValidation';
+import { queryKeys } from '../../lib/queryKeys';
 import type { Genre, GenreRequest } from '../../lib/types';
 
 /** Aviso que se queda en la fila de un género (p. ej. "no se puede borrar: lo usan 3 películas"). */
@@ -56,11 +59,27 @@ function nameErrorFrom(error: unknown): string | null {
  *   decide, y un toast desaparece a los pocos segundos.
  * - **404** al renombrar o borrar: el género ya no existía (otra persona, otra
  *   pestaña). Se informa y se recarga la lista.
+ * - **Caché.** La lista es la entrada compartida de `useGenres`: cada cambio
+ *   confirmado por el servidor se escribe en ella (`setQueryData`, con lo que
+ *   devuelve el servidor), así que los formularios y los filtros de `/peliculas`
+ *   lo ven sin pedir nada. Además se invalidan las películas, las series y «Mi
+ *   lista», que llevan el nombre de sus géneros dentro (ver `keysAffectedBy`).
  */
 export function AdminGenresPage() {
   useDocumentTitle('Géneros · Administración');
   const toast = useToast();
-  const { genres, setGenres, status, loaded, errorMessage, reload } = useGenres();
+  const { genres, status, loaded, errorMessage, reload } = useGenres();
+  const queryClient = useQueryClient();
+  const invalidateCatalog = useInvalidateCatalog();
+
+  /**
+   * Aplica a la lista en caché un cambio que el servidor ya ha confirmado y avisa
+   * a los listados que muestran géneros. El orden lo pone `useGenres` al leer.
+   */
+  const applyGenreChange = (change: (list: Genre[]) => Genre[]) => {
+    queryClient.setQueryData<Genre[]>(queryKeys.genres.all, (list) => (list ? change(list) : list));
+    void invalidateCatalog('genres');
+  };
 
   const [newName, setNewName] = useState('');
   const [newNameError, setNewNameError] = useState<string | undefined>(undefined);
@@ -115,7 +134,7 @@ export function AdminGenresPage() {
     try {
       const body: GenreRequest = { name: newName.trim() };
       const created = await apiFetch<Genre>('/genres', { method: 'POST', body });
-      setGenres((list) => sortGenres([...list, created]));
+      applyGenreChange((list) => [...list, created]);
       setNewName('');
       toast.success(`Género «${created.name}» creado.`);
     } catch (error) {
@@ -161,7 +180,7 @@ export function AdminGenresPage() {
     try {
       const body: GenreRequest = { name: editName.trim() };
       const updated = await apiFetch<Genre>(`/genres/${genre.id}`, { method: 'PUT', body });
-      setGenres((list) => sortGenres(list.map((item) => (item.id === genre.id ? updated : item))));
+      applyGenreChange((list) => list.map((item) => (item.id === genre.id ? updated : item)));
       setEditingId(null);
       pendingFocus.current = { kind: 'rename-button', genreId: genre.id };
       toast.success(`Género «${genre.name}» renombrado a «${updated.name}».`);
@@ -175,6 +194,7 @@ export function AdminGenresPage() {
         pendingFocus.current = { kind: 'heading' };
         toast.info(`El género «${genre.name}» ya no existía. Se ha actualizado la lista.`);
         reload();
+        void invalidateCatalog('genres');
       } else {
         toast.errorFrom(error, `No se pudo renombrar «${genre.name}».`);
       }
@@ -189,7 +209,7 @@ export function AdminGenresPage() {
     setDeleting(true);
     try {
       await apiFetch(`/genres/${genre.id}`, { method: 'DELETE' });
-      setGenres((list) => list.filter((item) => item.id !== genre.id));
+      applyGenreChange((list) => list.filter((item) => item.id !== genre.id));
       pendingFocus.current = { kind: 'heading' }; // la fila (y su botón) desaparece
       toast.success(`Género «${genre.name}» borrado.`);
     } catch (error) {
@@ -200,6 +220,7 @@ export function AdminGenresPage() {
         pendingFocus.current = { kind: 'heading' };
         toast.info(`El género «${genre.name}» ya no existía. Se ha actualizado la lista.`);
         reload();
+        void invalidateCatalog('genres');
       } else {
         toast.errorFrom(error, `No se pudo borrar «${genre.name}».`);
       }

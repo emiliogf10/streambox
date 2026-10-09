@@ -53,6 +53,73 @@ class AuthOpenApiDocumentationIntegrationTest {
                 .andExpect(jsonPath(LOGIN + "['400'].description").exists());
     }
 
+    /**
+     * El refresh documenta sus códigos reales (tarea 29): el frontend decide
+     * por ellos si reintenta, si vuelve al login o si espera.
+     */
+    @Test
+    void elRefreshDocumentaSusCodigosReales() throws Exception {
+        String refresh = "$.paths['/api/auth/refresh'].post";
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(refresh + ".responses['204'].description").exists())
+                .andExpect(jsonPath(refresh + ".responses['401'].description")
+                        .value(containsString("SESSION_EXPIRED")))
+                .andExpect(jsonPath(refresh + ".responses['403'].description")
+                        .value(allOf(containsString("CSRF_REJECTED"), containsString("X-Requested-With"))))
+                .andExpect(jsonPath(refresh + ".responses['429'].description").value(allOf(
+                        containsString("RATE_LIMIT_EXCEEDED"), containsString("Retry-After"))))
+                .andExpect(jsonPath(refresh + ".description").value(allOf(
+                        containsString("streambox_refresh"), containsString("10 segundos"))));
+    }
+
+    /**
+     * El logout documenta que revoca la sesión y que exige la cabecera CSRF
+     * (403 {@code CSRF_REJECTED}): un cliente que no la mande debe saber por
+     * qué no se le cierra la sesión.
+     */
+    @Test
+    void elLogoutDocumentaQueRevocaLaSesionYExigeLaCabeceraCsrf() throws Exception {
+        String logout = "$.paths['/api/auth/logout'].post";
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(logout + ".description").value(allOf(
+                        containsString("Revoca"), containsString("streambox_refresh"),
+                        containsString("15 minutos"), containsString("X-Requested-With: StreamBox"))))
+                .andExpect(jsonPath(logout + ".responses['403'].description")
+                        .value(allOf(containsString("CSRF_REJECTED"), containsString("X-Requested-With"))));
+    }
+
+    /**
+     * El logout documenta su 500: si la base de datos falla no se borran las
+     * cookies, y el cliente necesita saberlo para reintentar en lugar de dar
+     * la sesión por cerrada. El cuerpo es el {@code ErrorResponse} de siempre.
+     */
+    @Test
+    void elLogoutDocumentaSu500SinBorrarLasCookies() throws Exception {
+        String logout500 = "$.paths['/api/auth/logout'].post.responses['500']";
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(logout500 + ".description").value(allOf(
+                        containsString("INTERNAL_ERROR"), containsString("No se borran las cookies"),
+                        containsString("reintentar"))))
+                .andExpect(jsonPath(logout500 + ".content['application/json'].schema['$ref']")
+                        .value("#/components/schemas/ErrorResponse"));
+    }
+
+    /**
+     * {@code RATE_LIMIT_EXCEEDED} no es solo de login y registro: el refresh
+     * también lo devuelve (30 renovaciones por minuto e IP).
+     */
+    @Test
+    void elCodigoRateLimitExceededIncluyeElRefresh() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(SCHEMAS + ".ErrorResponse.properties.code.description").value(
+                        containsString("RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login, registro o "
+                                + "renovación de sesión (POST /api/auth/refresh)")));
+    }
+
     @Test
     void elRegistroDocumentaLaPoliticaDeContrasenas() throws Exception {
         mockMvc.perform(get("/v3/api-docs"))

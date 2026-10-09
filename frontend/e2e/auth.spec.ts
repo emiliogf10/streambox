@@ -1,6 +1,8 @@
 /**
- * E2E de la sesión: registro, login, cierre de sesión, rutas protegidas,
- * rol del usuario en el menú, sesión caducada (401), aviso de intentos restantes
+ * E2E de la sesión: registro, login, cierre de sesión (también cuando el servidor
+ * no responde: la sesión sigue abierta y se avisa), rutas protegidas,
+ * rol del usuario en el menú, sesión caducada (401), renovación con el refresh token
+ * (sin aviso, también al recargar y con dos pestañas), aviso de intentos restantes
  * y bloqueo por demasiados intentos (429 de cuenta bloqueada y de límite por IP).
  *
  * Protege el recorrido que hace TODO usuario nuevo. Si el registro no valida,
@@ -8,9 +10,9 @@
  * la app en un bucle, esta suite lo detecta con navegador y backend reales.
  */
 import type { Page } from '@playwright/test';
-import { SESSION_COOKIE, loginAdmin, newTestUser, registerUser } from './support/api';
+import { REFRESH_COOKIE, SESSION_COOKIE, loginAdmin, newTestUser, registerUser } from './support/api';
 import { ADMIN_USERNAME, LOCKOUT_MAX_FAILURES, BACKEND_URL } from './support/config';
-import { HERO_TITLE } from './support/catalog';
+import { HERO_TITLE, SERIES_HERO } from './support/catalog';
 import { expect, formAlert, sessionCookie, test } from './support/fixtures';
 
 /** Cuerpo de error de la API (solo lo que miran estos tests). */
@@ -19,6 +21,56 @@ interface ErrorBody {
   message?: string;
   remainingAttempts?: number;
 }
+
+/** Aviso único que muestra la app cuando la sesión caduca y no se puede renovar. */
+const SESSION_EXPIRED_TOAST = 'Tu sesión ha caducado. Inicia sesión de nuevo.';
+
+/**
+ * Registra un usuario nuevo e inicia sesión con el FORMULARIO, como una persona. Así el navegador tiene
+ * las dos cookies reales del login (`streambox_token` y `streambox_refresh`), que es lo que necesitan los
+ * tests de la renovación (`signIn` solo siembra la de acceso).
+ */
+async function loginWithForm(page: Page, request: Parameters<typeof registerUser>[0]): Promise<void> {
+  const user = newTestUser();
+  await registerUser(request, user);
+  await page.goto('/login');
+  await page.getByLabel('Correo electrónico').fill(user.email);
+  await page.getByLabel('Contraseña').fill(user.password);
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
+  expect(await cookieNamed(page, REFRESH_COOKIE), 'el login debe fijar el refresh token').toBeDefined();
+}
+
+/** Cookie del contexto del navegador con ese nombre (las HttpOnly solo se ven desde Playwright). */
+async function cookieNamed(page: Page, name: string) {
+  return (await page.context().cookies()).find((cookie) => cookie.name === name);
+}
+
+/**
+ * Empieza a anotar las respuestas de `POST /api/auth/refresh` de esta página: su estado (al momento) y su
+ * `code` de error (se lee del cuerpo, por eso `codes` es asíncrono; los 204 no tienen cuerpo).
+ */
+function countRefreshes(page: Page) {
+  const statuses: number[] = [];
+  const codes: Promise<string | undefined>[] = [];
+  page.on('response', (response) => {
+    if (!response.url().endsWith('/api/auth/refresh')) return;
+    statuses.push(response.status());
+    codes.push(
+      response.status() === 204
+        ? Promise.resolve(undefined)
+        : response
+            .json()
+            .then((body: ErrorBody) => body.code)
+            .catch(() => undefined),
+    );
+  });
+  return { statuses: () => [...statuses], codes: () => Promise.all(codes) };
+}
+
+/** Aviso de `lib/logout.ts` cuando el cierre de sesión no llega al servidor (ni en el reintento). */
+const LOGOUT_FAILED_NETWORK =
+  'No se ha podido cerrar la sesión: no hay conexión con el servidor. Tu sesión sigue abierta; inténtalo de nuevo.';
 
 /** Texto del aviso de intentos restantes que muestra la pantalla de login (singular y plural). */
 function attemptsMessage(remaining: number): string {
@@ -192,13 +244,53 @@ test.describe('Login y cierre de sesión', () => {
     await page.getByRole('button', { name: 'Menú de usuario' }).click();
     await page.getByRole('button', { name: 'Cerrar sesión' }).click();
     await expect(page).toHaveURL(/\/login$/);
-    // El cierre de sesión es optimista: la interfaz vuelve al login antes de que el servidor responda
-    // al POST /api/auth/logout que borra la cookie. Se espera a que desaparezca en vez de mirar una vez.
-    await expect.poll(() => sessionCookie(page)).toBeUndefined();
+    // El cierre NO es optimista: la interfaz solo vuelve al login cuando el servidor ha respondido al
+    // POST /api/auth/logout, cuyo Set-Cookie borra la cookie. Al llegar al login ya no debe existir.
+    expect(await sessionCookie(page)).toBeUndefined();
 
     // Y ya no se puede volver a la zona privada.
     await page.goto('/');
     await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test('si el servidor no responde al cerrar sesión, la sesión sigue abierta (de verdad) y se avisa; al volver, se cierra', async ({
+    page,
+    user,
+    signIn,
+  }) => {
+    await signIn(user);
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
+
+    // Se corta la red SOLO para el logout: no llegan ni el primer intento ni el reintento automático.
+    let attempts = 0;
+    await page.route('**/api/auth/logout', (route) => {
+      attempts += 1;
+      return route.abort('connectionrefused');
+    });
+
+    await page.getByRole('button', { name: 'Menú de usuario' }).click();
+    await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+    // Mientras espera el reintento, el botón lo dice y no se puede repetir.
+    await expect(page.getByRole('button', { name: 'Cerrando sesión...' })).toHaveAttribute('aria-disabled', 'true');
+
+    await expect(page.getByText(LOGOUT_FAILED_NETWORK)).toBeVisible();
+    expect(attempts).toBe(2);
+    // No se miente: sigue en la portada con la sesión, la cookie sigue ahí y el botón vuelve a estar disponible.
+    await expect(page).toHaveURL(/\/$/);
+    expect(await sessionCookie(page)).toBeDefined();
+    await expect(page.getByRole('button', { name: 'Cerrar sesión' })).not.toHaveAttribute('aria-disabled');
+
+    // La prueba de que la interfaz decía la verdad: al recargar, la sesión sigue abierta.
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
+
+    // Con el servidor alcanzable de nuevo, el mismo botón cierra la sesión.
+    await page.unroute('**/api/auth/logout');
+    await page.getByRole('button', { name: 'Menú de usuario' }).click();
+    await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    expect(await sessionCookie(page)).toBeUndefined();
   });
 
   test('una ruta protegida sin sesión redirige al login', async ({ page }) => {
@@ -251,18 +343,24 @@ test.describe('Rol en el menú de usuario (GET /api/users/me)', () => {
 });
 
 test.describe('Sesión caducada (401)', () => {
-  test('una cookie inválida al cargar lleva al login sin aviso de «sesión caducada»', async ({ page }) => {
-    // Primer chequeo de la app (`GET /users/me`): un 401 solo significa «no hay sesión».
+  test('una cookie inválida al cargar (y sin refresh que la renueve) lleva al login sin aviso de «sesión caducada»', async ({
+    page,
+  }) => {
+    // Primer chequeo de la app (`GET /users/me`): un 401 se intenta arreglar con el refresh token; como
+    // tampoco vale, solo significa «no hay sesión». Las dos cookies, inventadas.
     await page.context().addCookies([
       { name: SESSION_COOKIE, value: 'token.invalido.caducado', domain: 'localhost', path: '/api', httpOnly: true },
+      { name: REFRESH_COOKIE, value: 'refresh-invalido', domain: 'localhost', path: '/api/auth', httpOnly: true },
     ]);
+    const refresh = page.waitForResponse((response) => response.url().endsWith('/api/auth/refresh'));
     await page.goto('/');
+    expect((await refresh).status()).toBe(401);
     await expect(page).toHaveURL(/\/login$/);
     await page.waitForLoadState('networkidle');
-    await expect(page.getByText('Tu sesión ha caducado. Inicia sesión de nuevo.')).toHaveCount(0);
+    await expect(page.getByText(SESSION_EXPIRED_TOAST)).toHaveCount(0);
   });
 
-  test('una sesión que caduca con la app abierta lleva al login UNA sola vez con UN solo aviso', async ({
+  test('una sesión que caduca con la app abierta (y el refresh token ya no vale) lleva al login UNA sola vez con UN solo aviso', async ({
     page,
     user,
     signIn,
@@ -281,19 +379,147 @@ test.describe('Sesión caducada (401)', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
 
-    // La sesión caduca en el servidor mientras la app sigue abierta: se sustituye la cookie por una inválida.
+    // La sesión caduca en el servidor mientras la app sigue abierta: se sustituye la cookie de acceso por
+    // una inválida y se pone un refresh token que tampoco vale (revocado, caducado...). Sin el segundo, el
+    // test dependería de que `signIn` no siembra el refresh token: si algún día lo hiciera, la app
+    // renovaría la sesión en silencio y esto ya no probaría la caducidad.
     await page.context().addCookies([
       { name: SESSION_COOKIE, value: 'token.invalido.caducado', domain: 'localhost', path: '/api', httpOnly: true },
+      { name: REFRESH_COOKIE, value: 'refresh-revocado', domain: 'localhost', path: '/api/auth', httpOnly: true },
     ]);
     visited.length = 0;
+    const refreshes = countRefreshes(page);
 
     // Navegar DENTRO de la SPA (sin recargar) a una página que pide datos nuevos: darán 401. (Mi lista no sirve: los favoritos ya están en memoria y no hay petición.)
     await page.getByRole('link', { name: 'Series', exact: true }).first().click();
     await expect(page).toHaveURL(/\/login$/);
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByText('Tu sesión ha caducado. Inicia sesión de nuevo.')).toHaveCount(1);
+    await expect(page.getByText(SESSION_EXPIRED_TOAST)).toHaveCount(1);
     expect(visited).toEqual(['/series', '/login']);
+    // Varias peticiones de /series reciben el 401 a la vez, pero solo hay UN refresh (el servidor lo rechaza
+    // con SESSION_EXPIRED) y nunca se reintenta.
+    expect(refreshes.statuses()).toEqual([401]);
+    expect(await refreshes.codes()).toEqual(['SESSION_EXPIRED']);
+  });
+});
+
+test.describe('Sesión renovable (refresh token)', () => {
+  test('al caducar el token de acceso, la app lo renueva sola: sin aviso, sin salir de la página y con UN solo refresh', async ({
+    page,
+    request,
+  }) => {
+    await loginWithForm(page, request);
+    // A los 15 minutos el navegador descarta la cookie de acceso (Max-Age=900); el refresh token sigue.
+    await page.context().clearCookies({ name: SESSION_COOKIE });
+    expect(await sessionCookie(page)).toBeUndefined();
+    expect(await cookieNamed(page, REFRESH_COOKIE)).toBeDefined();
+    const refreshes = countRefreshes(page);
+
+    // Navegar dentro de la SPA: /series lanza varias peticiones a la vez y todas reciben 401.
+    const nav = page.getByRole('navigation', { name: 'Principal' });
+    await nav.getByRole('link', { name: 'Series' }).click();
+
+    await expect(page).toHaveURL(/\/series$/);
+    await expect(page.getByRole('region', { name: SERIES_HERO.title })).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByText(SESSION_EXPIRED_TOAST)).toHaveCount(0);
+    expect(refreshes.statuses()).toEqual([204]);
+    // El refresh dejó una cookie de acceso nueva.
+    expect(await sessionCookie(page)).toBeDefined();
+  });
+
+  test('«vuelves al día siguiente»: sin cookie de acceso pero con el refresh token, recargar entra sin pasar por el login', async ({
+    page,
+    request,
+  }) => {
+    await loginWithForm(page, request);
+    await page.context().clearCookies({ name: SESSION_COOKIE });
+    const refreshes = countRefreshes(page);
+    const visited: string[] = [];
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) visited.push(new URL(frame.url()).pathname);
+    });
+
+    await page.reload();
+
+    await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    expect(visited).not.toContain('/login');
+    await expect(page.getByText(SESSION_EXPIRED_TOAST)).toHaveCount(0);
+    expect(refreshes.statuses()).toEqual([204]);
+  });
+
+  test('sin ninguna de las dos cookies, un aviso único de sesión caducada y al login', async ({ page, request }) => {
+    await loginWithForm(page, request);
+    await page.context().clearCookies();
+    const refreshes = countRefreshes(page);
+
+    await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Series' }).click();
+
+    await expect(page).toHaveURL(/\/login$/);
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByText(SESSION_EXPIRED_TOAST)).toHaveCount(1);
+    expect(refreshes.statuses()).toEqual([401]);
+  });
+
+  test('tras renovar, cerrar sesión borra las DOS cookies y la sesión ya no se puede renovar', async ({ page, request }) => {
+    await loginWithForm(page, request);
+    await page.context().clearCookies({ name: SESSION_COOKIE });
+    await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Series' }).click();
+    await expect(page.getByRole('region', { name: SERIES_HERO.title })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Menú de usuario' }).click();
+    await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    expect(await sessionCookie(page)).toBeUndefined();
+    expect(await cookieNamed(page, REFRESH_COOKIE)).toBeUndefined();
+
+    // Ni recargando la zona privada se vuelve a entrar.
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByText(SESSION_EXPIRED_TOAST)).toHaveCount(0);
+  });
+
+  test('dos pestañas a las que les caduca el token a la vez renuevan sin pisarse: ninguna pierde la sesión', async ({
+    page,
+    request,
+  }) => {
+    await loginWithForm(page, request);
+    const second = await page.context().newPage();
+    await second.goto('/');
+    await expect(second.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
+
+    await page.context().clearCookies({ name: SESSION_COOKIE });
+    const firstRefreshes = countRefreshes(page);
+    const secondRefreshes = countRefreshes(second);
+
+    // Las dos navegan a la vez: las dos reciben 401 casi al mismo tiempo.
+    await Promise.all([
+      page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Series' }).click(),
+      second.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Series' }).click(),
+    ]);
+
+    for (const tab of [page, second]) {
+      await expect(tab.getByRole('region', { name: SERIES_HERO.title })).toBeVisible();
+      await tab.waitForLoadState('networkidle');
+      await expect(tab.getByText(SESSION_EXPIRED_TOAST)).toHaveCount(0);
+    }
+    // Como mucho un refresh por pestaña (el Web Lock las pone en fila y la segunda, si se entera a tiempo
+    // del aviso de la primera, ni lo pide) y ninguno rechazado: reutilizar un refresh token ya rotado
+    // habría revocado la sesión entera.
+    const statuses = [...firstRefreshes.statuses(), ...secondRefreshes.statuses()];
+    expect(statuses.length).toBeGreaterThanOrEqual(1);
+    expect(statuses.length).toBeLessThanOrEqual(2);
+    expect(statuses.every((status) => status === 204)).toBe(true);
+
+    // La prueba de que el servidor no revocó nada: al recargar (/series), las dos siguen dentro.
+    for (const tab of [page, second]) {
+      await tab.reload();
+      await expect(tab.getByRole('region', { name: SERIES_HERO.title })).toBeVisible();
+      await expect(tab).toHaveURL(/\/series$/);
+    }
+    await second.close();
   });
 });
 

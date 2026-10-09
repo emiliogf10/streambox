@@ -13,6 +13,7 @@ import { TextAreaField } from '../../components/TextAreaField';
 import { useToast } from '../../context/ToastContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { useGenres } from '../../hooks/useGenres';
+import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
 import { ApiError, apiFetch, getErrorMessage, isAbortError } from '../../lib/api';
 import {
   EMPTY_MOVIE_FORM,
@@ -135,6 +136,7 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
   const navigate = useNavigate();
   const toast = useToast();
   const genres = useGenres();
+  const invalidateCatalog = useInvalidateCatalog();
 
   const [values, setValues] = useState<MovieFormValues>(EMPTY_MOVIE_FORM);
   const [errors, setErrors] = useState<MovieFormErrors>({});
@@ -202,6 +204,7 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
         // Se recargan los géneros por si el que falta era uno de ellos.
         setFormError(error.message);
         genres.reload();
+        void invalidateCatalog('movies');
         return;
       }
     }
@@ -228,6 +231,8 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
         await apiFetch<Movie>('/movies', { method: 'POST', body });
         toast.success(`«${body.title}» se ha añadido al catálogo.`);
       }
+      // La portada, `/peliculas`, el listado del panel y «Mi lista» se ponen al día sin recargar.
+      void invalidateCatalog('movies');
       navigate(returnTo);
     } catch (error) {
       showServerError(error);

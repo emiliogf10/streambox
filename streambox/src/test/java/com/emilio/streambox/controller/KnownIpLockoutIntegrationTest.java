@@ -2,13 +2,15 @@ package com.emilio.streambox.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -21,6 +23,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -32,6 +35,7 @@ import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.AuthCookieService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * «IP conocida» del bloqueo de cuentas de extremo a extremo (hallazgo NV-2):
@@ -47,12 +51,30 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * ya es muy alto en el perfil de test, y el bloqueo de cuentas se baja a los
  * 5 fallos de producción.
  * </p>
+ *
+ * <p>
+ * <b>Reloj detenido.</b> El bean {@link Clock} de la aplicación se sustituye
+ * con {@link TestBean} por uno fijo. {@code Retry-After} se calcula desde el
+ * fallo más antiguo de la ventana ({@code SlidingWindowCounter}), así que con
+ * el reloj real dependía de cuánto tardaban los cinco logins con BCrypt: con
+ * la máquina cargada salió «897 frente a 900» y la comparación con ±2 s
+ * fallaba sin que la respuesta fuera distinguible por diseño. Con el reloj
+ * fijo todos los bloqueos valen exactamente la ventana (900 s) y la prueba de
+ * indistinguibilidad puede exigir igualdad exacta, que es más estricta que la
+ * tolerancia anterior. Sustituir el reloj crea un contexto propio (no comparte
+ * contadores con otras suites); ninguna prueba de esta clase necesita que el
+ * tiempo avance.
+ * </p>
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @AutoConfigureMockMvc
 @Transactional
-@TestPropertySource(properties = "streambox.security.rate-limit.lockout.max-failures=5")
+@TestPropertySource(properties = {
+        "streambox.security.rate-limit.lockout.max-failures=5",
+        // Fijada aquí porque el Retry-After esperado se deriva de ella.
+        "streambox.security.rate-limit.lockout.window=15m"
+})
 class KnownIpLockoutIntegrationTest {
 
     private static final String PASSWORD = "Contraseña-Correcta-2026";
@@ -63,6 +85,18 @@ class KnownIpLockoutIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /** Ventana del bloqueo en segundos: con el reloj detenido, el Retry-After de todo bloqueo. */
+    private static final String LOCK_WINDOW_SECONDS = "900";
+
+    /** Reloj de la aplicación sustituido por {@link TestBean} (ver la explicación de la clase). */
+    @TestBean
+    private Clock clock;
+
+    /** Fábrica del bean {@code clock} que usa {@link TestBean} (mismo nombre que el campo). */
+    static Clock clock() {
+        return Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
+    }
 
     /**
      * El escenario de la auditoría: el titular inicia sesión, un atacante
@@ -187,22 +221,27 @@ class KnownIpLockoutIntegrationTest {
         return login(email, "mal", ip).andExpect(status().isTooManyRequests()).andReturn().getResponse();
     }
 
+    /**
+     * Comprueba que dos respuestas de bloqueo son indistinguibles: mismo
+     * estado, tipo de contenido, {@code Retry-After} (exactamente la ventana,
+     * gracias al reloj detenido) y cuerpo JSON idéntico salvo
+     * {@code timestamp}, que el manejador de errores toma del reloj real.
+     */
     private void assertSameLockResponse(MockHttpServletResponse expected, MockHttpServletResponse actual)
             throws Exception {
+        assertEquals(429, expected.getStatus());
         assertEquals(expected.getStatus(), actual.getStatus());
         assertEquals(expected.getContentType(), actual.getContentType());
-        assertNotNull(expected.getHeader("Retry-After"));
-        // Cada bloqueo se provoca en un instante distinto (cada login gasta ~100 ms de
-        // BCrypt), así que el Retry-After puede diferir en un par de segundos.
-        long expectedRetry = Long.parseLong(expected.getHeader("Retry-After"));
-        long actualRetry = Long.parseLong(actual.getHeader("Retry-After"));
-        assertTrue(Math.abs(expectedRetry - actualRetry) <= 2,
-                "Retry-After distinto: " + expectedRetry + " frente a " + actualRetry);
-        JsonNode expectedBody = objectMapper.readTree(expected.getContentAsString());
-        JsonNode actualBody = objectMapper.readTree(actual.getContentAsString());
-        assertEquals(expectedBody.path("code"), actualBody.path("code"));
-        assertEquals(expectedBody.path("message"), actualBody.path("message"));
-        assertEquals(expectedBody.path("status"), actualBody.path("status"));
+        assertEquals(LOCK_WINDOW_SECONDS, expected.getHeader("Retry-After"));
+        assertEquals(expected.getHeader("Retry-After"), actual.getHeader("Retry-After"));
+        assertEquals(bodyWithoutTimestamp(expected), bodyWithoutTimestamp(actual));
+    }
+
+    private JsonNode bodyWithoutTimestamp(MockHttpServletResponse response) throws Exception {
+        JsonNode body = objectMapper.readTree(response.getContentAsString(StandardCharsets.UTF_8));
+        assertNotNull(body.get("code"), "el 429 debe llevar code");
+        ((ObjectNode) body).remove("timestamp");
+        return body;
     }
 
     private ResultActions login(String email, String password, String ip) throws Exception {

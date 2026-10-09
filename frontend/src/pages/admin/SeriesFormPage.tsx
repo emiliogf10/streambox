@@ -13,6 +13,7 @@ import { TextAreaField } from '../../components/TextAreaField';
 import { useToast } from '../../context/ToastContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { useGenres } from '../../hooks/useGenres';
+import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
 import { ApiError, apiFetch, getErrorMessage, isAbortError } from '../../lib/api';
 import {
   EMPTY_SERIES_FORM,
@@ -135,6 +136,7 @@ function SeriesEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string }
   const navigate = useNavigate();
   const toast = useToast();
   const genres = useGenres();
+  const invalidateCatalog = useInvalidateCatalog();
 
   const [values, setValues] = useState<SeriesFormValues>(EMPTY_SERIES_FORM);
   const [errors, setErrors] = useState<SeriesFormErrors>({});
@@ -204,6 +206,7 @@ function SeriesEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string }
         // Se recargan los géneros por si el que falta era uno de ellos.
         setFormError(error.message);
         genres.reload();
+        void invalidateCatalog('series');
         return;
       }
     }
@@ -226,11 +229,13 @@ function SeriesEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string }
     try {
       if (isEdit) {
         const updated = await apiFetch<SeriesDetail>(`/series/${editId}`, { method: 'PUT', body });
+        void invalidateCatalog('series'); // los listados públicos, el detalle y «Mi lista» se ponen al día
         setSaved(updated);
         setValues(toFormValues(updated));
         toast.success(`Se han guardado los cambios de «${updated.title}».`);
       } else {
         const created = await apiFetch<SeriesDetail>('/series', { method: 'POST', body });
+        void invalidateCatalog('series');
         toast.success(SERIES_CREATED_MESSAGE);
         const state: ReturnToState = { returnTo };
         navigate(adminEditSeriesPath(created.id), { replace: true, state });

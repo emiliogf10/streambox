@@ -167,6 +167,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return jsonError(status).body(error);
     }
 
+    /**
+     * Refresh token que no sirve para renovar la sesión: 401 {@code SESSION_EXPIRED},
+     * mismo cuerpo en todos los casos. Las cookies borradas las añade
+     * {@code AuthController} antes de relanzar la excepción.
+     */
+    @ExceptionHandler(SessionExpiredException.class)
+    public ResponseEntity<ErrorResponse> handleSessionExpired(
+            SessionExpiredException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.UNAUTHORIZED, ErrorCode.SESSION_EXPIRED,
+                exception.getMessage(), request);
+    }
+
     @ExceptionHandler(AmbiguousTitleException.class)
     public ResponseEntity<ErrorResponse> handleAmbiguousTitle(
             AmbiguousTitleException exception, HttpServletRequest request) {

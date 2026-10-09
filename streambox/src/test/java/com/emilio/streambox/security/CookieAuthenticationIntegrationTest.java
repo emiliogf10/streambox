@@ -78,14 +78,13 @@ class CookieAuthenticationIntegrationTest {
 
     @Test
     void laCookieDelLoginLlevaTodosLosAtributos() throws Exception {
-        String setCookie = login().getResponse().getHeader(HttpHeaders.SET_COOKIE);
+        String setCookie = cookieHeader(login(), "streambox_token");
 
-        assertTrue(setCookie.startsWith("streambox_token="), setCookie);
         assertTrue(setCookie.contains("HttpOnly"), setCookie);
         assertTrue(setCookie.contains("Secure"), setCookie);
         assertTrue(setCookie.contains("SameSite=Strict"), setCookie);
-        assertTrue(setCookie.contains("Path=/api"), setCookie);
-        assertTrue(setCookie.contains("Max-Age=" + jwtProperties.expirationHours() * 3600), setCookie);
+        assertTrue(setCookie.contains("Path=/api;"), setCookie);
+        assertTrue(setCookie.contains("Max-Age=" + jwtProperties.accessTokenTtl().toSeconds() + ";"), setCookie);
     }
 
     @Test
@@ -156,22 +155,36 @@ class CookieAuthenticationIntegrationTest {
         mockMvc.perform(post("/api/auth/login").cookie(valid).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"" + EMAIL + "\",\"password\":\"" + PASSWORD + "\"}"))
                 .andExpect(status().isNoContent());
-        mockMvc.perform(post("/api/auth/logout").cookie(valid)).andExpect(status().isNoContent());
+        // El logout también ignora la cookie de acceso (vieja o válida), pero ya
+        // no está exento de la defensa CSRF: exige la cabecera como el refresh
+        // (sin ella, otra web podría borrar las cookies de la víctima; ver
+        // RefreshTokenIntegrationTest#elLogoutSinLaCabeceraCsrfDa403YNoCierraLaSesion).
+        mockMvc.perform(post("/api/auth/logout").cookie(stale).header("X-Requested-With", "StreamBox"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(post("/api/auth/logout").cookie(valid).header("X-Requested-With", "StreamBox"))
+                .andExpect(status().isNoContent());
     }
 
     @Test
     void logoutBorraLaCookieYEsIdempotente() throws Exception {
         for (int i = 0; i < 2; i++) {
-            String setCookie = mockMvc.perform(post("/api/auth/logout"))
+            // Con la cabecera CSRF, como lo llama el frontend: sin ella, 403.
+            MvcResult result = mockMvc.perform(post("/api/auth/logout").header("X-Requested-With", "StreamBox"))
                     .andExpect(status().isNoContent())
-                    .andReturn().getResponse().getHeader(HttpHeaders.SET_COOKIE);
+                    .andReturn();
 
-            assertTrue(setCookie.startsWith("streambox_token=;"), setCookie);
-            assertTrue(setCookie.contains("Max-Age=0"), setCookie);
-            assertTrue(setCookie.contains("HttpOnly"), setCookie);
-            assertTrue(setCookie.contains("Secure"), setCookie);
-            assertTrue(setCookie.contains("SameSite=Strict"), setCookie);
-            assertTrue(setCookie.contains("Path=/api"), setCookie);
+            // Borra las dos cookies, cada una con su ruta (si no coincide, el
+            // navegador no la reconoce como la misma y no la borra).
+            for (String[] cookie : new String[][] { { "streambox_token", "/api;" },
+                    { "streambox_refresh", "/api/auth;" } }) {
+                String setCookie = cookieHeader(result, cookie[0]);
+                assertTrue(setCookie.startsWith(cookie[0] + "=;"), setCookie);
+                assertTrue(setCookie.contains("Max-Age=0"), setCookie);
+                assertTrue(setCookie.contains("HttpOnly"), setCookie);
+                assertTrue(setCookie.contains("Secure"), setCookie);
+                assertTrue(setCookie.contains("SameSite=Strict"), setCookie);
+                assertTrue(setCookie.contains("Path=" + cookie[1]), setCookie);
+            }
         }
     }
 
@@ -199,6 +212,15 @@ class CookieAuthenticationIntegrationTest {
 
         mockMvc.perform(get("/api/users/me").cookie(new Cookie("streambox_token", expired)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    /** Cabecera {@code Set-Cookie} de la cookie con ese nombre (falla si no está o está repetida). */
+    static String cookieHeader(MvcResult result, String name) {
+        java.util.List<String> matching = result.getResponse().getHeaders(HttpHeaders.SET_COOKIE).stream()
+                .filter(header -> header.startsWith(name + "="))
+                .toList();
+        assertEquals(1, matching.size(), "Set-Cookie de " + name + ": " + matching);
+        return matching.get(0);
     }
 
     @Test

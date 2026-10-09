@@ -59,6 +59,13 @@ export async function registerUser(request: APIRequestContext, user: TestUser): 
 export const SESSION_COOKIE = 'streambox_token';
 
 /**
+ * Nombre de la cookie del refresh token (HttpOnly, SameSite=Strict, Path=/api/auth: solo viaja al
+ * login, al refresh y al logout). La fija el login junto a {@link SESSION_COOKIE}. `signIn` NO la
+ * siembra (solo el JWT): los tests que necesitan una sesión renovable inician sesión con el formulario.
+ */
+export const REFRESH_COOKIE = 'streambox_refresh';
+
+/**
  * Extrae el valor de la cookie de sesión de la cabecera `Set-Cookie` del login.
  * El login ya no devuelve el JWT en el cuerpo (204 sin contenido): este valor es
  * lo que los tests reenvían como cookie (en llamadas directas a la API) o siembran

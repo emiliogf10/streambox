@@ -57,7 +57,8 @@ public enum ErrorCode {
 
     /**
      * Se ha superado el límite de peticiones permitido desde una misma IP
-     * (login o registro). Va con la cabecera {@code Retry-After}.
+     * (login, registro o renovación de sesión con {@code POST /api/auth/refresh}).
+     * Va con la cabecera {@code Retry-After}.
      */
     RATE_LIMIT_EXCEEDED,
 
@@ -99,6 +100,17 @@ public enum ErrorCode {
     /**
      * Petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie a la que
      * falta la cabecera {@code X-Requested-With: StreamBox} (defensa CSRF, 403).
+     * El refresh y el logout la exigen siempre, también con Bearer: trabajan
+     * con la cookie {@code streambox_refresh} y su respuesta cambia las cookies.
      */
-    CSRF_REJECTED
+    CSRF_REJECTED,
+
+    /**
+     * {@code POST /api/auth/refresh} no puede renovar la sesión (401): el
+     * refresh token falta, no existe, ha caducado (él o su familia de 30 días),
+     * está revocado (logout) o se ha reutilizado (posible robo: se revoca la
+     * familia). Es distinto de {@link #INVALID_CREDENTIALS} porque aquí no hay
+     * credenciales que corregir: el cliente debe volver a la pantalla de login.
+     */
+    SESSION_EXPIRED
 }

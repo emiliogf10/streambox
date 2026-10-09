@@ -8,12 +8,15 @@
  */
 import { render } from '@testing-library/react';
 import type { RenderResult } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { MemoryRouter, parsePath } from 'react-router-dom';
 import type { Mock } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import { ToastProvider } from '../context/ToastContext';
 import { LocationProbe } from './LocationProbe';
+import { createTestQueryClient } from './queryClient';
 import type { ApiErrorBody, Episode, Movie, PageResponse, Series, SeriesDetail, User } from '../lib/types';
 
 /** Crea un usuario de prueba (`UserResponse`); por defecto, rol `USER`. */
@@ -33,6 +36,18 @@ export const CURRENT_USER = 'GET /api/users/me';
 
 /** Clave de {@link routeFetch} de la lista de series favoritas, que `FavoritesProvider` pide siempre al montarse. */
 export const FAVORITE_SERIES = 'GET /api/users/me/favorites/series';
+
+/** Clave de {@link routeFetch} de la renovación de la sesión, que `apiFetch` pide ante un 401. */
+export const REFRESH_SESSION = 'POST /api/auth/refresh';
+
+/**
+ * Respuesta del servidor cuando no hay sesión que renovar (401 `SESSION_EXPIRED`;
+ * el real además borra las dos cookies). Es la respuesta por defecto de
+ * {@link REFRESH_SESSION} en {@link routeFetch}.
+ */
+export function sessionExpiredResponse(): Response {
+  return errorResponse(401, 'SESSION_EXPIRED', 'La sesión ha caducado. Inicia sesión de nuevo.');
+}
 
 /** Crea una película de prueba; cada test solo especifica lo que le importa. */
 export function makeMovie(overrides: Partial<Movie> = {}): Movie {
@@ -190,6 +205,12 @@ export function currentUserAs(user: User): () => Response {
  * las series no tienen nada que decir de ella. Los tests de series favoritas la
  * sobrescriben. (La de películas no tiene valor por defecto: sus tests ya la declaran.)
  *
+ * Y {@link REFRESH_SESSION} (`POST /api/auth/refresh`) responde por defecto 401
+ * `SESSION_EXPIRED` («no hay sesión que renovar»): `apiFetch` lo pide ante
+ * cualquier 401 de una ruta autenticada, también en el arranque sin sesión, así
+ * que un 401 simulado sigue significando «sesión caducada» como antes del refresh
+ * token. Los tests de la renovación lo sobrescriben.
+ *
  * @param fetchMock el `vi.fn()` instalado como `fetch` global
  * @param routes manejadores por clave `"MÉTODO URL"`; se pueden cambiar entre pasos del test
  */
@@ -198,6 +219,7 @@ export function routeFetch(fetchMock: Mock<typeof fetch>, routes: Record<string,
     [CURRENT_USER]: () =>
       sessionActive ? jsonResponse(makeUser()) : errorResponse(401, 'UNAUTHORIZED', 'No autenticado.'),
     [FAVORITE_SERIES]: () => jsonResponse([]),
+    [REFRESH_SESSION]: sessionExpiredResponse,
     ...routes,
   };
   fetchMock.mockImplementation(async (input, init = {}) => {
@@ -210,11 +232,12 @@ export function routeFetch(fetchMock: Mock<typeof fetch>, routes: Record<string,
 
 /**
  * Llamadas hechas al `fetch` simulado SIN contar el chequeo de sesión
- * (`GET /api/users/me`) que `AuthProvider` hace siempre al montarse. Sirve para
- * afirmar «este formulario no ha llamado al servidor» sin que el arranque cuente.
+ * (`GET /api/users/me`, y el `POST /api/auth/refresh` que lo sigue cuando da 401)
+ * que `AuthProvider` hace siempre al montarse. Sirve para afirmar «este formulario
+ * no ha llamado al servidor» sin que el arranque cuente.
  */
 export function apiCalls(fetchMock: Mock<typeof fetch>): Parameters<typeof fetch>[] {
-  return fetchMock.mock.calls.filter(([url]) => String(url) !== '/api/users/me');
+  return fetchMock.mock.calls.filter(([url]) => String(url) !== '/api/users/me' && String(url) !== '/api/auth/refresh');
 }
 
 /** Opciones de {@link renderWithProviders}. */
@@ -229,10 +252,15 @@ interface RenderOptions {
   session?: boolean;
   /** Estado de navegación de la entrada inicial (`location.state`), p. ej. la "vuelta al listado". */
   routeState?: unknown;
+  /**
+   * Caché de datos del servidor. Por defecto, una nueva (`createTestQueryClient`):
+   * ningún test ve lo que cargó otro. Pásala para inspeccionarla desde el test.
+   */
+  queryClient?: QueryClient;
 }
 
 /**
- * Renderiza `ui` dentro de router en memoria + avisos + sesión, igual que `App`.
+ * Renderiza `ui` dentro de router en memoria + caché de datos + avisos + sesión, igual que `App`.
  * Además de `ui` pinta un texto `ruta:/xxx` con la ruta actual para comprobar
  * redirecciones sin depender de cómo esté montado el router.
  */
@@ -241,14 +269,17 @@ export function renderWithProviders(ui: ReactElement, options: RenderOptions = {
   const route = options.route ?? '/';
   // Con estado, la entrada se pasa como objeto (`parsePath` separa ruta, búsqueda y fragmento).
   const entry = options.routeState === undefined ? route : { ...parsePath(route), state: options.routeState };
+  const queryClient = options.queryClient ?? createTestQueryClient();
   return render(
     <MemoryRouter initialEntries={[entry]}>
-      <ToastProvider>
-        <AuthProvider>
-          {ui}
-          <LocationProbe />
-        </AuthProvider>
-      </ToastProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <AuthProvider>
+            {ui}
+            <LocationProbe />
+          </AuthProvider>
+        </ToastProvider>
+      </QueryClientProvider>
     </MemoryRouter>,
   );
 }

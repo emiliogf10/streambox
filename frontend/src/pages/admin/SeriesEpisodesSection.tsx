@@ -3,6 +3,7 @@ import { Eye, EyeOff, Pencil, Plus, Trash } from 'lucide-react';
 import { Button } from '../../components/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useToast } from '../../context/ToastContext';
+import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
 import { ApiError, apiFetch, getErrorMessage, isAbortError } from '../../lib/api';
 import { episodeCode, formatEpisodeCount, formatSeasonCount } from '../../lib/series';
 import type { Episode, Season, SeriesDetail } from '../../lib/types';
@@ -68,6 +69,7 @@ function episodeLabel(episode: Episode): string {
 export function SeriesEpisodesSection({ series, onSeriesChange }: SeriesEpisodesSectionProps) {
   const headingId = useId();
   const toast = useToast();
+  const invalidateCatalog = useInvalidateCatalog();
   const empty = series.episodeCount === 0;
 
   const [editor, setEditor] = useState<Editor>(null);
@@ -115,10 +117,16 @@ export function SeriesEpisodesSection({ series, onSeriesChange }: SeriesEpisodes
   }, [editor, toDelete]);
 
   /**
-   * Vuelve a pedir la serie al servidor y se la pasa al padre.
+   * Vuelve a pedir la serie al servidor y se la pasa al padre. No usa la caché de
+   * TanStack a propósito: el diálogo ESPERA a esta respuesta para cerrarse con la
+   * lista ya nueva, y un fallo aquí tiene su propio aviso con «Reintentar».
    * @returns la serie nueva, o `null` si no se pudo (el error queda a la vista con «Reintentar»)
    */
   const refresh = async (): Promise<SeriesDetail | null> => {
+    // Solo se refresca tras un cambio de episodios (o tras saber que alguno ya no existía): los listados
+    // públicos, la página de la serie y «Mi lista» también tienen que enterarse (una serie aparece con su
+    // primer episodio y desaparece sin ninguno).
+    void invalidateCatalog('series');
     refreshController.current?.abort();
     const controller = new AbortController();
     refreshController.current = controller;

@@ -5,12 +5,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Date;
 import java.util.stream.Stream;
 
 import javax.crypto.Mac;
 import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -30,7 +35,7 @@ class JwtServiceTest {
 
     private static final String SECRET = "secreto-de-prueba-con-mas-de-treinta-y-dos-caracteres";
 
-    private final JwtService jwtService = new JwtService(new JwtProperties(SECRET, 1));
+    private final JwtService jwtService = new JwtService(new JwtProperties(SECRET, Duration.ofMinutes(15)));
 
     private static User user() {
         User user = new User();
@@ -38,8 +43,14 @@ class JwtServiceTest {
         return user;
     }
 
+    /**
+     * Clave HMAC-SHA256 del secreto. Con {@code Keys.hmacShaKeyFor} el
+     * algoritmo dependería de la longitud (con {@link #SECRET}, HS384) y el
+     * servicio rechazaría esos tokens por el algoritmo, no por lo que prueba
+     * cada test (caducidad, emisor...).
+     */
     private static SecretKey key(String secret) {
-        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        return new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
     }
 
     @Test
@@ -59,7 +70,7 @@ class JwtServiceTest {
         assertEquals(JwtService.ISSUER, claims.getIssuer());
         long lifetimeSeconds =
                 (claims.getExpiration().getTime() - claims.getIssuedAt().getTime()) / 1000;
-        assertEquals(3600, lifetimeSeconds);
+        assertEquals(900, lifetimeSeconds);
     }
 
     @Test
@@ -101,6 +112,100 @@ class JwtServiceTest {
     @Test
     void rechazaTextoQueNoEsUnJwt() {
         assertThrows(JwtException.class, () -> jwtService.extractEmail("basura"));
+    }
+
+    // ------------------------------------------------------------------
+    // Algoritmo fijo HS256 (tarea 29)
+    // ------------------------------------------------------------------
+
+    /** Secreto de 64 caracteres: con él, Keys.hmacShaKeyFor elegiría HS512. */
+    private static final String LONG_SECRET = "s".repeat(64);
+
+    /**
+     * Con un secreto largo, el algoritmo sigue siendo HS256. Antes la clave
+     * salía de {@code Keys.hmacShaKeyFor}, que con 64 bytes elige HS512: el
+     * algoritmo dependía de la longitud del secreto.
+     */
+    @Test
+    void firmaSiempreConHs256AunqueElSecretoSeaLargo() {
+        JwtService service = new JwtService(new JwtProperties(LONG_SECRET, Duration.ofMinutes(15)));
+
+        String token = service.generateToken(user());
+
+        String header = new String(Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
+                StandardCharsets.UTF_8);
+        assertTrue(header.contains("\"alg\":\"HS256\""), header);
+        assertEquals("ana@test.com", service.extractEmail(token));
+    }
+
+    /**
+     * Un token bien firmado con el mismo secreto pero con HS384 o HS512 se
+     * rechaza: el parser solo conoce HS256 y no deja que la cabecera del token
+     * elija el algoritmo. Sin la restricción, jjwt los aceptaría (la clave es
+     * lo bastante larga para los tres).
+     */
+    @ParameterizedTest
+    @ValueSource(strings = { "HS384", "HS512" })
+    void rechazaUnTokenFirmadoConOtroAlgoritmoHmacYElMismoSecreto(String algorithm) {
+        JwtService service = new JwtService(new JwtProperties(LONG_SECRET, Duration.ofMinutes(15)));
+        SecretKey key = Keys.hmacShaKeyFor(LONG_SECRET.getBytes(StandardCharsets.UTF_8));
+        String token = Jwts.builder()
+                .issuer(JwtService.ISSUER)
+                .subject("ana@test.com")
+                .expiration(new Date(System.currentTimeMillis() + 60_000))
+                .signWith(key, "HS384".equals(algorithm) ? Jwts.SIG.HS384 : Jwts.SIG.HS512)
+                .compact();
+
+        assertThrows(JwtException.class, () -> service.extractEmail(token));
+    }
+
+    /**
+     * Emisión y comprobación usan el {@link Clock} de la aplicación: con el
+     * reloj adelantado más allá de la vida del token, se rechaza como
+     * caducado (aunque en tiempo real aún fuese válido). Es lo que permite
+     * probar la caducidad del acceso sin esperar 15 minutos.
+     */
+    @Test
+    void laCaducidadSeCompruebaConElRelojDeLaAplicacion() {
+        Instant start = Instant.parse("2026-10-08T10:00:00Z");
+        MutableClock clock = new MutableClock(start);
+        JwtService service = new JwtService(new JwtProperties(SECRET, Duration.ofMinutes(15)), clock);
+        String token = service.generateToken(user());
+
+        Claims claims = Jwts.parser().verifyWith(new SecretKeySpec(SECRET.getBytes(StandardCharsets.UTF_8),
+                "HmacSHA256")).clock(() -> Date.from(start)).build().parseSignedClaims(token).getPayload();
+        assertEquals(start, claims.getIssuedAt().toInstant());
+
+        clock.now = start.plus(Duration.ofMinutes(14));
+        assertEquals("ana@test.com", service.extractEmail(token));
+
+        clock.now = start.plus(Duration.ofMinutes(16));
+        assertThrows(ExpiredJwtException.class, () -> service.extractEmail(token));
+    }
+
+    /** Reloj que solo cambia cuando el test lo pide. */
+    private static final class MutableClock extends Clock {
+
+        private Instant now;
+
+        MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        @Override
+        public java.time.ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -220,13 +325,15 @@ class JwtServiceTest {
                 "jjwt lanzó " + thrown.getClass().getName() + ": el filtro lo trataría como un 500");
     }
 
-    /** Firma HMAC hecha a mano con el algoritmo que corresponde a la clave real. */
+    /**
+     * Firma HMAC-SHA256 hecha a mano con la clave real (HS256 es el único
+     * algoritmo que acepta el servicio).
+     */
     private static String signedWithRealKey(String claimsJson) {
         try {
-            SecretKey secretKey = key(SECRET);
-            String alg = "HS" + secretKey.getAlgorithm().substring("HmacSHA".length());
-            String signingInput = b64("{\"alg\":\"" + alg + "\"}") + "." + b64(claimsJson);
-            Mac mac = Mac.getInstance(secretKey.getAlgorithm());
+            SecretKey secretKey = new SecretKeySpec(SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            String signingInput = b64("{\"alg\":\"HS256\"}") + "." + b64(claimsJson);
+            Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(secretKey);
             String signature = Base64.getUrlEncoder().withoutPadding()
                     .encodeToString(mac.doFinal(signingInput.getBytes(StandardCharsets.US_ASCII)));

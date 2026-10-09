@@ -98,17 +98,29 @@ class MultipartDisabledTomcatIntegrationTest {
 
     /**
      * El logout, público y sin cuerpo, ignora el multipart y cierra la sesión
-     * con normalidad: antes lo analizaba y respondía 413.
+     * con normalidad: antes lo analizaba y respondía 413. Lleva la cabecera
+     * CSRF que exige el logout: sin ella el filtro respondería 403 antes de
+     * llegar a {@code DispatcherServlet} y el test no comprobaría el análisis.
      */
     @Test
     void unMultipartGrandeAlLogoutNoSeAnaliza() throws Exception {
-        HttpResponse<String> response = postMultipart("/api/auth/logout");
+        HttpResponse<String> response = postMultipart("/api/auth/logout", true);
 
         assertEquals(204, response.statusCode(), "con 413 el cuerpo se ha analizado: " + response.body());
     }
 
-    /** {@code POST} con un campo de texto y un archivo de {@value #PART_SIZE} bytes. */
+    /** {@code POST} multipart sin la cabecera CSRF (login y registro no la exigen). */
     private HttpResponse<String> postMultipart(String path) throws Exception {
+        return postMultipart(path, false);
+    }
+
+    /**
+     * {@code POST} con un campo de texto y un archivo de {@value #PART_SIZE} bytes.
+     *
+     * @param path         ruta
+     * @param csrfHeader   si se envía {@code X-Requested-With: StreamBox}
+     */
+    private HttpResponse<String> postMultipart(String path, boolean csrfHeader) throws Exception {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         body.writeBytes(("--" + BOUNDARY + "\r\n"
                 + "Content-Disposition: form-data; name=\"email\"\r\n\r\n"
@@ -121,10 +133,12 @@ class MultipartDisabledTomcatIntegrationTest {
         body.writeBytes(padding);
         body.writeBytes(("\r\n--" + BOUNDARY + "--\r\n").getBytes(StandardCharsets.UTF_8));
 
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Content-Type", "multipart/form-data; boundary=" + BOUNDARY)
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()))
-                .build();
-        return http.send(request, HttpResponse.BodyHandlers.ofString());
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()));
+        if (csrfHeader) {
+            request.header("X-Requested-With", "StreamBox");
+        }
+        return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 }

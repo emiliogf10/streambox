@@ -36,6 +36,8 @@ class RateLimitPropertiesValidationTest {
                     "streambox.security.rate-limit.login.window=1m",
                     "streambox.security.rate-limit.register.max-requests=5",
                     "streambox.security.rate-limit.register.window=1h",
+                    "streambox.security.rate-limit.refresh.max-requests=30",
+                    "streambox.security.rate-limit.refresh.window=1m",
                     "streambox.security.rate-limit.lockout.max-failures=5",
                     "streambox.security.rate-limit.lockout.window=15m",
                     "streambox.security.rate-limit.lockout.max-known-ips=5",
@@ -49,7 +51,18 @@ class RateLimitPropertiesValidationTest {
             assertThat(properties.maxKeys()).isEqualTo(50_000);
             assertThat(properties.lockout().maxKnownIps()).isEqualTo(5);
             assertThat(properties.lockout().knownIpTtl()).isEqualTo(Duration.ofDays(30));
+            assertThat(properties.refresh().maxRequests()).isEqualTo(30);
+            assertThat(properties.refresh().window()).isEqualTo(Duration.ofMinutes(1));
         });
+    }
+
+    /** El límite del refresh (tarea 29) es obligatorio y positivo, como los demás. */
+    @Test
+    void unLimiteDeRefreshNoPositivoImpideArrancar() {
+        runner.withPropertyValues(
+                        "streambox.security.rate-limit.max-keys=100000",
+                        "streambox.security.rate-limit.refresh.max-requests=0")
+                .run(context -> assertThat(context).hasFailed());
     }
 
     @Test

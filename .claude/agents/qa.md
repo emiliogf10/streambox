@@ -45,6 +45,7 @@ Los informes quedan en `streambox/target/surefire-reports/`. Informa siempre del
 4. **Datos:** paginación (límites, orden estable entre páginas), filtros combinados, caracteres especiales, colecciones vacías, unicidad e integridad (restricciones de BD).
 5. **Rendimiento básico:** sin N+1 (contar sentencias con las estadísticas de Hibernate, como `CatalogIntegrationTest`).
 6. **Regresión:** que lo nuevo no rompe catálogo, login, favoritos ni migraciones.
+7. **Interfaz (si el cambio la toca):** recórrela con `agent-browser` (preferencia del autor; guía con `agent-browser skills get core` y, para pruebas exploratorias, `skills get dogfood`): flujos, textos por rol, estados de carga/vacío/error, teclado y foco. Reglas del apartado «Navegador» de `CLAUDE.md`: sesión propia (`--prefix qa`), solo contra una pila aislada con H2 (8097/5197), nunca contra el 8080 ni Supabase, y sin coincidir con otro Maven ni con `npm run test:e2e`. Lo que encuentres sigue el formato de incidencias de abajo (con la captura o el árbol de accesibilidad como evidencia).
 
 ## Formato de reporte de incidencias
 

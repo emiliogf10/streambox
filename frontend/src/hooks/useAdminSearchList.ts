@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import type { QueryKey } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { ApiError, getErrorMessage, isAbortError } from '../lib/api';
+import { ApiError, getErrorMessage } from '../lib/api';
 import type { PageResponse } from '../lib/types';
 import { useDebouncedValue } from './useDebouncedValue';
 
@@ -13,13 +15,8 @@ export const ADMIN_SEARCH_DEBOUNCE_MS = 300;
  */
 export type AdminPageFetcher<T> = (query: string, page: number, signal: AbortSignal) => Promise<PageResponse<T>>;
 
-/** Resultado de una carga, junto con la "clave" (búsqueda + página + intento) que lo pidió. */
-interface ListResult<T> {
-  key: string;
-  status: 'ready' | 'error';
-  page: PageResponse<T> | null;
-  errorMessage: string;
-}
+/** Clave de la caché de una búsqueda y página (`queryKeys.movies.admin`, `queryKeys.series.admin`). */
+export type AdminListKey = (query: string, page: number) => QueryKey;
 
 /** Lo que devuelve {@link useAdminSearchList}. */
 export interface AdminSearchList<T> {
@@ -68,20 +65,27 @@ function parsePage(raw: string | null): number {
  * tiene su propio estado y se vuelca a la URL con un *debounce* de 300 ms: no se
  * hace una petición por letra.
  *
- * **Peticiones sin carreras.** Cada combinación de búsqueda y página cancela la
- * petición anterior (`AbortController`) y, además, el resultado se guarda con la
- * clave que lo pidió: una respuesta antigua nunca se pinta como si fuera la
- * actual. Mientras llega la nueva página se sigue viendo la anterior.
+ * **Caché sin carreras (TanStack Query).** Cada combinación de búsqueda y página
+ * es una entrada de la caché (`queryKey`): una respuesta antigua nunca se pinta
+ * como si fuera la actual, la petición de la combinación anterior se cancela al
+ * dejar de usarse, y volver a una página ya vista (o «Atrás») la enseña al
+ * instante. Mientras llega la nueva página se sigue viendo la anterior
+ * (`keepPreviousData`). Las claves cuelgan de la raíz `movies` o `series`, así
+ * que un alta, edición o borrado del panel (que invalida esa raíz) refresca el
+ * listado solo.
  *
  * Si la página pedida queda fuera de rango (`?page=99`, o la última se quedó
  * vacía tras borrar), se lleva a la última que exista.
  *
- * @param fetchPage cómo pedir una página. **Debe ser estable** (una función de
- *   módulo o memorizada): forma parte de las dependencias de la carga y una
- *   función nueva en cada render la repetiría sin fin.
+ * @param queryKey clave de la caché de cada búsqueda y página (p. ej. `queryKeys.movies.admin`)
+ * @param fetchPage cómo pedir una página (con el `signal` de TanStack para poder cancelarla)
  * @param fallbackError mensaje si la carga falla sin un mensaje útil del servidor
  */
-export function useAdminSearchList<T>(fetchPage: AdminPageFetcher<T>, fallbackError: string): AdminSearchList<T> {
+export function useAdminSearchList<T>(
+  queryKey: AdminListKey,
+  fetchPage: AdminPageFetcher<T>,
+  fallbackError: string,
+): AdminSearchList<T> {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = (searchParams.get('q') ?? '').trim();
   const page = parsePage(searchParams.get('page'));
@@ -97,10 +101,13 @@ export function useAdminSearchList<T>(fetchPage: AdminPageFetcher<T>, fallbackEr
    */
   const appliedQuery = useRef(query);
 
-  const [reloadCount, setReloadCount] = useState(0);
-  const [result, setResult] = useState<ListResult<T> | null>(null);
-
-  const requestKey = `${query}|${page}|${reloadCount}`;
+  const list = useQuery({
+    queryKey: queryKey(query, page),
+    queryFn: ({ signal }) => fetchPage(query, page, signal),
+    // Mientras llega otra página u otra búsqueda se sigue viendo la anterior (atenuada por la pantalla).
+    placeholderData: keepPreviousData,
+  });
+  const { refetch } = list;
 
   // El texto ya "asentado" pasa a la URL y vuelve a la página 1. `replace`: el historial no se llena
   // con una entrada por letra. Solo reacciona a lo que se escribe (no a cambios de la URL).
@@ -117,26 +124,19 @@ export function useAdminSearchList<T>(fetchPage: AdminPageFetcher<T>, fallbackEr
     setInput(query);
   }, [query]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchPage(query, page, controller.signal)
-      .then((data) => setResult({ key: requestKey, status: 'ready', page: data, errorMessage: '' }))
-      .catch((error: unknown) => {
-        if (isAbortError(error) || controller.signal.aborted) return;
-        if (error instanceof ApiError && error.sessionExpired) return; // ya lo gestiona AuthProvider
-        setResult({ key: requestKey, status: 'error', page: null, errorMessage: getErrorMessage(error, fallbackError) });
-      });
-    return () => controller.abort();
-  }, [fetchPage, fallbackError, query, page, requestKey]);
-
-  const current = result?.key === requestKey ? result : null;
-  const data = current?.page ?? result?.page ?? null; // mientras carga, se sigue viendo la página anterior
-  const loading = current === null;
+  // Una sesión caducada ya la gestiona AuthProvider (aviso y salida al login): no se pinta como error del listado.
+  const sessionExpired = list.error instanceof ApiError && list.error.sessionExpired;
+  const failed = list.isError && !list.isFetching && !sessionExpired;
+  /** Datos de la búsqueda y página ACTUALES (no los de la anterior que se enseñan mientras tanto). */
+  const current = list.isPlaceholderData ? undefined : list.data;
+  const data = list.data ?? null;
+  // Cargando: falta la respuesta de la búsqueda/página actual, o se está refrescando (tras borrar, «Reintentar»).
+  const loading = !failed && (current === undefined || list.isFetching);
 
   // Página fuera de rango: ir a la última que exista.
   useEffect(() => {
-    if (current?.status !== 'ready' || !current.page) return;
-    const { content, totalPages } = current.page;
+    if (!current) return;
+    const { content, totalPages } = current;
     if (content.length === 0 && page > 1) {
       const last = Math.max(1, totalPages);
       setSearchParams(
@@ -167,9 +167,11 @@ export function useAdminSearchList<T>(fetchPage: AdminPageFetcher<T>, fallbackEr
   const clearSearch = useCallback(() => {
     setInput('');
     setSearchParams({}, { replace: true });
-  }, [setSearchParams]);
+  }, [setInput, setSearchParams]);
 
-  const reload = useCallback(() => setReloadCount((n) => n + 1), []);
+  const reload = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   return {
     query,
@@ -179,7 +181,7 @@ export function useAdminSearchList<T>(fetchPage: AdminPageFetcher<T>, fallbackEr
     searching: input.trim() !== query || (loading && data !== null),
     data,
     loading,
-    errorMessage: current?.status === 'error' ? current.errorMessage : null,
+    errorMessage: failed ? getErrorMessage(list.error, fallbackError) : null,
     pendingPageFix: data !== null && data.content.length === 0 && data.totalElements > 0 && page > 1,
     goToPage,
     clearSearch,

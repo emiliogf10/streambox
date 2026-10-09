@@ -1,17 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { Dispatch, SetStateAction } from 'react';
-import { apiFetch, getErrorMessage, isAbortError } from '../lib/api';
+import { useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch, getErrorMessage } from '../lib/api';
+import { queryKeys } from '../lib/queryKeys';
 import type { Genre } from '../lib/types';
 
 /** Estado de la carga de géneros. */
 export type GenresStatus = 'loading' | 'ready' | 'error';
 
-/** Resultado de una carga, junto con el intento que la originó (ver {@link useGenres}). */
-interface GenresResult {
-  attempt: number;
-  status: 'ready' | 'error';
-  errorMessage: string;
-}
+/** Lista vacía compartida mientras no han llegado los géneros (misma identidad en cada render). */
+const NO_GENRES: Genre[] = [];
 
 /**
  * Ordena los géneros por nombre como lo haría una persona en español
@@ -25,56 +22,55 @@ export function sortGenres(genres: readonly Genre[]): Genre[] {
   return [...genres].sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
 }
 
+/** Pide la lista de géneros (sin ordenar: el orden lo pone `select` en cada pantalla). */
+function fetchGenres(signal: AbortSignal): Promise<Genre[]> {
+  return apiFetch<Genre[]>('/genres', { signal });
+}
+
 /**
- * Carga la lista de géneros (`GET /api/genres`), ordenada por nombre.
+ * Lista de géneros (`GET /api/genres`), ordenada por nombre.
  *
- * La usan el formulario de película (casillas de géneros) y la pestaña de
- * géneros del panel. Esta última además modifica la lista en el cliente tras
- * crear, renombrar o borrar, por eso se expone `setGenres`.
+ * La usan la barra de filtros de `/peliculas`, los formularios de película y de
+ * serie y la pestaña Géneros del panel. Antes cada una la pedía por su cuenta;
+ * ahora es UNA entrada de la caché (`queryKeys.genres.all`): pasar de una
+ * pantalla a otra no repite la petición, y cuando la pestaña Géneros crea,
+ * renombra o borra uno (con `setQueryData`), todas ven el cambio.
  *
- * **Sin estados mezclados.** El resultado se guarda junto al número de intento
- * que lo pidió y `status` se DERIVA comparándolo con el intento actual (el mismo
- * patrón que `AuthContext`): al pulsar "Reintentar" el estado pasa a `loading`
- * sin tener que reiniciarlo a mano dentro del efecto. `loaded` indica si alguna
- * carga ha ido bien, para poder seguir enseñando la lista mientras se recarga.
+ * El orden se aplica con `select` (al leer), no al guardar: así da igual quién
+ * escriba en la caché, la lista siempre sale ordenada.
+ *
+ * - `status`: `error` si la última carga falló (aunque quede una lista anterior),
+ *   `loading` mientras no hay lista (también al reintentar tras un error) y `ready`.
+ * - `loaded`: si alguna carga ha ido bien, para seguir enseñando la lista
+ *   mientras se recarga o si un refresco falla.
  */
 export function useGenres(): {
   genres: Genre[];
-  setGenres: Dispatch<SetStateAction<Genre[]>>;
   status: GenresStatus;
   loaded: boolean;
   errorMessage: string;
   reload: () => void;
 } {
-  const [genres, setGenres] = useState<Genre[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const [result, setResult] = useState<GenresResult | null>(null);
+  const query = useQuery({
+    queryKey: queryKeys.genres.all,
+    queryFn: ({ signal }) => fetchGenres(signal),
+    select: sortGenres,
+  });
+  const { refetch } = query;
+  const reload = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    apiFetch<Genre[]>('/genres', { signal: controller.signal })
-      .then((list) => {
-        setGenres(sortGenres(list));
-        setLoaded(true);
-        setResult({ attempt, status: 'ready', errorMessage: '' });
-      })
-      .catch((error: unknown) => {
-        if (isAbortError(error) || controller.signal.aborted) return;
-        setResult({ attempt, status: 'error', errorMessage: getErrorMessage(error, 'No se pudieron cargar los géneros.') });
-      });
-    return () => controller.abort();
-  }, [attempt]);
-
-  const reload = useCallback(() => setAttempt((n) => n + 1), []);
-  const current = result?.attempt === attempt ? result : null;
+  const failed = query.isError && !query.isFetching;
+  let status: GenresStatus = 'loading';
+  if (failed) status = 'error';
+  else if (query.data !== undefined) status = 'ready';
 
   return {
-    genres,
-    setGenres,
-    status: current?.status ?? 'loading',
-    loaded,
-    errorMessage: current?.errorMessage ?? '',
+    genres: query.data ?? NO_GENRES,
+    status,
+    loaded: query.data !== undefined,
+    errorMessage: failed ? getErrorMessage(query.error, 'No se pudieron cargar los géneros.') : '',
     reload,
   };
 }

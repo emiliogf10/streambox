@@ -10,6 +10,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../lib/api';
 import { makeSeriesDetail } from '../test/helpers';
+import { queryWrapper } from '../test/queryClient';
 import { useSeriesDetail } from './useSeriesDetail';
 
 // Se simula SOLO `apiFetch`; `ApiError`, `isAbortError`... siguen siendo los reales.
@@ -29,7 +30,7 @@ describe('useSeriesDetail', () => {
     const detail = makeSeriesDetail({ id: 3 });
     apiFetch.mockResolvedValueOnce(detail);
 
-    const { result } = renderHook(() => useSeriesDetail('3'));
+    const { result } = renderHook(() => useSeriesDetail('3'), { wrapper: queryWrapper() });
 
     expect(result.current.status).toBe('loading');
     expect(apiFetch).toHaveBeenCalledWith('/series/3', { signal: expect.any(AbortSignal) });
@@ -39,7 +40,7 @@ describe('useSeriesDetail', () => {
 
   it('al cambiar de serie pasa a "cargando" en el mismo render (sin la anterior) y cancela su petición', async () => {
     apiFetch.mockResolvedValueOnce(makeSeriesDetail({ id: 3, title: 'Tres' }));
-    const { result, rerender } = renderHook(({ id }) => useSeriesDetail(id), { initialProps: { id: '3' } });
+    const { result, rerender } = renderHook(({ id }) => useSeriesDetail(id), { initialProps: { id: '3' }, wrapper: queryWrapper() });
     await waitFor(() => expect(result.current.status).toBe('ready'));
     apiFetch.mockReturnValueOnce(new Promise(() => {}));
 
@@ -58,22 +59,26 @@ describe('useSeriesDetail', () => {
 
   it('404 → "not-found" (no "error"); otro fallo → "error" con mensaje y reload vuelve a pedir', async () => {
     apiFetch.mockRejectedValueOnce(new api.ApiError({ status: 404, code: 'RESOURCE_NOT_FOUND', message: 'No' }));
-    const notFound = renderHook(() => useSeriesDetail('3'));
+    const notFound = renderHook(() => useSeriesDetail('3'), { wrapper: queryWrapper() });
     await waitFor(() => expect(notFound.result.current.status).toBe('not-found'));
 
     apiFetch.mockRejectedValueOnce(new api.ApiError({ status: 500, code: 'X', message: 'Servidor caído' }));
-    const failing = renderHook(() => useSeriesDetail('5'));
+    const failing = renderHook(() => useSeriesDetail('5'), { wrapper: queryWrapper() });
     await waitFor(() => expect(failing.result.current.status).toBe('error'));
     expect(failing.result.current.errorMessage).toBe('Servidor caído');
 
-    apiFetch.mockResolvedValueOnce(makeSeriesDetail({ id: 5 }));
-    act(() => failing.result.current.reload());
+    // La respuesta del reintento se retiene para poder ver el estado intermedio.
+    let answer!: (detail: unknown) => void;
+    apiFetch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    await act(async () => failing.result.current.reload());
     expect(failing.result.current.status).toBe('loading');
-    await waitFor(() => expect(failing.result.current.status).toBe('ready'));
+    expect(apiFetch).toHaveBeenCalledTimes(3);
+    await act(async () => answer(makeSeriesDetail({ id: 5 })));
+    expect(failing.result.current.status).toBe('ready');
   });
 
   it.each([['abc'], ['0'], ['1.5'], ['-1'], [undefined]])('id mal formado (%j) → "not-found" sin petición', (raw) => {
-    const { result } = renderHook(() => useSeriesDetail(raw));
+    const { result } = renderHook(() => useSeriesDetail(raw), { wrapper: queryWrapper() });
 
     expect(result.current.status).toBe('not-found');
     expect(apiFetch).not.toHaveBeenCalled();
@@ -81,7 +86,7 @@ describe('useSeriesDetail', () => {
 
   it('al desmontar cancela la petición en vuelo', () => {
     apiFetch.mockReturnValueOnce(new Promise(() => {}));
-    const { unmount } = renderHook(() => useSeriesDetail('3'));
+    const { unmount } = renderHook(() => useSeriesDetail('3'), { wrapper: queryWrapper() });
     const signal = (apiFetch.mock.calls[0][1] as { signal: AbortSignal }).signal;
 
     unmount();

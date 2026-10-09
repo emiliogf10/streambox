@@ -7,12 +7,15 @@
  * la cuenta (con la contraseña sin revelar), los tres estados del usuario
  * (cargando, error con reintento, listo) y de la lista (cargando, error con
  * reintento, vacía, con datos), el recuento y el orden de los géneros, que solo
- * se enseñen cinco títulos de la lista, y que «Cerrar sesión» cierre la sesión.
+ * se enseñen cinco títulos de la lista, y que «Cerrar sesión» espere al servidor
+ * («Cerrando sesión...»; si falla, la sesión sigue abierta y se avisa).
  */
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FavoritesProvider } from '../context/FavoritesContext';
+import { LOGOUT_FAILED_SERVER, LOGOUT_RETRY_DELAY_MS } from '../lib/logout';
+import { installManualTimers } from '../test/fakeTimers';
 import {
   CURRENT_USER,
   errorResponse,
@@ -22,6 +25,7 @@ import {
   makePage,
   makeSeries,
   makeUser,
+  noContentResponse,
   renderWithProviders,
   routeFetch,
 } from '../test/helpers';
@@ -43,16 +47,22 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 /** Opciones de {@link renderProfile}: el usuario, las listas y rutas extra de `fetch`. */
 interface ProfileSetup {
   user?: User;
   movies?: Movie[];
   series?: Series[];
   extra?: Parameters<typeof routeFetch>[1];
+  /** Opciones de user-event; con el reloj falso hace falta `{ delay: null }` (ver `src/test/fakeTimers.ts`). */
+  events?: Parameters<typeof userEvent.setup>[0];
 }
 
 /** Monta el perfil con sesión iniciada. Por defecto: usuario normal con la lista vacía y películas en el catálogo. */
-function renderProfile({ user = makeUser(), movies = [], series = [], extra = {} }: ProfileSetup = {}) {
+function renderProfile({ user = makeUser(), movies = [], series = [], extra = {}, events }: ProfileSetup = {}) {
   routeFetch(fetchMock, {
     [CURRENT_USER]: () => jsonResponse(user),
     [MOVIES]: () => jsonResponse(movies),
@@ -60,7 +70,7 @@ function renderProfile({ user = makeUser(), movies = [], series = [], extra = {}
     [ANY_MOVIE]: () => jsonResponse(makePage([makeMovie({ id: 99 })])),
     ...extra,
   });
-  const userEvents = userEvent.setup();
+  const userEvents = userEvent.setup(events);
   renderWithProviders(
     <FavoritesProvider>
       <ProfilePage />
@@ -112,13 +122,38 @@ describe('ProfilePage: cabecera', () => {
     expect(document.title).toBe('Mi perfil — StreamBox');
   });
 
-  it('«Cerrar sesión» cierra la sesión', async () => {
-    const user = renderProfile();
+  it('«Cerrar sesión» dice «Cerrando sesión...» mientras el servidor contesta y cierra la sesión cuando confirma', async () => {
+    let answer!: (response: Response) => void;
+    const user = renderProfile({
+      extra: { 'POST /api/auth/logout': () => new Promise<Response>((resolve) => (answer = resolve)) },
+    });
     await findName('ana');
 
     await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
 
-    expect(localStorage.getItem('token')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cerrando sesión...' })).toHaveAttribute('aria-disabled', 'true');
+    // Aún sin respuesta, la sesión (y con ella el perfil) sigue ahí.
+    expect(screen.getByRole('heading', { level: 1, name: 'ana' })).toBeInTheDocument();
+    answer(noContentResponse());
+    // Sin sesión el perfil deja de pintarse (en la app real, la ruta protegida lleva al login).
+    await waitFor(() => expect(screen.queryByRole('heading', { level: 1, name: 'ana' })).not.toBeInTheDocument());
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/auth/logout')).toHaveLength(1);
+  });
+
+  it('si el servidor falla también en el reintento, el perfil sigue con la sesión abierta y avisa', async () => {
+    installManualTimers();
+    const user = renderProfile({
+      extra: { 'POST /api/auth/logout': () => errorResponse(500, 'INTERNAL_ERROR', 'x') },
+      events: { delay: null },
+    });
+    await findName('ana');
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+    await act(() => vi.advanceTimersByTimeAsync(LOGOUT_RETRY_DELAY_MS));
+
+    expect(await screen.findByText(LOGOUT_FAILED_SERVER)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'ana' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cerrar sesión' })).not.toHaveAttribute('aria-disabled');
   });
 });
 

@@ -14,6 +14,12 @@ interface ErrorStateProps {
    * sección) y no a la página entera: no reserva media pantalla de alto.
    */
   compact?: boolean;
+  /**
+   * Nivel del encabezado del título: 2 (por defecto) cuando el error vive dentro
+   * de una página que ya tiene su `<h1>`; 1 cuando el error ES la página (p. ej.
+   * «No se pudo comprobar tu sesión», que se pinta sin barra ni contenido).
+   */
+  headingLevel?: 1 | 2;
 }
 
 /**
@@ -22,7 +28,14 @@ interface ErrorStateProps {
  * `role="alert"` anuncia el error al instante. El mensaje no se redacta aquí:
  * viene de `ApiError`, que ya distingue red caída, 403, 429, 5xx...
  */
-export function ErrorState({ title = 'No se pudo cargar el contenido', message, onRetry, compact = false }: ErrorStateProps) {
+export function ErrorState({
+  title = 'No se pudo cargar el contenido',
+  message,
+  onRetry,
+  compact = false,
+  headingLevel = 2,
+}: ErrorStateProps) {
+  const Heading = headingLevel === 1 ? 'h1' : 'h2';
   return (
     <div className={`flex items-center justify-center ${compact ? '' : 'min-h-[50vh] px-4'}`}>
       <div
@@ -30,7 +43,7 @@ export function ErrorState({ title = 'No se pudo cargar el contenido', message, 
         className="flex w-full max-w-md flex-col items-center gap-3 rounded-xl border border-red-500/30 bg-red-950/30 px-6 py-8 text-center"
       >
         <TriangleAlert aria-hidden="true" className="size-8 text-danger" />
-        <h2 className="font-semibold text-danger">{title}</h2>
+        <Heading className="font-semibold text-danger">{title}</Heading>
         <p className="text-sm leading-relaxed text-muted">{message}</p>
         {onRetry && (
           <Button variant="outline" onClick={onRetry} className="mt-2">

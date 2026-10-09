@@ -49,7 +49,7 @@
 
 | Componente | Tecnología |
 | :--- | :--- |
-| **Frontend** | React 19, Vite, TypeScript, Tailwind CSS v4 |
+| **Frontend** | React 19, Vite, TypeScript, Tailwind CSS v4, TanStack Query (caché de datos del servidor) |
 | **Lenguaje Backend** | Java 21 LTS |
 | **Framework** | Spring Boot 4.1.0 |
 | **Módulos Spring** | Spring WebMVC, Spring Data JPA, Spring Security, Spring Validation |
@@ -100,7 +100,9 @@ La base de todos los endpoints es `/api`.
 | Método | Endpoint | Acceso | Descripción |
 | :--- | :--- | :---: | :--- |
 | `POST` | `/api/users` | Público | Registro de nuevos usuarios (contraseña de 12 a 64 caracteres, no común y sin el usuario ni el email; 400 con el motivo en `validationErrors.password`) |
-| `POST` | `/api/auth/login` | Público | Autenticación mediante email y contraseña; retorna JWT. Un fallo responde 401 con `remainingAttempts`; al 5.º, 429 `ACCOUNT_LOCKED` |
+| `POST` | `/api/auth/login` | Público | Autenticación mediante email y contraseña; 204 sin cuerpo con dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min) y `streambox_refresh` (refresh token, `Path=/api/auth`). Un fallo responde 401 con `remainingAttempts`; al 5.º, 429 `ACCOUNT_LOCKED` |
+| `POST` | `/api/auth/refresh` | Público (cookie `streambox_refresh`) | Renueva la sesión sin contraseña: 204 con un JWT nuevo y el refresh token rotado. Exige `X-Requested-With: StreamBox` (403 `CSRF_REJECTED`); 401 `SESSION_EXPIRED` si el refresh no sirve (reutilizar uno ya rotado revoca la sesión); 429 por IP |
+| `POST` | `/api/auth/logout` | Público | Revoca la sesión del refresh token de la cookie y borra las dos cookies; 204 (403 `CSRF_REJECTED` sin `X-Requested-With: StreamBox`) |
 | `GET` | `/api/users/me` | `USER`, `ADMIN` | Consulta los datos del usuario autenticado |
 | `GET` | `/api/users` | `ADMIN` | Lista todos los usuarios registrados (la regla es por ruta: cualquier método salvo el `POST` de registro, `HEAD` incluido, exige `ADMIN`) |
 
@@ -201,8 +203,8 @@ Configura las siguientes variables de entorno en tu sistema o en tu IDE:
 | Variable | Descripción | Valor por Defecto / Ejemplo |
 | :--- | :--- | :--- |
 | `JWT_SECRET` | Clave secreta para firmar los tokens JWT (**obligatoria**). Texto de **al menos 32 caracteres**; la aplicación no arranca si es más corta. Genera una con `openssl rand -base64 48` | — |
-| `STREAMBOX_AUTH_COOKIE_SECURE` | Atributo `Secure` de la cookie de sesión `streambox_token` (HttpOnly, SameSite=Strict). `true` por defecto; el `docker-compose.yml` la pone a `false` porque sirve HTTP en localhost. **Ponla a `true` si sirves por HTTPS** | `true` |
-| `JWT_EXPIRATION_HOURS` | Tiempo de vida del token en horas | `24` |
+| `STREAMBOX_AUTH_COOKIE_SECURE` | Atributo `Secure` de las cookies de sesión `streambox_token` y `streambox_refresh` (HttpOnly, SameSite=Strict). `true` por defecto; el `docker-compose.yml` la pone a `false` porque sirve HTTP en localhost (con el perfil `prod`, el arranque lo avisa con un `WARN`). **Ponla a `true` si sirves por HTTPS** | `true` |
+| `JWT_ACCESS_TOKEN_TTL` | Vida del token de acceso (JWT de la cookie `streambox_token`), formato de duración de Spring Boot (`15m`, `900s`). Mayor que 0 y como mucho `1h`. La sesión larga la mantiene el refresh token (`streambox_refresh`): 7 días por uso y 30 como mucho desde el login (`streambox.auth.refresh.*`) | `15m` |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Opcionales. Si ambas están definidas, al arrancar se crea el primer administrador (si no existe ya). Al crearlo, la contraseña debe cumplir la política del registro (12–64 caracteres, no común, sin el usuario ni el email) o la aplicación no arranca; si ya existe, no se valida | — |
 | `ADMIN_USERNAME` | Opcional. Nombre de usuario del administrador inicial | `admin` |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | Solo perfil `prod`: conexión a PostgreSQL | — |

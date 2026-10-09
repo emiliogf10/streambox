@@ -8,6 +8,8 @@ import com.emilio.streambox.exception.AccountLockedException;
 import com.emilio.streambox.exception.InvalidCredentialsException;
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.JwtService;
+import com.emilio.streambox.security.refresh.RefreshTokenService;
+import com.emilio.streambox.security.refresh.SessionTokens;
 import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.ratelimit.LoginAttemptService.LoginAttempt;
 
@@ -37,6 +39,8 @@ public class AuthenticationService {
 
     private final JwtService jwtService;
 
+    private final RefreshTokenService refreshTokenService;
+
     /**
      * Hash válido que se comprueba cuando el email no existe, para que el
      * tiempo de respuesta no delate si la cuenta está registrada.
@@ -53,22 +57,34 @@ public class AuthenticationService {
      *                            cuentas con demasiados intentos fallidos
      * @param jwtService          servicio que genera el token del usuario
      *                            autenticado
+     * @param refreshTokenService servicio que abre la familia de refresh
+     *                            tokens de la sesión
      */
     public AuthenticationService(
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             LoginAttemptService loginAttemptService,
-            JwtService jwtService) {
+            JwtService jwtService,
+            RefreshTokenService refreshTokenService) {
 
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.loginAttemptService = loginAttemptService;
         this.jwtService = jwtService;
+        this.refreshTokenService = refreshTokenService;
         this.dummyPasswordHash = passwordEncoder.encode("contraseña-que-nadie-usa");
     }
 
     /**
-     * Inicia sesión: comprueba las credenciales y genera el token JWT.
+     * Inicia sesión: comprueba las credenciales, genera el JWT de acceso y abre
+     * una familia nueva de refresh tokens.
+     *
+     * <p>
+     * Cada login abre su propia familia (una por dispositivo o navegador): el
+     * logout de uno no cierra los demás, y una reutilización detectada solo
+     * revoca la sesión afectada. La familia se crea solo después de verificar
+     * la contraseña.
+     * </p>
      *
      * @param email    correo electrónico del usuario
      * @param password contraseña en texto plano
@@ -76,16 +92,17 @@ public class AuthenticationService {
      *                 nunca {@code X-Forwarded-For} a mano): decide si el
      *                 bloqueo de la cuenta le aplica como IP conocida o
      *                 desconocida (ver {@link LoginAttemptService})
-     * @return token JWT; el controlador lo entrega en una cookie HttpOnly, nunca
-     *         en el cuerpo
+     * @return JWT de acceso y refresh token; el controlador los entrega en
+     *         cookies HttpOnly, nunca en el cuerpo
      * @throws InvalidCredentialsException si el email no existe o la contraseña es
      *         incorrecta; lleva los intentos que quedan antes del bloqueo
      * @throws AccountLockedException si la cuenta está bloqueada temporalmente
      *         por demasiados intentos fallidos, o si este fallo agota los intentos
      */
-    public String login(String email, String password, String clientIp) {
+    public SessionTokens login(String email, String password, String clientIp) {
 
-        return jwtService.generateToken(authenticate(email, password, clientIp));
+        User user = authenticate(email, password, clientIp);
+        return new SessionTokens(jwtService.generateToken(user), refreshTokenService.startFamily(user.getId()));
     }
 
     /**

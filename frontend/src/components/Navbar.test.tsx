@@ -5,17 +5,21 @@
  * Protegen la muestra visible del rol: el enlace «Administrar» y la etiqueta
  * «Administrador» del menú aparecen SOLO a quien el servidor confirma como
  * `ADMIN`, y el menú enseña el nombre del usuario de la sesión. Mientras se comprueba la sesión la barra solo tiene el logo; si tras
- * iniciar sesión el usuario no carga, el menú es el de siempre (sin huecos) y cerrar sesión sigue funcionando. `fetch` está
+ * iniciar sesión el usuario no carga, el menú es el de siempre (sin huecos) y cerrar sesión sigue funcionando. «Cerrar
+ * sesión» espera al servidor: dice «Cerrando sesión...» sin perder el foco, no se repite con un doble clic y, si falla,
+ * la sesión sigue abierta con un aviso y el botón listo para reintentar. `fetch` está
  * simulado; la sesión y los avisos son los proveedores reales.
  *
  * Además comprueban que la barra publica su altura en `--navbar-height`, el dato
  * con el que `index.css` evita que el foco quede tapado por ella.
  */
-import { screen, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuth } from '../context/AuthContext';
 import { FavoritesProvider } from '../context/FavoritesContext';
+import { LOGOUT_FAILED_NETWORK, LOGOUT_RETRY_DELAY_MS } from '../lib/logout';
+import { installManualTimers } from '../test/fakeTimers';
 import { CURRENT_USER, errorResponse, jsonResponse, makeUser, noContentResponse, renderWithProviders, routeFetch } from '../test/helpers';
 import { UserStatusProbe } from '../test/UserStatusProbe';
 import { NAVBAR_HEIGHT_VARIABLE, Navbar } from './Navbar';
@@ -326,5 +330,64 @@ describe('Navbar: menú de usuario', () => {
     await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
     expect(await screen.findByRole('link', { name: 'Iniciar sesión' })).toBeInTheDocument();
     expect(localStorage.getItem('token')).toBeNull();
+  });
+});
+
+describe('Navbar: «Cerrar sesión» espera al servidor', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Monta la barra con sesión y `POST /auth/logout` respondido por `logout`; abre el menú. */
+  async function renderWithLogout(logout: () => Response | Promise<Response>, options = {}) {
+    routeFetch(fetchMock, { ...FAVORITES, 'POST /api/auth/logout': logout });
+    const user = userEvent.setup(options);
+    renderWithProviders(
+      <FavoritesProvider>
+        <Navbar />
+      </FavoritesProvider>,
+      { session: true },
+    );
+    await screen.findByRole('button', { name: 'Menú de usuario' });
+    await openMenu(user);
+    return user;
+  }
+
+  const logoutCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/auth/logout');
+
+  it('mientras el servidor contesta dice «Cerrando sesión...», no está disponible (sin perder el foco) y un segundo clic no repite la petición', async () => {
+    let answer!: (response: Response) => void;
+    const user = await renderWithLogout(() => new Promise<Response>((resolve) => (answer = resolve)));
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+
+    const busy = screen.getByRole('button', { name: 'Cerrando sesión...' });
+    // `aria-disabled` y no `disabled`: el lector lo anuncia «no disponible» y el foco no se va del menú.
+    expect(busy).toHaveAttribute('aria-disabled', 'true');
+    expect(busy).not.toBeDisabled();
+    expect(busy).toHaveFocus();
+    await user.click(busy);
+    expect(logoutCalls()).toHaveLength(1);
+    // La sesión sigue abierta hasta que el servidor confirme.
+    expect(screen.getByRole('button', { name: 'Menú de usuario' })).toBeInTheDocument();
+
+    answer(noContentResponse());
+    expect(await screen.findByRole('link', { name: 'Iniciar sesión' })).toBeInTheDocument();
+  });
+
+  it('si no hay conexión ni en el reintento, la sesión sigue abierta, avisa y el botón vuelve a «Cerrar sesión» para reintentar', async () => {
+    installManualTimers();
+    const user = await renderWithLogout(() => Promise.reject(new TypeError('Failed to fetch')), { delay: null });
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+    expect(screen.getByRole('button', { name: 'Cerrando sesión...' })).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(LOGOUT_RETRY_DELAY_MS));
+
+    expect(await screen.findByText(LOGOUT_FAILED_NETWORK)).toBeInTheDocument();
+    expect(logoutCalls()).toHaveLength(2);
+    const retry = screen.getByRole('button', { name: 'Cerrar sesión' });
+    expect(retry).not.toHaveAttribute('aria-disabled');
+    expect(retry).toHaveFocus();
+    expect(screen.queryByRole('link', { name: 'Iniciar sesión' })).not.toBeInTheDocument();
   });
 });

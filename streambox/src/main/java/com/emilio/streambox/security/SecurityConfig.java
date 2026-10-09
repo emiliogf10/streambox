@@ -249,15 +249,25 @@ public class SecurityConfig {
                                                 .dispatcherTypeMatchers(DispatcherType.ERROR)
                                                 .permitAll()
 
-                                                // Registro y autenticacion son publicos. Las rutas
-                                                // salen de RateLimitingFilter para que lo publico y
-                                                // lo limitado por IP sean siempre lo mismo.
+                                                // Registro, autenticacion y renovacion de sesion son
+                                                // publicos. Las rutas salen de RateLimitingFilter para
+                                                // que lo publico y lo limitado por IP sean siempre lo
+                                                // mismo. El refresh es publico porque se llama
+                                                // precisamente cuando el JWT de acceso ha caducado: lo
+                                                // autentica la cookie streambox_refresh (en
+                                                // RefreshTokenService) y exige la cabecera CSRF (en
+                                                // JwtAuthenticationFilter).
                                                 .requestMatchers(HttpMethod.POST,
                                                                 RateLimitingFilter.REGISTER_PATH,
-                                                                RateLimitingFilter.LOGIN_PATH)
+                                                                RateLimitingFilter.LOGIN_PATH,
+                                                                RateLimitingFilter.REFRESH_PATH)
                                                 .permitAll()
 
-                                                // Logout: publico e idempotente (solo borra la cookie).
+                                                // Logout: publico e idempotente (revoca la familia del
+                                                // refresh token de la cookie, si la hay, y borra las
+                                                // dos cookies). Como el refresh, exige la cabecera
+                                                // CSRF (en JwtAuthenticationFilter): sin ella otra web
+                                                // podria borrar las cookies de la victima.
                                                 .requestMatchers(HttpMethod.POST,
                                                                 JwtAuthenticationFilter.LOGOUT_PATH)
                                                 .permitAll()

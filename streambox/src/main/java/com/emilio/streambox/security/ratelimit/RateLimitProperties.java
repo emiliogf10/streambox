@@ -16,9 +16,11 @@ import jakarta.validation.constraints.Positive;
  *
  * @param login    límite de intentos de login por IP
  * @param register límite de registros de usuario por IP
+ * @param refresh  límite de renovaciones de sesión ({@code POST /api/auth/refresh})
+ *                 por IP
  * @param lockout  bloqueo temporal de una cuenta tras varios logins fallidos
  * @param maxKeys  tope de claves vivas <b>por contador</b> (cada contador en
- *                 memoria, el de login, el de registro, el de bloqueo por
+ *                 memoria, el de login, el de registro, el de refresh, el de bloqueo por
  *                 cuenta y el de IP conocida, lo aplica por separado). Al
  *                 llenarse se purgan las caducadas y, si sigue lleno, se
  *                 expulsa la clave con la actividad más antigua; ver
@@ -29,6 +31,7 @@ import jakarta.validation.constraints.Positive;
 public record RateLimitProperties(
         @Valid @NotNull Rule login,
         @Valid @NotNull Rule register,
+        @Valid @NotNull Rule refresh,
         @Valid @NotNull Lockout lockout,
         @Positive int maxKeys) {
 

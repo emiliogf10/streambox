@@ -207,6 +207,26 @@ describe('MyListPage: secciones', () => {
 
     expect(await screen.findByRole('link', { name: /^Dark/ })).toBeInTheDocument();
   });
+  it('al pulsar «Reintentar» vuelve al estado de carga (sin el error a la vista) hasta que llega la respuesta', async () => {
+    let retry: ReturnType<typeof deferredResponse> | null = null;
+    const user = renderList([dune], [], {
+      [FAVORITE_SERIES]: () => (retry ? retry.promise : errorResponse(500, 'INTERNAL_ERROR', 'boom')),
+    });
+    expect(await screen.findByRole('heading', { level: 2, name: 'No se pudo cargar tu lista' })).toBeInTheDocument();
+
+    retry = deferredResponse();
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }));
+
+    // Mientras el servidor no contesta: el esqueleto de carga, anunciado como estado, y no el error de antes.
+    const loading = await screen.findByText('Cargando tu lista...');
+    expect(loading.closest('[role="status"]')).not.toBeNull();
+    expect(screen.queryByRole('heading', { name: 'No se pudo cargar tu lista' })).not.toBeInTheDocument();
+
+    await act(async () => retry?.resolve(jsonResponse([dark])));
+
+    expect(await screen.findByRole('link', { name: /^Dark/ })).toBeInTheDocument();
+    expect(screen.queryByText('Cargando tu lista...')).not.toBeInTheDocument();
+  });
 });
 
 describe('MyListPage: vaciar lista', () => {

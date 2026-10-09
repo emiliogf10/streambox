@@ -7,11 +7,70 @@
  * `fetch` se sustituye por un doble: no hay red real.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, apiFetch, configureAuth, getErrorMessage, isAbortError, rateLimitMessage } from './api';
-import { errorResponse, jsonResponse, noContentResponse } from '../test/helpers';
+import {
+  ApiError,
+  SESSION_CHANNEL_NAME,
+  SESSION_LOCK_NAME,
+  announceSessionChange,
+  apiFetch,
+  configureAuth,
+  currentSessionKey,
+  getErrorMessage,
+  isAbortError,
+  rateLimitMessage,
+} from './api';
+import {
+  REFRESH_SESSION as REFRESH,
+  errorResponse,
+  jsonResponse,
+  noContentResponse,
+  sessionExpiredResponse as sessionExpired,
+} from '../test/helpers';
+import { installFakeLocks } from '../test/webLocks';
+import type { FakeLocks } from '../test/webLocks';
 
 const fetchMock = vi.fn<typeof fetch>();
 const onUnauthorized = vi.fn<(usedKey: number) => void>();
+const onSessionChangedElsewhere = vi.fn<() => void>();
+
+type Handler = (init: RequestInit) => Response | Promise<Response>;
+
+/**
+ * Servidor simulado por `"MÉTODO /ruta"`. Cada llamada recibe un `Response` nuevo
+ * (un cuerpo solo se puede leer una vez). Lo no declarado falla con un mensaje claro.
+ */
+function serve(routes: Record<string, Handler>) {
+  fetchMock.mockImplementation(async (input, init = {}) => {
+    const key = `${init.method ?? 'GET'} ${String(input)}`;
+    const handler = routes[key];
+    if (!handler) throw new Error(`Petición no prevista en el test: ${key}`);
+    return handler(init);
+  });
+}
+
+/** Llamadas hechas a `url` (con su método, por defecto GET). */
+function callsTo(url: string, method = 'GET') {
+  return fetchMock.mock.calls.filter(([u, init]) => String(u) === url && (init?.method ?? 'GET') === method);
+}
+
+/** Llamadas al refresh. */
+function refreshCalls() {
+  return callsTo('/api/auth/refresh', 'POST');
+}
+
+/** Promesa controlable a mano para decidir CUÁNDO contesta el servidor. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/** Deja correr las promesas y temporizadores pendientes (entrega del BroadcastChannel simulado incluida). */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 /** Devuelve `[url, init]` de la última llamada a `fetch`. */
 function lastCall(): [string, RequestInit] {
@@ -35,11 +94,19 @@ async function catchError(promise: Promise<unknown>): Promise<unknown> {
   throw new Error('La promesa debía fallar y se resolvió');
 }
 
+const canRefresh = vi.fn<(usedKey: number) => boolean>();
+/** Clave de la sesión actual que ve `apiFetch` (los tests la cambian para simular otro login/logout). */
+let currentKey = 7;
+
 beforeEach(() => {
   fetchMock.mockReset();
   onUnauthorized.mockReset();
+  onSessionChangedElsewhere.mockReset();
+  canRefresh.mockReset();
+  canRefresh.mockReturnValue(true);
+  currentKey = 7;
   vi.stubGlobal('fetch', fetchMock);
-  configureAuth({ getSessionKey: () => 7, onUnauthorized });
+  configureAuth({ getSessionKey: () => currentKey, onUnauthorized, canRefresh, onSessionChangedElsewhere });
 });
 
 afterEach(() => {
@@ -164,8 +231,11 @@ describe('apiFetch: respuestas correctas', () => {
 });
 
 describe('apiFetch: 401 y sesión', () => {
-  it('401 en endpoint autenticado avisa UNA vez con la clave de sesión que se usó y marca sessionExpired', async () => {
-    fetchMock.mockResolvedValue(errorResponse(401, 'UNAUTHORIZED', 'Token inválido'));
+  it('401 en endpoint autenticado (y el refresh tampoco renueva) avisa UNA vez con la clave de sesión que se usó y marca sessionExpired', async () => {
+    serve({
+      'GET /api/movies': () => errorResponse(401, 'INVALID_CREDENTIALS', 'Token inválido'),
+      [REFRESH]: sessionExpired,
+    });
 
     const error = await catchError(apiFetch('/movies'));
 
@@ -245,6 +315,469 @@ describe('apiFetch: 401 y sesión', () => {
   });
 });
 
+describe('apiFetch: renovación de la sesión (refresh token)', () => {
+  const MOVIES = 'GET /api/movies';
+
+  it('401 → refresh (POST sin cuerpo, con cookie y cabecera anti-CSRF) → repite la petición UNA vez y devuelve su resultado', async () => {
+    let renewed = false;
+    serve({
+      [MOVIES]: () => (renewed ? jsonResponse({ id: 1 }) : errorResponse(401, 'INVALID_CREDENTIALS', 'x')),
+      [REFRESH]: () => {
+        renewed = true;
+        return noContentResponse();
+      },
+    });
+
+    await expect(apiFetch('/movies')).resolves.toEqual({ id: 1 });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/movies', '/api/auth/refresh', '/api/movies']);
+    const [, init] = refreshCalls()[0];
+    expect(init?.credentials).toBe('same-origin');
+    expect(init?.body).toBeUndefined();
+    expect(new Headers(init?.headers).get('X-Requested-With')).toBe('StreamBox');
+    expect(new Headers(init?.headers).get('Accept')).toBe('application/json');
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('una petición que modifica datos (POST con cuerpo) se repite igual: mismo cuerpo y cabeceras', async () => {
+    let renewed = false;
+    serve({
+      'POST /api/users/me/favorites/3': () => (renewed ? noContentResponse() : errorResponse(401, 'INVALID_CREDENTIALS', 'x')),
+      [REFRESH]: () => {
+        renewed = true;
+        return noContentResponse();
+      },
+    });
+
+    await apiFetch('/users/me/favorites/3', { method: 'POST', body: { nota: 'a' } });
+
+    const calls = callsTo('/api/users/me/favorites/3', 'POST');
+    expect(calls).toHaveLength(2);
+    expect(calls[1][1]?.body).toBe('{"nota":"a"}');
+    expect(new Headers(calls[1][1]?.headers).get('X-Requested-With')).toBe('StreamBox');
+  });
+
+  it('si el refresh da 401 SESSION_EXPIRED: sesión caducada (aviso UNA vez), sin repetir la petición ni reintentar el refresh', async () => {
+    serve({ [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'), [REFRESH]: sessionExpired });
+
+    const error = await catchError(apiFetch('/movies'));
+
+    expect(error).toMatchObject({ status: 401, sessionExpired: true, message: 'Tu sesión ha caducado. Inicia sesión de nuevo.' });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(onUnauthorized).toHaveBeenCalledWith(7);
+    expect(refreshCalls()).toHaveLength(1);
+    expect(callsTo('/api/movies')).toHaveLength(1);
+  });
+
+  it('si la repetición vuelve a dar 401: sesión caducada, sin bucle (un refresh y una sola repetición)', async () => {
+    serve({ [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'), [REFRESH]: () => noContentResponse() });
+
+    const error = await catchError(apiFetch('/movies'));
+
+    expect(error).toMatchObject({ status: 401, sessionExpired: true });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(refreshCalls()).toHaveLength(1);
+    expect(callsTo('/api/movies')).toHaveLength(2);
+  });
+
+  it.each([
+    ['red caída', () => Promise.reject(new TypeError('Failed to fetch')), 0, 'NETWORK_ERROR', /No se pudo conectar con el servidor/],
+    ['500 (BD caída)', () => errorResponse(500, 'INTERNAL_ERROR', 'x'), 500, 'INTERNAL_ERROR', /El servidor ha tenido un problema/],
+    ['503 del proxy (HTML, sin code)', () => new Response('<html>caído</html>', { status: 503 }), 503, 'HTTP_503', /No se pudo conectar con el servidor/],
+    ['503 de la API (con code)', () => errorResponse(503, 'SERVICE_UNAVAILABLE', 'x'), 503, 'SERVICE_UNAVAILABLE', /El servidor ha tenido un problema/],
+    [
+      '429 con Retry-After',
+      () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x', {}, { 'Retry-After': '20' }),
+      429,
+      'RATE_LIMIT_EXCEEDED',
+      /Inténtalo de nuevo en 20 s/,
+    ],
+    ['403 CSRF_REJECTED', () => errorResponse(403, 'CSRF_REJECTED', 'x'), 403, 'CSRF_REJECTED', /No tienes permisos/],
+  ] as const)(
+    'si el refresh falla (%s): devuelve ESE error, que la pantalla enseña con «Reintentar», sin cerrar la sesión',
+    async (_caso, refresh, status, code, message) => {
+      serve({ [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'), [REFRESH]: refresh as Handler });
+
+      const error = (await catchError(apiFetch('/movies'))) as ApiError;
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).toMatchObject({ status, code, sessionExpired: false });
+      expect(error.message).toMatch(message);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(callsTo('/api/movies')).toHaveLength(1);
+      expect(refreshCalls()).toHaveLength(1);
+    },
+  );
+
+  it('varias peticiones con 401 a la vez comparten UN solo refresh y se repiten todas', async () => {
+    const refresh = deferred<Response>();
+    let renewed = false;
+    serve({
+      [MOVIES]: () => (renewed ? jsonResponse(['m']) : errorResponse(401, 'INVALID_CREDENTIALS', 'x')),
+      'GET /api/genres': () => (renewed ? jsonResponse(['g']) : errorResponse(401, 'INVALID_CREDENTIALS', 'x')),
+      'GET /api/users/me/favorites': () => (renewed ? jsonResponse(['f']) : errorResponse(401, 'INVALID_CREDENTIALS', 'x')),
+      [REFRESH]: () => refresh.promise,
+    });
+
+    const all = Promise.all([apiFetch('/movies'), apiFetch('/genres'), apiFetch('/users/me/favorites')]);
+    await vi.waitFor(() => expect(refreshCalls()).toHaveLength(1));
+    await flush(); // las tres ya tienen su 401 y esperan la misma renovación
+    renewed = true;
+    refresh.resolve(noContentResponse());
+
+    await expect(all).resolves.toEqual([['m'], ['g'], ['f']]);
+    expect(refreshCalls()).toHaveLength(1);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('varias peticiones con 401 y el refresh caducado: un refresh y un solo aviso por petición (AuthProvider deja uno)', async () => {
+    serve({
+      [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'),
+      'GET /api/genres': () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'),
+      [REFRESH]: sessionExpired,
+    });
+
+    const errors = await Promise.all([catchError(apiFetch('/movies')), catchError(apiFetch('/genres'))]);
+
+    expect(errors).toEqual([expect.objectContaining({ sessionExpired: true }), expect.objectContaining({ sessionExpired: true })]);
+    expect(refreshCalls()).toHaveLength(1);
+  });
+
+  it('un 401 que llega DESPUÉS de una renovación hecha mientras la petición viajaba no pide otro refresh: solo se repite', async () => {
+    const slow = deferred<Response>();
+    let renewed = false;
+    let slowCalls = 0;
+    serve({
+      [MOVIES]: () => (renewed ? jsonResponse('m') : errorResponse(401, 'INVALID_CREDENTIALS', 'x')),
+      // La primera salió con la cookie vieja y su 401 llega tarde; la repetición ya va con la nueva.
+      'GET /api/genres': () => (++slowCalls === 1 ? slow.promise : jsonResponse('g')),
+      [REFRESH]: () => {
+        renewed = true;
+        return noContentResponse();
+      },
+    });
+
+    const late = apiFetch('/genres');
+    await expect(apiFetch('/movies')).resolves.toBe('m');
+    expect(refreshCalls()).toHaveLength(1);
+    slow.resolve(errorResponse(401, 'INVALID_CREDENTIALS', 'x'));
+
+    await expect(late).resolves.toBe('g');
+    expect(refreshCalls()).toHaveLength(1);
+  });
+
+  it('una renovación posterior a la caducada sí se pide (cada caducidad, su refresh)', async () => {
+    let expiredAgain = true;
+    serve({
+      [MOVIES]: () => {
+        if (expiredAgain) {
+          expiredAgain = false;
+          return errorResponse(401, 'INVALID_CREDENTIALS', 'x');
+        }
+        return jsonResponse('m');
+      },
+      [REFRESH]: () => noContentResponse(),
+    });
+
+    await apiFetch('/movies');
+    expiredAgain = true; // pasan otros 15 minutos
+    await apiFetch('/movies');
+
+    expect(refreshCalls()).toHaveLength(2);
+  });
+
+  it.each([
+    ['login', '/auth/login', 'POST'],
+    ['logout', '/auth/logout', 'POST'],
+    ['refresh', '/auth/refresh', 'POST'],
+    ['registro', '/users', 'POST'],
+  ])('un 401 de %s (ruta pública o de sesión) nunca dispara un refresh ni cierra la sesión', async (_caso, path, method) => {
+    serve({ [`${method} /api${path}`]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x') });
+
+    await catchError(apiFetch(path, { method, public: true }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('las rutas de sesión tampoco renuevan aunque se llamen sin `public`', async () => {
+    serve({ 'POST /api/auth/logout': () => errorResponse(401, 'INVALID_CREDENTIALS', 'x') });
+
+    await catchError(apiFetch('/auth/logout', { method: 'POST' }));
+
+    expect(refreshCalls()).toHaveLength(0);
+  });
+
+  it('sin sesión o con una petición de una sesión anterior (canRefresh = false): no renueva y el 401 sigue su curso', async () => {
+    canRefresh.mockReturnValue(false);
+    serve({ [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x') });
+
+    const error = await catchError(apiFetch('/movies'));
+
+    expect(canRefresh).toHaveBeenCalledWith(7);
+    expect(refreshCalls()).toHaveLength(0);
+    expect(error).toMatchObject({ status: 401, sessionExpired: true });
+    expect(onUnauthorized).toHaveBeenCalledWith(7); // AuthProvider lo ignorará: es de otra sesión
+  });
+
+  it('sin AuthProvider (sin puente) no hay sesión que renovar', async () => {
+    configureAuth(null);
+    serve({ [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x') });
+
+    await catchError(apiFetch('/movies'));
+
+    expect(refreshCalls()).toHaveLength(0);
+  });
+
+  it('si la sesión cambia mientras se renueva (logout u otro login), NO se repite la petición en la sesión nueva', async () => {
+    const refresh = deferred<Response>();
+    serve({ [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'), [REFRESH]: () => refresh.promise });
+
+    const pending = catchError(apiFetch('/movies'));
+    await vi.waitFor(() => expect(refreshCalls()).toHaveLength(1));
+    currentKey = 8; // otra sesión
+    refresh.resolve(noContentResponse());
+
+    expect(await pending).toMatchObject({ status: 401 });
+    expect(callsTo('/api/movies')).toHaveLength(1);
+    expect(onUnauthorized).toHaveBeenCalledWith(7); // clave vieja: AuthProvider lo ignora
+  });
+
+  it('una petición cancelada antes de leer su 401 no dispara el refresh: lanza AbortError', async () => {
+    const controller = new AbortController();
+    const response = deferred<Response>();
+    serve({ [MOVIES]: () => response.promise });
+
+    const pending = catchError(apiFetch('/movies', { signal: controller.signal }));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    controller.abort();
+    response.resolve(errorResponse(401, 'INVALID_CREDENTIALS', 'x'));
+
+    expect(isAbortError(await pending)).toBe(true);
+    expect(refreshCalls()).toHaveLength(0);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('una petición cancelada mientras se renueva no se repite (el refresh, compartido, sigue)', async () => {
+    const controller = new AbortController();
+    const refresh = deferred<Response>();
+    serve({ [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'), [REFRESH]: () => refresh.promise });
+
+    const pending = catchError(apiFetch('/movies', { signal: controller.signal }));
+    await vi.waitFor(() => expect(refreshCalls()).toHaveLength(1));
+    controller.abort();
+    refresh.resolve(noContentResponse());
+
+    expect(isAbortError(await pending)).toBe(true);
+    expect(callsTo('/api/movies')).toHaveLength(1);
+  });
+
+  it('si la petición se cancela mientras un refresh acaba en SESSION_EXPIRED, la sesión se cierra igual (un aviso) y lanza AbortError', async () => {
+    // Pasa de verdad al cambiar de pantalla: la petición que pidió el refresh se cancela. Si nadie cerrara
+    // la sesión, la siguiente petición con 401 pediría otro refresh condenado a la misma respuesta.
+    const controller = new AbortController();
+    const refresh = deferred<Response>();
+    serve({ [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'), [REFRESH]: () => refresh.promise });
+
+    const pending = catchError(apiFetch('/movies', { signal: controller.signal }));
+    await vi.waitFor(() => expect(refreshCalls()).toHaveLength(1));
+    controller.abort();
+    refresh.resolve(sessionExpired());
+
+    expect(isAbortError(await pending)).toBe(true);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    expect(onUnauthorized).toHaveBeenCalledWith(7);
+  });
+
+  it('sin Web Locks, login y logout esperan a que termine el refresh en curso (no se cruzan sus cookies)', async () => {
+    const refresh = deferred<Response>();
+    serve({
+      [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'),
+      [REFRESH]: () => refresh.promise,
+      'POST /api/auth/logout': () => noContentResponse(),
+    });
+
+    const movies = catchError(apiFetch('/movies'));
+    await vi.waitFor(() => expect(refreshCalls()).toHaveLength(1));
+    const logout = apiFetch('/auth/logout', { method: 'POST', public: true });
+    await flush();
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(0);
+
+    refresh.resolve(sessionExpired());
+    await logout;
+    await movies;
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(1);
+  });
+
+  it('avisa a las demás pestañas de cada renovación correcta (y no de las fallidas)', async () => {
+    const otherTab = new BroadcastChannel(SESSION_CHANNEL_NAME);
+    const received: unknown[] = [];
+    otherTab.onmessage = (event: MessageEvent) => received.push(event.data);
+    let refreshOk = true;
+    serve({
+      [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'),
+      [REFRESH]: () => (refreshOk ? noContentResponse() : sessionExpired()),
+    });
+
+    await catchError(apiFetch('/movies'));
+    await flush();
+    expect(received).toEqual([{ type: 'session-renewed' }]);
+
+    refreshOk = false;
+    await catchError(apiFetch('/movies'));
+    await flush();
+    expect(received).toHaveLength(1);
+    otherTab.close();
+  });
+
+  describe('cambios de sesión entre pestañas (session-changed)', () => {
+    it('announceSessionChange publica SOLO el tipo, sin identidad ni datos de la cuenta', async () => {
+      const otherTab = new BroadcastChannel(SESSION_CHANNEL_NAME);
+      const received: unknown[] = [];
+      otherTab.onmessage = (event: MessageEvent) => received.push(event.data);
+
+      announceSessionChange();
+      await flush();
+
+      expect(received).toEqual([{ type: 'session-changed' }]);
+      otherTab.close();
+    });
+
+    it('el aviso de otra pestaña llega a AuthProvider (onSessionChangedElsewhere) y no cuenta como renovación', async () => {
+      const otherTab = new BroadcastChannel(SESSION_CHANNEL_NAME);
+      serve({
+        [MOVIES]: () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'),
+        [REFRESH]: () => sessionExpired(),
+      });
+
+      otherTab.postMessage({ type: 'session-changed' });
+      await flush();
+      expect(onSessionChangedElsewhere).toHaveBeenCalledTimes(1);
+
+      // No es una renovación: un 401 posterior sí pide su propio refresh.
+      await catchError(apiFetch('/movies'));
+      expect(refreshCalls()).toHaveLength(1);
+      otherTab.close();
+    });
+
+    it('mensajes desconocidos o sin forma de objeto se ignoran', async () => {
+      const otherTab = new BroadcastChannel(SESSION_CHANNEL_NAME);
+      otherTab.postMessage('session-changed');
+      otherTab.postMessage({ type: 'otra-cosa' });
+      await flush();
+      expect(onSessionChangedElsewhere).not.toHaveBeenCalled();
+      otherTab.close();
+    });
+
+    it('currentSessionKey expone la clave del puente (0 sin AuthProvider)', () => {
+      expect(currentSessionKey()).toBe(7);
+      configureAuth(null);
+      expect(currentSessionKey()).toBe(0);
+    });
+  });
+
+  describe('con Web Locks (navigator.locks)', () => {
+    let locks: FakeLocks;
+
+    beforeEach(() => {
+      locks = installFakeLocks();
+    });
+
+    afterEach(() => {
+      locks.uninstall();
+    });
+
+    it('el refresh, el login y el logout piden el lock común a todas las pestañas', async () => {
+      let renewed = false;
+      serve({
+        [MOVIES]: () => (renewed ? jsonResponse('m') : errorResponse(401, 'INVALID_CREDENTIALS', 'x')),
+        [REFRESH]: () => {
+          renewed = true;
+          return noContentResponse();
+        },
+        'POST /api/auth/login': () => noContentResponse(),
+        'POST /api/auth/logout': () => noContentResponse(),
+      });
+
+      await apiFetch('/movies');
+      await apiFetch('/auth/login', { method: 'POST', body: {}, public: true });
+      await apiFetch('/auth/logout', { method: 'POST', public: true });
+
+      expect(locks.requested).toEqual([SESSION_LOCK_NAME, SESSION_LOCK_NAME, SESSION_LOCK_NAME]);
+    });
+
+    it('las peticiones normales no pasan por el lock', async () => {
+      serve({ [MOVIES]: () => jsonResponse('m') });
+
+      await apiFetch('/movies');
+
+      expect(locks.requested).toEqual([]);
+    });
+
+    it('si otra pestaña está renovando, se espera a que suelte el lock y, si avisó de su renovación, solo se repite la petición', async () => {
+      const otherTab = new BroadcastChannel(SESSION_CHANNEL_NAME);
+      const held = locks.hold(SESSION_LOCK_NAME);
+      await held.acquired;
+      let renewed = false;
+      serve({
+        [MOVIES]: () => (renewed ? jsonResponse('m') : errorResponse(401, 'INVALID_CREDENTIALS', 'x')),
+        [REFRESH]: () => noContentResponse(),
+      });
+
+      const pending = apiFetch('/movies');
+      await vi.waitFor(() => expect(locks.requested).toHaveLength(1));
+      // La otra pestaña termina su refresh: cookies nuevas (comunes), aviso y suelta el lock.
+      renewed = true;
+      otherTab.postMessage({ type: 'session-renewed' });
+      await flush();
+      held.release();
+
+      await expect(pending).resolves.toBe('m');
+      expect(refreshCalls()).toHaveLength(0);
+      otherTab.close();
+    });
+
+    it('si la otra pestaña soltó el lock sin renovar, esta pide su propio refresh', async () => {
+      const held = locks.hold(SESSION_LOCK_NAME);
+      await held.acquired;
+      let renewed = false;
+      serve({
+        [MOVIES]: () => (renewed ? jsonResponse('m') : errorResponse(401, 'INVALID_CREDENTIALS', 'x')),
+        [REFRESH]: () => {
+          renewed = true;
+          return noContentResponse();
+        },
+      });
+
+      const pending = apiFetch('/movies');
+      await vi.waitFor(() => expect(locks.requested).toHaveLength(1));
+      expect(refreshCalls()).toHaveLength(0); // espera al lock
+      held.release();
+
+      await expect(pending).resolves.toBe('m');
+      expect(refreshCalls()).toHaveLength(1);
+    });
+
+    it('un aviso de otra pestaña recibido ANTES del 401 hace que no se pida refresh', async () => {
+      const otherTab = new BroadcastChannel(SESSION_CHANNEL_NAME);
+      const response = deferred<Response>();
+      let movieCalls = 0;
+      serve({ [MOVIES]: () => (++movieCalls === 1 ? response.promise : jsonResponse('m')) });
+
+      const pending = apiFetch('/movies');
+      await vi.waitFor(() => expect(movieCalls).toBe(1));
+      otherTab.postMessage({ type: 'session-renewed' });
+      await flush();
+      response.resolve(errorResponse(401, 'INVALID_CREDENTIALS', 'x'));
+
+      await expect(pending).resolves.toBe('m');
+      expect(refreshCalls()).toHaveLength(0);
+      expect(locks.requested).toEqual([]);
+      otherTab.close();
+    });
+  });
+});
+
 describe('apiFetch: 429 y otros errores del servidor', () => {
   it('429 lee Retry-After y lo muestra en segundos', async () => {
     fetchMock.mockResolvedValue(
@@ -310,6 +843,43 @@ describe('apiFetch: 429 y otros errores del servidor', () => {
     const error = await catchError(apiFetch('/movies'));
 
     expect(error).toMatchObject({ status: 502, code: 'HTTP_502' });
+  });
+
+  it.each([502, 503, 504])(
+    'un %i del proxy (sin JSON con code) dice que no se llegó al servidor, no que este fallara',
+    async (status) => {
+      fetchMock.mockResolvedValue(new Response('<html>Bad gateway</html>', { status }));
+
+      const error = (await catchError(apiFetch('/movies'))) as ApiError;
+
+      expect(error).toMatchObject({ status, code: `HTTP_${status}` });
+      expect(error.message).toBe('No se pudo conectar con el servidor. Inténtalo de nuevo en unos instantes.');
+    },
+  );
+
+  it('un 502 con cuerpo JSON pero sin code (p. ej. otro proxy) también es «no se pudo conectar»', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ message: 'upstream error' }, 502));
+
+    const error = (await catchError(apiFetch('/movies'))) as ApiError;
+
+    expect(error.message).toBe('No se pudo conectar con el servidor. Inténtalo de nuevo en unos instantes.');
+  });
+
+  it.each([502, 503, 504])('un %i CON code lo envió la API: mensaje de fallo del servidor (sin filtrar su texto)', async (status) => {
+    fetchMock.mockResolvedValue(errorResponse(status, 'SERVICE_UNAVAILABLE', 'detalle interno'));
+
+    const error = (await catchError(apiFetch('/movies'))) as ApiError;
+
+    expect(error).toMatchObject({ status, code: 'SERVICE_UNAVAILABLE' });
+    expect(error.message).toBe('El servidor ha tenido un problema. Inténtalo de nuevo en unos minutos.');
+  });
+
+  it('un 500 sin cuerpo sigue siendo un fallo del servidor (solo 502/503/504 son del proxy)', async () => {
+    fetchMock.mockResolvedValue(new Response('', { status: 500 }));
+
+    const error = (await catchError(apiFetch('/movies'))) as ApiError;
+
+    expect(error.message).toBe('El servidor ha tenido un problema. Inténtalo de nuevo en unos minutos.');
   });
 
   it('un 4xx sin mensaje usa un texto genérico con el estado', async () => {

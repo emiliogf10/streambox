@@ -1,6 +1,7 @@
 package com.emilio.streambox.security.ratelimit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,6 +19,8 @@ import org.springframework.security.web.servlet.util.matcher.PathPatternRequestM
 
 import com.emilio.streambox.security.SecurityErrorResponseWriter;
 import com.emilio.streambox.security.ratelimit.SlidingWindowCounterTest.MutableClock;
+
+import jakarta.servlet.http.Cookie;
 
 /**
  * Tests unitarios de {@link RateLimitingFilter}: qué peticiones cuentan como
@@ -40,6 +43,7 @@ class RateLimitingFilterTest {
             new RateLimitProperties(
                     new RateLimitProperties.Rule(1, Duration.ofMinutes(1)),
                     new RateLimitProperties.Rule(1, Duration.ofHours(1)),
+                    new RateLimitProperties.Rule(1, Duration.ofMinutes(1)),
                     new RateLimitProperties.Lockout(5, Duration.ofMinutes(15), 5, Duration.ofDays(30)),
                     100_000),
             new MutableClock(),
@@ -215,8 +219,172 @@ class RateLimitingFilterTest {
     }
 
     // ------------------------------------------------------------------
+    // Refresh (tarea 29): cuenta por la cabecera CSRF, no por Content-Type
+    // ------------------------------------------------------------------
+
+    /**
+     * El refresh no tiene cuerpo: una petición sin {@code Content-Type} pero
+     * con la cabecera CSRF llega al servicio y tiene que contar. Con la regla
+     * del login («sin Content-Type no cuenta») quedaría sin límite.
+     */
+    @Test
+    void unRefreshSinContentTypeConLaCabeceraCsrfGastaElHueco() throws Exception {
+        assertPassed(refresh("/api/auth/refresh", true));
+
+        assertRejected(refresh("/api/auth/refresh", true));
+    }
+
+    /**
+     * Sin la cabecera CSRF no cuenta (el siguiente filtro responde 403 sin
+     * tocar la base de datos): una web ajena, que no puede añadir esa cabecera
+     * sin preflight, no puede agotar el límite de la víctima.
+     */
+    @Test
+    void unRefreshSinLaCabeceraCsrfNoGastaElHueco() throws Exception {
+        assertPassed(refresh("/api/auth/refresh", false));
+        assertPassed(refresh("/api/auth/refresh", false));
+        MockHttpServletRequest wrongValue = refresh("/api/auth/refresh", false);
+        wrongValue.addHeader("X-Requested-With", "XMLHttpRequest");
+        assertPassed(wrongValue);
+
+        assertPassed(refresh("/api/auth/refresh", true));
+        assertRejected(refresh("/api/auth/refresh", true));
+    }
+
+    /** Con la cabecera cuenta también con un tipo CORS-safelisted: el criterio es la cabecera. */
+    @Test
+    void unRefreshConLaCabeceraCuentaAunqueSuContentTypeSeaSafelisted() throws Exception {
+        MockHttpServletRequest first = refresh("/api/auth/refresh", true);
+        first.setContentType("text/plain");
+        assertPassed(first);
+
+        assertRejected(refresh("/api/auth/refresh", true));
+    }
+
+    /** Las variantes codificadas de la ruta comparten el contador, como en el login. */
+    @Test
+    void lasVariantesDeLaRutaDelRefreshCompartenElLimite() throws Exception {
+        assertPassed(refresh("/api/auth/%72efresh", true));
+
+        assertRejected(refresh("/api/auth/refresh;x=1", true));
+    }
+
+    /** El refresh tiene su propio contador: no gasta el del login ni al revés. */
+    @Test
+    void refreshYLoginNoCompartenContador() throws Exception {
+        assertPassed(refresh("/api/auth/refresh", true));
+
+        assertPassed(post("/api/auth/login"));
+        assertRejected(refresh("/api/auth/refresh", true));
+    }
+
+    /**
+     * Regresión: cada visita sin sesión hace un refresh sin cookie al
+     * arrancar (el frontend no puede saber si la cookie HttpOnly existe). Si
+     * contaran, unas pocas visitas desde la misma IP (un NAT) dejarían el
+     * refresh en 429 para todos. Sin cookie no cuenta: el controlador lo
+     * rechaza sin llamar al servicio.
+     */
+    @Test
+    void unRefreshSinCookieNoGastaElHueco() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            assertPassed(refreshWithCookie(null));
+        }
+
+        assertPassed(refresh("/api/auth/refresh", true));
+        assertRejected(refresh("/api/auth/refresh", true));
+    }
+
+    /** Una cookie presente pero vacía o en blanco se trata como si no viniera. */
+    @ParameterizedTest
+    @ValueSource(strings = { "", " ", "   " })
+    void unRefreshConLaCookieVaciaNoGastaElHueco(String value) throws Exception {
+        assertPassed(refreshWithCookie(value));
+        assertPassed(refreshWithCookie(value));
+
+        assertPassed(refresh("/api/auth/refresh", true));
+        assertRejected(refresh("/api/auth/refresh", true));
+    }
+
+    /**
+     * Decisión: un valor mal formado <b>sí</b> cuenta (el navegador nunca lo
+     * envía, así que solo lo manda un cliente que no es la aplicación, y no
+     * debe salirle gratis), aunque el controlador lo rechace sin base de datos.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = { "basura", "%%%", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" })
+    void unRefreshConUnValorMalFormadoGastaElHueco(String value) throws Exception {
+        assertPassed(refreshWithCookie(value));
+
+        assertRejected(refreshWithCookie(value));
+    }
+
+    /**
+     * La cookie sola no basta: sin la cabecera CSRF tampoco cuenta (se quedará
+     * en el 403 del filtro JWT), aunque traiga un valor de buen formato.
+     */
+    @Test
+    void conCookiePeroSinCabeceraCsrfNoGastaElHueco() throws Exception {
+        MockHttpServletRequest withoutHeader = refresh("/api/auth/refresh", false);
+        assertTrue(RateLimitingFilter.hasRefreshCookie(withoutHeader));
+        assertPassed(withoutHeader);
+        assertPassed(refresh("/api/auth/refresh", false));
+
+        assertPassed(refresh("/api/auth/refresh", true));
+        assertRejected(refresh("/api/auth/refresh", true));
+    }
+
+    /**
+     * Con varias cookies del mismo nombre se mira la primera, igual que
+     * {@code @CookieValue}: si la primera está vacía no cuenta (el controlador
+     * también la ve vacía y responde 401 sin servicio).
+     */
+    @Test
+    void conVariasCookiesSeMiraLaPrimeraComoElControlador() {
+        MockHttpServletRequest request = refreshWithCookie("");
+        request.setCookies(new Cookie(REFRESH_COOKIE, ""), new Cookie(REFRESH_COOKIE, WELL_FORMED_TOKEN));
+
+        assertFalse(RateLimitingFilter.hasRefreshCookie(request));
+    }
+
+    // ------------------------------------------------------------------
     // Utilidades
     // ------------------------------------------------------------------
+
+    /** Nombre de la cookie del refresh token. */
+    private static final String REFRESH_COOKIE = "streambox_refresh";
+
+    /** Valor con la forma de un refresh token (43 caracteres Base64URL), aunque no exista. */
+    private static final String WELL_FORMED_TOKEN = "A".repeat(43);
+
+    /**
+     * Refresh como el del frontend con sesión: sin cuerpo ni Content-Type, con
+     * la cookie del refresh y con o sin la cabecera CSRF.
+     */
+    private static MockHttpServletRequest refresh(String rawPath, boolean csrfHeader) {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", rawPath);
+        request.setRemoteAddr(IP);
+        request.setCookies(new Cookie(REFRESH_COOKIE, WELL_FORMED_TOKEN));
+        if (csrfHeader) {
+            request.addHeader("X-Requested-With", "StreamBox");
+        }
+        return request;
+    }
+
+    /**
+     * Refresh con la cabecera CSRF y la cookie indicada.
+     *
+     * @param value valor de la cookie; {@code null} = sin cookie
+     */
+    private static MockHttpServletRequest refreshWithCookie(String value) {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/refresh");
+        request.setRemoteAddr(IP);
+        request.addHeader("X-Requested-With", "StreamBox");
+        if (value != null) {
+            request.setCookies(new Cookie(REFRESH_COOKIE, value));
+        }
+        return request;
+    }
 
     private static MockHttpServletRequest postFrom(String remoteAddr, String rawPath) {
         MockHttpServletRequest request = request("POST", rawPath);

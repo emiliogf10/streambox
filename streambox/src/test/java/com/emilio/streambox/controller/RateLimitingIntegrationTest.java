@@ -1,6 +1,9 @@
 package com.emilio.streambox.controller;
 
+import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -23,6 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +36,8 @@ import com.emilio.streambox.entity.User;
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.JwtService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import jakarta.servlet.http.Cookie;
 
 /**
  * Tests de los límites contra fuerza bruta: límite por IP en login y registro
@@ -50,6 +56,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @TestPropertySource(properties = {
         "streambox.security.rate-limit.login.max-requests=3",
         "streambox.security.rate-limit.register.max-requests=2",
+        "streambox.security.rate-limit.refresh.max-requests=2",
         "streambox.security.rate-limit.lockout.max-failures=3"
 })
 class RateLimitingIntegrationTest {
@@ -335,7 +342,152 @@ class RateLimitingIntegrationTest {
         assertFalse(userRepository.existsByEmail("contoken3@test.com"));
     }
 
+    // --- Límite por IP en refresh (tarea 29) ---
+
+    /**
+     * El refresh tiene su propio límite (aquí 2): el tercero desde la misma IP
+     * da 429 aunque no traiga cuerpo ni {@code Content-Type} (con la regla del
+     * login, sin {@code Content-Type} no contaría y quedaría sin límite). Con
+     * otra IP sigue funcionando.
+     */
+    @Test
+    void superarElLimiteDeRefreshPorIpRetorna429ConRetryAfter() throws Exception {
+        String ip = "10.20.0.1";
+        refresh(ip, true).andExpect(status().isUnauthorized());
+        refresh(ip, true).andExpect(status().isUnauthorized());
+
+        refresh(ip, true)
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
+        refresh("10.20.0.2", true).andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * Las peticiones sin la cabecera CSRF (lo único que puede mandar otra web)
+     * reciben 403 y no gastan el límite: no sirven para dejar a la víctima sin
+     * poder renovar su sesión.
+     */
+    @Test
+    void losRefreshSinCabeceraCsrfNoGastanElLimite() throws Exception {
+        String ip = "10.20.0.3";
+        for (int i = 0; i < 5; i++) {
+            refresh(ip, false)
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("CSRF_REJECTED"));
+        }
+
+        refresh(ip, true).andExpect(status().isUnauthorized());
+        refresh(ip, true).andExpect(status().isUnauthorized());
+        refresh(ip, true).andExpect(status().isTooManyRequests());
+    }
+
+    /** El límite del refresh no gasta el del login (cada uno tiene su contador). */
+    @Test
+    void elLimiteDeRefreshYElDeLoginSonIndependientes() throws Exception {
+        createUser("user-refresh");
+        String ip = "10.20.0.4";
+        refresh(ip, true);
+        refresh(ip, true);
+        refresh(ip, true).andExpect(status().isTooManyRequests());
+
+        login("user-refresh@test.com", "correct-password", ip).andExpect(status().isNoContent());
+    }
+
+    /**
+     * Regresión: cada visita sin sesión hace un refresh sin cookie al arrancar
+     * (el frontend no sabe si la cookie HttpOnly existe). Contaban en el
+     * límite, así que unas pocas visitas desde la misma IP (una oficina tras
+     * un NAT) dejaban el refresh en 429 para todos, también para quien sí
+     * tenía sesión. Ahora responden siempre el 401 {@code SESSION_EXPIRED}
+     * (borrando las cookies, como cualquier otro fallo) sin gastar nada; los
+     * refresh con cookie siguen limitados (aquí 2).
+     */
+    @Test
+    void losRefreshSinCookieNoGastanElLimiteYLosConCookieSiguenLimitados() throws Exception {
+        createUser("user-refresh-anon");
+        String ip = "10.20.0.5";
+        for (int i = 0; i < 5; i++) {
+            refreshWithCookie(ip, null)
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"))
+                    .andExpect(header().stringValues("Set-Cookie", hasItems(
+                            startsWith("streambox_token=;"), startsWith("streambox_refresh=;"))));
+        }
+        refreshWithCookie(ip, "").andExpect(status().isUnauthorized());
+
+        MvcResult login = login("user-refresh-anon@test.com", "correct-password", ip)
+                .andExpect(status().isNoContent())
+                .andReturn();
+        String r1 = refreshCookieOf(login);
+
+        MvcResult first = refreshWithCookie(ip, r1).andExpect(status().isNoContent()).andReturn();
+        MvcResult second = refreshWithCookie(ip, refreshCookieOf(first))
+                .andExpect(status().isNoContent())
+                .andReturn();
+        refreshWithCookie(ip, refreshCookieOf(second))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("RATE_LIMIT_EXCEEDED"));
+    }
+
+    /**
+     * Decisión: un valor que no puede ser un token propio <b>sí</b> cuenta,
+     * aunque se rechace sin base de datos. El navegador solo guarda cookies de
+     * buen formato, así que contarlo no perjudica a ningún usuario legítimo.
+     */
+    @Test
+    void losRefreshConUnValorMalFormadoSiGastanElLimite() throws Exception {
+        String ip = "10.20.0.6";
+        refreshWithCookie(ip, "basura").andExpect(status().isUnauthorized());
+        refreshWithCookie(ip, "basura").andExpect(status().isUnauthorized());
+
+        refreshWithCookie(ip, "basura").andExpect(status().isTooManyRequests());
+    }
+
     // --- Utilidades ---
+
+    /**
+     * Valor con la forma de un refresh token (43 caracteres Base64URL) que no
+     * existe: llega al servicio, consulta la base de datos y da 401.
+     */
+    private static final String UNKNOWN_REFRESH_TOKEN = "A".repeat(43);
+
+    /**
+     * Refresh como el de un navegador con una cookie de refresh (aquí, de
+     * buen formato pero desconocida: da 401 si no pasa del límite), con o sin
+     * la cabecera CSRF.
+     */
+    private ResultActions refresh(String ip, boolean csrfHeader) throws Exception {
+        var request = post("/api/auth/refresh")
+                .with(ip(ip))
+                .cookie(new Cookie("streambox_refresh", UNKNOWN_REFRESH_TOKEN));
+        if (csrfHeader) {
+            request.header("X-Requested-With", "StreamBox");
+        }
+        return mockMvc.perform(request);
+    }
+
+    /**
+     * Refresh con la cabecera CSRF y la cookie indicada.
+     *
+     * @param value valor de la cookie {@code streambox_refresh}; {@code null} = sin cookie
+     */
+    private ResultActions refreshWithCookie(String ip, String value) throws Exception {
+        var request = post("/api/auth/refresh")
+                .with(ip(ip))
+                .header("X-Requested-With", "StreamBox");
+        if (value != null) {
+            request.cookie(new Cookie("streambox_refresh", value));
+        }
+        return mockMvc.perform(request);
+    }
+
+    /** Valor de la cookie {@code streambox_refresh} que fija la respuesta. */
+    private static String refreshCookieOf(MvcResult result) {
+        Cookie cookie = result.getResponse().getCookie("streambox_refresh");
+        assertNotNull(cookie, "La respuesta debía fijar la cookie del refresh");
+        return cookie.getValue();
+    }
 
     /** Secuencia para las IPs de los tests de variantes (10.11.x.y, sin uso en otros tests). */
     private static final AtomicInteger VARIANT_SEQUENCE = new AtomicInteger();

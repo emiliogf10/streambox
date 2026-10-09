@@ -27,12 +27,18 @@ class CookieSecureFlagDisabledIntegrationTest {
     @Autowired private MockMvc mockMvc;
 
     @Test
-    void laCookieDeLogoutRespetaSecureDesactivado() throws Exception {
-        String setCookie = mockMvc.perform(post("/api/auth/logout"))
+    void lasCookiesDeLogoutRespetanSecureDesactivado() throws Exception {
+        // Con la cabecera CSRF que exige el logout (sin ella, 403 sin Set-Cookie).
+        java.util.List<String> setCookies = mockMvc.perform(post("/api/auth/logout")
+                        .header("X-Requested-With", "StreamBox"))
                 .andExpect(status().isNoContent())
-                .andReturn().getResponse().getHeader(HttpHeaders.SET_COOKIE);
+                .andReturn().getResponse().getHeaders(HttpHeaders.SET_COOKIE);
 
-        assertFalse(setCookie.contains("Secure"), setCookie);
-        assertTrue(setCookie.contains("HttpOnly") && setCookie.contains("SameSite=Strict"), setCookie);
+        // Las dos: streambox_token y streambox_refresh.
+        org.junit.jupiter.api.Assertions.assertEquals(2, setCookies.size(), setCookies.toString());
+        for (String setCookie : setCookies) {
+            assertFalse(setCookie.contains("Secure"), setCookie);
+            assertTrue(setCookie.contains("HttpOnly") && setCookie.contains("SameSite=Strict"), setCookie);
+        }
     }
 }

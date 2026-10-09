@@ -55,6 +55,8 @@ interface ProfileHeaderProps {
   user: User;
   isAdmin: boolean;
   onLogout: () => void;
+  /** `true` mientras el servidor confirma el cierre de sesión (ver `logout` en `AuthContext`). */
+  isLoggingOut: boolean;
 }
 
 /**
@@ -70,8 +72,11 @@ interface ProfileHeaderProps {
  *   servidor). Es interfaz, no seguridad: el backend responde 403 a un `USER`.
  * - No hay «Editar perfil»: cambiar nombre, correo o contraseña exige endpoints
  *   que no existen, y un botón que no hace nada sería peor que no tenerlo.
+ * - «Cerrar sesión» espera la confirmación del servidor: mientras tanto dice
+ *   «Cerrando sesión...» con `aria-disabled` (no `disabled`, que sacaría el foco
+ *   del botón y obligaría a buscarlo de nuevo si falla y hay que reintentar).
  */
-function ProfileHeader({ user, isAdmin, onLogout }: ProfileHeaderProps) {
+function ProfileHeader({ user, isAdmin, onLogout, isLoggingOut }: ProfileHeaderProps) {
   const memberSince = formatMemberSince(user.createdAt);
   return (
     <div className="mb-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-5">
@@ -103,9 +108,9 @@ function ProfileHeader({ user, isAdmin, onLogout }: ProfileHeaderProps) {
             Panel de administración
           </Link>
         )}
-        <Button variant="outline" onClick={onLogout}>
+        <Button variant="outline" onClick={onLogout} aria-disabled={isLoggingOut || undefined}>
           <LogOut aria-hidden="true" className="size-4" />
-          Cerrar sesión
+          {isLoggingOut ? 'Cerrando sesión...' : 'Cerrar sesión'}
         </Button>
       </div>
     </div>
@@ -308,7 +313,7 @@ function ListPreview({ movies, series, onOpenMovie }: ListPreviewProps) {
  */
 export function ProfilePage() {
   useDocumentTitle('Mi perfil');
-  const { user, userStatus, isAdmin, refreshUser, logout } = useAuth();
+  const { user, userStatus, isAdmin, refreshUser, logout, isLoggingOut } = useAuth();
   const { movies, series, status, errorMessage, reload } = useFavorites();
   const summaryId = useId();
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
@@ -337,7 +342,7 @@ export function ProfilePage() {
   } else {
     content = (
       <>
-        <ProfileHeader user={user} isAdmin={isAdmin} onLogout={logout} />
+        <ProfileHeader user={user} isAdmin={isAdmin} onLogout={() => void logout()} isLoggingOut={isLoggingOut} />
 
         {status === 'ready' && (
           <section aria-labelledby={summaryId} className="mb-4">

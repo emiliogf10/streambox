@@ -12,7 +12,7 @@
  * pendiente las rutas esperan: redirigir ya echaría al login a quien recarga con
  * la sesión abierta.
  */
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, Route, Routes } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -28,6 +28,7 @@ import {
 } from '../test/helpers';
 import { apiFetch } from '../lib/api';
 import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './RouteGuards';
+import { MAIN_CONTENT_ID, SkipLink } from './SkipLink';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -123,12 +124,51 @@ describe('RequireAuth', () => {
 
     const title = await screen.findByRole('heading', { name: 'No se pudo comprobar tu sesión' });
     expect(title.closest('[role="alert"]')).not.toBeNull();
+    // No culpa a la conexión: con un 500 (o un 429 del refresh) el servidor sí respondió.
+    expect(
+      screen.getByText('No hemos podido confirmar si tu sesión sigue abierta. Inténtalo de nuevo en unos instantes.'),
+    ).toBeInTheDocument();
     expect(screen.getByText('ruta:/')).toBeInTheDocument();
 
     routeFetch(fetchMock, { [CURRENT_USER]: () => jsonResponse(makeUser()) });
     await user.click(screen.getByRole('button', { name: 'Reintentar' }));
 
     expect(await screen.findByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
+  });
+
+  it('la pantalla «No se pudo comprobar tu sesión» es una página completa: <main> destino del salto y un <h1> dentro de la alerta', async () => {
+    routeFetch(fetchMock, { [CURRENT_USER]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom') });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <SkipLink />
+        <Routing />
+      </>,
+      { route: '/', session: true },
+    );
+
+    const title = await screen.findByRole('heading', { level: 1, name: 'No se pudo comprobar tu sesión' });
+    const main = screen.getByRole('main');
+    expect(main).toHaveAttribute('id', MAIN_CONTENT_ID);
+    expect(main).toContainElement(title);
+    // Un solo encabezado y una sola región que se anuncia: el título va DENTRO de la alerta, no repetido fuera.
+    // (Fuera del <main> solo queda la zona de avisos, que está vacía.)
+    expect(screen.getAllByRole('heading')).toHaveLength(1);
+    expect(within(main).getAllByRole('alert')).toHaveLength(1);
+    expect(within(main).getByRole('alert')).toContainElement(title);
+
+    // «Saltar al contenido» tiene destino: lleva el foco al <main>.
+    await user.click(screen.getByRole('link', { name: 'Saltar al contenido' }));
+    expect(main).toHaveFocus();
+  });
+
+  it('mientras se comprueba la sesión también hay un <main> al que saltar', () => {
+    routeFetch(fetchMock, { [CURRENT_USER]: () => new Promise<Response>(() => {}) });
+
+    renderWithProviders(<Routing />, { route: '/', session: true });
+
+    expect(screen.getByRole('main')).toHaveAttribute('id', MAIN_CONTENT_ID);
+    expect(within(screen.getByRole('main')).getByRole('status')).toHaveTextContent('Comprobando tu sesión...');
   });
 
   it('si la sesión caduca mientras se está dentro (401 en una petición), expulsa al login', async () => {
@@ -157,9 +197,9 @@ describe('RequireAdmin', () => {
     renderWithProviders(<Routing />, { route: '/admin' });
 
     expect(await screen.findByText('ruta:/login')).toBeInTheDocument();
-    // Solo se hizo el chequeo inicial de la sesión: nada del panel.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/users/me');
+    // Solo se hizo el chequeo inicial de la sesión (y, tras su 401, el intento de
+    // renovarla con el refresh token): nada del panel.
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/users/me', '/api/auth/refresh']);
   });
 
   it('a un administrador le muestra el contenido cuando el servidor lo confirma', async () => {

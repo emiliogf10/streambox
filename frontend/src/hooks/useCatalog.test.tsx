@@ -12,7 +12,9 @@
 import { act, renderHook, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../context/ToastContext';
+import { createTestQueryClient } from '../test/queryClient';
 import * as api from '../lib/api';
 import { makeMovie, makePage } from '../test/helpers';
 import { NO_MOVIE_FILTERS } from '../lib/movieFilters';
@@ -27,9 +29,16 @@ vi.mock('../lib/api', async (importOriginal) => ({
 
 const apiFetch = vi.mocked(api.apiFetch);
 
-/** `useCatalog` necesita `ToastProvider` (avisa de los fallos de "cargar más"). */
+/** Caché nueva en cada test (ver `beforeEach`): ninguno ve lo que cargó otro. */
+let queryClient = createTestQueryClient();
+
+/** `useCatalog` necesita la caché de TanStack Query y `ToastProvider` (avisa de los fallos de "cargar más"). */
 function wrapper({ children }: { children: ReactNode }) {
-  return <ToastProvider>{children}</ToastProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>{children}</ToastProvider>
+    </QueryClientProvider>
+  );
 }
 
 /** Promesa que se resuelve o rechaza a mano: permite observar estados intermedios. */
@@ -57,6 +66,7 @@ function paramsOfCall(n: number) {
 
 beforeEach(() => {
   apiFetch.mockReset();
+  queryClient = createTestQueryClient();
 });
 
 describe('useCatalog: carga inicial', () => {
@@ -210,7 +220,7 @@ describe('useCatalog: reload', () => {
     const pending = deferred<unknown>();
     apiFetch.mockReturnValueOnce(pending.promise);
 
-    act(() => result.current.reload());
+    await act(async () => result.current.reload());
 
     expect(result.current.status).toBe('loading');
 
@@ -314,7 +324,7 @@ describe('useMovieResults: la página /peliculas con y sin filtros', () => {
     const more = deferred<unknown>();
     apiFetch.mockReturnValueOnce(more.promise);
     let pendingMore!: Promise<void>;
-    act(() => {
+    await act(async () => {
       pendingMore = result.current.loadMore();
     });
     const moreSignal = (apiFetch.mock.calls[1][1] as { signal: AbortSignal }).signal;

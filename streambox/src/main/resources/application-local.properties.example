@@ -36,4 +36,4 @@ spring.datasource.password=tu_contraseña_aqui
 # Opcional: Secreto JWT para desarrollo local (mínimo 32 caracteres).
 # Genera uno con: openssl rand -base64 48
 # jwt.secret=tu_clave_secreta_jwt_aqui
-# jwt.expiration-hours=24
+# jwt.access-token-ttl=15m

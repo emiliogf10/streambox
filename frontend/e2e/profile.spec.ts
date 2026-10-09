@@ -112,9 +112,9 @@ test.describe('Mi perfil', () => {
     await page.getByRole('main').getByRole('button', { name: 'Cerrar sesión' }).click();
 
     await expect(page).toHaveURL(/\/login$/);
-    // El cierre de sesión es optimista: la interfaz vuelve al login antes de que el servidor responda
-    // al POST /api/auth/logout que borra la cookie. Se espera a que desaparezca en vez de mirar una vez.
-    await expect.poll(() => sessionCookie(page)).toBeUndefined();
+    // El cierre NO es optimista: solo se llega al login tras la respuesta del servidor al
+    // POST /api/auth/logout, cuyo Set-Cookie ya ha borrado la cookie.
+    expect(await sessionCookie(page)).toBeUndefined();
   });
 
   test('sin sesión, /perfil lleva al login', async ({ page }) => {

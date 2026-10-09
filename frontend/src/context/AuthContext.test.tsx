@@ -5,9 +5,13 @@
  * - No hay token en JavaScript: nunca se escribe en `localStorage`, y el que dejaron
  *   versiones anteriores se borra al arrancar.
  * - La sesión se descubre al arrancar con `GET /api/users/me` (200 = hay sesión,
- *   401 = no hay, SIN aviso de «sesión caducada»; red/5xx = error recuperable).
- * - `login` llama a `/auth/login` y carga el usuario; `logout` limpia el estado al
- *   instante y pide borrar la cookie (best-effort).
+ *   401 = se intenta renovar con el refresh token y, si tampoco, no hay, SIN aviso
+ *   de «sesión caducada»; red/5xx = error recuperable).
+ * - Un 401 con la sesión abierta primero intenta renovarla (refresh) en silencio.
+ * - `login` llama a `/auth/login` y carga el usuario; `logout` NO es optimista: la
+ *   sesión solo se cierra en la interfaz cuando el servidor confirma (2xx o 401);
+ *   ante red/5xx reintenta una vez y, si sigue fallando, la mantiene y avisa
+ *   (la cookie HttpOnly sigue valiendo: decir «cerrada» sería mentir).
  * - Un 401 en un endpoint autenticado con la sesión abierta la cierra UNA sola vez,
  *   y solo si es de la sesión actual.
  * - `isAdmin` falla cerrado y el usuario de una sesión anterior nunca se cuela en la nueva.
@@ -15,25 +19,43 @@
  * Se usa el `apiFetch` real con `fetch` simulado para probar el puente `configureAuth`
  * de punta a punta.
  */
+import { QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, apiFetch } from '../lib/api';
+import { ApiError, SESSION_CHANNEL_NAME, apiFetch } from '../lib/api';
+import { SESSION_CLOSED_ELSEWHERE, SESSION_SWITCHED_ELSEWHERE } from '../lib/sessionMessages';
+import { LOGOUT_FAILED_NETWORK, LOGOUT_FAILED_OTHER, LOGOUT_FAILED_SERVER, LOGOUT_RETRY_DELAY_MS } from '../lib/logout';
 import type { User } from '../lib/types';
-import { errorResponse, jsonResponse, makeUser, noContentResponse } from '../test/helpers';
+import { installManualTimers } from '../test/fakeTimers';
+import { installFakeLocks } from '../test/webLocks';
+import {
+  REFRESH_SESSION,
+  errorResponse,
+  jsonResponse,
+  makeUser,
+  noContentResponse,
+  sessionExpiredResponse,
+} from '../test/helpers';
 import { AuthProvider, useAuth } from './AuthContext';
 import { ToastProvider } from './ToastContext';
+import { createTestQueryClient } from '../test/queryClient';
 
 const fetchMock = vi.fn<typeof fetch>();
 
 const SESSION_EXPIRED = 'Tu sesión ha caducado. Inicia sesión de nuevo.';
 const UNAUTHORIZED = () => errorResponse(401, 'UNAUTHORIZED', 'No autenticado.');
 
+/** Caché de datos nueva en cada test (`AuthProvider` la vacía al cambiar de sesión). */
+let queryClient = createTestQueryClient();
+
 function wrapper({ children }: { children: ReactNode }) {
   return (
-    <ToastProvider>
-      <AuthProvider>{children}</AuthProvider>
-    </ToastProvider>
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <AuthProvider>{children}</AuthProvider>
+      </ToastProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -56,11 +78,16 @@ type Handler = () => Response | Promise<Response>;
 /**
  * Servidor simulado: cada ruta `"MÉTODO /ruta"` tiene su manejador. Lo que no se
  * declara hace fallar la llamada con un mensaje claro (nada se inventa).
+ *
+ * Única ruta por defecto: `POST /api/auth/refresh` responde 401 `SESSION_EXPIRED`
+ * (no hay sesión que renovar), así un 401 simulado sigue significando «sesión
+ * caducada». Los tests de la renovación la sobrescriben.
  */
 function serve(routes: Record<string, Handler>) {
+  const withDefaults: Record<string, Handler> = { [REFRESH_SESSION]: sessionExpiredResponse, ...routes };
   fetchMock.mockImplementation(async (input, init) => {
     const key = `${init?.method ?? 'GET'} ${String(input)}`;
-    const handler = routes[key];
+    const handler = withDefaults[key];
     if (!handler) throw new Error(`Petición no prevista en el test: ${key}`);
     return handler();
   });
@@ -76,6 +103,7 @@ async function startApp() {
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
+  queryClient = createTestQueryClient();
 });
 
 afterEach(() => {
@@ -118,8 +146,70 @@ describe('AuthProvider: arranque (se descubre la sesión con GET /users/me)', ()
       userStatus: 'idle',
     });
     expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+    // Antes de rendirse intentó renovar UNA vez (el servidor dijo SESSION_EXPIRED) y no repitió /users/me.
+    expect(callsTo('/api/auth/refresh', 'POST')).toHaveLength(1);
+    expect(callsTo('/api/users/me')).toHaveLength(1);
     // Sin sesión no hay nada que cerrar: no se llama a /auth/logout.
     expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(0);
+  });
+
+  it('«vuelves al día siguiente»: /users/me da 401 pero el refresh token sigue valiendo → se renueva y se entra sin login ni aviso', async () => {
+    const me = makeUser({ role: 'ADMIN' });
+    let renewed = false;
+    serve({
+      'GET /api/users/me': () => (renewed ? jsonResponse(me) : UNAUTHORIZED()),
+      'POST /api/auth/refresh': () => {
+        renewed = true;
+        return noContentResponse();
+      },
+    });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    // Todo ocurre dentro de «Comprobando tu sesión...»: ni se manda al login ni se pinta la app.
+    expect(result.current).toMatchObject({ isCheckingSession: true, isAuthenticated: false });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    expect(result.current).toMatchObject({ user: me, isAdmin: true, userStatus: 'ready', sessionCheckFailed: false });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/users/me', '/api/auth/refresh', '/api/users/me']);
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['red caída', () => Promise.reject(new TypeError('Failed to fetch'))],
+    ['error 500', () => errorResponse(500, 'INTERNAL_ERROR', 'boom')],
+    ['429', () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x', {}, { 'Retry-After': '30' })],
+  ] as const)(
+    'si en el arranque el refresh falla (%s): no se sabe si hay sesión → error recuperable, ni login ni aviso',
+    async (_case, failure) => {
+      serve({ 'GET /api/users/me': UNAUTHORIZED, 'POST /api/auth/refresh': failure as Handler });
+
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      await waitFor(() => expect(result.current.sessionCheckFailed).toBe(true));
+      expect(result.current).toMatchObject({ isAuthenticated: false, isCheckingSession: false, userStatus: 'error' });
+      expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+    },
+  );
+
+  it('con Web Locks (navigator.locks) el arranque también renueva la sesión', async () => {
+    const locks = installFakeLocks();
+    let renewed = false;
+    serve({
+      'GET /api/users/me': () => (renewed ? jsonResponse(makeUser()) : UNAUTHORIZED()),
+      'POST /api/auth/refresh': () => {
+        renewed = true;
+        return noContentResponse();
+      },
+    });
+
+    try {
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+      expect(locks.requested).toEqual(['streambox-session']);
+    } finally {
+      locks.uninstall();
+    }
   });
 
   it.each([
@@ -331,31 +421,258 @@ describe('AuthProvider: login', () => {
   });
 });
 
-describe('AuthProvider: logout', () => {
-  it('limpia el estado AL INSTANTE y pide borrar la cookie (POST /auth/logout con cabecera anti-CSRF)', async () => {
+describe('AuthProvider: logout (lo confirma el servidor)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('NO es optimista: la sesión sigue abierta hasta que el servidor confirma (204) y entonces se cierra', async () => {
     const serverLogout = deferred<Response>();
     serve({
       'GET /api/users/me': () => jsonResponse(makeUser({ role: 'ADMIN' })),
       'POST /api/auth/logout': () => serverLogout.promise,
     });
     const { result } = await startApp();
-    expect(result.current.isAdmin).toBe(true);
+    expect(result.current).toMatchObject({ isAdmin: true, isLoggingOut: false });
 
-    let done!: Promise<void>;
+    let done!: Promise<boolean>;
     act(() => {
       done = result.current.logout();
     });
 
-    // El servidor aún no ha contestado, pero la interfaz ya no tiene sesión.
-    expect(result.current).toMatchObject({ isAuthenticated: false, user: null, isAdmin: false, userStatus: 'idle' });
+    // El servidor aún no ha contestado: la cookie sigue valiendo, así que la interfaz no dice lo contrario.
+    expect(result.current).toMatchObject({ isAuthenticated: true, isAdmin: true, isLoggingOut: true });
     const [, init] = callsTo('/api/auth/logout', 'POST')[0];
     expect(new Headers(init?.headers).get('X-Requested-With')).toBe('StreamBox');
+
+    let closed: boolean | undefined;
     await act(async () => {
       serverLogout.resolve(noContentResponse());
-      await done;
+      closed = await done;
+    });
+
+    expect(closed).toBe(true);
+    expect(result.current).toMatchObject({
+      isAuthenticated: false,
+      user: null,
+      isAdmin: false,
+      userStatus: 'idle',
+      isLoggingOut: false,
     });
     // Cerrar sesión por decisión propia no es «sesión caducada».
     expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+  });
+
+  it('un doble clic mientras el cierre está en curso NO lanza una segunda petición', async () => {
+    const serverLogout = deferred<Response>();
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'POST /api/auth/logout': () => serverLogout.promise,
+    });
+    const { result } = await startApp();
+
+    let first!: Promise<boolean>;
+    let second!: Promise<boolean>;
+    act(() => {
+      // Las dos en el mismo tic: el estado de React aún no se ha actualizado entre ellas.
+      first = result.current.logout();
+      second = result.current.logout();
+    });
+
+    await expect(second).resolves.toBe(false);
+    await act(async () => {
+      serverLogout.resolve(noContentResponse());
+      await first;
+    });
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(1);
+    expect(result.current.isAuthenticated).toBe(false);
+  });
+
+  it.each([
+    ['red caída', () => Promise.reject(new TypeError('Failed to fetch')), LOGOUT_FAILED_NETWORK],
+    ['error 500 del backend', () => errorResponse(500, 'INTERNAL_ERROR', 'x'), LOGOUT_FAILED_SERVER],
+    // Con el backend parado, el proxy (Vite o nginx) responde 502/503/504: tampoco se llegó a él.
+    ['502 del proxy', () => new Response('Bad Gateway', { status: 502 }), LOGOUT_FAILED_NETWORK],
+    ['503 del proxy', () => errorResponse(503, 'SERVICE_UNAVAILABLE', 'x'), LOGOUT_FAILED_NETWORK],
+    ['504 del proxy', () => new Response('', { status: 504 }), LOGOUT_FAILED_NETWORK],
+  ] as const)(
+    'si falla (%s): reintenta UNA vez tras la espera y, si vuelve a fallar, mantiene la sesión y avisa',
+    async (_case, failure, message) => {
+      serve({
+        'GET /api/users/me': () => jsonResponse(makeUser({ role: 'ADMIN' })),
+        'POST /api/auth/logout': failure as Handler,
+      });
+      const { result } = await startApp();
+      installManualTimers();
+
+      let done!: Promise<boolean>;
+      act(() => {
+        done = result.current.logout();
+      });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(1);
+      // Esperando el reintento: sigue «cerrando», con la sesión abierta.
+      expect(result.current).toMatchObject({ isAuthenticated: true, isLoggingOut: true });
+
+      await act(() => vi.advanceTimersByTimeAsync(LOGOUT_RETRY_DELAY_MS - 1));
+      expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(1);
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(2);
+
+      let closed: boolean | undefined;
+      await act(async () => {
+        closed = await done;
+      });
+      expect(closed).toBe(false);
+      // No se miente: la cookie sigue valiendo, así que la sesión (y el rol) siguen en pantalla.
+      expect(result.current).toMatchObject({ isAuthenticated: true, isAdmin: true, userStatus: 'ready', isLoggingOut: false });
+      expect(screen.getByText(message)).toBeInTheDocument();
+      expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+      // Y no hay más reintentos automáticos.
+      await act(() => vi.advanceTimersByTimeAsync(LOGOUT_RETRY_DELAY_MS * 5));
+      expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(2);
+    },
+  );
+
+  it('si el reintento sale bien, la sesión se cierra sin ningún aviso de error', async () => {
+    let calls = 0;
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'POST /api/auth/logout': () =>
+        ++calls === 1 ? Promise.reject(new TypeError('Failed to fetch')) : noContentResponse(),
+    });
+    const { result } = await startApp();
+    installManualTimers();
+
+    let done!: Promise<boolean>;
+    act(() => {
+      done = result.current.logout();
+    });
+    await act(() => vi.advanceTimersByTimeAsync(LOGOUT_RETRY_DELAY_MS));
+    let closed: boolean | undefined;
+    await act(async () => {
+      closed = await done;
+    });
+
+    expect(closed).toBe(true);
+    expect(calls).toBe(2);
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(screen.queryByText(LOGOUT_FAILED_NETWORK)).not.toBeInTheDocument();
+  });
+
+  it('tras un fallo, el usuario puede volver a intentarlo y entonces se cierra', async () => {
+    let serverUp = false;
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'POST /api/auth/logout': () => (serverUp ? noContentResponse() : errorResponse(502, 'HTTP_502', 'x')),
+    });
+    const { result } = await startApp();
+    installManualTimers();
+
+    let first!: Promise<boolean>;
+    act(() => {
+      first = result.current.logout();
+    });
+    await act(() => vi.advanceTimersByTimeAsync(LOGOUT_RETRY_DELAY_MS));
+    await act(async () => {
+      await first;
+    });
+    expect(result.current.isAuthenticated).toBe(true);
+
+    serverUp = true;
+    let closed: boolean | undefined;
+    await act(async () => {
+      closed = await result.current.logout();
+    });
+
+    expect(closed).toBe(true);
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(3);
+    expect(result.current.isAuthenticated).toBe(false);
+  });
+
+  it('un 401 al cerrar significa que la sesión ya no era válida: se trata como cerrada (sin reintento ni aviso)', async () => {
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'POST /api/auth/logout': UNAUTHORIZED,
+    });
+    const { result } = await startApp();
+
+    let closed: boolean | undefined;
+    await act(async () => {
+      closed = await result.current.logout();
+    });
+
+    expect(closed).toBe(true);
+    expect(result.current).toMatchObject({ isAuthenticated: false, userStatus: 'idle', isLoggingOut: false });
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(1);
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+  });
+
+  it('un rechazo que no es pasajero (403) no se reintenta: mantiene la sesión y avisa sin inventar el motivo', async () => {
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'POST /api/auth/logout': () => errorResponse(403, 'CSRF_REJECTED', 'x'),
+    });
+    const { result } = await startApp();
+
+    let closed: boolean | undefined;
+    await act(async () => {
+      closed = await result.current.logout();
+    });
+
+    expect(closed).toBe(false);
+    expect(result.current.isAuthenticated).toBe(true);
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(1);
+    expect(screen.getByText(LOGOUT_FAILED_OTHER)).toBeInTheDocument();
+  });
+
+  it('si otra petición recibe un 401 mientras se cierra, manda ese cierre (un solo aviso) y la respuesta del logout ya no cambia nada', async () => {
+    const serverLogout = deferred<Response>();
+    let logoutCalls = 0;
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'GET /api/movies': UNAUTHORIZED,
+      // La primera es la del usuario; la segunda, la limpieza best-effort del cierre por 401.
+      'POST /api/auth/logout': () => (++logoutCalls === 1 ? serverLogout.promise : noContentResponse()),
+    });
+    const { result } = await startApp();
+    installManualTimers();
+
+    let done!: Promise<boolean>;
+    act(() => {
+      done = result.current.logout();
+    });
+    let movies!: Promise<unknown>;
+    act(() => {
+      movies = apiFetch('/movies').catch(() => undefined);
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    // El refresh de ese 401 espera en la fila de sesión a que el logout conteste:
+    // así su respuesta nunca puede llegar DESPUÉS de la del logout y resucitar la sesión.
+    expect(callsTo('/api/auth/refresh', 'POST')).toHaveLength(0);
+    expect(result.current.isAuthenticated).toBe(true);
+
+    await act(async () => {
+      serverLogout.resolve(errorResponse(500, 'INTERNAL_ERROR', 'x'));
+      await movies;
+    });
+    // El logout falló, pero el refresh posterior confirma que no hay sesión que renovar: caducada.
+    expect(callsTo('/api/auth/refresh', 'POST')).toHaveLength(1);
+    expect(result.current.isAuthenticated).toBe(false);
+
+    let closed: boolean | undefined;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(LOGOUT_RETRY_DELAY_MS);
+      closed = await done;
+    });
+
+    // La sesión ya estaba cerrada por el 401: ni reintento, ni aviso de fallo, ni dos avisos.
+    expect(closed).toBe(true);
+    expect(result.current).toMatchObject({ isAuthenticated: false, isLoggingOut: false });
+    expect(screen.getAllByText(SESSION_EXPIRED)).toHaveLength(1);
+    expect(screen.queryByText(LOGOUT_FAILED_SERVER)).not.toBeInTheDocument();
+    // El del usuario y la limpieza del cierre por 401; ningún reintento.
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(2);
   });
 
   it('es idempotente: una segunda llamada no vuelve a pedir nada al servidor', async () => {
@@ -372,19 +689,6 @@ describe('AuthProvider: logout', () => {
     expect(result.current.isAuthenticated).toBe(false);
   });
 
-  it('es best-effort: si /auth/logout falla (red o 500), no lanza y la sesión de la interfaz sigue cerrada', async () => {
-    serve({
-      'GET /api/users/me': () => jsonResponse(makeUser()),
-      'POST /api/auth/logout': () => Promise.reject(new TypeError('Failed to fetch')),
-    });
-    const { result } = await startApp();
-
-    await act(async () => {
-      await expect(result.current.logout()).resolves.toBeUndefined();
-    });
-
-    expect(result.current.isAuthenticated).toBe(false);
-  });
 });
 
 describe('AuthProvider: 401 del servidor con la sesión abierta', () => {
@@ -400,16 +704,81 @@ describe('AuthProvider: 401 del servidor con la sesión abierta', () => {
     return startApp();
   }
 
-  it('un 401 cierra la sesión, avisa y limpia la cookie caducada', async () => {
+  it('un 401 que el refresh no arregla (SESSION_EXPIRED) cierra la sesión, avisa y limpia la cookie caducada', async () => {
     const { result } = await startSignedIn();
 
     await act(async () => {
       await apiFetch('/movies').catch(() => undefined);
     });
 
+    expect(callsTo('/api/auth/refresh', 'POST')).toHaveLength(1);
     expect(result.current).toMatchObject({ isAuthenticated: false, user: null, isAdmin: false, userStatus: 'idle' });
     expect(screen.getByText(SESSION_EXPIRED)).toBeInTheDocument();
     await waitFor(() => expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(1));
+  });
+
+  it('a los 15 minutos (401) con el refresh token válido: se renueva en silencio y la sesión sigue igual', async () => {
+    const me = makeUser({ role: 'ADMIN' });
+    let renewed = false;
+    serve({
+      'GET /api/users/me': () => jsonResponse(me),
+      'GET /api/movies': () => (renewed ? jsonResponse([]) : UNAUTHORIZED()),
+      'POST /api/auth/refresh': () => {
+        renewed = true;
+        return noContentResponse();
+      },
+    });
+    const { result } = await startApp();
+
+    let movies: unknown;
+    await act(async () => {
+      movies = await apiFetch('/movies');
+    });
+
+    expect(movies).toEqual([]);
+    expect(result.current).toMatchObject({ isAuthenticated: true, user: me, isAdmin: true, userStatus: 'ready' });
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(0);
+  });
+
+  it('si el refresh falla por el servidor (500) la sesión NO se cierra: la petición falla con un error que se puede reintentar', async () => {
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'GET /api/movies': UNAUTHORIZED,
+      'POST /api/auth/refresh': () => errorResponse(500, 'INTERNAL_ERROR', 'x'),
+    });
+    const { result } = await startApp();
+
+    let error: unknown;
+    await act(async () => {
+      error = await apiFetch('/movies').catch((e: unknown) => e);
+    });
+
+    expect(error).toMatchObject({ status: 500, sessionExpired: false });
+    expect(result.current.isAuthenticated).toBe(true);
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+  });
+
+  it('tras cerrar sesión, un 401 de una petición de la sesión cerrada no pide refresh (no la resucita)', async () => {
+    const slowMovies = deferred<Response>();
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'GET /api/movies': () => slowMovies.promise,
+      'POST /api/auth/logout': () => noContentResponse(),
+      'POST /api/auth/refresh': () => noContentResponse(),
+    });
+    const { result } = await startApp();
+
+    const slow = apiFetch('/movies').catch(() => undefined);
+    await act(async () => result.current.logout());
+    await act(async () => {
+      slowMovies.resolve(UNAUTHORIZED());
+      await slow;
+    });
+
+    expect(callsTo('/api/auth/refresh', 'POST')).toHaveLength(0);
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
   });
 
   it('varios 401 simultáneos cierran la sesión y avisan UNA sola vez', async () => {
@@ -500,5 +869,192 @@ describe('AuthProvider: usuario actual y rol', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     expect(() => renderHook(() => useAuth())).toThrow('useAuth debe usarse dentro de <AuthProvider>.');
+  });
+});
+
+describe('AuthProvider: cambios de sesión en OTRA pestaña (session-changed)', () => {
+  /** Canal de «otra pestaña»: lo que recibe y una forma de enviarle mensajes. */
+  let otherTab: BroadcastChannel;
+  let received: unknown[];
+
+  beforeEach(() => {
+    otherTab = new BroadcastChannel(SESSION_CHANNEL_NAME);
+    received = [];
+    otherTab.onmessage = (event: MessageEvent) => received.push(event.data);
+  });
+
+  afterEach(() => {
+    otherTab.close();
+  });
+
+  /** Espera a que el canal (asíncrono, como en el navegador) entregue lo pendiente. */
+  async function flushChannel() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  /** «La otra pestaña» anuncia un cambio de sesión. */
+  async function announceFromOtherTab() {
+    await act(async () => {
+      otherTab.postMessage({ type: 'session-changed' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  it('al iniciar sesión se anuncia SOLO el tipo de mensaje, sin identidad ni datos', async () => {
+    let loggedIn = false;
+    serve({
+      'GET /api/users/me': () => (loggedIn ? jsonResponse(makeUser({ username: 'carlos', id: 2 })) : UNAUTHORIZED()),
+      'POST /api/auth/login': () => {
+        loggedIn = true;
+        return noContentResponse();
+      },
+    });
+    const { result } = await startApp();
+    // El arranque sin sesión (401) no es un cambio: no se anuncia nada.
+    await flushChannel();
+    expect(received).toEqual([]);
+
+    await act(async () => result.current.login('carlos@example.com', 'secreta'));
+    await flushChannel();
+
+    expect(received).toEqual([{ type: 'session-changed' }]);
+  });
+
+  it('al cerrar sesión (confirmado) se anuncia; si el servidor no lo confirma, no', async () => {
+    let serverUp = false;
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'POST /api/auth/logout': () => (serverUp ? noContentResponse() : errorResponse(403, 'CSRF_REJECTED', 'x')),
+    });
+    const { result } = await startApp();
+
+    await act(async () => {
+      await result.current.logout();
+    });
+    await flushChannel();
+    // La sesión sigue abierta (403): no ha cambiado nada para las demás pestañas.
+    expect(received).toEqual([]);
+
+    serverUp = true;
+    await act(async () => {
+      await result.current.logout();
+    });
+    await flushChannel();
+    expect(received).toEqual([{ type: 'session-changed' }]);
+  });
+
+  it('al descubrir que la sesión caducó (401 + refresh 401) se anuncia una vez', async () => {
+    serve({
+      'GET /api/users/me': () => jsonResponse(makeUser()),
+      'POST /api/auth/logout': () => noContentResponse(),
+      'GET /api/movies': () => UNAUTHORIZED(),
+    });
+    await startApp();
+
+    await act(async () => {
+      await Promise.all([apiFetch('/movies').catch(() => undefined), apiFetch('/movies').catch(() => undefined)]);
+    });
+    await flushChannel();
+
+    expect(received).toEqual([{ type: 'session-changed' }]);
+  });
+
+  it('si en otra pestaña entra OTRA cuenta: vacía la caché, vuelve a preguntar y avisa de quién está dentro (sin «sesión caducada» ni reenviar el aviso)', async () => {
+    let me = makeUser({ id: 1, username: 'ana' });
+    serve({ 'GET /api/users/me': () => jsonResponse(me) });
+    const { result } = await startApp();
+    queryClient.setQueryData(['favorites'], { movie: [{ id: 99 }], series: [] });
+
+    me = makeUser({ id: 2, username: 'carlos', email: 'carlos@example.com' });
+    await announceFromOtherTab();
+
+    // Nada de la sesión anterior queda en la caché.
+    expect(queryClient.getQueryData(['favorites'])).toBeUndefined();
+    await waitFor(() => expect(result.current.user).toEqual(me));
+    expect(result.current.isAuthenticated).toBe(true);
+    expect(callsTo('/api/users/me')).toHaveLength(2);
+    expect(await screen.findByText(SESSION_SWITCHED_ELSEWHERE('carlos'))).toBeInTheDocument();
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+    // Quien recibe el aviso no lo reenvía: sin bucles entre pestañas.
+    await flushChannel();
+    expect(received).toEqual([]);
+  });
+
+  it('si es la MISMA cuenta (p. ej. salió y volvió a entrar allí), no avisa de nada', async () => {
+    serve({ 'GET /api/users/me': () => jsonResponse(makeUser({ id: 1 })) });
+    const { result } = await startApp();
+
+    await announceFromOtherTab();
+
+    await waitFor(() => expect(callsTo('/api/users/me')).toHaveLength(2));
+    await waitFor(() => expect(result.current.userStatus).toBe('ready'));
+    expect(result.current.isAuthenticated).toBe(true);
+    expect(screen.queryByText(/otra pestaña/)).not.toBeInTheDocument();
+  });
+
+  it('si en otra pestaña se cerró la sesión: queda sin sesión y dice que se cerró allí (no que caducó), sin pedir otro logout', async () => {
+    let loggedIn = true;
+    serve({ 'GET /api/users/me': () => (loggedIn ? jsonResponse(makeUser()) : UNAUTHORIZED()) });
+    const { result } = await startApp();
+    queryClient.setQueryData(['favorites'], { movie: [{ id: 99 }], series: [] });
+
+    loggedIn = false;
+    await announceFromOtherTab();
+
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(false));
+    expect(result.current).toMatchObject({ user: null, userStatus: 'idle', isCheckingSession: false });
+    expect(queryClient.getQueryData(['favorites'])).toBeUndefined();
+    expect(await screen.findByText(SESSION_CLOSED_ELSEWHERE)).toBeInTheDocument();
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+    // Lo cerró la otra pestaña; esta no repite el logout ni reenvía el aviso.
+    expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(0);
+    await flushChannel();
+    expect(received).toEqual([]);
+  });
+
+  it('una pestaña sin sesión (en el login) descubre la sesión iniciada en otra y avisa de quién ha entrado', async () => {
+    let loggedIn = false;
+    serve({
+      'GET /api/users/me': () => (loggedIn ? jsonResponse(makeUser({ username: 'carlos' })) : UNAUTHORIZED()),
+    });
+    const { result } = await startApp();
+    expect(result.current.isAuthenticated).toBe(false);
+
+    loggedIn = true;
+    await announceFromOtherTab();
+
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    expect(await screen.findByText(SESSION_SWITCHED_ELSEWHERE('carlos'))).toBeInTheDocument();
+  });
+
+  it('sin sesión en ninguna parte (otra pestaña sin sesión anuncia algo): no avisa de nada', async () => {
+    serve({ 'GET /api/users/me': () => UNAUTHORIZED() });
+    const { result } = await startApp();
+
+    await announceFromOtherTab();
+
+    await waitFor(() => expect(callsTo('/api/users/me')).toHaveLength(2));
+    await waitFor(() => expect(result.current.isCheckingSession).toBe(false));
+    expect(result.current.isAuthenticated).toBe(false);
+    expect(screen.queryByText(/otra pestaña/)).not.toBeInTheDocument();
+    expect(screen.queryByText(SESSION_EXPIRED)).not.toBeInTheDocument();
+  });
+
+  it('dos avisos seguidos (salir y entrar con otra cuenta allí): un solo aviso, el de la cuenta nueva', async () => {
+    let me = makeUser({ id: 1, username: 'ana' });
+    serve({ 'GET /api/users/me': () => jsonResponse(me) });
+    const { result } = await startApp();
+
+    me = makeUser({ id: 2, username: 'carlos' });
+    await act(async () => {
+      otherTab.postMessage({ type: 'session-changed' });
+      otherTab.postMessage({ type: 'session-changed' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => expect(result.current.user?.id).toBe(2));
+    expect(await screen.findAllByText(SESSION_SWITCHED_ELSEWHERE('carlos'))).toHaveLength(1);
   });
 });

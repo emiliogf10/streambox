@@ -48,7 +48,7 @@ class LoginAttemptServiceKnownIpTest {
     private LoginAttemptService service(int maxKeys, int maxKnownIps) {
         RateLimitProperties.Rule rule = new RateLimitProperties.Rule(100, Duration.ofMinutes(1));
         return new LoginAttemptService(
-                new RateLimitProperties(rule, rule,
+                new RateLimitProperties(rule, rule, rule,
                         new RateLimitProperties.Lockout(5, Duration.ofMinutes(15), maxKnownIps, Duration.ofDays(30)),
                         maxKeys),
                 clock);

@@ -71,6 +71,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final RequestMatcher loginRequest;
     private final RequestMatcher registerRequest;
     private final RequestMatcher logoutRequest;
+    private final RequestMatcher refreshRequest;
+
+    /** Mensaje del 403 {@code CSRF_REJECTED}. */
+    static final String CSRF_REJECTED_MESSAGE = "Petición rechazada: falta la cabecera de protección "
+            + CSRF_HEADER + ": " + CSRF_HEADER_VALUE;
 
     /**
      * Crea una instancia del filtro JWT.
@@ -94,6 +99,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.loginRequest = matchers.matcher(HttpMethod.POST, RateLimitingFilter.LOGIN_PATH);
         this.registerRequest = matchers.matcher(HttpMethod.POST, RateLimitingFilter.REGISTER_PATH);
         this.logoutRequest = matchers.matcher(HttpMethod.POST, LOGOUT_PATH);
+        this.refreshRequest = matchers.matcher(HttpMethod.POST, RateLimitingFilter.REFRESH_PATH);
+    }
+
+    /**
+     * Indica si la petición trae la cabecera de la defensa CSRF con su valor
+     * ({@code X-Requested-With: StreamBox}).
+     *
+     * <p>
+     * Pública y estática porque {@code RateLimitingFilter} usa el mismo
+     * criterio para decidir qué peticiones de refresh cuentan en su límite:
+     * así lo que se limita y lo que llega al servicio son siempre lo mismo.
+     * </p>
+     *
+     * @param request petición
+     * @return {@code true} si la cabecera está y vale {@value #CSRF_HEADER_VALUE}
+     */
+    public static boolean hasCsrfHeader(HttpServletRequest request) {
+        return CSRF_HEADER_VALUE.equals(request.getHeader(CSRF_HEADER));
     }
 
     /**
@@ -138,6 +161,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain)
             throws ServletException, IOException {
+
+        if (isRefreshCookieEndpoint(request)) {
+            // Refresh y logout no usan el JWT de acceso: no se mira ni la
+            // cookie streambox_token ni Authorization (ver el Javadoc de
+            // isRefreshCookieEndpoint). Solo se exige la cabecera CSRF, aquí,
+            // antes de MVC y de la base de datos, y con el mismo criterio que
+            // usa RateLimitingFilter para contar el refresh.
+            if (!hasCsrfHeader(request)) {
+                errorWriter.write(request, response, HttpStatus.FORBIDDEN, ErrorCode.CSRF_REJECTED,
+                        CSRF_REJECTED_MESSAGE);
+                return;
+            }
+            filterChain.doFilter(request, response);
+            return;
+        }
 
         String authHeader = request.getHeader("Authorization");
         boolean bearer = authHeader != null && authHeader.startsWith("Bearer ");
@@ -185,11 +223,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // Defensa CSRF: el navegador adjunta la cookie solo, así que una
             // petición no segura autenticada por cookie debe traer una cabecera
             // personalizada que un formulario de otro sitio no puede añadir.
-            if (fromCookie && !isSafeMethod(request.getMethod())
-                    && !CSRF_HEADER_VALUE.equals(request.getHeader(CSRF_HEADER))) {
+            if (fromCookie && !isSafeMethod(request.getMethod()) && !hasCsrfHeader(request)) {
                 errorWriter.write(request, response, HttpStatus.FORBIDDEN, ErrorCode.CSRF_REJECTED,
-                        "Petición rechazada: falta la cabecera de protección "
-                                + CSRF_HEADER + ": " + CSRF_HEADER_VALUE);
+                        CSRF_REJECTED_MESSAGE);
                 return;
             }
 
@@ -288,15 +324,59 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Login, registro y logout son públicos y no necesitan sesión: ignorar la
-     * cookie ahí evita que una caducada o manipulada, o la exigencia CSRF, los
-     * bloquee. Riesgo residual documentado: un login CSRF (un sitio ajeno
-     * inicia sesión del usuario con credenciales del atacante); lo mitiga
-     * SameSite=Strict.
+     * Indica si la petición es {@code POST /api/auth/refresh} o
+     * {@code POST /api/auth/logout}: las dos rutas de sesión que trabajan con
+     * la cookie {@code streambox_refresh} (la lee el controlador) y no con el
+     * JWT de acceso.
+     *
+     * <p>
+     * Para ellas el filtro no autentica (son públicas: el refresh se llama
+     * justo cuando el JWT ha caducado y el logout debe funcionar haya o no
+     * sesión) pero <b>siempre</b> exige {@code X-Requested-With: StreamBox},
+     * porque las dos tienen efecto sobre la sesión del navegador:
+     * </p>
+     * <ul>
+     * <li>El refresh rota el refresh token.</li>
+     * <li>El logout revoca la familia del refresh token y su respuesta borra
+     * las dos cookies. Sin la cabecera, un formulario {@code POST} de otra web
+     * no revoca nada (con {@code SameSite=Strict} el navegador no envía las
+     * cookies), pero la respuesta de esa navegación de primer nivel sí aplica
+     * los {@code Set-Cookie} de borrado: la víctima perdería la sesión. Con la
+     * cabecera obligatoria, la web ajena necesita una petición con preflight
+     * y, sin CORS configurado, el navegador no la envía. El 403 se da antes
+     * de llegar al controlador: ni se consulta la base de datos ni se tocan
+     * las cookies.</li>
+     * </ul>
+     *
+     * <p>
+     * <b>También con {@code Authorization: Bearer}.</b> Aunque un cliente de
+     * API sin cookies no corre riesgo de CSRF, estas rutas no usan el Bearer
+     * para nada (no autentican con él), así que no tiene sentido que su
+     * presencia cambie las reglas: una sola regla por ruta, igual en refresh y
+     * logout, es más fácil de razonar y de probar, y para un cliente de API
+     * añadir la cabecera no cuesta nada.
+     * </p>
+     *
+     * @param request petición
+     * @return {@code true} si es el refresh o el logout
+     */
+    private boolean isRefreshCookieEndpoint(HttpServletRequest request) {
+        return refreshRequest.matches(request) || logoutRequest.matches(request);
+    }
+
+    /**
+     * Login y registro son públicos y no necesitan sesión: ignorar la cookie
+     * ahí evita que una caducada o manipulada, o la exigencia CSRF, los
+     * bloquee. No exigen la cabecera porque no tienen sesión que proteger (ver
+     * {@code RateLimitingFilter}). Riesgo residual documentado: un login CSRF
+     * (un sitio ajeno inicia sesión del usuario con credenciales del
+     * atacante); lo mitiga SameSite=Strict. El refresh y el logout también
+     * ignoran la cookie de acceso, pero se tratan aparte en
+     * {@link #doFilterInternal} porque sí exigen la cabecera CSRF (ver
+     * {@link #isRefreshCookieEndpoint}).
      */
     private boolean isCookieExempt(HttpServletRequest request) {
-        return loginRequest.matches(request) || registerRequest.matches(request)
-                || logoutRequest.matches(request);
+        return loginRequest.matches(request) || registerRequest.matches(request);
     }
 
     private static boolean isSafeMethod(String method) {

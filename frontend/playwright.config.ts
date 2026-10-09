@@ -125,7 +125,7 @@ export default defineConfig({
         SPRING_DATASOURCE_USERNAME: 'sa',
         SPRING_DATASOURCE_PASSWORD: '',
         JWT_SECRET: JWT_SECRET,
-        JWT_EXPIRATION_HOURS: '1',
+        JWT_ACCESS_TOKEN_TTL: '15m',
         // El backend E2E corre en http: sin esto la cookie de sesión llevaría `Secure` y
         // el navegador no la guardaría. (`streambox.auth.cookie.secure`; en producción es `true`.)
         STREAMBOX_AUTH_COOKIE_SECURE: 'false',
@@ -134,6 +134,7 @@ export default defineConfig({
         ADMIN_PASSWORD,
         STREAMBOX_SECURITY_RATE_LIMIT_LOGIN_MAX_REQUESTS: '100000',
         STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS: '100000',
+        STREAMBOX_SECURITY_RATE_LIMIT_REFRESH_MAX_REQUESTS: '100000',
         STREAMBOX_SECURITY_RATE_LIMIT_LOCKOUT_MAX_FAILURES: String(LOCKOUT_MAX_FAILURES),
       },
     },

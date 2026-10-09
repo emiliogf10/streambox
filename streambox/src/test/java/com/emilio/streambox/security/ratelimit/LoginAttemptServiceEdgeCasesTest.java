@@ -76,7 +76,7 @@ class LoginAttemptServiceEdgeCasesTest {
     private LoginAttemptService service(int maxFailures) {
         RateLimitProperties.Rule rule = new RateLimitProperties.Rule(100, Duration.ofMinutes(1));
         return new LoginAttemptService(
-                new RateLimitProperties(rule, rule, new RateLimitProperties.Lockout(maxFailures, Duration.ofMinutes(15), 5, Duration.ofDays(30)), 100_000),
+                new RateLimitProperties(rule, rule, rule, new RateLimitProperties.Lockout(maxFailures, Duration.ofMinutes(15), 5, Duration.ofDays(30)), 100_000),
                 clock);
     }
 }

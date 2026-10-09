@@ -48,7 +48,7 @@ StreamBox es una aplicación tipo Netflix con dos programas independientes que s
 | :--- | :--- | :--- | :--- |
 | **Backend** (API REST) | Java 21, Spring Boot 4.1, Spring Security, Spring Data JPA (Hibernate), Flyway | `streambox/` | 8080 |
 | **Base de datos** | PostgreSQL (H2 en memoria en los tests) | — | 5432 |
-| **Frontend** (SPA) | React 19, TypeScript, Vite, Tailwind CSS v4, React Router | `frontend/` | 5173 |
+| **Frontend** (SPA) | React 19, TypeScript, Vite, Tailwind CSS v4, React Router, TanStack Query | `frontend/` | 5173 |
 
 ```
  Navegador ──► Vite (5173) ──/api/*──► Spring Boot (8080) ──JDBC──► PostgreSQL (5432)
@@ -97,7 +97,7 @@ Cookie: streambox_token=eyJhbGciOiJIUzI1NiJ9...
 
 (El navegador añade la cookie solo; un cliente que no sea el navegador, como Swagger o un script, puede enviar en su lugar `Authorization: Bearer <token>`.)
 
-**1. El navegador.** `useCatalog` (frontend; delega en `usePagedCatalog`) llama a `apiFetch('/movies', { params: {...} })`. `apiFetch` hace el `fetch` con `credentials: 'same-origin'`: el navegador adjunta la cookie `streambox_token` por su cuenta, y JavaScript nunca ve el token.
+**1. El navegador.** `useCatalog` (frontend; delega en `usePagedCatalog`, que usa la caché de TanStack Query, ver 19.3) llama a `apiFetch('/movies', { params: {...} })`. `apiFetch` hace el `fetch` con `credentials: 'same-origin'`: el navegador adjunta la cookie `streambox_token` por su cuenta, y JavaScript nunca ve el token.
 
 **2. Vite.** Ve que la ruta empieza por `/api` y la reenvía a `http://localhost:8080`.
 
@@ -143,7 +143,7 @@ select ... from movie_genres mg join genres g ... where mg.movie_id in (?, ?, ..
 }
 ```
 
-**13. De vuelta en el navegador**, `apiFetch` comprueba `res.ok`, interpreta el JSON y se lo da a `usePagedCatalog` (que lo usa `useCatalog`), que lo guarda en el estado de React. La portada se vuelve a pintar.
+**13. De vuelta en el navegador**, `apiFetch` comprueba `res.ok`, interpreta el JSON y se lo da a `usePagedCatalog` (que lo usa `useCatalog`), que lo guarda en la caché de TanStack Query (19.3). La portada se vuelve a pintar, y si el usuario vuelve a ella en el siguiente minuto se pinta desde la caché, sin repetir la petición.
 
 Si algo falla en cualquier punto (token caducado, parámetro inválido, error de base de datos), la petición no sigue: se corta y se devuelve un error JSON con un formato común (capítulo 16).
 
@@ -201,10 +201,10 @@ Todos en `streambox/src/main/resources/`:
 
 ```properties
 jwt.secret=${JWT_SECRET}
-jwt.expiration-hours=${JWT_EXPIRATION_HOURS:24}
+jwt.access-token-ttl=${JWT_ACCESS_TOKEN_TTL:15m}
 ```
 
-`${JWT_SECRET}` toma el valor de la variable de entorno `JWT_SECRET`. Lo que va detrás de los dos puntos es el **valor por defecto**: si `JWT_EXPIRATION_HOURS` no existe, vale 24.
+`${JWT_SECRET}` toma el valor de la variable de entorno `JWT_SECRET`. Lo que va detrás de los dos puntos es el **valor por defecto**: si `JWT_ACCESS_TOKEN_TTL` no existe, vale 15 minutos. (Hasta el 2026-10-08 era `jwt.expiration-hours`/`JWT_EXPIRATION_HOURS`, 24 h; esa variable ya **no se lee**: si la tienes en tu terminal, en un `.env` o en `application-local.properties`, bórrala.)
 
 Además, Spring Boot tiene *relaxed binding*: una variable de entorno `JWT_SECRET` también rellena la propiedad `jwt.secret` aunque no hubiera `${...}`. Las variables de entorno **tienen más prioridad** que los `.properties`. (Esto explica por qué un test que comprueba «sin secreto la app no arranca» fallaba en tu máquina: tenías `JWT_SECRET` definida. Está resuelto en `JwtPropertiesValidationTest`.)
 
@@ -214,10 +214,11 @@ En vez de leer valores sueltos con `@Value`, el proyecto agrupa la configuració
 
 | Prefijo | Clase | Qué controla |
 | :--- | :--- | :--- |
-| `jwt.*` | `security/JwtProperties` | Secreto (≥32 caracteres) y horas de validez del token |
+| `jwt.*` | `security/JwtProperties` | Secreto (≥32 caracteres) y vida del token de acceso (`access-token-ttl`, 15 min, máximo 1 h) |
+| `streambox.auth.refresh.*` | `security/refresh/RefreshTokenProperties` | Vida del *refresh token* (`ttl`, 7 días), tope de la sesión (`family-ttl`, 30 días), gracia entre pestañas (`reuse-grace`, 10 s, máximo 1 min) y limpieza periódica (`cleanup.*`: activada, cada hora, conserva 3 días los rotados) |
 | `streambox.admin.*` | `security/AdminProperties` | Email, usuario y contraseña del administrador inicial |
 | `streambox.auth.cookie.*` | `security/AuthCookieProperties` | Atributo `Secure` de la cookie de sesión `streambox_token` (por defecto `true`) |
-| `streambox.security.rate-limit.*` | `security/ratelimit/RateLimitProperties` | Límites de login, registro y bloqueo de cuentas |
+| `streambox.security.rate-limit.*` | `security/ratelimit/RateLimitProperties` | Límites de login, registro y refresh, y bloqueo de cuentas |
 
 Las duraciones se escriben como `1m`, `1h`, `15m` y Spring las convierte en `java.time.Duration` automáticamente.
 
@@ -226,7 +227,7 @@ Las duraciones se escriben como `1m`, `1h`, `15m` y Spring las convierte en `jav
 | Variable | Obligatoria | Uso |
 | :--- | :--- | :--- |
 | `JWT_SECRET` | Sí | Secreto de firma de los tokens (≥32 caracteres). Genera uno: `openssl rand -base64 48` |
-| `JWT_EXPIRATION_HOURS` | No (24) | Validez del token |
+| `JWT_ACCESS_TOKEN_TTL` | No (`15m`) | Vida del token de acceso (máximo `1h`). La sesión dura más gracias al *refresh token* (capítulo 10) |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | No | Crean el primer administrador. Al crearlo, la contraseña debe cumplir la política del registro (capítulo 10.5); si ya existe, no se valida |
 | `ADMIN_USERNAME` | No (`admin`) | Nombre del administrador |
 | `STREAMBOX_AUTH_COOKIE_SECURE` | No (`true`) | Atributo `Secure` de la cookie de sesión. Solo debe ser `false` para probar por HTTP plano (el `docker-compose.yml` lo pone a `false` por defecto); detrás de HTTPS, `true` |
@@ -250,7 +251,7 @@ Puntos que conviene entender:
 - **Pooler.** Usa la cadena *Session pooler* (puerto **5432**). El *Transaction pooler* (puerto 6543) no admite las sentencias preparadas que usa Hibernate. La conexión directa suele ser solo IPv6 y puede no funcionar en tu red.
 - **SSL.** `sslmode=require` es obligatorio: Supabase no acepta conexiones sin cifrar.
 - **Usuario.** Con el pooler es `postgres.<id-del-proyecto>`, no solo `postgres`.
-- **El esquema lo crea Flyway** al arrancar contra la base vacía (aplica `V1`, `V2` y `V3`), igual que en local.
+- **El esquema lo crea Flyway** al arrancar contra la base vacía (aplica `V1` a `V4`), igual que en local.
 - **Seguridad: la API pública de Supabase.** Supabase publica automáticamente una API REST sobre el esquema `public`, accesible con una clave pública, y da privilegios por defecto a los roles `anon` y `authenticated`. Como las tablas viven ahí, hay que cerrarla. **Desde la auditoría de octubre de 2026 lo hace la propia aplicación**, en cada arranque: un *callback* de Flyway (`db/callback/postgresql/afterMigrate__close_public_api.sql`, sección 5.4) activa RLS sin políticas en todas las tablas de `public`, retira los privilegios a `anon` y `authenticated` (también sobre secuencias y funciones) y cambia los privilegios por defecto para que lo que se cree después nazca cerrado. La aplicación no se ve afectada porque conecta con el rol `postgres`, propietario de las tablas, que se salta RLS. [`docs/supabase-seguridad.sql`](supabase-seguridad.sql) queda como **respaldo manual** (el mismo bloque, para aplicarlo sin arrancar la app). *Por qué:* antes era un paso manual que solo protegía las tablas que existían el día que se ejecutaba, y las que creaba Flyway después (las de series, por ejemplo) nacían abiertas hasta que alguien se acordaba de repetirlo. **Alcance:** el callback actúa sobre **todas** las tablas y funciones del esquema `public`, no solo las de StreamBox. Si ese mismo proyecto de Supabase aloja otra aplicación que usa la Data API con sus propias políticas RLS, se la rompería; para esa situación se quita la ubicación del callback (`spring.flyway.locations=classpath:db/migration`) y se aplica el cierre a mano solo a las tablas propias. Además, **el primer arranque contra tu Supabase aplica RLS y retira privilegios a `anon`/`authenticated`** (lo mismo que ya hiciste con el script; no toca datos). Lo que sigue sin poder hacer el código: ver cuál es el estado real de tu proyecto Supabase. Lo más robusto es **desactivar la Data API del proyecto** (StreamBox accede por conexión directa), y mirar el log de arranque: un `WARNING` de este callback significa que algo sigue abierto.
 - **Mover los datos** de una base a otra: ver `docs/PLAN_DE_ACCION.md` (migración a Supabase). Los `id` se conservan, y por eso hay que comprobar que las secuencias de identidad quedan por encima del mayor `id` (si no, el siguiente `INSERT` chocaría con una fila existente).
 
@@ -293,7 +294,7 @@ Es la única puerta de entrada.
 - **`X-Forwarded-For` se fija con la IP real** (`$remote_addr`). El backend, en el perfil `prod` con `forward-headers-strategy=native`, limita los logins por esa IP. Si se usara `$proxy_add_x_forwarded_for`, un atacante podría inventarse una IP en cada petición. Se comprobó:
   - directo al backend, con una IP falsa distinta en cada petición, 13 de 13 intentos se saltan el límite;
   - a través de nginx, el 10.º intento ya da 429.
-- **Caché:** `index.html` con `no-cache`; `/assets/` (nombres con hash) un año e `immutable`; `/covers/` un día. Un recurso que no existe da 404, no `index.html`.
+- **Caché:** `index.html` (y con él todas las rutas de la SPA) con `no-store`: el navegador no guarda copia del documento, así que tras cerrar sesión el botón Atrás no puede enseñar desde la caché una pantalla ya cargada con datos de la cuenta, y tras un despliegue nadie se queda con la versión vieja. `/assets/` (nombres con hash) un año e `immutable`; `/covers/` un día. Va en un `map` a nivel de `server` y no en un `add_header` del `location`, que anularía las cabeceras de seguridad (comprobado con `curl -I`: `/`, `/series/7` e `/index.html` llevan `no-store` y todas las cabeceras de seguridad). Un recurso que no existe da 404, no `index.html`.
 - **No se publica:** `/actuator` no es accesible desde fuera, y las rutas con `;` dan 400. El `;` es un truco clásico para saltarse reglas de seguridad por ruta en Java.
 - **Cabeceras de seguridad**, en todas las respuestas (`always`), declaradas una sola vez en el `server`. Si un `location` tuviera su propio `add_header`, dejaría de heredarlas.
   - Una **CSP** estricta: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`. Es la segunda línea de defensa contra XSS: aunque se colara HTML, el navegador no ejecutaría scripts en línea, y `connect-src 'self'` impide que un script colado envíe datos a otro servidor. (El token ya no es accesible para JavaScript: va en una cookie HttpOnly.)
@@ -368,6 +369,12 @@ En las tablas de unión, la **clave primaria es la pareja** `(movie_id, genre_id
 
 Las **series** (migración `V3`) tienen tablas propias con la misma estructura: `series`, `series_genres`, `episodes` y `user_favorite_series`. Se explican en el capítulo 15 bis.
 
+La tabla **`refresh_tokens`** (migración `V4`) guarda las sesiones renovables (capítulo 10): una fila por *refresh token*, con su usuario (`ON DELETE CASCADE`: borrar un usuario revoca sus sesiones), el **SHA-256** del token (`token_hash`, `UNIQUE`; nunca el token en claro: un `CHECK` exige 64 caracteres hexadecimales en minúsculas, así que guardar el token por error falla en vez de pasar en silencio), la familia de rotación (`family_id`, `UUID`), sus caducidades (`expires_at` y el tope de la familia `family_expires_at`) y, al rotar, `revoked_at` y `replaced_by_id` (el sucesor, `ON DELETE SET NULL`). Decisiones:
+
+- `created_at` **no** usa `@CreationTimestamp`: lo pone el servicio con el mismo `Clock` que `expires_at`, porque un `CHECK` compara las dos columnas y mezclar el reloj del sistema con el fijo de los tests lo haría fallar.
+- `RefreshTokenRepository.findByTokenHashForUpdate` usa **bloqueo pesimista** (`FOR NO KEY UPDATE` en PostgreSQL): dos refresh simultáneos del mismo token (dos pestañas) se ponen en fila y solo uno rota. Exige estar dentro de una transacción (`Propagation.MANDATORY`). Probado contra PostgreSQL real (`PostgresRefreshTokenIntegrationTest`): sin el `@Lock`, el test ve dos rotaciones.
+- Sin índices para la limpieza periódica (tabla pequeña; cada índice encarece cada refresh). Si crece, se añaden en una migración nueva.
+
 ### 5.2 Las restricciones (y por qué están en la base de datos)
 
 Están en `V1__create_schema.sql`:
@@ -434,7 +441,7 @@ spring.flyway.baseline-on-migrate=true
 spring.flyway.baseline-version=0
 ```
 
-Si Flyway encuentra una base **con tablas pero sin historial**, la marca como «versión 0» (baseline) y aplica V1, V2 y V3 encima (V3 solo crea tablas nuevas, sin `IF NOT EXISTS`). Por eso V1 usa `CREATE TABLE IF NOT EXISTS` y `CREATE INDEX IF NOT EXISTS`: sobre una base antigua no falla, solo añade lo que falte.
+Si Flyway encuentra una base **con tablas pero sin historial**, la marca como «versión 0» (baseline) y aplica V1 a V4 encima (V3 y V4 solo crean tablas nuevas, sin `IF NOT EXISTS`). Por eso V1 usa `CREATE TABLE IF NOT EXISTS` y `CREATE INDEX IF NOT EXISTS`: sobre una base antigua no falla, solo añade lo que falte.
 
 > **Matiz importante.** En una base antigua, V1 solo añade los **índices**. Las tablas ya existían, así que `IF NOT EXISTS` no las toca y conservan sus claves foráneas **sin `ON DELETE CASCADE`** y **sin los `CHECK`**. Por eso `MovieService.deleteMovie` sigue borrando a mano los favoritos antes de borrar la película (`deleteFromAllFavorites`). Los tests de `PostgresBaselineAdoptionIntegrationTest` lo comprueban.
 
@@ -657,7 +664,7 @@ Se evalúan **de arriba abajo** y gana la primera que coincide:
 | Método y ruta | Quién puede |
 | :--- | :--- |
 | `POST /api/users`, `POST /api/auth/login` | Cualquiera (registro y login) |
-| `POST /api/auth/logout` | Cualquiera (público e idempotente: solo borra la cookie) |
+| `POST /api/auth/logout` | Cualquiera (público e idempotente: revoca la sesión del *refresh token* y borra las dos cookies), **siempre con `X-Requested-With: StreamBox`** (si no, 403 `CSRF_REJECTED`) |
 | `/api/admin/**` (cualquier método) | Solo `ADMIN` (vistas de gestión, p. ej. series sin episodios) |
 | `/api/users` con **cualquier método salvo `POST`** (el listado de cuentas; `GET`, `HEAD`, `PUT`...) | Solo `ADMIN` |
 | `GET`, `HEAD /api/movies/**` | Cualquier usuario autenticado |
@@ -683,7 +690,7 @@ La última regla es una red de seguridad: un endpoint nuevo que se olvide de añ
 
 Para cada petición:
 
-1. Busca el token: primero la cabecera `Authorization: Bearer` (si existe, **manda ella**; un Bearer inválido da 401 aunque haya cookie válida) y, si no hay, la cookie `streambox_token`. Si no hay ninguna, **no hace nada** y deja pasar la petición (sin autenticar). Login, registro y logout ignoran la cookie para que una vieja no los bloquee.
+1. Busca el token: primero la cabecera `Authorization: Bearer` (si existe, **manda ella**; un Bearer inválido da 401 aunque haya cookie válida) y, si no hay, la cookie `streambox_token`. Si no hay ninguna, **no hace nada** y deja pasar la petición (sin autenticar). Login, registro, refresh y logout ignoran la cookie de acceso para que una vieja no los bloquee. Refresh y logout, además, exigen **siempre** `X-Requested-With: StreamBox` (también con Bearer): si no, 403 `CSRF_REJECTED` antes de tocar la base de datos.
 2. Extrae el token y pide a `JwtService.extractEmail(token)` que lo valide y devuelva el email. Si el token está manipulado, caducado o lo emitió otro sistema, jjwt lanza una `JwtException` (o `IllegalArgumentException` si viene vacío): se registra en `DEBUG` **solo la clase** de la excepción y la petición sigue **sin autenticar**. No se registra el mensaje de jjwt, que puede repetir contenido del token que manda el cliente (p. ej. su `alg`), ni se usa `WARN`: cualquiera puede mandar tokens basura sin límite y llenaría el log; el 401 ya lo cuenta. Un token sin `subject` también es anónimo.
 3. **Busca el usuario en la base de datos** por email. Si no existe (por ejemplo, se borró la cuenta), la petición sigue sin autenticar. Esta consulta está **fuera** del `try`: si la base de datos falla, el error **no** se confunde con «sin autenticar». Antes el filtro capturaba `Exception` y una caída de la BD daba 401 a un usuario con token válido, y el frontend le cerraba la sesión. Ahora la excepción sube, Tomcat la reenvía a `/error` y el cliente recibe **500 `INTERNAL_ERROR`** (sección 9.5); el frontend muestra el error con opción de reintentar y conserva la sesión (`JwtUserLookupFailureTomcatIntegrationTest`). Que jjwt solo lance esas dos excepciones ante cualquier token hostil lo vigila `JwtServiceTest` (43 tokens maliciosos): si una versión futura lanzara otra, ese test fallaría al actualizar la librería.
 4. Crea un `AuthenticatedUser(id, email, role)` y lo guarda en el `SecurityContextHolder` con la autoridad `ROLE_<rol>`.
@@ -748,14 +755,15 @@ Las dos primeras son JSON codificado en Base64. **No están cifradas**: cualquie
 | `iss` (*issuer*) | Quién lo emitió: `streambox` |
 | `sub` (*subject*) | De quién es: el email del usuario |
 | `iat` (*issued at*) | Cuándo se emitió |
-| `exp` (*expiration*) | Cuándo caduca (24 h después, por defecto) |
+| `exp` (*expiration*) | Cuándo caduca: **15 minutos** después, por defecto (`jwt.access-token-ttl`). La sesión dura más gracias al *refresh token* (sección 10.4 bis) |
 
 La tercera parte es la **firma**: un HMAC-SHA256 de las otras dos partes calculado con el secreto `JWT_SECRET`, que solo conoce el servidor. Si alguien cambia una letra del contenido (por ejemplo, el email), la firma deja de coincidir y el token se rechaza. Sin el secreto es imposible fabricar una firma válida.
 
 ### 10.2 `JwtService`
 
 - **Constructor**: construye la clave de firma **una sola vez** a partir de `JwtProperties` (ya validada: ≥32 caracteres = 256 bits, lo mínimo para HS256).
-- **`generateToken(user)`**: crea el token con los claims de arriba y lo firma.
+- **El algoritmo está fijado: HS256**, al firmar y al verificar (el analizador solo admite `HS256`). Antes lo elegía la librería según la longitud del secreto (`Keys.hmacShaKeyFor`: un secreto largo daba HS384 o HS512), y la documentación decía HS256. Un token con otro `alg` se rechaza (401).
+- **`generateToken(user)`**: crea el token con los claims de arriba y lo firma. Usa el `Clock` de la aplicación, así que los tests pueden adelantar el reloj para probar la caducidad.
 - **`extractEmail(token)`**: verifica la firma, la caducidad y que el emisor sea `streambox` (`requireIssuer`). Si todo es correcto, devuelve el `sub`. Si no, la librería (jjwt) lanza una excepción.
 
 ### 10.3 Contraseñas con BCrypt
@@ -794,7 +802,7 @@ sequenceDiagram
     else correcto
         A->>L: recordSuccess(intento) (borra los fallos)
         A->>A: JwtService.generateToken(user)
-        A-->>F: 204 + Set-Cookie streambox_token (HttpOnly, SameSite=Strict, Path=/api)
+        A-->>F: 204 + Set-Cookie streambox_token (JWT, 15 min, Path=/api)<br/>+ Set-Cookie streambox_refresh (sesión nueva, 7 días, Path=/api/auth)
     end
 ```
 
@@ -806,6 +814,39 @@ Detalles de seguridad que conviene saber defender:
 4. **El bloqueo se comprueba antes que la contraseña.** Una cuenta bloqueada rechaza el login aunque la contraseña sea correcta; si no, el bloqueo no protegería nada.
 5. **El intento se reserva antes de comprobar la contraseña** (`reserveAttempt`), de forma atómica. Si solo se contara al fallar, 20 peticiones simultáneas pasarían todas la comprobación de bloqueo mientras BCrypt trabaja y se probarían 20 contraseñas en vez de 5.
 6. **La contraseña del login no tiene mínimo** (las cuentas antiguas de 8 caracteres siguen entrando: la política de 12 solo se aplica al registrarse), pero sí un **máximo de 1024 caracteres**, para no leer cuerpos enormes ni pasárselos a BCrypt. Ese 400 ocurre antes del servicio, así que no gasta intento de la cuenta.
+
+### 10.4 bis La sesión renovable (*refresh token*)
+
+**El problema.** Un JWT es *stateless*: el servidor no guarda nada, así que no puede «anularlo». Con un token de 24 horas, uno robado valía 24 horas, y cerrar sesión solo borraba la cookie del navegador. La solución estándar son **dos tokens**:
+
+| | Token de acceso (`streambox_token`) | *Refresh token* (`streambox_refresh`) |
+| :--- | :--- | :--- |
+| Qué es | JWT firmado (sección 10.1) | 32 bytes aleatorios en base64url (43 caracteres), **sin significado** |
+| Vida | 15 minutos | 7 días, y la sesión entera como mucho 30 desde el login |
+| Dónde se guarda en el servidor | En ningún sitio | En `refresh_tokens`, **solo su SHA-256** (capítulo 5) |
+| Cookie | HttpOnly, SameSite=Strict, `Path=/api` | HttpOnly, SameSite=Strict, **`Path=/api/auth`**: solo viaja a login, refresh y logout, nunca al resto de la API |
+| Para qué | Cada petición a la API | Solo para pedir un token de acceso nuevo |
+
+Así, un token de acceso robado vale como mucho 15 minutos, y cerrar sesión **sí** anula la sesión: el servidor revoca el *refresh token*. Se guarda solo el hash para que una copia de la base de datos no sirva para entrar (igual que con las contraseñas, aunque aquí basta SHA-256: el token es aleatorio y largo, no hace falta un hash lento como BCrypt).
+
+**`POST /api/auth/refresh`** (`AuthController` → `RefreshTokenService.refresh`), sin cuerpo:
+
+1. Lee **solo** la cookie `streambox_refresh` (ignora la de acceso y `Authorization`). Exige `X-Requested-With: StreamBox` (403 `CSRF_REJECTED`); esas peticiones sin cabecera, que es lo único que puede mandar otra web, se rechazan antes de tocar la base de datos y **no** gastan el límite por IP (30 por minuto; aquí la regla de NV-A del capítulo 11 no sirve, porque el refresh no lleva cuerpo ni `Content-Type`).
+2. Busca el hash con **bloqueo pesimista** (`findByTokenHashForUpdate`): si dos pestañas refrescan a la vez, la segunda espera a la primera.
+3. Si el token está vigente, lo **rota**: crea un sucesor de la misma «familia» (la sesión), marca el viejo como revocado y lo enlaza con el sucesor, todo en la misma transacción. Responde **204** con las dos cookies nuevas.
+4. Si llega un token **ya rotado**, alguien está usando una copia vieja: es la señal clásica de robo. Se **revoca toda la familia** (también el sucesor, que quizá tenga el ladrón) y responde 401. Es la *reuse detection* de OAuth 2.0. La transacción usa `noRollbackFor = SessionExpiredException` para que la revocación se guarde aunque la respuesta sea un error. **La revocación de la familia se hace en dos pasadas** (`revokeWholeFamily`), y no por descuido. En PostgreSQL (READ COMMITTED), si mientras se revoca otra petición está rotando el último token de la familia, el `UPDATE` espera a que esa rotación confirme y entonces vuelve a evaluar las filas que ya había elegido, pero **no ve el sucesor que se insertó después de empezar la sentencia**: quedaba vivo, justo el que podría tener un ladrón. La segunda pasada empieza ya con la rotación confirmada y lo revoca. Lo encontró la revisión de seguridad y lo prueban dos tests contra PostgreSQL real (una reutilización y un logout durante una rotación): sin la segunda pasada, queda un token activo.
+5. **Gracia de 10 segundos:** si el token se rotó hace menos de 10 s y su sucesor sigue vivo, casi seguro son dos pestañas que refrescaron a la vez. Entonces se emite solo un token de acceso nuevo, sin rotar ni revocar (el navegador ya tiene la cookie del sucesor, que comparten todas las pestañas). Coste asumido: quien use un token robado en esos 10 s consigue un token de acceso de 15 minutos; su siguiente uso del token viejo ya revoca la sesión.
+6. En cualquier otro caso (sin cookie, desconocido, caducado, sesión de 30 días agotada, revocado por un logout, usuario borrado): **401 `SESSION_EXPIRED`**, el mismo cuerpo siempre (no se revela por qué), y las dos cookies se borran. El cliente no debe reintentar: va al login.
+
+**Logout:** exige `X-Requested-With: StreamBox`; sin ella, 403 `CSRF_REJECTED` sin revocar nada ni borrar cookies. ¿Por qué, si es «solo» cerrar sesión? Un formulario de otra web no manda las cookies (SameSite=Strict), pero la respuesta de esa navegación sí traería los `Set-Cookie` que las borran: cualquier web podría cerrarte la sesión por fastidiar. Con la cabecera hace falta un *preflight* que, sin CORS, falla. Con ella, revoca la familia del *refresh token* de la cookie (si la hay) y borra las dos cookies; responde 204 aunque no haya sesión. Si la base de datos falla, responde 500 **sin** borrar las cookies, y el frontend avisa en vez de fingir que cerró (capítulo 19.2). Un token de acceso copiado sigue valiendo hasta su `exp` (≤15 min), pero ya no se puede renovar.
+
+**Limpieza:** `RefreshTokenCleanupConfig` programa cada hora `deleteExpired`, que borra las sesiones caducadas y los tokens caducados hace más de 3 días. Se conservan unos días los rotados porque son los que delatan una reutilización. Se desactiva con `streambox.auth.refresh.cleanup.enabled=false` (así está en el perfil `test`).
+
+**El frontend** (`lib/api.ts`) no ve nunca ninguno de los dos tokens. Si una petición recibe 401, pide un refresh (uno solo aunque fallen varias a la vez) y repite la petición una vez (capítulo 19.2).
+
+**Cómo defenderlo en una entrevista:** «Tokens de acceso cortos y *stateless* para no consultar una lista de revocación en cada petición, más un *refresh token* opaco, guardado con hash, rotatorio y con detección de reutilización, para poder revocar sesiones. Las dos cookies son HttpOnly y SameSite=Strict, y la del refresh tiene un `Path` restringido para que no viaje con cada petición.»
+
+Tests: `RefreshTokenIntegrationTest` (30 casos: rotación, reutilización, gracia, caducidades, CSRF, límite, logout), concurrencia en H2 y contra PostgreSQL real (`PostgresRefreshTokenServiceConcurrencyIntegrationTest`: sin el bloqueo rotan todas), limpieza programada y validación de propiedades.
 
 ### 10.5 El registro
 
@@ -845,7 +886,7 @@ Hay dos protecciones contra la fuerza bruta, complementarias:
 
 | Protección | Clase | Clave | Límite por defecto | Protege contra |
 | :--- | :--- | :--- | :--- | :--- |
-| **Por IP** | `RateLimitingFilter` | IP del cliente | Login: 10/min. Registro: 5/h | Un atacante que prueba muchas cuentas desde una IP |
+| **Por IP** | `RateLimitingFilter` | IP del cliente | Login: 10/min. Registro: 5/h. Refresh: 30/min (solo cuentan los que traen `X-Requested-With`; ver 10.4 bis) | Un atacante que prueba muchas cuentas desde una IP |
 | **Por cuenta** | `LoginAttemptService` | Email (y, para una «IP conocida», email + IP; ver 11.2) | 5 fallos en 15 min | Un atacante que prueba muchas contraseñas contra una cuenta desde muchas IPs |
 
 Ambas responden **429 Too Many Requests** con la cabecera **`Retry-After`** (segundos que hay que esperar), que el frontend usa para la cuenta atrás. Se distinguen por el `code`: **`RATE_LIMIT_EXCEEDED`** (límite por IP) o **`ACCOUNT_LOCKED`** (cuenta bloqueada).
@@ -1348,9 +1389,10 @@ Todos los errores de la API, vengan de donde vengan, tienen la misma forma (`dto
 | :--- | :--- | :--- |
 | `VALIDATION_ERROR` | 400 | `@Valid` falla, parámetro mal formado, `sort`/`direction`/`page` no permitidos |
 | `MALFORMED_REQUEST` | 400 | JSON mal escrito o con tipos imposibles |
-| `INVALID_CREDENTIALS` | 401 | Login incorrecto (con `remainingAttempts`), y también 401 por falta de token |
+| `INVALID_CREDENTIALS` | 401 | Login incorrecto (con `remainingAttempts`), y también 401 por falta de token o token de acceso caducado |
+| `SESSION_EXPIRED` | 401 | `POST /api/auth/refresh` sin una sesión renovable válida: hay que volver a iniciar sesión (capítulo 10.4 bis) |
 | `ACCESS_DENIED` | 403 | Autenticado sin el rol necesario |
-| `CSRF_REJECTED` | 403 | Petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie sin la cabecera `X-Requested-With: StreamBox` |
+| `CSRF_REJECTED` | 403 | Petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie sin la cabecera `X-Requested-With: StreamBox`; refresh y logout la exigen **siempre**, también con Bearer |
 | `RESOURCE_NOT_FOUND` | 404 | Película, género o usuario inexistente; ruta inexistente |
 | `MOVIE_NOT_IN_FAVORITES` | 404 | Quitar de la lista algo que no estaba |
 | `SERIES_NOT_IN_FAVORITES` | 404 | Quitar de la lista una serie (visible) que no estaba |
@@ -1409,7 +1451,7 @@ El resto (`env`, `beans`, `heapdump`…) **no se exponen**: algunos mostrarían 
 
 `springdoc` genera la documentación interactiva a partir de las anotaciones `@Operation` y `@ApiResponses` de los controladores. Está en `http://localhost:8080/swagger-ui.html` (solo en `dev`).
 
-`config/OpenApiConfig` define el título y el esquema de seguridad `bearerAuth`: en Swagger, pulsas «Authorize», pegas un token y todas las peticiones lo llevan. Como el login entrega el JWT en una cookie HttpOnly (204, sin cuerpo), el token hay que copiarlo del valor de la cookie `streambox_token` en las herramientas del navegador; con `Bearer` no se exige `X-Requested-With`. Los controladores con `@SecurityRequirement(name = "bearerAuth")` muestran el candado.
+`config/OpenApiConfig` define el título y el esquema de seguridad `bearerAuth`: en Swagger, pulsas «Authorize», pegas un token y todas las peticiones lo llevan. Como el login entrega el JWT en una cookie HttpOnly (204, sin cuerpo), el token hay que copiarlo del valor de la cookie `streambox_token` en las herramientas del navegador; con `Bearer` no se exige `X-Requested-With`. Los controladores con `@SecurityRequirement(name = "bearerAuth")` muestran el candado. Además, `OpenApiConfig` declara un segundo esquema, **`cookieAuth`** (`apiKey` en la cookie `streambox_token`), que es la autenticación real del navegador, y `config/CookieAuthOperationCustomizer` hace que cada operación autenticada acepte **cualquiera de los dos** y documenta en las no seguras (POST/PUT/PATCH/DELETE) el 403 `CSRF_REJECTED` de la defensa CSRF; login y registro no lo llevan. Swagger UI no puede fijar la cookie, así que para probar desde ahí sigue usándose `bearerAuth`. La especificación versionada (`docs/api/openapi.yaml`) y la colección de Postman (`docs/api/postman/`, verificada con Newman: 62 peticiones y 117 aserciones, incluidos refresh y logout) se regeneran con el procedimiento de `docs/api/README.md`.
 
 **Respuestas de error en el OpenAPI.** springdoc rellena cada `@ApiResponse` sin `content` con el tipo de retorno del método. Por eso, hasta octubre de 2026, el 401 del login aparecía documentado como un `LoginResponse` (el token) y el 404 de películas como una `MovieResponse`: un cliente generado a partir del OpenAPI habría leído un error como si fuera un token. Ahora `config/ErrorResponseOpenApiCustomizer` (un `GlobalOpenApiCustomizer` registrado como `@Bean` en `OpenApiConfig`) recorre el documento ya generado y hace dos cosas:
 
@@ -1454,8 +1496,9 @@ frontend/src/
 
 ```tsx
 <BrowserRouter>                    // enrutador (URLs sin recargar la página)
+ <QueryClientProvider>             // caché de datos del servidor (TanStack Query, ver 19.3)
   <ToastProvider>                  // avisos emergentes
-    <AuthProvider>                 // sesión (necesita los avisos: "sesión caducada")
+    <AuthProvider>                 // sesión (necesita los avisos y la caché: la vacía al cambiar de sesión)
       <SkipLink />
       <Routes>
         /login, /registro          → envueltas en RedirectIfAuthenticated
@@ -1486,11 +1529,12 @@ Un **contexto** de React es una forma de compartir un valor con todos los compon
 
 - `RequireAuth`: sin sesión, redirige a `/login`.
 - `RedirectIfAuthenticated`: con sesión, `/login` y `/registro` redirigen a `/`.
+- Mientras comprueban la sesión («Comprobando tu sesión...») o si ese chequeo falla («No se pudo comprobar tu sesión», con «Reintentar»), estas dos guardas son la página entera: la pintan dentro de su propio `<main id="contenido">` (destino de «Saltar al contenido») y, en el error, con el título como `<h1>` **dentro** de la alerta, para que se anuncie una sola vez (`ErrorState` con `headingLevel={1}`).
 - `RequireAdmin` (envuelve todo `/admin`): mientras se carga el usuario muestra «Comprobando permisos...» (así, recargar en `/admin` no expulsa a un administrador real antes de saber su rol); si la carga falla, no enseña el contenido y ofrece «Reintentar»; si el usuario es `USER`, redirige a `/`.
 
 `RequireAuth` y `RedirectIfAuthenticated` esperan al primer chequeo de sesión (`isCheckingSession`, ver 19.2) y muestran «Comprobando tu sesión...» en lugar de redirigir o enseñar el formulario, así que no hay «parpadeo». Recuerda que esto es solo experiencia de usuario: **la seguridad real la pone el backend**, que rechaza cualquier petición sin token válido.
 
-**`FavoritesProvider` vive dentro de `AppShell`**: solo existe en la zona autenticada. Al cerrar sesión se desmonta y la lista de un usuario no puede verla el siguiente.
+**`FavoritesProvider` vive dentro de `AppShell`**: solo existe en la zona autenticada. Pero su lista está en la caché de TanStack Query, que sobrevive a los componentes: por eso `AuthProvider` **vacía la caché** en cada cambio de sesión (19.3) y la lista de un usuario no puede verla el siguiente.
 
 ### 18.3 El proxy de Vite
 
@@ -1526,7 +1570,8 @@ Qué hace, paso a paso:
 
 | Respuesta | Mensaje para el usuario | Efecto |
 | :--- | :--- | :--- |
-| 401 en endpoint privado | «Tu sesión ha caducado…» | Avisa a `AuthProvider` para cerrar sesión (`sessionExpired: true`) |
+| 401 en endpoint privado | — | Primero intenta **renovar la sesión** con el *refresh token* y repetir la petición una vez (paso 8) |
+| 401 en endpoint privado que no se arregla renovando | «Tu sesión ha caducado…» | Avisa a `AuthProvider` para cerrar sesión (`sessionExpired: true`) |
 | 401 en endpoint público | El del servidor («Email o contraseña incorrectos») | **No** cierra sesión: aquí significa credenciales incorrectas |
 | 403 | «No tienes permisos…» | **No** cierra sesión: el usuario sí está identificado |
 | 429 | «Demasiados intentos. Inténtalo de nuevo en N s.» | `retryAfterSeconds` sale de la cabecera `Retry-After`; el `code` distingue `ACCOUNT_LOCKED` de `RATE_LIMIT_EXCEEDED` |
@@ -1534,16 +1579,39 @@ Qué hace, paso a paso:
 | Otros 4xx | El `message` del servidor (ya en español y específico) | `validationErrors` se conserva para pintarlos junto a cada campo |
 
 7. Las **cancelaciones** (`AbortController`) se relanzan tal cual. `isAbortError` las reconoce para ignorarlas: no son errores, sino peticiones que ya no interesan (el usuario salió de la pantalla o escribió otra letra en el buscador).
+8. **Renovación de la sesión** (*refresh token*, capítulo 10.4 bis). El JWT de acceso dura 15 minutos; al caducar, el navegador descarta su cookie y la siguiente petición da 401. Entonces `apiFetch` hace `POST /api/auth/refresh` (sin cuerpo; el navegador pone la cookie `streambox_refresh`) y, si responde 204, **repite la petición original una sola vez**. Es seguro también en un `POST`: un 401 significa que el servidor no llegó a ejecutarla (la autenticación va antes). Según la respuesta del refresh:
+
+| Refresh | Qué pasa |
+| :--- | :--- |
+| 204 | Se repite la petición y se devuelve lo que diga. Si vuelve a dar 401, sesión caducada: no hay un segundo refresh (sin bucles) |
+| 401 (`SESSION_EXPIRED`, o cualquier 401) | Sesión caducada: el 401 original sigue su curso normal (aviso único, login). **Nunca** se reintenta el refresh; el servidor ya ha borrado las dos cookies |
+| Red caída, 5xx, 429, 403 | **No** se cierra la sesión (no se sabe si sigue viva). Se lanza el error del refresh (`sessionExpired: false`), que la pantalla enseña con «Reintentar» |
+
+No se intenta renovar en rutas públicas (login, registro, logout) ni en `/auth/refresh`, en peticiones canceladas, sin `AuthProvider`, ni si la petición es de una sesión ya cerrada o anterior (`canRefresh` del puente, ver 19.2): un refresh tardío podría devolver al navegador cookies válidas de la sesión que el usuario acaba de cerrar.
+
+**Tres reglas de diseño** (todas en `lib/api.ts`, con su porqué en los comentarios):
+
+1. ***Single-flight*.** Si varias peticiones reciben 401 a la vez (la portada lanza tres o cuatro), todas esperan la **misma** promesa de refresh (`refreshInFlight`). Cada refresh rota el token y gasta una de las 30 peticiones por minuto del límite por IP.
+2. **No renovar dos veces la misma caducidad: la «generación».** `sessionGeneration` es un contador que sube con cada renovación correcta. Cada petición anota la generación con la que **sale**; si al recibir su 401 ya es otra, es que alguien renovó mientras viajaba (salió con la cookie vieja) y basta con repetirla. Es un contador y no una hora: no le afectan los cambios del reloj. Las demás pestañas se enteran por un `BroadcastChannel` (`streambox-session`), que también sube su contador.
+3. **Login, logout y refresh van en fila** con el Web Lock `streambox-session` (`navigator.locks`), común a todas las pestañas del mismo origen. Así dos pestañas no renuevan a la vez y, sobre todo, un refresh no se cruza con un logout: si la respuesta del refresh llegara después de la del logout, dejaría en el navegador una cookie de acceso válida (15 min) y al recargar se «resucitaría» la sesión. Dentro del lock, antes de pedir el refresh, se vuelve a mirar la generación: si mientras se esperaba otra pestaña renovó (y lo avisó), solo se repite la petición. Las peticiones que van dentro del lock tienen un tiempo máximo de 15 s (`SESSION_REQUEST_TIMEOUT_MS`): una petición colgada no puede bloquear el login de todas las pestañas. Sin `navigator.locks` (navegadores antiguos, o http fuera de `localhost`, que no es «contexto seguro») se usa una cola local de la pestaña.
+
+*Por qué es robusto aunque falle la coordinación.* Las cookies son comunes a todas las pestañas: un refresh de más (p. ej. si el aviso del canal llega después de soltarse el lock) envía el refresh token **actual**, no uno viejo, así que solo gasta una rotación; no cierra la sesión. El caso peligroso —reenviar un token ya rotado fuera de los 10 s de gracia, que revoca la sesión entera— solo ocurre si el navegador nunca recibe el `Set-Cookie` de una rotación (se corta la red justo después de que el servidor rote): entonces el siguiente refresh lleva el token viejo y el servidor cierra la sesión. Es el precio conocido de la rotación con detección de reutilización.
+
+*Cancelaciones.* Si la petición se cancela antes de leer su 401, no se pide refresh. Si se cancela mientras se renueva, no se repite; pero si el refresh acaba en `SESSION_EXPIRED`, se avisa igual a `AuthProvider` (la caducidad es de la sesión, no de la petición): si no, las peticiones que siguieran llegando con 401 pedirían otro refresh condenado a la misma respuesta. Lo destapó el E2E: en desarrollo, StrictMode cancela la primera petición de cada pantalla.
+
+Tests: `lib/api.test.ts` (*describe* «renovación de la sesión»: reintento, sin bucle, errores del refresh, concurrencia, generación, rutas públicas, cancelaciones, el canal y los Web Locks simulados con `src/test/webLocks.ts`; `src/test/setup.ts` sustituye `BroadcastChannel` por uno en memoria) y E2E en `e2e/auth.spec.ts` («Sesión renovable»).
 
 ### 19.2 `AuthContext`: la sesión
 
-`context/AuthContext.tsx` gestiona la sesión, pero **ya no hay token en el cliente**: vive en la cookie HttpOnly `streambox_token`, invisible para JavaScript (un XSS ya no puede robarlo). La sesión se descubre al arrancar con `GET /api/users/me` (200 = sesión; 401 = sin sesión, en silencio; red/5xx = error con «Reintentar»), con tres estados (`unknown`, `active`, `none`) y un contador `epoch` que descarta respuestas tardías. Expone `isAuthenticated`, `isCheckingSession`, `login(email, password)` (llama a `/auth/login` y luego a `/users/me`), `logout()` (limpia el estado y pide `POST /auth/logout` para borrar la cookie), `user`, `isAdmin`, `userStatus` y `refreshUser`. Se borra al arrancar la clave `token` heredada de `localStorage`.
+`context/AuthContext.tsx` gestiona la sesión, pero **ya no hay token en el cliente**: vive en la cookie HttpOnly `streambox_token`, invisible para JavaScript (un XSS ya no puede robarlo). La sesión se descubre al arrancar con `GET /api/users/me` (200 = sesión; 401 = `apiFetch` intenta renovarla con el *refresh token* y, si tampoco, sin sesión, en silencio; red/5xx/429 = error con «Reintentar»: «No hemos podido confirmar si tu sesión sigue abierta. Inténtalo de nuevo en unos instantes.»). Así quien vuelve al día siguiente (sin cookie de acceso, con el *refresh token* aún válido) entra sin login, todo dentro de «Comprobando tu sesión...». Hay tres estados (`unknown`, `active`, `none`) y un contador `epoch` que descarta respuestas tardías. Expone `isAuthenticated`, `isCheckingSession`, `login(email, password)` (llama a `/auth/login` y luego a `/users/me`), `logout()` (ver abajo), `isLoggingOut`, `user`, `isAdmin`, `userStatus` y `refreshUser`. Se borra al arrancar la clave `token` heredada de `localStorage`.
 
-**El puente con `apiFetch`.** `api.ts` necesita saber a qué sesión pertenece cada respuesta y avisar de los 401, pero no puede importar `AuthContext` (sería una dependencia circular: el contexto ya importa `api.ts`). La solución: `api.ts` ofrece `configureAuth(puente)` y el `AuthProvider` se registra al montarse, pasando dos funciones: `getSessionKey` (devuelve el contador `epoch` de la sesión) y `onUnauthorized`.
+**Cerrar sesión lo decide el servidor (`lib/logout.ts`).** Con la sesión en una cookie HttpOnly, JavaScript no puede borrarla: solo lo hace el `Set-Cookie` de la respuesta a `POST /auth/logout`. Por eso `logout()` **no es optimista**: llama primero al servidor y solo cuando responde 2xx (o 401, «ya no había sesión») limpia la interfaz; las rutas protegidas llevan entonces al login. Si falla por red o 5xx reintenta **una vez** tras `LOGOUT_RETRY_DELAY_MS` (1 s); si vuelve a fallar —o el rechazo no es pasajero, como un 403— la sesión **sigue abierta** en pantalla y un aviso lo dice («No se ha podido cerrar la sesión: no hay conexión con el servidor. Tu sesión sigue abierta; inténtalo de nuevo.», con variante para 5xx y otra genérica; un 502/503/504 cuenta como «no hay conexión»: es lo que responde el proxy de Vite o nginx con el backend parado, y decir «el servidor ha tenido un problema» sería falso). Mientras tanto `isLoggingOut` es `true`: los botones «Cerrar sesión» de la barra y de `/perfil` dicen «Cerrando sesión...» con `aria-disabled` (no `disabled`, que sacaría el foco del menú y lo cerraría) y una copia síncrona en un `ref` impide un segundo cierre con un doble clic. *Por qué:* antes la interfaz pasaba a «sin sesión» antes de la petición y se tragaba el error; si el servidor no respondía, la cookie seguía valiendo y al recargar `GET /users/me` devolvía la sesión: en un equipo compartido, la siguiente persona entraba en la cuenta. El cierre por «sesión caducada» (401 de otra petición que el refresh no arregla) no cambia: limpia la interfaz al momento y llama al logout en modo *best-effort* para borrar las cookies. Esta petición es también la que **revoca el *refresh token*** en el servidor, y va en fila con los refresh (19.1, regla 3).
 
-**El 401 sin bucles.** Si el token caduca y la portada lanza tres peticiones a la vez, llegan tres 401. Sin cuidado, habría tres cierres de sesión, tres avisos y tres redirecciones. El diseño lo evita:
+**El puente con `apiFetch`.** `api.ts` necesita saber a qué sesión pertenece cada respuesta y avisar de los 401, pero no puede importar `AuthContext` (sería una dependencia circular: el contexto ya importa `api.ts`). La solución: `api.ts` ofrece `configureAuth(puente)` y el `AuthProvider` se registra al montarse, pasando tres funciones: `getSessionKey` (devuelve el contador `epoch` de la sesión), `onUnauthorized` y `canRefresh(claveUsada)`, que solo permite renovar si hay (o puede haber, en el arranque) sesión y la petición es de la época actual. Al registrarse, `api.ts` abre además el canal entre pestañas.
 
-1. `apiFetch` **no navega nunca**; solo llama a `onUnauthorized(claveUsada)`, la época de sesión con la que se hizo la petición.
+**El 401 sin bucles.** Si la sesión caduca sin remedio (el refresh también da 401) y la portada lanza tres peticiones a la vez, llegan tres 401. Sin cuidado, habría tres cierres de sesión, tres avisos y tres redirecciones. El diseño lo evita:
+
+1. `apiFetch` **no navega nunca**; tras un único refresh compartido que no renueva, solo llama a `onUnauthorized(claveUsada)`, la época de sesión con la que se hizo la petición.
 2. `onUnauthorized` ignora el aviso si ya no hay sesión o si la clave usada **no es la actual** (una respuesta tardía de una sesión anterior). Un 401 durante el primer chequeo de sesión (`unknown`) deja la sesión en «sin sesión» sin toast.
 3. El primer aviso cierra la sesión y muestra un único toast. Los siguientes ya encuentran la sesión cerrada y no hacen nada.
 4. Al quedar `isAuthenticated = false`, `RequireAuth` redirige a `/login` **una vez**.
@@ -1551,21 +1619,63 @@ Qué hace, paso a paso:
 **Detalles que explican el código:**
 
 - `useLayoutEffect` registra el puente **antes** que cualquier `useEffect`. Los componentes hijos lanzan peticiones en sus `useEffect` al montarse, y esos efectos se ejecutan antes que los del padre; los *layout effects* se ejecutan antes que todos ellos.
-- Sin sincronización inmediata entre pestañas (ya no hay `localStorage` ni evento `storage`): la otra pestaña se entera en su siguiente petición (401 con aviso).
+- **Los cambios de sesión se propagan a las demás pestañas.** Las cookies son comunes a todas las pestañas, pero el estado de React no: si en una pestaña se cerraba sesión y entraba otra persona, otra pestaña abierta seguía mostrando el nombre, el rol y la caché del usuario anterior mientras sus peticiones ya salían con la cookie nueva (y sus clics en favoritos cambiaban la cuenta de otro). Ahora, tras un login correcto, un logout confirmado por el servidor o una sesión caducada, la pestaña publica por el `BroadcastChannel` de `lib/api.ts` una señal `{ type: 'session-changed' }` (**sin identidad ni datos**). Las demás pasan a `applySession('unknown')`: vacían su caché, cambian de época (las respuestas viejas se ignoran) y vuelven a pedir `/users/me`. **No la reenvían**, así que no hay bucles. Avisos (`lib/sessionMessages.ts`), elegidos para ser verdad para quien mira esa pestaña: «Se ha iniciado sesión en otra pestaña como «X».» (el nombre sale de su propio `/users/me`, no del mensaje), «Se ha cerrado la sesión en otra pestaña. Inicia sesión de nuevo.», y ninguno si para esa pestaña nada ha cambiado (misma cuenta). Nunca dicen «caducada», porque sería falso. Efecto asumido: la pestaña que recibe la señal muestra un instante «Comprobando tu sesión...» y pierde un formulario sin guardar, lo que solo ocurre cuando la sesión ha cambiado de verdad (y enviarlo habría ido con la cookie de otra cuenta). Las renovaciones del *refresh token* se coordinan aparte (19.1).
 
 **El usuario actual y su rol.** Además de descubrir la sesión, `AuthProvider` carga el usuario con `GET /api/users/me` al arrancar, tras `login()` y en cada `refreshUser()`. `useAuth()` expone `user`, `isAdmin`, `userStatus` (`idle` sin sesión, `loading`, `ready` o `error`) y `refreshUser()` para reintentar.
 
-- **Por qué se pregunta al servidor y no se lee del JWT.** El token no lleva el rol (solo el email como `sub` y el emisor). Y aunque lo llevara, quedaría desfasado hasta que caducase (24 h), mientras que el backend lee el usuario de la base de datos en cada petición y un cambio de rol es inmediato. Preguntar a `/users/me` mantiene esa misma coherencia en el cliente.
+- **Por qué se pregunta al servidor y no se lee del JWT.** El token no lleva el rol (solo el email como `sub` y el emisor). Y aunque lo llevara, quedaría desfasado hasta que caducase (15 min, y se renueva sin cesar), mientras que el backend lee el usuario de la base de datos en cada petición y un cambio de rol es inmediato. Preguntar a `/users/me` mantiene esa misma coherencia en el cliente.
 - `login(email, password)` es asíncrono: espera a `POST /auth/login` y a `GET /users/me` antes de abrir la sesión en la interfaz (así no se pinta un instante «sin rol»); si `/users/me` falla, la sesión se abre igualmente con `userStatus = 'error'`.
 - **Respuestas tardías.** El resultado se guarda junto a la época de sesión (`epoch`) y al número de intento que lo pidieron, y `user`/`userStatus` se calculan comparándolo con la sesión actual: el usuario de una sesión anterior nunca se asigna a la nueva. Además, cada cambio cancela la petición en curso con `AbortController`. Son dos defensas independientes.
+- **No usa TanStack Query (a propósito).** `/users/me` no es un dato más que cachear: es cómo se descubre la sesión, y su lógica de épocas y estados (`unknown`/`active`/`none`) es justo la que decide cuándo hay que vaciar la caché de los demás datos. Pasarla a `useQuery` mezclaría las dos cosas y obligaría a reescribir sus tests de casos límite (refresh, logout en vuelo, 401 tardíos) sin ganar nada. Cada cambio de sesión (`applySession`: entrar, salir, sesión caducada) llama a `queryClient.clear()`.
 - **Errores.** Un 401 lo gestiona `apiFetch` como cualquier otro (cierra sesión y avisa una vez). Si falla por red o un 5xx, la sesión se mantiene con `userStatus = 'error'` e `isAdmin = false`: **falla cerrado** (ante la duda, no se muestra nada de administrador).
 - **El rol del cliente solo decide qué se pinta**: la etiqueta «Administrador» del menú de usuario (`Navbar`, que muestra también «Sesión iniciada como» y el nombre), y la guarda `RequireAdmin`. La seguridad real es el 403 del backend.
-- En los tests, `routeFetch` (`src/test/helpers.tsx`) responde por defecto a `/users/me` con un usuario `USER` (`makeUser`), y cada test puede sobrescribirlo.
+- En los tests, `routeFetch` (`src/test/helpers.tsx`) responde por defecto a `/users/me` con un usuario `USER` (`makeUser`) y a `POST /api/auth/refresh` con 401 `SESSION_EXPIRED` (así un 401 simulado sigue significando «sesión caducada»), y cada test puede sobrescribirlos. `apiCalls` no cuenta ni `/users/me` ni ese refresh del arranque.
 
 **El login** (`pages/LoginPage.tsx`) llama a `login(email, password)` del contexto (que hace `POST /auth/login` con `public: true` y luego carga `/users/me`; no hay token que guardar) y ya está: `RedirectIfAuthenticated` ve la sesión y lleva a `/`.
 
-> **Hecho en la tarea 29.** El JWT va en cookie HttpOnly (`SameSite=Strict`, `Path=/api`, `Secure` según `streambox.auth.cookie.secure`/`STREAMBOX_AUTH_COOKIE_SECURE`, `true` por defecto; el compose HTTP en localhost lo pone a `false`). Riesgos residuales: sin revocación (el logout solo borra la cookie; el JWT dura 24 h), login CSRF mitigado con SameSite, y siguen pendientes vida corta + refresh, y HSTS con HTTPS.
+> **Hecho en la tarea 29.** El JWT va en cookie HttpOnly (`SameSite=Strict`, `Path=/api`, `Secure` según `streambox.auth.cookie.secure`/`STREAMBOX_AUTH_COOKIE_SECURE`, `true` por defecto; el compose HTTP en localhost lo pone a `false`). Después llegaron la vida corta (15 min) y el *refresh token* revocable (10.4 bis), con su renovación transparente en el cliente (19.1, paso 8), e `index.html` con `Cache-Control: no-store` (4.6). Riesgos residuales: un JWT de acceso copiado vale hasta su `exp` (≤15 min) aunque se cierre la sesión, login CSRF mitigado con SameSite, y sigue pendiente HSTS con HTTPS.
 
+
+### 19.3 Caché de datos del servidor (TanStack Query)
+
+**El problema que resuelve.** Antes cada hook de datos (`usePagedCatalog`, `useGenres`, `useSeriesDetail`, `useAdminSearchList`, `FavoritesContext`...) reimplementaba a mano la carga, el error, la cancelación de respuestas viejas (con contadores de «época» y `AbortController`) y «cargar más». Y no había caché: volver a la portada repetía todas las peticiones, los géneros los pedían cuatro pantallas por separado y, si un administrador editaba una película, los demás listados no se enteraban hasta recargar. `@tanstack/react-query` (v5, ≈10 kB gzip de lo que se usa) es la librería estándar para esto: guarda cada respuesta bajo una **clave**, la comparte entre pantallas y la invalida cuando cambia.
+
+**Lo que no cambia: `apiFetch` sigue siendo el único cliente.** Las `queryFn` lo llaman pasando el `signal` de TanStack (`({ signal }) => apiFetch(path, { params, signal })`), así que la sesión (cookie, refresh, 401/403/429, red caída) se sigue gestionando en un solo sitio (19.1). TanStack decide **cuándo** pedir y **qué** guardar; `apiFetch`, **cómo**.
+
+**Configuración** (`lib/queryClient.ts`, `createQueryClient`; `App` crea uno por montaje con `useState`):
+
+| Opción | Valor | Por qué |
+| :--- | :--- | :--- |
+| `staleTime` | 60 s | Volver a una pantalla dentro del minuto la pinta desde la caché sin pedir nada. El catálogo cambia poco y las escrituras del panel invalidan al momento; lo que cambie OTRA persona se ve como mucho un minuto después. Con 0 (el valor por defecto) cada navegación lo pediría todo otra vez. |
+| `gcTime` | 5 min | Lo que ya no usa ninguna pantalla se guarda 5 minutos («Atrás» lo enseña al instante) y luego se libera. |
+| `retry` | `shouldRetryQuery` | **Un** reintento y solo en fallos pasajeros: red (status 0) o 5xx. Nunca un 4xx: un 401 ya pasó por el refresh dentro de `apiFetch` (repetirlo pediría otro refresh condenado a fallar), un 403/404 no cambia en un segundo y repetir un 429 alarga el bloqueo. El valor por defecto (3 reintentos ante todo) tardaría ~7 s en enseñar un 404. Las mutaciones no se reintentan nunca: un `POST` repetido a ciegas podría duplicar una escritura. |
+| `refetchOnWindowFocus` | `true` | Al volver a la pestaña se refresca solo lo anticuado (más de un minuto). Así «Mi lista» se pone al día si se cambió en otra pestaña. |
+| `networkMode` | `'always'` | Con el modo por defecto, sin conexión las consultas quedarían «en pausa» (esqueleto de carga sin fin) y los favoritos esperando sin aviso. Así `apiFetch` devuelve su error de red y la pantalla enseña «No se pudo conectar» con «Reintentar». |
+
+`loadStatusOf(query)` traduce el estado de TanStack a los tres de las pantallas, con las reglas de siempre: `ready` si hay datos (aunque falle un refresco en segundo plano: mejor seguir enseñando lo cargado), `error` si no los hay y la carga falló, `loading` en otro caso, también mientras se **reintenta** (al pulsar «Reintentar» vuelve el esqueleto). Los textos y estados que ve el usuario no han cambiado.
+
+**Claves** (`lib/queryKeys.ts`, todas en un sitio y tipadas). Cada una cuelga de una raíz: `movies` (portada, `/peliculas` con y sin filtros, listado del panel, presencia), `series` (listados, detalle `['series','detail',id]`, panel), `genres` y `favorites`. Un listado paginado lleva en la clave el endpoint, el tamaño, el orden y los filtros de la URL (`queryKeys.paged`), así que cada combinación de filtros es una entrada: volver a un filtro ya visto (o «Atrás») no repite la petición, y los resultados de dos filtros no se mezclan nunca. Cambiar de filtros es cambiar de clave: la lista nueva empieza en «cargando» (nunca se pinta la anterior como si fuera de los filtros nuevos) y la petición de la clave vieja se cancela al quedarse sin pantalla.
+
+**Hooks migrados:**
+
+- `usePagedCatalog` (y con él `useCatalog`, `useMovieResults`, `useSeriesCatalog`, `useLatestSeries` y `useCatalogPresence`): `useInfiniteQuery` con `getNextPageParam` según `hasNext`. «Cargar más» es `fetchNextPage` (los títulos se juntan con `mergeById`; si falla, aviso y `loadMoreFailed`); «Reintentar» es `resetQueries` (vuelve a la página 0, como antes; un `refetch` pediría una tras otra todas las páginas cargadas). La portada y `/peliculas` sin filtros comparten la misma entrada.
+- `useSeriesDetail`: `useQuery`; un 404 es «no encontrada» (sin reintento), también si llega en un refresco.
+- `useGenres`: una sola entrada para las cuatro pantallas; el orden lo pone `select: sortGenres`. La pestaña Géneros escribe en ella con `setQueryData` tras cada alta, renombrado o borrado confirmado.
+- `useAdminSearchList`: `useQuery` con `placeholderData: keepPreviousData` (mientras llega otra página o búsqueda se ve la anterior, atenuada).
+- `FavoritesContext`: ver 20.2.
+
+**Invalidación tras escribir desde el panel** (`hooks/useInvalidateCatalog`, `keysAffectedBy`). Tras crear, editar o borrar una película se invalida `movies` + `favorites`; una serie o un episodio, `series` + `favorites`; un género, `movies` + `series` + `favorites` (los títulos llevan los nombres de sus géneros dentro). «Mi lista» va en todas porque guarda copias de los títulos. Invalidar marca la entrada como anticuada: lo que está en pantalla se pide al momento y lo demás, al volver a abrirlo (mientras llega, se ve un instante la versión anterior: es el patrón *stale-while-revalidate*). También se invalida cuando el servidor responde 404 («ya no existía»): es la prueba de que la copia local estaba desfasada.
+
+**Al cambiar de sesión, la caché se vacía.** `AuthProvider` llama a `queryClient.clear()` en cada cambio (entrar, salir, sesión caducada). Sin eso, tras cerrar sesión y entrar con otra cuenta en el mismo navegador se verían los favoritos de la persona anterior (la caché sobrevive a los componentes). `clear()` además cancela las peticiones en vuelo de la sesión que se cierra.
+
+**Lo que se dejó sin migrar, y por qué:**
+
+- `AuthContext` (19.2): su `/users/me` es el mecanismo de sesión, no un dato.
+- `SearchBar`: un *typeahead* efímero (debounce + dos búsquedas en paralelo que se pintan juntas, con fallo parcial). Nada lo comparte y la caché apenas aportaría; su único `AbortController` está en un solo efecto y probado con reloj falso.
+- La carga de la película o serie a **editar** (`MovieFormPage`, `SeriesFormPage`) y el refresco de `SeriesEpisodesSection`: copian el dato una vez en el estado editable del formulario (una caché no podría actualizar lo que el administrador está escribiendo) y el diálogo de episodios **espera** a ese refresco para cerrarse con la lista nueva. Sí invalidan la caché tras guardar.
+- Login, registro y logout: son acciones de un solo uso, sin datos que cachear.
+
+**Tests.** `src/test/queryClient.tsx` crea un `QueryClient` nuevo por test (`retry: false`, `gcTime: Infinity`, sin refresco al enfocar) y `renderWithProviders` lo monta; los tests de hooks usan `queryWrapper()`. En `src/test/setup.ts`, TanStack avisa de los cambios en una microtarea en lugar de en un `setTimeout(0)`, para que `await act(...)` los incluya (y para que el reloj falso no los congele). La política de reintentos se prueba con el `QueryClient` real en `lib/queryClient.test.tsx`; la caché entre navegaciones, la invalidación tras editar y el cambio de usuario, con las rutas reales en `src/serverCache.test.tsx`; y en E2E, `admin-peliculas.spec.ts` comprueba que `/peliculas` enseña el título editado sin recargar la página.
 ---
 
 ## 20. Frontend: pantallas y estado
@@ -1577,7 +1687,7 @@ Qué hace, paso a paso:
 - Carga inicial: `GET /movies?page=0&size=20&sort=createdAt&direction=desc`.
 - «Cargar más películas»: pide la página siguiente mientras la respuesta diga `hasNext: true`, y la **añade al final** sin duplicados (`mergeById`). El banner no cambia y el scroll no salta.
 - Estados separados para la carga inicial (`status`: cargando, listo, error) y para «cargar más» (`loadingMore`, `loadMoreFailed`): si falla «cargar más», no se pierde lo ya cargado; aparece un aviso y el botón pasa a «Reintentar».
-- Cancela las peticiones en vuelo al salir de la pantalla (`AbortController`).
+- Datos en la caché de TanStack Query (19.3): la petición en vuelo se cancela al salir de la pantalla, y volver a la portada dentro del minuto no repite nada. `/peliculas` sin filtros comparte esta misma entrada.
 
 `HomePage` reparte las películas así:
 
@@ -1597,6 +1707,14 @@ Antes cada pantalla guardaba su propia copia de la lista y se desincronizaban. A
 4. Si va bien → aviso de éxito.
 5. Si falla → se **deshace solo ese cambio** (no se restaura una copia vieja de toda la lista, que podría pisar otros cambios en curso) y se avisa.
 6. **Excepción**: un 409 al añadir («ya estaba») o un 404 al quitar («ya no estaba») significan que el servidor **ya tiene el estado deseado** (por ejemplo, lo cambiaste en otra pestaña). No se deshace nada; solo se informa.
+
+**Con TanStack Query** (19.3) las dos listas van en UNA entrada de la caché (`queryKeys.favorites.all`) y añadir o quitar es una mutación (`useMutation`): `onMutate` cancela un refresco de la lista que estuviera en vuelo (traería la lista de antes del clic y pisaría el cambio) y aplica el cambio en la caché; `onError` deshace solo ese título (salvo 409/404); `onSettled` desbloquea el botón y, cuando no queda ningún cambio en vuelo, marca la lista como anticuada **sin pedirla** (pedirla tras cada clic costaría una petición por clic y reordenaría las series bajo el puntero). Si se pulsa mientras la lista aún carga, al terminar se vuelve a pedir: esa carga pudo salir antes del cambio.
+
+Tres detalles añadidos tras la revisión de `qa`:
+
+- **Se reafirma lo confirmado.** `onMutate` solo cancela los refrescos que ya estaban en vuelo; uno que empezara mientras viajaba la petición (volver a la pestaña, reconectar, una invalidación del panel) traía la lista sin el cambio y lo pisaba: el aviso decía «se ha añadido» y el corazón salía vacío. Ahora `onSuccess` (y la rama 409/404 de `onError`) vuelven a aplicar el estado que confirmó el servidor, sin duplicados y sin pedir la lista otra vez (`applyConfirmed`).
+- **Un aviso por racha de fallos.** Con el servidor caído, cada vuelta a la pestaña volvía a pedir la lista y lanzaba otro «No se pudo cargar tu lista». Ahora se avisa una vez hasta la siguiente carga correcta.
+- **Nada de avisos de una sesión ya cerrada.** `onMutate` guarda la época de la sesión; si cuando responde el servidor la sesión ya es otra (se cerró sesión con la petición en vuelo), no se avisa ni se toca la caché, que ya es de otra persona.
 
 **Vaciar la lista no es optimista**: es destructivo, así que primero se confirma con un diálogo y se espera a la respuesta del servidor.
 
@@ -1654,10 +1772,10 @@ Solo para `ADMIN`. La barra muestra el enlace **«Administrar»** únicamente si
 - **`AdminMoviesPage`** (listado):
   - Tabla con portada pequeña (`MoviePoster`), título, año, duración, géneros y acciones «Editar X» y «Borrar X» (el nombre accesible incluye el título).
   - En móvil la tabla se compacta (año, duración y géneros bajo el título, y acciones solo con icono) para no provocar scroll horizontal.
-  - Buscador por título con debounce de 300 ms (`useDebouncedValue`) y cancelación (`AbortController`). Sin texto pide `/movies?sort=createdAt&direction=desc`; con texto, `/movies/search?title=…&sort=title`.
+  - Buscador por título con debounce de 300 ms (`useDebouncedValue`); cada búsqueda y página es una entrada de la caché (19.3), y la petición de la búsqueda anterior se cancela. Sin texto pide `/movies?sort=createdAt&direction=desc`; con texto, `/movies/search?title=…&sort=title`.
   - Paginación con «Anterior»/«Siguiente», «Página X de Y» y el total (`components/Pagination`). La búsqueda y la página viven en la URL (`?q=&page=`), así que recargar o volver atrás conserva el estado.
   - Estados de carga, vacío y error con reintento.
-- **Borrar película**: `ConfirmDialog` («¿Borrar "Título"? También se quitará de las listas de todos los usuarios…»). Espera al servidor (no es optimista, porque es destructivo). Después avisa y recarga la página actual (retrocede una si queda vacía). Un 404 significa que ya estaba borrada: se informa y se recarga.
+- **Borrar película**: `ConfirmDialog` («¿Borrar "Título"? También se quitará de las listas de todos los usuarios…»). Espera al servidor (no es optimista, porque es destructivo). Después avisa e invalida la caché de películas (19.3), lo que recarga la página actual (retrocede una si queda vacía) y pone al día los listados públicos. Un 404 significa que ya estaba borrada: se informa y se recarga.
 - **`MovieFormPage`** (alta y edición, el mismo componente):
   - Campos: título, sinopsis (con contador de caracteres), duración, año, URL de portada, URL de vídeo y géneros (casillas en un `fieldset` con `legend`, cargadas con `useGenres`; al menos uno).
   - La validación en el cliente (`lib/movieValidation.ts`) replica **exactamente** las reglas y los mensajes del servidor, incluidas las de URL (capítulo 13.3). Los errores del servidor (`validationErrors`) se pintan junto a cada campo y el foco va al primero.
@@ -1701,7 +1819,7 @@ Las tarjetas abren el modal de detalle de siempre (`MovieDetailsModal`). Una pá
 
 Un detalle que costó un bug: `setSearchParams` de React Router cambia de identidad con cada URL. Por eso, tras aplicar con Intro, se volvía a aplicar el borrador anterior y se deshacía el filtro. Lo evita la marca `handledDraft`, y hay un test que lo reproduce.
 
-**Datos:** las dos vistas usan una sola llamada a `usePagedCatalog`, que ahora acepta una `CatalogQuery` (`sort`, `direction`, `genreId`, `releaseYear`). Al cambiar de consulta, reinicia la lista durante el render y cancela con `AbortController` la carga y el «cargar más» anteriores, así que una respuesta lenta del filtro anterior nunca pisa la del nuevo. El pie «Mostrando N de M / Cargar más» es `LoadMoreFooter`, compartido con la portada y `/series`.
+**Datos:** las dos vistas usan una sola llamada a `usePagedCatalog`, que acepta una `CatalogQuery` (`sort`, `direction`, `genreId`, `releaseYear`). Los filtros forman parte de la clave de la caché (19.3): al cambiarlos la lista empieza en «cargando», la carga y el «cargar más» del filtro anterior se cancelan y una respuesta lenta suya nunca pisa la del nuevo; volver a un filtro ya visto lo pinta al instante. El pie «Mostrando N de M / Cargar más» es `LoadMoreFooter`, compartido con la portada y `/series`.
 
 ### 20.9 Estados vacíos según el rol
 
@@ -1807,10 +1925,10 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1552 | `.\mvnw.cmd test` (desde `streambox/`) |
-| Backend (PostgreSQL real) | Testcontainers | 131 | Se ejecutan con el anterior (1683 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 774 | `npm run test` (desde `frontend/`) |
-| Frontend (flujos completos) | Playwright (Chromium) | 144 (+24 de capturas, que se omiten) | `npm run test:e2e` |
+| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1680 | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (PostgreSQL real) | Testcontainers | 146 | Se ejecutan con el anterior (1826 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 889 | `npm run test` (desde `frontend/`) |
+| Frontend (flujos completos) | Playwright (Chromium) | 150 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend
 
@@ -1845,6 +1963,7 @@ Prueban de verdad todo el recorrido del capítulo 2: filtros, seguridad, control
 - **Vitest + Testing Library** (`*.test.ts(x)` junto al código): prueban la lógica (`apiFetch`, validación, `buildCatalogRows`…) y los componentes **como los usaría una persona**: buscan elementos por su rol y su texto (`getByRole('button', { name: 'Iniciar sesión' })`), no por clases CSS. Si un test no encuentra un elemento por su rol, suele ser un problema de accesibilidad. Se ejecutan en `jsdom` (un navegador simulado), con algunas simulaciones en `src/test/setup.ts` (por ejemplo, `<dialog>`, que jsdom no implementa).
 - **Playwright** (`frontend/e2e/`): abre un Chromium real y recorre la aplicación de verdad (registro, login, catálogo, favoritos, buscador, teclado, responsive en 375/768/1280 px). Levanta **su propio backend** en el puerto 8099 con H2 en memoria y su propio Vite en el 5199, siembra 25 películas por la API con un administrador temporal y lo apaga todo al terminar. No toca tu base de datos ni tus puertos 8080 y 5173. Las portadas se siembran como rutas propias (`/covers/...`), que son las únicas no `https` que acepta la API.
 - **Specs que modifican el catálogo** (`admin-peliculas.spec.ts` y `admin-series.spec.ts`: crean, editan y borran títulos) van en un proyecto aparte, `catalogo-mutable`, que Playwright solo empieza cuando el resto ha terminado. Mientras existe una película creada por un test, ella pasa a ser la más reciente, y los tests que comprueban el banner o «Mostrando 25 de 25» fallarían según el orden. Contrapartida: si falla algún test del proyecto principal, este se omite. Para ejecutarlo solo: `npx playwright test admin-peliculas admin-series --no-deps`.
+- **La caché en los tests.** Cada test tiene su propio `QueryClient` (`src/test/queryClient.tsx`): ninguno ve lo que cargó otro. Ver 19.3.
 - **El tiempo en los tests.** Ningún test de Vitest espera tiempo real. Los que dependen de un debounce (buscador de la barra, buscador del panel, vista previa de la portada) usan el reloj falso de `src/test/fakeTimers.ts`: `installManualTimers()` en `beforeEach` y `passTime(ms)` para dejar pasar el tiempo. Así se comprueba el retraso exacto (nada a los 299 ms, la petición a los 300) y el resultado no depende de lo cargada que esté la máquina. Con el reloj real y `waitFor` (1 s), algunos fallaban a veces con la suite en paralelo.
 - **Esperar como una persona en E2E.** Antes de pulsar en el formulario de película se espera a que esté completo (`waitForMovieForm(page)` en `e2e/support/fixtures.ts`). Los géneros llegan aparte y, al aparecer, desplazan los botones 128 px en móvil. Playwright solo comprueba qué hay bajo el puntero en el primer evento del clic, así que el `mouseup` podía caer en otro elemento.
 
@@ -1876,7 +1995,7 @@ Ejemplo: `age_rating` en `movies`.
 3. **DTOs y mapper**: `MovieRequest` (con validación), `MovieResponse` y `MovieMapper`.
 4. **Arranca la aplicación**: Hibernate valida que entidad y migración coinciden.
 5. **Tests**: `FlywaySchemaIntegrationTest` y `PostgresSchemaIntegrationTest` para la columna y sus restricciones.
-6. **Nunca** edites una migración ya aplicada (V1 a V3).
+6. **Nunca** edites una migración ya aplicada (V1 a V4).
 
 ### 23.3 Añadir una pantalla al frontend
 

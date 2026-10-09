@@ -1,6 +1,8 @@
 /**
  * E2E del ciclo completo de una película desde el panel: alta (con portada
- * propia `/covers/...` y vista previa), edición y borrado con confirmación.
+ * propia `/covers/...` y vista previa), edición y borrado con confirmación. De
+ * paso comprueba la caché de datos (TanStack Query): tras editar, `/peliculas`
+ * enseña el título nuevo sin recargar la página.
  *
  * **Se ejecuta aparte y al final** (proyecto `catalogo-mutable` de
  * `playwright.config.ts`, que depende del resto): mientras existe, la película
@@ -82,6 +84,15 @@ test('crea una película con portada propia, la edita y la borra con confirmaci�
   await expect(row).toContainText('2023');
   await expect(row).toContainText('1h 51m');
 
+  // Caché de datos: /peliculas se carga AHORA (la nueva es la más reciente, así que es el banner) y se vuelve
+  // al panel sin recargar la página. La marca en `window` desaparecería con una recarga.
+  const mainNav = page.getByRole('navigation', { name: 'Principal' });
+  await page.evaluate(() => Object.assign(window, { __sinRecargar: true }));
+  await mainNav.getByRole('link', { name: 'Películas' }).click();
+  await expect(page.getByRole('heading', { level: 2, name: title, exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/admin\/peliculas$/);
+
   // Edición: carga los datos, se cambian título y duración y se vuelve al listado.
   await row.getByRole('link', { name: `Editar ${title}` }).click();
   await expect(page.getByRole('heading', { level: 2, name: `Editar «${title}»` })).toBeVisible();
@@ -96,6 +107,15 @@ test('crea una película con portada propia, la edita y la borra con confirmaci�
   await expect(page.getByText(`Se han guardado los cambios de «${editedTitle}».`)).toBeVisible();
   await expect(movieRow(page, editedTitle)).toContainText('1h 52m');
   await expect(movieRow(page, title)).toHaveCount(0);
+
+  // Sin recargar, /peliculas ya enseña el título nuevo: el dato de hace unos segundos seguía «fresco» en la
+  // caché, pero la edición lo invalidó.
+  await mainNav.getByRole('link', { name: 'Películas' }).click();
+  await expect(page.getByRole('heading', { level: 2, name: editedTitle, exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: title, exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => (window as { __sinRecargar?: boolean }).__sinRecargar)).toBe(true);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/admin\/peliculas$/);
 
   // Buscarla por su sufijo y borrarla, con confirmación.
   await page.getByRole('searchbox', { name: 'Buscar por título' }).fill(SUFFIX);

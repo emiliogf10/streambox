@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.time.Duration;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,6 +59,8 @@ class JwtPropertiesValidationTest {
 
     private static final String VALID_SECRET = "a".repeat(32);
 
+    private static final Duration TTL = Duration.ofMinutes(15);
+
     /** Secreto demasiado corto (20 caracteres) y fácil de buscar en el log. */
     private static final String LEAKED_SECRET = "secreto-filtrado-123";
 
@@ -88,18 +91,18 @@ class JwtPropertiesValidationTest {
     }
 
     @Test
-    void secretoValidoArrancaYUsa24HorasPorDefecto() {
+    void secretoValidoArrancaYUsa15MinutosPorDefecto() {
         runner.withPropertyValues("jwt.secret=" + VALID_SECRET).run(context -> {
             assertThat(context).hasNotFailed();
             JwtProperties properties = context.getBean(JwtProperties.class);
             assertThat(properties.secret()).isEqualTo(VALID_SECRET);
-            assertThat(properties.expirationHours()).isEqualTo(24);
+            assertThat(properties.accessTokenTtl()).isEqualTo(Duration.ofMinutes(15));
         });
     }
 
     @Test
     void secretoDeExactamente32CaracteresEsValido() {
-        assertThat(new JwtProperties(VALID_SECRET, 24).secret()).isEqualTo(VALID_SECRET);
+        assertThat(new JwtProperties(VALID_SECRET, TTL).secret()).isEqualTo(VALID_SECRET);
     }
 
     @Test
@@ -140,16 +143,44 @@ class JwtPropertiesValidationTest {
 
     @Test
     void secretoSoloConEspaciosImpideArrancar() {
-        assertThatThrownBy(() -> new JwtProperties(" ".repeat(40), 24))
+        assertThatThrownBy(() -> new JwtProperties(" ".repeat(40), TTL))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("jwt.secret es obligatorio");
     }
 
-    @Test
-    void duracionCeroONegativaImpideArrancar() {
-        runner.withPropertyValues("jwt.secret=" + VALID_SECRET, "jwt.expiration-hours=0")
+    /**
+     * La vida del token de acceso debe ser mayor que 0 y como mucho 1 hora
+     * (un TTL de horas anularía la ventaja de poder cerrar sesión de verdad).
+     * El arranque falla nombrando la propiedad y su variable de entorno.
+     */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = { "0s", "-1m", "61m", "2h", "24h" })
+    void unaVidaDelTokenNoValidaImpideArrancar(String ttl) {
+        runner.withPropertyValues("jwt.secret=" + VALID_SECRET, "jwt.access-token-ttl=" + ttl)
                 .run(context -> assertThat(context).hasFailed()
-                        .getFailure().hasStackTraceContaining("jwt.expiration-hours"));
+                        .getFailure().hasStackTraceContaining("jwt.access-token-ttl")
+                        .hasStackTraceContaining("JWT_ACCESS_TOKEN_TTL"));
+    }
+
+    @Test
+    void unaVidaDelTokenDeExactamenteUnaHoraOUnSegundoEsValida() {
+        assertThat(new JwtProperties(VALID_SECRET, Duration.ofHours(1)).accessTokenTtl())
+                .isEqualTo(Duration.ofHours(1));
+        assertThat(new JwtProperties(VALID_SECRET, Duration.ofSeconds(1)).accessTokenTtl())
+                .isEqualTo(Duration.ofSeconds(1));
+    }
+
+    @Test
+    void laVidaDelTokenSeLeeConElFormatoDeSpringBoot() {
+        runner.withPropertyValues("jwt.secret=" + VALID_SECRET, "jwt.access-token-ttl=5m").run(context ->
+                assertThat(context.getBean(JwtProperties.class).accessTokenTtl()).isEqualTo(Duration.ofMinutes(5)));
+    }
+
+    @Test
+    void unaVidaDelTokenNulaSeRechazaAlCrearloAMano() {
+        assertThatThrownBy(() -> new JwtProperties(VALID_SECRET, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(JwtProperties.INVALID_TTL_MESSAGE);
     }
 
     /**
@@ -207,7 +238,7 @@ class JwtPropertiesValidationTest {
 
     @Test
     void elMensajeDelConstructorNoIncluyeElSecretoNiSuLongitud() {
-        assertThatThrownBy(() -> new JwtProperties(LEAKED_SECRET, 24))
+        assertThatThrownBy(() -> new JwtProperties(LEAKED_SECRET, TTL))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(JwtProperties.SHORT_SECRET_MESSAGE)
                 .message().doesNotContain(LEAKED_SECRET)
@@ -218,8 +249,8 @@ class JwtPropertiesValidationTest {
     void toStringNoMuestraElSecreto() {
         String secret = "secreto-largo-que-no-debe-salir-en-logs-0123456789";
 
-        assertThat(new JwtProperties(secret, 24).toString())
+        assertThat(new JwtProperties(secret, TTL).toString())
                 .doesNotContain(secret)
-                .contains("expirationHours=24");
+                .contains("accessTokenTtl=PT15M");
     }
 }

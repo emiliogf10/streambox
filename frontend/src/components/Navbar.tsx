@@ -48,6 +48,9 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
  * Tras los datos del usuario van dos acciones, ambas de 44 px: «Mi perfil»
  * (enlace a `/perfil`, que cierra el menú al navegar) y «Cerrar sesión». El perfil
  * vive aquí y no en la fila de navegación principal, que ya está al límite de ancho.
+ * «Cerrar sesión» espera la confirmación del servidor (ver `logout` en
+ * `AuthContext`): mientras tanto dice «Cerrando sesión...» y no se puede repetir;
+ * si falla, el menú sigue abierto con el botón listo para reintentar y un aviso.
  *
  * **Navegación.** «Inicio» (`/`), «Películas» (`/peliculas`), «Series»
  * (`/series`) y «Mi lista» (`/favorites`). Ya no hay secciones reservadas:
@@ -78,7 +81,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
  */
 export function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const { isAuthenticated, isCheckingSession, user, isAdmin, logout } = useAuth();
+  const { isAuthenticated, isCheckingSession, user, isAdmin, logout, isLoggingOut } = useAuth();
   const headerRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -205,13 +208,18 @@ export function Navbar() {
                   <User aria-hidden="true" className="size-4" />
                   Mi perfil
                 </NavLink>
+                {/* Mientras el servidor confirma el cierre: `aria-disabled` (no `disabled`) para que el foco
+                    no salte fuera del menú —lo cerraría— y siga ahí si falla y hay que reintentar. */}
                 <button
                   type="button"
                   onClick={() => void logout()}
-                  className="focus-ring flex min-h-11 w-full items-center gap-2 px-4 text-left text-sm text-gray-300 transition-colors hover:text-white"
+                  aria-disabled={isLoggingOut || undefined}
+                  className={`focus-ring flex min-h-11 w-full items-center gap-2 px-4 text-left text-sm text-gray-300 transition-colors ${
+                    isLoggingOut ? 'cursor-wait' : 'hover:text-white'
+                  }`}
                 >
                   <LogOut aria-hidden="true" className="size-4" />
-                  Cerrar sesión
+                  {isLoggingOut ? 'Cerrando sesión...' : 'Cerrar sesión'}
                 </button>
               </div>
             )}

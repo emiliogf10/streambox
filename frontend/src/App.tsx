@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from './components/AppShell';
 import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './components/RouteGuards';
 import { SkipLink } from './components/SkipLink';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
+import { createQueryClient } from './lib/queryClient';
 import { AdminGenresPage } from './pages/admin/AdminGenresPage';
 import { AdminLayout } from './pages/admin/AdminLayout';
 import { AdminMoviesPage } from './pages/admin/AdminMoviesPage';
@@ -103,22 +106,31 @@ export function AppRoutes() {
 /**
  * Raíz de la aplicación: proveedores globales y rutas ({@link AppRoutes}).
  *
- * Orden de los proveedores: `ToastProvider` por fuera porque `AuthProvider`
- * lo necesita (avisa de "sesión caducada"). `BrowserRouter` envuelve a todo
- * para que cualquier componente pueda usar el enrutador.
+ * Orden de los proveedores: `QueryClientProvider` (la caché de datos del
+ * servidor, ver `lib/queryClient.ts`) y `ToastProvider` por fuera porque
+ * `AuthProvider` necesita los dos (vacía la caché al cambiar de sesión y avisa
+ * de "sesión caducada"). `BrowserRouter` envuelve a todo para que cualquier
+ * componente pueda usar el enrutador.
+ *
+ * El `QueryClient` se crea UNA vez por montaje de `App` (`useState` con
+ * inicializador) y no como variable de módulo: así cada montaje, también en
+ * los tests, empieza con la caché vacía.
  *
  * `SkipLink` va antes de las rutas para ser lo primero que recibe el foco con el teclado.
  */
 function App() {
+  const [queryClient] = useState(createQueryClient);
   return (
     <BrowserRouter>
-      <ToastProvider>
-        <AuthProvider>
-          {/* Primer elemento enfocable de toda la aplicación (ver SkipLink). */}
-          <SkipLink />
-          <AppRoutes />
-        </AuthProvider>
-      </ToastProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <AuthProvider>
+            {/* Primer elemento enfocable de toda la aplicación (ver SkipLink). */}
+            <SkipLink />
+            <AppRoutes />
+          </AuthProvider>
+        </ToastProvider>
+      </QueryClientProvider>
     </BrowserRouter>
   );
 }

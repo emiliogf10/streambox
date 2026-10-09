@@ -340,6 +340,6 @@ class LoginAttemptServiceTest {
 
     private static RateLimitProperties properties(int maxFailures, Duration window) {
         RateLimitProperties.Rule rule = new RateLimitProperties.Rule(100, Duration.ofMinutes(1));
-        return new RateLimitProperties(rule, rule, new RateLimitProperties.Lockout(maxFailures, window, 5, Duration.ofDays(30)), 100_000);
+        return new RateLimitProperties(rule, rule, rule, new RateLimitProperties.Lockout(maxFailures, window, 5, Duration.ofDays(30)), 100_000);
     }
 }

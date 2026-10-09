@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '../context/ToastContext';
-import { apiFetch, getErrorMessage, isAbortError } from '../lib/api';
+import { apiFetch, getErrorMessage } from '../lib/api';
 import { mergeById } from '../lib/catalog';
+import { loadStatusOf } from '../lib/queryClient';
+import { queryKeys } from '../lib/queryKeys';
+import type { CatalogPath } from '../lib/queryKeys';
 import type { PageResponse } from '../lib/types';
 
 /** Estado de la carga inicial de un catálogo paginado. */
@@ -22,158 +26,117 @@ export interface CatalogQuery {
   releaseYear?: number;
 }
 
+/** Lista vacía compartida: mientras no hay datos, `items` no cambia de identidad en cada render. */
+const NO_ITEMS: never[] = [];
+
 /**
- * Carga un catálogo paginado (`/movies`, `/series` o `/movies/search`). Es la
- * lógica común de `useCatalog` (portada), los hooks de series y la página
- * `/peliculas` (`useMovieResults`): antes estaba escrita solo para películas y
- * las series la habrían duplicado línea a línea.
+ * Carga un catálogo paginado (`/movies`, `/series` o `/movies/search`) con
+ * «cargar más». Es la lógica común de `useCatalog` (portada), los hooks de
+ * series, `useCatalogPresence` y la página `/peliculas` (`useMovieResults`).
  *
- * La ordenación la hace el servidor (por defecto `sort=createdAt&direction=desc`,
- * con desempate por `id` en la misma dirección), así que la paginación es
- * estable y "Cargar más" solo pide la página siguiente mientras `hasNext` sea `true`.
+ * **Con TanStack Query** (`useInfiniteQuery`): cada página pedida se guarda en
+ * la caché bajo una clave con el endpoint, el tamaño, el orden y los filtros
+ * (`queryKeys.paged`). De ahí salen las ventajas frente a la versión anterior,
+ * que lo hacía todo a mano con `AbortController` y contadores:
+ * - **Caché compartida:** la portada y `/peliculas` sin filtros piden lo mismo y
+ *   comparten la entrada; volver a una pantalla ya visitada la pinta al instante
+ *   (y, si el dato tiene más de un minuto, lo refresca en segundo plano).
+ * - **Sin carreras:** cambiar de filtros es cambiar de clave. La lista nueva
+ *   empieza vacía («cargando»: nunca se pinta, ni un fotograma, la anterior como
+ *   si fuera de los filtros nuevos) y la petición de la clave vieja se cancela
+ *   (`signal`) al quedarse sin pantalla que la use.
+ * - **Invalidación:** tras una escritura del panel, la raíz de la clave
+ *   (`movies` o `series`) se invalida y este listado se pone al día solo.
  *
- * **Estados independientes:** la carga inicial (`status`) y la de "cargar más"
+ * La ordenación la hace el servidor (con desempate por `id`), así que la
+ * paginación es estable y «Cargar más» pide la página siguiente mientras el
+ * servidor diga `hasNext`. Los títulos de cada página se añaden al final sin
+ * duplicados (`mergeById`): el banner (el primero) no cambia y el scroll no salta.
+ *
+ * **Estados independientes:** la carga inicial (`status`) y la de «cargar más»
  * (`loadingMore`) no se mezclan. Un fallo al cargar más NO destruye lo ya
- * cargado: se avisa con un toast y el botón pasa a "Reintentar"
- * (`loadMoreFailed`). Los títulos nuevos se añaden al final (sin duplicados,
- * ver `mergeById`), así que el banner (el primero) no cambia y la posición de
- * scroll no salta.
+ * cargado: se avisa con un toast y el botón pasa a «Reintentar» (`loadMoreFailed`).
  *
- * **Cambio de consulta** (otro `path` u otros filtros, p. ej. al elegir un
- * género en `/peliculas`): el catálogo vuelve a empezar. El estado se reinicia
- * DURANTE el render (el patrón que recomienda React para "ajustar el estado
- * cuando cambia una prop"), de modo que nunca se pinta, ni un solo fotograma,
- * la lista anterior como si fuera de los filtros nuevos. Las peticiones en vuelo
- * de la consulta anterior (la inicial y la de "cargar más") se cancelan con su
- * `AbortController`: una respuesta tardía no puede colarse en la lista nueva.
- *
- * Los parámetros son valores simples (y los de `query` se desestructuran en
- * valores simples) para que, al ser dependencias de los efectos, no provoquen
- * recargas por cambiar de identidad en cada render: quien llama puede pasar un
- * objeto `query` nuevo en cada render sin problema.
- *
- * @param path ruta del listado relativa a `/api` (`/movies`, `/series`, `/movies/search`)
+ * @param path ruta del listado relativa a `/api`
  * @param pageSize títulos por petición
- * @param loadMoreErrorMessage aviso si falla "cargar más" y el error no trae mensaje propio
- * @param query orden y filtros (opcional; ver {@link CatalogQuery})
+ * @param loadMoreErrorMessage aviso si falla «cargar más» y el error no trae mensaje propio
+ * @param query orden y filtros (opcional; ver {@link CatalogQuery}); puede ser un objeto nuevo en cada render
  */
 export function usePagedCatalog<T extends { id: number }>(
-  path: string,
+  path: CatalogPath,
   pageSize: number,
   loadMoreErrorMessage: string,
   query: CatalogQuery = {},
 ) {
   const { sort = 'createdAt', direction = 'desc', genreId, releaseYear } = query;
   const toast = useToast();
-  const [items, setItems] = useState<T[]>([]);
-  const [total, setTotal] = useState(0);
-  const [status, setStatus] = useState<CatalogStatus>('loading');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loadMoreFailed, setLoadMoreFailed] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
 
-  /** Próxima página que falta por pedir (la 0 se pide en la carga inicial). */
-  const nextPage = useRef(1);
-  const loadingMoreRef = useRef(false);
-  const moreController = useRef<AbortController | null>(null);
+  const queryClient = useQueryClient();
+  // Valores simples en la clave: un objeto `query` nuevo en cada render no provoca otra petición.
+  const queryKey = queryKeys.paged(path, { pageSize, sort, direction, genreId, releaseYear });
 
-  // Otra consulta: se olvida la anterior antes de pintar (ver «Cambio de consulta» arriba).
-  const queryKey = [path, pageSize, sort, direction, genreId ?? '', releaseYear ?? ''].join('|');
-  const [currentQueryKey, setCurrentQueryKey] = useState(queryKey);
-  if (currentQueryKey !== queryKey) {
-    setCurrentQueryKey(queryKey);
-    setItems([]);
-    setTotal(0);
-    setHasMore(false);
-    setStatus('loading');
-    setLoadingMore(false);
-    setLoadMoreFailed(false);
-  }
-
-  /** Pide una página del catálogo con el orden y los filtros actuales. */
-  const fetchPage = useCallback(
-    (page: number, signal: AbortSignal) =>
+  const catalog = useInfiniteQuery({
+    queryKey,
+    queryFn: ({ pageParam, signal }) =>
       apiFetch<PageResponse<T>>(path, {
-        params: { page, size: pageSize, sort, direction, genreId, releaseYear },
+        params: { page: pageParam, size: pageSize, sort, direction, genreId, releaseYear },
         signal,
       }),
-    [path, pageSize, sort, direction, genreId, releaseYear],
+    initialPageParam: 0,
+    // La página siguiente es la que toca por orden (no la que diga el servidor): la 0, la 1, la 2...
+    getNextPageParam: (lastPage, _pages, lastPageParam) => (lastPage.hasNext ? lastPageParam + 1 : undefined),
+  });
+
+  const { data, fetchNextPage, isFetchingNextPage, isFetchNextPageError } = catalog;
+  const items = useMemo(
+    () => data?.pages.reduce<T[]>((all, page) => mergeById(all, page.content), []) ?? NO_ITEMS,
+    [data],
   );
-
-  // Carga inicial (y recarga con "Reintentar", y cada cambio de consulta).
-  useEffect(() => {
-    const controller = new AbortController();
-    // Un "cargar más" de la consulta anterior ya no sirve: se cancela y se libera el candado.
-    moreController.current?.abort();
-    loadingMoreRef.current = false;
-
-    (async () => {
-      try {
-        const response = await fetchPage(0, controller.signal);
-        // Red de seguridad: si la respuesta llega justo después de cancelar, se descarta igual.
-        if (controller.signal.aborted) return;
-        nextPage.current = 1;
-        setItems(mergeById<T>([], response.content));
-        setTotal(response.totalElements);
-        setHasMore(response.hasNext);
-        setStatus('ready');
-      } catch (error) {
-        if (isAbortError(error)) return;
-        setErrorMessage(getErrorMessage(error));
-        setStatus('error');
-      }
-    })();
-
-    return () => controller.abort();
-  }, [fetchPage, reloadKey]);
-
-  // Al salir de la pantalla se cancela cualquier "cargar más" en vuelo.
-  useEffect(() => () => moreController.current?.abort(), []);
-
-  /** Pide la página siguiente y la añade al final sin duplicar ni perder lo cargado. */
-  const loadMore = useCallback(async () => {
-    if (loadingMoreRef.current) return;
-
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-    setLoadMoreFailed(false);
-    const controller = new AbortController();
-    moreController.current = controller;
-
-    try {
-      const response = await fetchPage(nextPage.current, controller.signal);
-      if (controller.signal.aborted) return;
-      setItems((current) => mergeById(current, response.content));
-      setTotal(response.totalElements);
-      nextPage.current += 1;
-      setHasMore(response.hasNext);
-    } catch (error) {
-      if (isAbortError(error)) return;
-      setLoadMoreFailed(true);
-      toast.errorFrom(error, loadMoreErrorMessage);
-    } finally {
-      // Si se canceló por un cambio de consulta, el candado ya es de la consulta nueva: no se toca.
-      if (moreController.current === controller) {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      }
-    }
-  }, [fetchPage, loadMoreErrorMessage, toast]);
+  const lastPage = data?.pages.at(-1);
+  const status: CatalogStatus = loadStatusOf(catalog);
 
   /**
-   * Vuelve a cargar desde cero. El estado se reinicia aquí (en el evento que lo
-   * provoca) y no dentro del efecto, para no encadenar renders innecesarios.
+   * Candado síncrono de «cargar más»: un doble clic llega antes de que React
+   * pinte `loadingMore`, y sin él los dos clics esperarían la misma petición y
+   * mostrarían dos avisos si fallara.
+   */
+  const loadingMoreRef = useRef(false);
+
+  /** Pide la página siguiente; si falla, avisa (lo cargado se queda y el botón ofrece reintentar). */
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    try {
+      // Si había un refresco en segundo plano en curso, se corta (el valor por defecto): el clic
+      // siempre trae la página siguiente, en vez de esperar al refresco y no hacer nada más.
+      const result = await fetchNextPage();
+      if (result.isFetchNextPageError) toast.errorFrom(result.error, loadMoreErrorMessage);
+    } finally {
+      loadingMoreRef.current = false;
+    }
+  }, [fetchNextPage, loadMoreErrorMessage, toast]);
+
+  /**
+   * Vuelve a cargar DESDE CERO («Reintentar» del estado de error): olvida las
+   * páginas cargadas y pide solo la primera, y mientras tanto `status` es
+   * `loading`. Un `refetch` volvería a pedir, una tras otra, todas las páginas
+   * ya cargadas.
    */
   const reload = useCallback(() => {
-    moreController.current?.abort();
-    loadingMoreRef.current = false;
-    setStatus('loading');
-    setLoadingMore(false);
-    setLoadMoreFailed(false);
-    setReloadKey((key) => key + 1);
-  }, []);
+    const key = queryKeys.paged(path, { pageSize, sort, direction, genreId, releaseYear });
+    void queryClient.resetQueries({ queryKey: key, exact: true });
+  }, [queryClient, path, pageSize, sort, direction, genreId, releaseYear]);
 
-  return { items, total, status, errorMessage, loadingMore, loadMoreFailed, hasMore, loadMore, reload };
+  return {
+    items,
+    total: lastPage?.totalElements ?? 0,
+    status,
+    errorMessage: status === 'error' ? getErrorMessage(catalog.error) : '',
+    loadingMore: isFetchingNextPage,
+    // Mientras se reintenta, el botón dice «Cargando...», no «Reintentar».
+    loadMoreFailed: isFetchNextPageError && !isFetchingNextPage,
+    hasMore: lastPage?.hasNext ?? false,
+    loadMore,
+    reload,
+  };
 }

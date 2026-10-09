@@ -8,10 +8,11 @@
  * son una lista aparte (y no se confunden con una película del mismo id), y el
  * vaciado de las dos con su fallo parcial. `fetch` está simulado.
  */
+import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { act, renderHook, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FavoriteButton } from '../components/FavoriteButton';
 import {
   errorResponse,
@@ -23,10 +24,15 @@ import {
   routeFetch,
 } from '../test/helpers';
 import { FavoritesProvider, useFavorites } from './FavoritesContext';
-import { AuthProvider } from './AuthContext';
+import { AuthProvider, useAuth } from './AuthContext';
 import { ToastProvider } from './ToastContext';
+import { createTestQueryClient } from '../test/queryClient';
+import { queryKeys } from '../lib/queryKeys';
 
 const fetchMock = vi.fn<typeof fetch>();
+
+/** Caché de datos nueva en cada test (ver `beforeEach`): ninguno ve la lista que cargó otro. */
+let queryClient = createTestQueryClient();
 
 const m1 = makeMovie({ id: 1, title: 'Uno' });
 const m2 = makeMovie({ id: 2, title: 'Dos' });
@@ -53,6 +59,7 @@ function deferred<T>() {
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
+  queryClient = createTestQueryClient();
 });
 
 describe('FavoriteButton (interfaz)', () => {
@@ -181,11 +188,13 @@ describe('FavoriteButton (interfaz)', () => {
 describe('useFavorites (estado compartido)', () => {
   function wrapper({ children }: { children: ReactNode }) {
     return (
-      <ToastProvider>
-        <AuthProvider>
-          <FavoritesProvider>{children}</FavoritesProvider>
-        </AuthProvider>
-      </ToastProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <AuthProvider>
+            <FavoritesProvider>{children}</FavoritesProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </QueryClientProvider>
     );
   }
 
@@ -279,6 +288,78 @@ describe('useFavorites (estado compartido)', () => {
     expect(result.current.movies.map((m) => m.id)).toEqual([1]);
   });
 
+  describe('caché de TanStack Query', () => {
+    it('el cambio optimista está en la caché al instante y, si falla, se deshace también allí', async () => {
+      const pending = deferred<Response>();
+      const { result } = await renderLoaded([m1, m2], { 'DELETE /api/users/me/favorites/1': () => pending.promise });
+      const cachedIds = () =>
+        queryClient.getQueryData<{ movie: { id: number }[] }>(queryKeys.favorites.all)?.movie.map((m) => m.id);
+
+      let toggling!: Promise<void>;
+      await act(async () => {
+        toggling = result.current.toggle(m1);
+      });
+      expect(cachedIds()).toEqual([2]);
+      expect(result.current.isFavorite(1)).toBe(false);
+
+      await act(async () => {
+        pending.resolve(errorResponse(500, 'INTERNAL_ERROR', 'boom'));
+        await toggling;
+      });
+      expect(cachedIds()).toEqual([1, 2]);
+      expect(result.current.isFavorite(1)).toBe(true);
+    });
+
+    it('un refresco de la lista que estaba en vuelo NO pisa el cambio optimista (se cancela)', async () => {
+      const staleRefresh = deferred<Response>();
+      let refreshing = false;
+      const { result } = await renderLoaded([m1], {
+        [LIST]: () => (refreshing ? staleRefresh.promise : jsonResponse([m1])),
+        'POST /api/users/me/favorites/2': () => jsonResponse({}, 201),
+      });
+      // Algo pide refrescar la lista (volver a la pestaña, una invalidación...) y el servidor tarda.
+      refreshing = true;
+      await act(async () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.favorites.all });
+      });
+
+      await act(() => result.current.toggle(m2));
+      // La respuesta del refresco era de ANTES del clic (sin la 2): llega tarde y se descarta.
+      await act(async () => staleRefresh.resolve(jsonResponse([m1])));
+
+      expect(result.current.movies.map((m) => m.id)).toEqual([2, 1]);
+    });
+
+    it('tras el cambio la lista queda «anticuada» pero no se vuelve a pedir (una petición por clic, no dos)', async () => {
+      const { result } = await renderLoaded([m1], { 'POST /api/users/me/favorites/2': () => jsonResponse({}, 201) });
+
+      await act(() => result.current.toggle(m2));
+
+      expect(queryClient.getQueryState(queryKeys.favorites.all)?.isInvalidated).toBe(true);
+      expect(fetchMock.mock.calls.filter(([url, init]) => String(url) === '/api/users/me/favorites' && !init?.method)).toHaveLength(1);
+    });
+
+    it('si se pulsa mientras la lista aún carga, al terminar se vuelve a pedir (esa carga pudo salir antes del cambio)', async () => {
+      const firstLoad = deferred<Response>();
+      let loads = 0;
+      routeFetch(fetchMock, {
+        [LIST]: () => {
+          loads += 1;
+          return loads === 1 ? firstLoad.promise : jsonResponse([m2]);
+        },
+        'POST /api/users/me/favorites/2': () => jsonResponse({}, 201),
+      });
+      const { result } = renderHook(() => useFavorites(), { wrapper });
+      await waitFor(() => expect(loads).toBe(1));
+
+      await act(() => result.current.toggle(m2));
+      await act(async () => firstLoad.resolve(jsonResponse([])));
+
+      await waitFor(() => expect(result.current.movies.map((m) => m.id)).toEqual([2]));
+      expect(loads).toBe(2);
+    });
+  });
+
   describe('clear (vaciar la lista)', () => {
     it('no es optimista: la lista se vacía solo cuando el servidor confirma, y devuelve true', async () => {
       const pending = deferred<Response>();
@@ -339,11 +420,13 @@ describe('useFavorites: series', () => {
 
   function wrapper({ children }: { children: ReactNode }) {
     return (
-      <ToastProvider>
-        <AuthProvider>
-          <FavoritesProvider>{children}</FavoritesProvider>
-        </AuthProvider>
-      </ToastProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <AuthProvider>
+            <FavoritesProvider>{children}</FavoritesProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </QueryClientProvider>
     );
   }
 
@@ -548,5 +631,185 @@ describe('FavoriteButton de una serie', () => {
     expect(await screen.findByText('«Serie Uno» se ha añadido a tu lista.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^En mi lista\s*—\s*Serie Uno$/ })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/users/me/favorites/series/1' && init?.method === 'POST')).toBe(true);
+  });
+});
+
+describe('useFavorites: carreras con refrescos, avisos y cambios de sesión', () => {
+  function wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <AuthProvider>
+            <FavoritesProvider>{children}</FavoritesProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  /** Monta la lista y la sesión juntas (para poder cerrar sesión desde el test). */
+  async function renderLoaded(extra: Parameters<typeof routeFetch>[1] = {}) {
+    routeFetch(fetchMock, { [LIST]: () => jsonResponse([m1]), ...extra });
+    const hook = renderHook(() => ({ fav: useFavorites(), auth: useAuth() }), { wrapper });
+    await waitFor(() => expect(hook.result.current.fav.status).toBe('ready'));
+    await waitFor(() => expect(hook.result.current.auth.isAuthenticated).toBe(true));
+    return hook;
+  }
+
+  const ids = (movies: { id: number }[]) => movies.map((m) => m.id);
+
+  it.each([
+    ['201 (añadida)', () => jsonResponse({}, 201)],
+    ['409 (ya estaba)', () => errorResponse(409, 'MOVIE_ALREADY_IN_FAVORITES', 'La película ya está en favoritos')],
+  ])(
+    'un refresco que empieza DURANTE el POST y trae la lista de antes no deja fuera el título confirmado: %s',
+    async (_name, answer) => {
+      const post = deferred<Response>();
+      const { result } = await renderLoaded({ 'POST /api/users/me/favorites/2': () => post.promise });
+
+      let toggling!: Promise<void>;
+      await act(async () => {
+        toggling = result.current.fav.toggle(m2);
+      });
+      expect(ids(result.current.fav.movies)).toEqual([2, 1]);
+      // Mientras el POST viaja, algo refresca la lista y el servidor aún no la tiene: pisa el cambio optimista.
+      await act(async () => {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.favorites.all });
+      });
+      expect(ids(result.current.fav.movies)).toEqual([1]);
+
+      await act(async () => {
+        post.resolve(answer());
+        await toggling;
+      });
+
+      // El servidor confirmó que está: se vuelve a aplicar, sin pedir la lista otra vez y sin duplicarla.
+      expect(ids(result.current.fav.movies)).toEqual([2, 1]);
+      expect(fetchMock.mock.calls.filter(([url, init]) => String(url) === '/api/users/me/favorites' && !init?.method)).toHaveLength(2);
+    },
+  );
+
+  it('lo mismo al quitar: un refresco a medias del DELETE no devuelve el título quitado', async () => {
+    const del = deferred<Response>();
+    const { result } = await renderLoaded({
+      [LIST]: () => jsonResponse([m1]),
+      'DELETE /api/users/me/favorites/1': () => del.promise,
+    });
+
+    let toggling!: Promise<void>;
+    await act(async () => {
+      toggling = result.current.fav.toggle(m1);
+    });
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.favorites.all });
+    });
+    expect(ids(result.current.fav.movies)).toEqual([1]);
+
+    await act(async () => {
+      del.resolve(noContentResponse());
+      await toggling;
+    });
+
+    expect(ids(result.current.fav.movies)).toEqual([]);
+  });
+
+  it('si la respuesta llega cuando la sesión ya se cerró, no avisa ni toca la lista (es de otra sesión)', async () => {
+    const post = deferred<Response>();
+    const { result } = await renderLoaded({
+      'POST /api/users/me/favorites/2': () => post.promise,
+      'POST /api/auth/logout': () => noContentResponse(),
+    });
+
+    let toggling!: Promise<void>;
+    await act(async () => {
+      toggling = result.current.fav.toggle(m2);
+    });
+    await act(async () => {
+      await result.current.auth.logout();
+    });
+    await act(async () => {
+      post.resolve(jsonResponse({}, 201));
+      await toggling;
+    });
+
+    expect(screen.queryByText(/se ha añadido a tu lista/)).not.toBeInTheDocument();
+    expect(result.current.fav.isFavorite(2)).toBe(false);
+    expect(result.current.fav.isPending(2)).toBe(false);
+  });
+
+  it('un fallo que llega con la sesión ya cerrada tampoco avisa (ni deshace nada en la lista de otra sesión)', async () => {
+    const del = deferred<Response>();
+    const { result } = await renderLoaded({
+      'DELETE /api/users/me/favorites/1': () => del.promise,
+      'POST /api/auth/logout': () => noContentResponse(),
+    });
+
+    let toggling!: Promise<void>;
+    await act(async () => {
+      toggling = result.current.fav.toggle(m1);
+    });
+    await act(async () => {
+      await result.current.auth.logout();
+    });
+    await act(async () => {
+      del.resolve(errorResponse(500, 'INTERNAL_ERROR', 'boom'));
+      await toggling;
+    });
+
+    expect(screen.queryByText(/El servidor ha tenido un problema/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No se pudo quitar/)).not.toBeInTheDocument();
+  });
+
+  describe('con el servidor caído y volviendo a la pestaña', () => {
+    afterEach(() => {
+      focusManager.setFocused(undefined);
+    });
+
+    /** Simula salir de la pestaña y volver a ella (lo que dispara `refetchOnWindowFocus`). */
+    async function returnToTab() {
+      await act(async () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+    }
+
+    it('avisa UNA vez por racha de fallos; tras una carga correcta, un fallo nuevo vuelve a avisar', async () => {
+      // La app real refresca al volver a la pestaña (el cliente de los tests lo desactiva por defecto).
+      queryClient.setDefaultOptions({
+        queries: { ...queryClient.getDefaultOptions().queries, refetchOnWindowFocus: true },
+      });
+      let up = false;
+      let loads = 0;
+      routeFetch(fetchMock, {
+        [LIST]: () => {
+          loads += 1;
+          return up ? jsonResponse([m1]) : errorResponse(500, 'INTERNAL_ERROR', 'boom');
+        },
+      });
+      const { result } = renderHook(() => useFavorites(), { wrapper });
+      await waitFor(() => expect(result.current.status).toBe('error'));
+      const SERVER_DOWN = 'El servidor ha tenido un problema. Inténtalo de nuevo en unos minutos.';
+      expect(screen.getAllByText(SERVER_DOWN)).toHaveLength(1);
+
+      for (const expectedLoads of [2, 3]) {
+        await returnToTab();
+        await waitFor(() => expect(loads).toBe(expectedLoads));
+        await waitFor(() => expect(result.current.status).toBe('error'));
+      }
+      // Tres fallos seguidos, un solo aviso (la pantalla ya enseña el error con «Reintentar»).
+      expect(screen.getAllByText(SERVER_DOWN)).toHaveLength(1);
+
+      up = true;
+      await returnToTab();
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+
+      // Racha nueva (p. ej. se descarta la lista y vuelve a fallar): sí se avisa otra vez.
+      up = false;
+      await act(async () => {
+        await queryClient.resetQueries({ queryKey: queryKeys.favorites.all });
+      });
+      await waitFor(() => expect(result.current.status).toBe('error'));
+      expect(screen.getAllByText(SERVER_DOWN)).toHaveLength(2);
+    });
   });
 });

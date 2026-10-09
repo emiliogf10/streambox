@@ -60,7 +60,7 @@ Cada subagente arranca **sin memoria** de esta conversación. Cada encargo debe 
 Un informe de un subagente describe lo que *intentó*, no necesariamente lo que ocurrió:
 
 - Mira el resultado real: `git diff --stat` y los archivos clave que cambiaron.
-- Cambios de backend/BD/seguridad: ejecuta tú `.\mvnw.cmd test` (desde `streambox/`) y cuenta los tests. Cambios de frontend: `npm run build` y `npm run lint` (desde `frontend/`).
+- Cambios de backend/BD/seguridad: ejecuta tú `.\mvnw.cmd test` (desde `streambox/`) y cuenta los tests. Cambios de frontend: `npm run build` y `npm run lint` (desde `frontend/`) y, si cambia algo visible, **míralo con `agent-browser`** (preferencia del autor; reglas en el apartado «Navegador» de `CLAUDE.md`: sesión propia, pila aislada con H2 en 8097/5197, nunca el 8080/Supabase, sin coincidir con otro Maven). Pide también a `frontend` y `qa` que lo usen.
 - Cambios no triviales: pide una pasada de `qa` (y de `security` si tocan autenticación, autorización o datos personales). Un revisor distinto de quien implementó.
 - Si un agente se salió de su zona o debilitó un test, deshaz o reencarga; nunca lo des por bueno.
 

@@ -2,26 +2,27 @@
   "info": {
     "_postman_id": "36f1cc7d-d712-5ceb-bd83-b75fec0d4c79",
     "name": "StreamBox API",
-    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend (solo para las carpetas con peticiones de administrador).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos y los borra al final. Los ids y tokens se guardan solos en variables de colección.\n\n**Autenticación (estado en `main`)**: JWT en el cuerpo del login y cabecera `Authorization: Bearer <token>`. La tarea 29 la cambiará a cookie HttpOnly; entonces habrá que actualizar el login y la autorización de esta colección.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Límites**: login y registro tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro (y 4 de los 10 logins por minuto): a la tercera ejecución en una hora el registro responde 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` más alto. No la ejecutes en bucle contra un entorno real.",
+    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend (solo para las carpetas con peticiones de administrador).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8 y cierra las sesiones en la 9. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Límites**: login, registro y refresh tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 3 de los 10 logins por minuto y 3 de las 30 renovaciones por minuto: a la tercera ejecución en una hora el registro responde 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` más alto. No la ejecutes en bucle contra un entorno real.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
-    "type": "bearer",
-    "bearer": [
-      {
-        "key": "token",
-        "value": "{{token}}",
-        "type": "string"
-      }
-    ]
+    "type": "noauth"
   },
   "variable": [
     {
-      "key": "token",
+      "key": "adminToken",
       "value": ""
     },
     {
-      "key": "adminToken",
+      "key": "adminRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "loginRefreshToken",
+      "value": ""
+    },
+    {
+      "key": "userRefreshToken",
       "value": ""
     },
     {
@@ -44,7 +45,7 @@
   "item": [
     {
       "name": "1. Autenticación",
-      "description": "Registro y login. Los dos logins guardan los tokens que usa el resto de la colección.",
+      "description": "Registro y login. El login del USER deja sus cookies de sesión en el jar de Postman; el del ADMIN, sin jar, guarda su JWT en `adminToken` para usarlo como Bearer.",
       "item": [
         {
           "name": "Registrar usuario de prueba",
@@ -153,7 +154,7 @@
           ]
         },
         {
-          "name": "Login usuario (guarda token)",
+          "name": "Login usuario (deja las cookies de sesión)",
           "request": {
             "method": "POST",
             "header": [
@@ -173,7 +174,7 @@
                 "login"
               ]
             },
-            "description": "Devuelve {token}. Hoy (rama main) el token viaja en el cuerpo y se envía como `Authorization: Bearer`. La tarea 29 lo moverá a una cookie HttpOnly: esta colección habrá que actualizarla entonces.",
+            "description": "Responde 204 sin cuerpo y entrega la sesión en dos cookies HttpOnly; SameSite=Strict: `streambox_token` (JWT de acceso, `Path=/api`, 15 min) y `streambox_refresh` (refresh token opaco, `Path=/api/auth`, 7 días). Postman las guarda en su cookie jar (botón **Cookies**, bajo *Send*) y las manda solas en las peticiones siguientes a ese dominio. JavaScript del navegador no puede leerlas (HttpOnly); aquí el script lee el `Set-Cookie` solo para comprobarlo.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
@@ -194,11 +195,28 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"Devuelve un JWT\", function () {",
-                  "  const t = pm.response.json().token;",
-                  "  pm.expect(t).to.be.a(\"string\").and.match(/^[\\w-]+\\.[\\w-]+\\.[\\w-]+$/);",
-                  "  pm.collectionVariables.set(\"token\", t);",
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204 sin cuerpo\", function () {",
+                  "  pm.response.to.have.status(204);",
+                  "  pm.expect(pm.response.text()).to.eql(\"\");",
+                  "});",
+                  "pm.test(\"Cookie streambox_token: JWT, HttpOnly, SameSite=Strict, Path=/api\", function () {",
+                  "  const c = setCookie(\"streambox_token\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_token\").to.be.a(\"string\");",
+                  "  pm.expect(cookieValue(c)).to.match(/^[\\w-]+\\.[\\w-]+\\.[\\w-]+$/);",
+                  "  pm.expect(c).to.match(/; Path=\\/api(;|$)/).and.match(/HttpOnly/).and.match(/SameSite=Strict/);",
+                  "});",
+                  "pm.test(\"Cookie streambox_refresh: HttpOnly, SameSite=Strict, Path=/api/auth\", function () {",
+                  "  const c = setCookie(\"streambox_refresh\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_refresh\").to.be.a(\"string\");",
+                  "  pm.expect(c).to.match(/; Path=\\/api\\/auth(;|$)/).and.match(/HttpOnly/).and.match(/SameSite=Strict/);",
+                  "  pm.collectionVariables.set(\"loginRefreshToken\", cookieValue(c));",
                   "});"
                 ]
               }
@@ -226,7 +244,7 @@
                 "login"
               ]
             },
-            "description": "Las cuentas ADMIN solo se crean al arrancar el backend con ADMIN_EMAIL / ADMIN_PASSWORD. Pon esos valores en el entorno.",
+            "description": "Las cuentas ADMIN solo se crean al arrancar el backend con ADMIN_EMAIL / ADMIN_PASSWORD. Pon esos valores en el entorno. Esta petición desactiva el cookie jar para no sustituir la sesión del USER (el jar solo guarda una cookie `streambox_token` por dominio): el JWT se lee del `Set-Cookie` y se usa como `Authorization: Bearer {{adminToken}}`, como haría un cliente de API.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
@@ -247,15 +265,32 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Responde 200 (si falla, rellena adminEmail y adminPassword en el entorno)\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"Devuelve un JWT\", function () {",
-                  "  pm.collectionVariables.set(\"adminToken\", pm.response.json().token);",
-                  "  pm.expect(pm.collectionVariables.get(\"adminToken\")).to.be.a(\"string\");",
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204 (si falla, rellena adminEmail y adminPassword en el entorno)\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Entrega el JWT en la cookie streambox_token\", function () {",
+                  "  const c = setCookie(\"streambox_token\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_token\").to.be.a(\"string\");",
+                  "  pm.collectionVariables.set(\"adminToken\", cookieValue(c));",
+                  "  pm.expect(pm.collectionVariables.get(\"adminToken\")).to.match(/^[\\w-]+\\.[\\w-]+\\.[\\w-]+$/);",
+                  "});",
+                  "pm.test(\"Guarda también su refresh token (para cerrar su sesión al final)\", function () {",
+                  "  const c = setCookie(\"streambox_refresh\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_refresh\").to.be.a(\"string\");",
+                  "  pm.collectionVariables.set(\"adminRefreshToken\", cookieValue(c));",
                   "});"
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Login con credenciales incorrectas (401)",
@@ -311,10 +346,10 @@
     },
     {
       "name": "2. Seguridad (casos negativos)",
-      "description": "Comprueba que la autorización por rol funciona: sin token 401, con rol insuficiente 403.",
+      "description": "Comprueba la autenticación y la autorización: sin sesión 401, Bearer inválido 401, escritura por cookie sin X-Requested-With 403 CSRF_REJECTED y rol insuficiente 403 ACCESS_DENIED.",
       "item": [
         {
-          "name": "Sin token (401)",
+          "name": "Sin sesión (401)",
           "request": {
             "method": "GET",
             "header": [],
@@ -328,7 +363,7 @@
                 "movies"
               ]
             },
-            "description": "",
+            "description": "Sin cookie ni Authorization: esta petición desactiva el cookie jar.",
             "auth": {
               "type": "noauth"
             }
@@ -345,10 +380,13 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
-          "name": "Token inválido (401)",
+          "name": "Bearer inválido (401)",
           "request": {
             "method": "GET",
             "header": [],
@@ -362,7 +400,7 @@
                 "movies"
               ]
             },
-            "description": "",
+            "description": "Lleva la cookie válida del USER (jar activo) y un `Authorization: Bearer` inválido. Si hay Bearer, manda él: la cookie no lo «rescata».",
             "auth": {
               "type": "noauth"
             }
@@ -383,7 +421,51 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });"
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Cuerpo de error con code INVALID_CREDENTIALS\", function () { pm.expect(pm.response.json().code).to.eql(\"INVALID_CREDENTIALS\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Escritura por cookie sin X-Requested-With (403)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/favorites",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "favorites"
+              ]
+            },
+            "description": "Vaciar favoritos con la cookie del USER pero sin `X-Requested-With: StreamBox`. El backend lo rechaza antes de mirar nada (403 CSRF_REJECTED): es la defensa frente a que otra web dispare escrituras con la cookie de la víctima."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// El pre-request de la colección añade X-Requested-With; este, que se ejecuta después, la quita a propósito.",
+                  "pm.request.headers.remove(\"X-Requested-With\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 403\", function () { pm.response.to.have.status(403); });",
+                  "pm.test(\"Cuerpo de error con code CSRF_REJECTED\", function () { pm.expect(pm.response.json().code).to.eql(\"CSRF_REJECTED\"); });"
                 ]
               }
             }
@@ -427,7 +509,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Responde 403\", function () { pm.response.to.have.status(403); });"
+                  "pm.test(\"Responde 403\", function () { pm.response.to.have.status(403); });",
+                  "pm.test(\"Es ACCESS_DENIED (rol), no CSRF_REJECTED: la cabecera sí va\", function () { pm.expect(pm.response.json().code).to.eql(\"ACCESS_DENIED\"); });"
                 ]
               }
             }
@@ -579,7 +662,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         }
       ]
     },
@@ -645,7 +731,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Crear género inválido (400)",
@@ -700,7 +789,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Listar géneros",
@@ -790,7 +882,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         }
       ]
     },
@@ -856,7 +951,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Crear película inválida (400)",
@@ -911,7 +1009,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Listar películas (paginado y ordenado)",
@@ -1176,7 +1277,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         }
       ]
     },
@@ -1242,7 +1346,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Serie sin episodios invisible para USER (404)",
@@ -1317,7 +1424,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Añadir episodio (ADMIN)",
@@ -1379,7 +1489,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Episodio duplicado (409)",
@@ -1435,7 +1548,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Detalle de serie con temporadas y episodios",
@@ -1629,7 +1745,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Actualizar serie (ADMIN)",
@@ -1685,7 +1804,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Actualizar episodio (ADMIN)",
@@ -1743,7 +1865,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Serie inexistente (404)",
@@ -2207,7 +2332,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Borrar serie (ADMIN)",
@@ -2248,7 +2376,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Borrar película (ADMIN)",
@@ -2289,7 +2420,10 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         },
         {
           "name": "Película borrada ya no existe (404)",
@@ -2362,9 +2496,422 @@
                 ]
               }
             }
-          ]
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
         }
       ]
+    },
+    {
+      "name": "9. Sesión: refresh y logout",
+      "description": "Va al final porque el logout cierra la sesión del USER. Comprueba la renovación con el refresh token (y su rotación), la defensa CSRF de refresh y logout, que el logout borra las cookies y que el refresh token queda revocado en el servidor. Termina cerrando también la sesión del ADMIN.",
+      "item": [
+        {
+          "name": "Refresh sin X-Requested-With (403)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Sin la cabecera CSRF el refresh se rechaza sin mirar el refresh token ni gastar el límite por IP."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// El pre-request de la colección añade X-Requested-With; este, que se ejecuta después, la quita a propósito.",
+                  "pm.request.headers.remove(\"X-Requested-With\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 403\", function () { pm.response.to.have.status(403); });",
+                  "pm.test(\"Cuerpo de error con code CSRF_REJECTED\", function () { pm.expect(pm.response.json().code).to.eql(\"CSRF_REJECTED\"); });",
+                  "pm.test(\"No toca las cookies (ningún Set-Cookie)\", function () { pm.expect(pm.response.headers.has(\"Set-Cookie\")).to.be.false; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh (204, rota el refresh token)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Sin cuerpo: el jar envía la cookie `streambox_refresh` (su `Path=/api/auth` hace que solo viaje aquí, a login y a logout). Responde 204 con un JWT nuevo y un refresh token nuevo; el anterior queda revocado."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204 sin cuerpo\", function () {",
+                  "  pm.response.to.have.status(204);",
+                  "  pm.expect(pm.response.text()).to.eql(\"\");",
+                  "});",
+                  "pm.test(\"Entrega un JWT nuevo en streambox_token\", function () {",
+                  "  const c = setCookie(\"streambox_token\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_token\").to.be.a(\"string\");",
+                  "  pm.expect(cookieValue(c)).to.match(/^[\\w-]+\\.[\\w-]+\\.[\\w-]+$/);",
+                  "});",
+                  "pm.test(\"Rota el refresh token (streambox_refresh distinto del del login)\", function () {",
+                  "  const c = setCookie(\"streambox_refresh\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_refresh\").to.be.a(\"string\");",
+                  "  pm.expect(cookieValue(c)).to.not.eql(pm.collectionVariables.get(\"loginRefreshToken\"));",
+                  "  pm.collectionVariables.set(\"userRefreshToken\", cookieValue(c));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mi usuario con la sesión renovada (200)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "El jar ya tiene las cookies que entregó el refresh."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Sigue siendo el usuario de prueba\", function () { pm.expect(pm.response.json().email).to.eql(pm.environment.get(\"userEmail\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout sin X-Requested-With (403)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Sin la cabecera, otra web podría borrar las cookies de la víctima con un formulario. Se rechaza sin revocar nada ni borrar las cookies."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// El pre-request de la colección añade X-Requested-With; este, que se ejecuta después, la quita a propósito.",
+                  "pm.request.headers.remove(\"X-Requested-With\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 403\", function () { pm.response.to.have.status(403); });",
+                  "pm.test(\"Cuerpo de error con code CSRF_REJECTED\", function () { pm.expect(pm.response.json().code).to.eql(\"CSRF_REJECTED\"); });",
+                  "pm.test(\"No toca las cookies (ningún Set-Cookie)\", function () { pm.expect(pm.response.headers.has(\"Set-Cookie\")).to.be.false; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout (204)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Revoca en el servidor la sesión del refresh token de la cookie y borra las dos cookies (Max-Age=0); el jar las elimina. Es idempotente: 204 haya o no sesión. El JWT de acceso no se puede revocar (es stateless): una copia valdría hasta caducar, pero ya no se podría renovar."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Borra las dos cookies (Set-Cookie con Max-Age=0)\", function () {",
+                  "  pm.expect(setCookie(\"streambox_token\")).to.match(/Max-Age=0/);",
+                  "  pm.expect(setCookie(\"streambox_refresh\")).to.match(/Max-Age=0/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mi usuario tras el logout (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "El jar ya no tiene cookie de sesión."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh con el token revocado por el logout (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "streambox_refresh={{userRefreshToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Reenvía a mano (cabecera `Cookie`, con el jar desactivado) el refresh token que estaba vigente antes del logout: demuestra que la revocación es en el servidor, no solo que se borró la cookie."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Cuerpo de error con code SESSION_EXPIRED\", function () { pm.expect(pm.response.json().code).to.eql(\"SESSION_EXPIRED\"); });",
+                  "pm.test(\"Borra las dos cookies (Set-Cookie con Max-Age=0)\", function () {",
+                  "  pm.expect(setCookie(\"streambox_token\")).to.match(/Max-Age=0/);",
+                  "  pm.expect(setCookie(\"streambox_refresh\")).to.match(/Max-Age=0/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Logout del administrador (204)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "streambox_refresh={{adminRefreshToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "El ADMIN no usa el jar, así que su refresh token (guardado en el login) se manda a mano en la cabecera `Cookie`. Logout y refresh solo leen la cookie `streambox_refresh`: el Bearer no cierra nada."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Borra las dos cookies (Set-Cookie con Max-Age=0)\", function () {",
+                  "  pm.expect(setCookie(\"streambox_token\")).to.match(/Max-Age=0/);",
+                  "  pm.expect(setCookie(\"streambox_refresh\")).to.match(/Max-Age=0/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Refresh del administrador tras su logout (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "streambox_refresh={{adminRefreshToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "La sesión del ADMIN también queda revocada en el servidor."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Cuerpo de error con code SESSION_EXPIRED\", function () { pm.expect(pm.response.json().code).to.eql(\"SESSION_EXPIRED\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Defensa CSRF de StreamBox: una petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe",
+          "// llevar X-Requested-With: StreamBox (si no, 403 CSRF_REJECTED). Con Authorization: Bearer no hace falta y",
+          "// no se añade, para que la colección demuestre que no se exige; refresh y logout la exigen siempre.",
+          "// Una petición puede quitarla en su propio pre-request, que se ejecuta después de este.",
+          "const safeMethods = [\"GET\", \"HEAD\", \"OPTIONS\"];",
+          "const usesBearer = !!pm.request.auth && pm.request.auth.type === \"bearer\";",
+          "const alwaysRequired = /^\\/api\\/auth\\/(refresh|logout)$/.test(pm.request.url.getPath());",
+          "if (!safeMethods.includes(pm.request.method) && (!usesBearer || alwaysRequired)) {",
+          "  pm.request.headers.upsert({ key: \"X-Requested-With\", value: \"StreamBox\" });",
+          "}"
+        ]
+      }
     }
   ]
 }
