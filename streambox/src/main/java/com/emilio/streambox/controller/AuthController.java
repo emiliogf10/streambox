@@ -14,6 +14,7 @@ import com.emilio.streambox.dto.LoginRequest;
 import com.emilio.streambox.exception.SessionExpiredException;
 import com.emilio.streambox.security.AuthCookieService;
 import com.emilio.streambox.security.AuthenticatedUser;
+import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.refresh.RefreshTokenService;
 import com.emilio.streambox.security.refresh.SessionTokens;
 import com.emilio.streambox.service.AuthenticationService;
@@ -48,18 +49,22 @@ public class AuthController {
 
     private final AuthCookieService authCookieService;
 
+    private final LoginAttemptService loginAttemptService;
+
     /**
      * Crea el controlador de autenticación.
      *
      * @param authenticationService servicio que valida las credenciales y genera los tokens
      * @param refreshTokenService   servicio que rota y revoca los refresh tokens
      * @param authCookieService     construye las cookies de sesión
+     * @param loginAttemptService   olvida las «IPs conocidas» de la cuenta en el logout-all
      */
     public AuthController(AuthenticationService authenticationService, RefreshTokenService refreshTokenService,
-            AuthCookieService authCookieService) {
+            AuthCookieService authCookieService, LoginAttemptService loginAttemptService) {
         this.authenticationService = authenticationService;
         this.refreshTokenService = refreshTokenService;
         this.authCookieService = authCookieService;
+        this.loginAttemptService = loginAttemptService;
     }
 
     /**
@@ -272,7 +277,8 @@ public class AuthController {
             + "de la cuenta autenticada, incluida la actual: ningún refresh token suyo vuelve a servir para "
             + "renovar. Borra las cookies streambox_token y streambox_refresh de esta petición (Set-Cookie con "
             + "Max-Age=0). Sin cuerpo. Los JWT de acceso ya emitidos son stateless y no se pueden revocar: "
-            + "siguen valiendo hasta caducar (como mucho 15 minutos), pero ya no se pueden renovar.")
+            + "siguen valiendo hasta caducar (como mucho 15 minutos), pero ya no se pueden renovar. Además, "
+            + "ninguna IP de la cuenta sigue librándose del bloqueo por intentos fallidos del login.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Todas las sesiones revocadas y cookies borradas"),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado (no se revoca ni "
@@ -284,6 +290,9 @@ public class AuthController {
     public void logoutAll(@AuthenticationPrincipal AuthenticatedUser principal, HttpServletResponse response) {
 
         refreshTokenService.revokeAllSessions(principal.id());
+        // Después de revocar (si falla, 500 y no se olvida nada). Sin re-registrar
+        // la IP: esta petición no prueba la contraseña (ver LoginAttemptService).
+        loginAttemptService.forgetKnownIps(principal.email());
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.clearingCookie());
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.clearingRefreshCookie());
     }

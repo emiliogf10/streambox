@@ -45,6 +45,45 @@ class KnownIpRegistryTest {
         assertEquals(0, registry.accounts());
     }
 
+    /** Olvidar una cuenta borra todas sus IPs y no toca las de otras cuentas. */
+    @Test
+    void olvidarUnaCuentaBorraTodasSusIpsYSoloLasSuyas() {
+        registry.remember("ana@test.com", "203.0.113.1");
+        registry.remember("ana@test.com", "203.0.113.2");
+        registry.remember("otra@test.com", "203.0.113.1");
+
+        registry.forget("ana@test.com");
+
+        assertFalse(registry.isKnown("ana@test.com", "203.0.113.1"));
+        assertFalse(registry.isKnown("ana@test.com", "203.0.113.2"));
+        assertTrue(registry.isKnown("otra@test.com", "203.0.113.1"));
+        assertEquals(1, registry.accounts(), "La cuenta olvidada no deja entrada vacía");
+    }
+
+    /** Olvidar todas salvo una deja esa como la única conocida (también si no lo era antes). */
+    @Test
+    void olvidarTodasSalvoUnaDejaSoloEsa() {
+        registry.remember("ana@test.com", "203.0.113.1");
+        registry.remember("ana@test.com", "203.0.113.2");
+
+        registry.forgetAllBut("ana@test.com", "203.0.113.3");
+
+        assertFalse(registry.isKnown("ana@test.com", "203.0.113.1"));
+        assertFalse(registry.isKnown("ana@test.com", "203.0.113.2"));
+        assertTrue(registry.isKnown("ana@test.com", "203.0.113.3"));
+    }
+
+    /** Sin IP (no debería ocurrir con {@code getRemoteAddr()}) solo se olvida: no queda entrada. */
+    @Test
+    void olvidarTodasSalvoNingunaIpLasOlvidaTodas() {
+        registry.remember("ana@test.com", "203.0.113.1");
+
+        registry.forgetAllBut("ana@test.com", null);
+
+        assertFalse(registry.isKnown("ana@test.com", "203.0.113.1"));
+        assertEquals(0, registry.accounts());
+    }
+
     @Test
     void caducaAlCumplirseElPlazoDesdeElUltimoLoginCorrecto() {
         registry.remember("ana@test.com", "203.0.113.1");

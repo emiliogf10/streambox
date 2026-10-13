@@ -15,6 +15,7 @@ import com.emilio.streambox.exception.UserNotFoundException;
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.JwtService;
 import com.emilio.streambox.security.password.PasswordPolicy;
+import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.ratelimit.PasswordChangeAttemptService;
 import com.emilio.streambox.security.ratelimit.PasswordChangeAttemptService.Attempt;
 import com.emilio.streambox.security.refresh.IssuedRefreshToken;
@@ -43,6 +44,8 @@ import jakarta.persistence.PersistenceContext;
  *   <li>En una transacción: guarda el hash nuevo, <b>revoca todas las
  *       sesiones</b> del usuario y abre una familia nueva para la sesión
  *       actual.</li>
+ *   <li>Tras confirmar la transacción, olvida las «IPs conocidas» del login
+ *       salvo la de esta petición ({@link LoginAttemptService#forgetKnownIpsExcept}).</li>
  * </ol>
  *
  * <h2>Las demás sesiones se cierran; la actual sigue (decisión del autor)</h2>
@@ -103,6 +106,7 @@ public class PasswordChangeService {
     private final PasswordChangeAttemptService attemptService;
     private final RefreshTokenService refreshTokenService;
     private final JwtService jwtService;
+    private final LoginAttemptService loginAttemptService;
     private final TransactionTemplate transactionTemplate;
 
     @PersistenceContext
@@ -116,6 +120,7 @@ public class PasswordChangeService {
      * @param attemptService      límite de intentos con la contraseña actual incorrecta
      * @param refreshTokenService revoca las sesiones y abre la nueva
      * @param jwtService          emite el JWT de acceso de la sesión actual
+     * @param loginAttemptService olvida las «IPs conocidas» de la cuenta tras el cambio
      * @param transactionManager  gestor de transacciones (para la parte de escritura)
      */
     public PasswordChangeService(
@@ -124,6 +129,7 @@ public class PasswordChangeService {
             PasswordChangeAttemptService attemptService,
             RefreshTokenService refreshTokenService,
             JwtService jwtService,
+            LoginAttemptService loginAttemptService,
             PlatformTransactionManager transactionManager) {
 
         this.userRepository = userRepository;
@@ -131,6 +137,7 @@ public class PasswordChangeService {
         this.attemptService = attemptService;
         this.refreshTokenService = refreshTokenService;
         this.jwtService = jwtService;
+        this.loginAttemptService = loginAttemptService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -140,6 +147,8 @@ public class PasswordChangeService {
      * @param userId          id del usuario autenticado (sale del token, nunca del cliente)
      * @param currentPassword contraseña actual (ya validada en forma)
      * @param newPassword     contraseña nueva (longitud ya validada)
+     * @param clientIp        dirección remota de la petición ({@code getRemoteAddr()}):
+     *                        queda como la única «IP conocida» de la cuenta
      * @return JWT de acceso y refresh token de la familia nueva de la sesión
      *         actual; el controlador los entrega en cookies
      * @throws InvalidParameterException          si la nueva no cumple la política
@@ -148,7 +157,8 @@ public class PasswordChangeService {
      * @throws TooManyRequestsException           si se han agotado los intentos (429)
      * @throws UserNotFoundException              si la cuenta ya no existe
      */
-    public SessionTokens changePassword(Long userId, String currentPassword, String newPassword) {
+    public SessionTokens changePassword(Long userId, String currentPassword, String newPassword,
+            String clientIp) {
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado"));
@@ -171,7 +181,12 @@ public class PasswordChangeService {
         }
         String newHash = passwordEncoder.encode(newPassword);
 
-        return transactionTemplate.execute(status -> replaceCredentials(userId, verifiedHash, newHash));
+        SessionTokens tokens = transactionTemplate.execute(
+                status -> replaceCredentials(userId, verifiedHash, newHash));
+        // Después de confirmar: si la transacción se deshace, la contraseña
+        // antigua sigue valiendo y sus IPs conocidas también deben seguir.
+        loginAttemptService.forgetKnownIpsExcept(user.getEmail(), clientIp);
+        return tokens;
     }
 
     /**

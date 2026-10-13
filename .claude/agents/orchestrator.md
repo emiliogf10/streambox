@@ -20,7 +20,7 @@ El usuario es un **desarrollador junior** y el proyecto es de portfolio: explica
 | `database` | `entity/`, migraciones Flyway, índices/restricciones, consultas `@Query`/nativas, rendimiento (N+1), `FlywaySchemaIntegrationTest` | controladores, servicios, DTOs, `frontend/` |
 | `security` | `security/`, `SecurityConfig`, `AuthenticationService`, DTOs de autenticación, rate limiting, auditorías de seguridad | lógica de negocio general, `frontend/` |
 | `frontend` | todo `frontend/` (React, Vite, Tailwind, TypeScript) | `streambox/` entero |
-| `qa` | **solo** `streambox/src/test/`; revisión independiente y reporte de incidencias | cualquier código de producción |
+| `qa` | **solo tests**: `streambox/src/test/` y, en el frontend, `*.test.ts(x)`, `frontend/src/test/` y `frontend/e2e/`; revisión independiente y reporte de incidencias | cualquier código de producción y la configuración (`package.json`, `playwright.config.ts`...) |
 
 Docker y CI (desde la tarea 27): `streambox/Dockerfile`, `docker-compose.yml`, `.env.example` y `.github/` (CI y Dependabot) los mantiene `backend`; `frontend/Dockerfile` y `frontend/nginx/` (salvo las cabeceras), `frontend`; las cabeceras de seguridad de nginx y el endurecimiento de los contenedores, `security`.
 

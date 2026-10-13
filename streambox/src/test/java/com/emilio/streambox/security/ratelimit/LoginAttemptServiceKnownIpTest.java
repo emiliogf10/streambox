@@ -427,6 +427,56 @@ class LoginAttemptServiceKnownIpTest {
     }
 
     // ------------------------------------------------------------------
+    // Olvidar las IPs conocidas (cambio de contraseña y logout-all)
+    // ------------------------------------------------------------------
+
+    /**
+     * Tras olvidarlas, una IP que era conocida (la de un intruso que entró con
+     * la contraseña robada) vuelve al contador de la cuenta: si la cuenta está
+     * bloqueada, ella también. El email se normaliza como en el login.
+     */
+    @Test
+    void trasOlvidarLasIpsConocidasVuelvenAlBloqueoDeLaCuenta() {
+        ownerLogsIn(HOME);
+        ownerLogsIn(OFFICE);
+        lockAndCatch(OWNER, ATTACKER);
+
+        service.forgetKnownIps("  ADMIN@Example.TEST ");
+
+        assertEquals(false, canReserve(OWNER, HOME));
+        assertEquals(false, canReserve(OWNER, OFFICE));
+    }
+
+    /**
+     * Olvidar todas salvo la de la petición: la IP de quien cambió la
+     * contraseña sigue librándose del bloqueo; las demás, no. Las IPv6 se
+     * agrupan por /64, como en el login.
+     */
+    @Test
+    void olvidarTodasSalvoUnaConservaSoloEsaAgrupandoIpv6() {
+        ownerLogsIn(HOME);
+        ownerLogsIn("2001:db8:1:2::1");
+        lockAndCatch(OWNER, ATTACKER);
+
+        service.forgetKnownIpsExcept(OWNER, "2001:db8:1:2::99");
+
+        assertEquals(false, canReserve(OWNER, HOME));
+        assertEquals(true, canReserve(OWNER, "2001:db8:1:2:aaaa::1"), "Mismo /64: misma IP conocida");
+    }
+
+    /** Olvidar las IPs de una cuenta no toca las de otra. */
+    @Test
+    void olvidarLasIpsDeUnaCuentaNoAfectaAOtra() {
+        ownerLogsIn(HOME);
+        service.recordSuccess(service.reserveAttempt(OTHER_ACCOUNT, HOME));
+        lockAndCatch(OTHER_ACCOUNT, ATTACKER);
+
+        service.forgetKnownIps(OWNER);
+
+        assertEquals(true, canReserve(OTHER_ACCOUNT, HOME));
+    }
+
+    // ------------------------------------------------------------------
     // Memoria acotada
     // ------------------------------------------------------------------
 

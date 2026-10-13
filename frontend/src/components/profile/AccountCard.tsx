@@ -126,7 +126,7 @@ export function AccountCard({ user }: AccountCardProps) {
           value={<span className="text-muted">No se muestra por seguridad.</span>}
           action={changeButton('password', 'contraseña')}
         >
-          {editing === 'password' && <PasswordForm id={passwordFormId} onClose={() => close('password')} />}
+          {editing === 'password' && <PasswordForm id={passwordFormId} email={user.email} onClose={() => close('password')} />}
         </AccountRow>
       </dl>
     </ProfileCard>

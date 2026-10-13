@@ -3,6 +3,7 @@ package com.emilio.streambox.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -18,6 +19,7 @@ import org.mockito.InOrder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import com.emilio.streambox.entity.Role;
@@ -26,6 +28,7 @@ import com.emilio.streambox.exception.CurrentPasswordIncorrectException;
 import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.JwtService;
+import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.ratelimit.PasswordChangeAttemptService;
 import com.emilio.streambox.security.ratelimit.PasswordChangeAttemptService.Attempt;
 import com.emilio.streambox.security.ratelimit.SlidingWindowCounter.Reservation;
@@ -47,12 +50,14 @@ class PasswordChangeServiceTest {
     private static final String CURRENT = "Contraseña-Actual-2026";
     private static final String NEW = "Otra-Clave-Distinta-2026!";
     private static final String HASH = "$2a$10$hash-verificado";
+    private static final String IP = "203.0.113.77";
 
     private final UserRepository userRepository = mock(UserRepository.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
     private final PasswordChangeAttemptService attempts = mock(PasswordChangeAttemptService.class);
     private final RefreshTokenService refreshTokenService = mock(RefreshTokenService.class);
     private final JwtService jwtService = mock(JwtService.class);
+    private final LoginAttemptService loginAttempts = mock(LoginAttemptService.class);
     private final PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
     private final EntityManager entityManager = mock(EntityManager.class);
     private final Attempt attempt = new Attempt("7", new Reservation(1, 1));
@@ -62,7 +67,7 @@ class PasswordChangeServiceTest {
     @BeforeEach
     void setUp() {
         service = new PasswordChangeService(userRepository, passwordEncoder, attempts, refreshTokenService,
-                jwtService, transactionManager);
+                jwtService, loginAttempts, transactionManager);
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user(HASH)));
@@ -81,7 +86,7 @@ class PasswordChangeServiceTest {
         when(jwtService.generateToken(locked)).thenReturn("jwt");
         when(refreshTokenService.startFamily(USER_ID)).thenReturn(issued);
 
-        SessionTokens tokens = service.changePassword(USER_ID, CURRENT, NEW);
+        SessionTokens tokens = service.changePassword(USER_ID, CURRENT, NEW, IP);
 
         assertEquals("$2a$10$hash-nuevo", locked.getPassword());
         assertEquals(new SessionTokens("jwt", issued), tokens);
@@ -89,6 +94,10 @@ class PasswordChangeServiceTest {
         order.verify(refreshTokenService).revokeAllSessions(USER_ID);
         order.verify(refreshTokenService).startFamily(USER_ID);
         verify(attempts).recordSuccess(attempt);
+        // Las IPs conocidas se olvidan (salvo la de esta petición) después del commit.
+        InOrder afterCommit = inOrder(transactionManager, loginAttempts);
+        afterCommit.verify(transactionManager).commit(any());
+        afterCommit.verify(loginAttempts).forgetKnownIpsExcept("ana@streambox.test", IP);
     }
 
     /**
@@ -102,10 +111,11 @@ class PasswordChangeServiceTest {
         User locked = user("$2a$10$hash-de-otro-cambio");
         when(entityManager.find(User.class, USER_ID, LockModeType.PESSIMISTIC_WRITE)).thenReturn(locked);
 
-        assertThrows(CurrentPasswordIncorrectException.class, () -> service.changePassword(USER_ID, CURRENT, NEW));
+        assertThrows(CurrentPasswordIncorrectException.class,
+                () -> service.changePassword(USER_ID, CURRENT, NEW, IP));
 
         assertEquals("$2a$10$hash-de-otro-cambio", locked.getPassword());
-        verifyNoInteractions(refreshTokenService);
+        verifyNoInteractions(refreshTokenService, loginAttempts);
     }
 
     /** Con la actual incorrecta se anota el fallo y no se toca nada más. */
@@ -113,11 +123,12 @@ class PasswordChangeServiceTest {
     void conLaActualIncorrectaAnotaElFalloYNoEscribe() {
         when(passwordEncoder.matches(CURRENT, HASH)).thenReturn(false);
 
-        assertThrows(CurrentPasswordIncorrectException.class, () -> service.changePassword(USER_ID, CURRENT, NEW));
+        assertThrows(CurrentPasswordIncorrectException.class,
+                () -> service.changePassword(USER_ID, CURRENT, NEW, IP));
 
         verify(attempts).recordFailure(attempt);
         verify(attempts, never()).recordSuccess(any());
-        verifyNoInteractions(transactionManager, refreshTokenService, entityManager);
+        verifyNoInteractions(transactionManager, refreshTokenService, entityManager, loginAttempts);
     }
 
     /**
@@ -127,9 +138,27 @@ class PasswordChangeServiceTest {
     @Test
     void unErrorDePoliticaNoGastaIntento() {
         assertThrows(InvalidParameterException.class,
-                () -> service.changePassword(USER_ID, CURRENT, "netflixpassword"));
+                () -> service.changePassword(USER_ID, CURRENT, "netflixpassword", IP));
 
-        verifyNoInteractions(attempts, passwordEncoder, transactionManager);
+        verifyNoInteractions(attempts, passwordEncoder, transactionManager, loginAttempts);
+    }
+
+    /**
+     * Si el commit falla, la contraseña antigua sigue valiendo: sus IPs
+     * conocidas no deben olvidarse (por eso se olvidan después del commit y no
+     * dentro de la transacción).
+     */
+    @Test
+    void siElCommitFallaNoOlvidaLasIpsConocidas() {
+        User locked = user(HASH);
+        when(entityManager.find(User.class, USER_ID, LockModeType.PESSIMISTIC_WRITE)).thenReturn(locked);
+        when(refreshTokenService.startFamily(USER_ID))
+                .thenReturn(new IssuedRefreshToken("r".repeat(43), java.time.Duration.ofDays(7)));
+        doThrow(new TransactionSystemException("commit fallido")).when(transactionManager).commit(any());
+
+        assertThrows(TransactionSystemException.class, () -> service.changePassword(USER_ID, CURRENT, NEW, IP));
+
+        verifyNoInteractions(loginAttempts);
     }
 
     private static User user(String hash) {

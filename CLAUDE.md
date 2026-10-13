@@ -38,7 +38,7 @@ Docker (desde la raíz; ver cap. 4.6 del manual): `docker compose up -d --build`
 
 **Maven y Docker:** los tests del paquete `postgres` usan Testcontainers (`postgres:16`) y **se omiten solos si Docker no está en marcha**. Solo ellos: `.\mvnw.cmd test "-Dtest=Postgres*"`; sin ellos: `"-Dtest=!Postgres*"`. Dos procesos de Maven a la vez en `streambox/` se pisan (`target/`): un solo agente con Maven cada vez.
 
-**El editor también escribe en `target/`:** la extensión Java del IDE del autor (Antigravity, basado en VS Code) compila en `target/classes` y `target/test-classes`. Si su espacio de trabajo Java se corrompe, deja clases con «Unresolved compilation problem» y `mvnw test` falla en el descubrimiento (`ClassNotFoundException` de una clase que sí existe) aunque el código esté bien. Solución en Maven: `.\mvnw.cmd clean test`. Solución en el editor (los archivos «en rojo»): comando «Java: Clean Java Language Server Workspace».
+**El editor también escribe en `target/`:** la extensión Java del IDE del autor (Antigravity, basado en VS Code) compila en `target/classes` y `target/test-classes`. Si su espacio de trabajo Java se corrompe, deja clases con «Unresolved compilation problem» y `mvnw test` falla en el descubrimiento (`ClassNotFoundException` de una clase que sí existe) aunque el código esté bien. Solución en Maven: `.\mvnw.cmd clean test` (solo si la app del autor no está corriendo en el 8080: `clean` le borra `target/`; ver «Reglas operativas»). Solución en el editor (los archivos «en rojo»): comando «Java: Clean Java Language Server Workspace».
 
 ## Reglas de trabajo
 
@@ -92,7 +92,7 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 - Cada bug corregido deja un test que falla sin el arreglo.
 - Lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia real) se prueba también contra PostgreSQL real en `src/test/.../postgres/` (extiende `PostgresIntegrationTestSupport`); H2 puede ocultar diferencias (ya ocultó un bug de búsqueda).
 - Frontend: lógica y componentes con Vitest + Testing Library (`*.test.ts(x)` junto al código, utilidades en `src/test/`); flujos completos con Playwright en `frontend/e2e/`. Localiza por rol/etiqueta, no con `data-testid`.
-- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 1889 con Docker —1742 con H2 y 147 contra PostgreSQL real—; sin Docker se omiten los de PostgreSQL (cada parametrizado omitido cuenta como uno, así que el recuento de omitidos no coincide con el de métodos); 920 de Vitest y 154 E2E + 24 de capturas omitidas; en el contenedor de Claude (Chromium 141) fallan 2 E2E de `accessibility.spec.ts:189`).
+- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 1899 con Docker —1752 con H2 y 147 contra PostgreSQL real—; sin Docker se omiten los de PostgreSQL (cada parametrizado omitido cuenta como uno, así que el recuento de omitidos no coincide con el de métodos); 922 de Vitest y 154 E2E + 24 de capturas omitidas; en el contenedor de Claude (Chromium 141) fallan 2 E2E de `accessibility.spec.ts:189`).
 - Vitest no espera tiempo real: los debounces se prueban con `src/test/fakeTimers.ts`. Los E2E que modifican el catálogo van en el proyecto `catalogo-mutable` de Playwright, que corre al final.
 
 ## Frontend: estado actual
@@ -142,3 +142,11 @@ Equipo: `orchestrator` (principal) y los especialistas `backend`, `database`, `s
 - Los especialistas no se hablan entre sí: cuando necesitan algo de otra área lo piden en su apartado «Peticiones para otros agentes» y el orquestador lo reencamina.
 - Si el usuario dice «hazlo tú directamente» o «sin agentes», se trabaja sin delegar. Para desactivar el orquestador de forma permanente, quitar `agent` de `.claude/settings.json`.
 - Al delegar: contexto completo (objetivo y porqué, decisiones ya tomadas, archivos, restricciones, qué debe devolver) y verificación posterior con la suite real, no solo con el informe del agente.
+- **`qa` escribe tests del backend y del frontend** (`streambox/src/test/`, `frontend/src/**/*.test.ts(x)`, `frontend/src/test/`, `frontend/e2e/`), nunca código de producción ni configuración: es el revisor independiente también del frontend.
+
+### Reglas operativas para todos los agentes (lecciones aprendidas)
+
+- **La app del autor puede estar corriendo en el 8080** (`spring-boot:run` contra Supabase), y carga sus clases de `streambox/target/`. **No la pares nunca** y **no uses `mvnw clean`** si puede estar en marcha (le borra `target/`): `./mvnw test` basta. Antes de arrancar o parar procesos, mira qué escucha en cada puerto; para solo los tuyos, por PID, nunca `java` en bloque. Si el autor ha tenido su app abierta durante el trabajo, recuérdale reiniciarla al final.
+- **Lo que pasa tras un `sendError` o una excepción en un filtro** (el reenvío a `/error`, el cortafuegos de Spring Security, las cabeceras de seguridad) **no se ve con MockMvc**: se prueba con Tomcat real (`@SpringBootTest(webEnvironment = RANDOM_PORT)`), como `ErrorDispatchTomcatIntegrationTest`.
+- **Cortes por el límite de sesión de la API:** pasan. Trabaja por pasos que dejen el árbol **compilando y con los tests en verde**, informa de forma **compacta** y, en tareas largas, el orquestador guarda el estado en `docs/TRABAJO_EN_CURSO.md` (temporal; se borra al terminar). Si un agente se corta, el siguiente empieza leyendo `git diff` y ese archivo, comprueba que no quedó ningún proceso suyo vivo (p. ej. un backend en el 8099) y no rehace lo que ya esté bien.
+- **Un solo Maven a la vez** (incluido el backend que levantan `npm run test:e2e` y el navegador): comparten `streambox/target/`. Vitest, `npm run build` y `npm run lint` sí pueden ir en paralelo con Maven.

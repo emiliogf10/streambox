@@ -124,6 +124,35 @@ final class KnownIpRegistry {
     }
 
     /**
+     * Olvida todas las IPs conocidas de la cuenta (cambio de contraseña o
+     * «cerrar sesión en todos los dispositivos»).
+     *
+     * @param account cuenta (email normalizado)
+     */
+    synchronized void forget(String account) {
+        byAccount.remove(account);
+    }
+
+    /**
+     * Olvida todas las IPs conocidas de la cuenta y deja como única conocida
+     * la indicada, en una sola operación atómica: nadie puede observar un
+     * estado intermedio con otras IPs aún vivas.
+     *
+     * <p>
+     * Solo se puede llamar tras verificar la contraseña de la cuenta desde esa
+     * IP (la misma condición que {@link #remember(String, String)}).
+     * </p>
+     *
+     * @param account cuenta (email normalizado)
+     * @param ip      clave de la IP que queda como conocida; si es {@code null}
+     *                solo se olvidan las demás
+     */
+    synchronized void forgetAllBut(String account, String ip) {
+        forget(account);
+        remember(account, ip);
+    }
+
+    /**
      * @return número de cuentas con alguna IP recordada (para pruebas)
      */
     synchronized int accounts() {

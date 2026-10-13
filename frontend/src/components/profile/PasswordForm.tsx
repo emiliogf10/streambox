@@ -23,6 +23,12 @@ const EMPTY: PasswordChangeValues = { currentPassword: '', newPassword: '', conf
 interface PasswordFormProps {
   /** `id` del formulario (único en la página: `useId`); prefijo de los campos. */
   id: string;
+  /**
+   * Correo de la cuenta: va en un campo oculto de identificación para que el
+   * gestor de contraseñas sepa a qué credencial guardada pertenece el cambio
+   * (el login la guarda con el correo como «usuario»).
+   */
+  email: string;
   /** Cierra el formulario (al terminar o al cancelar); quien lo abrió devuelve el foco. */
   onClose: () => void;
 }
@@ -48,8 +54,15 @@ interface PasswordFormProps {
  * - 429: aviso con la espera y el botón bloqueado con la cuenta atrás (`Retry-After`), como el login.
  * - Red, 5xx...: aviso del formulario, que sigue abierto para reintentar.
  * Ninguno cierra la sesión: solo un 401 sin arreglo, que gestiona `apiFetch`.
+ *
+ * **Autocompletado**: `current-password` en la actual y `new-password` en la
+ * nueva y su repetición (el navegador propone una contraseña segura y no la
+ * guardada). Como el formulario no tiene campo de usuario visible, lleva uno
+ * oculto con el correo (`autoComplete="username"`): sin él, el gestor de
+ * contraseñas no sabe de qué cuenta es la contraseña y no ofrece actualizar la
+ * guardada (patrón recomendado por Chromium para formularios de cambio de contraseña).
  */
-export function PasswordForm({ id, onClose }: PasswordFormProps) {
+export function PasswordForm({ id, email, onClose }: PasswordFormProps) {
   const toast = useToast();
   const [values, setValues] = useState<PasswordChangeValues>(EMPTY);
   const [fieldErrors, setFieldErrors] = useState<PasswordChangeErrors>({});
@@ -141,6 +154,24 @@ export function PasswordForm({ id, onClose }: PasswordFormProps) {
   return (
     <form id={id} onSubmit={handleSubmit} noValidate aria-label="Cambiar contraseña" className="mt-3">
       <FormAlert message={formError} />
+      {/*
+        Campo de identificación solo para el gestor de contraseñas. Es un `input`
+        real (los gestores ignoran `type="hidden"`) dentro del formulario, con el
+        mismo valor con el que el login guardó la credencial: el correo.
+        `hidden` (display: none) lo saca de la vista, del orden de tabulación y
+        del árbol de accesibilidad; `aria-hidden` y `tabIndex={-1}` lo garantizan
+        aunque alguna regla CSS lo volviera a mostrar. `readOnly`: nadie lo edita.
+        Sin `name`, así que nunca viaja en el cuerpo de la petición.
+      */}
+      <input
+        type="email"
+        autoComplete="username"
+        value={email}
+        readOnly
+        hidden
+        aria-hidden="true"
+        tabIndex={-1}
+      />
       <div className="flex flex-col gap-4">
         <FormField
           id={ids.currentPassword}

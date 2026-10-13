@@ -455,6 +455,14 @@ describe('ProfilePage: cambiar el nombre', () => {
     expect(screen.getByRole('button', { name: 'Cambiar nombre' })).toHaveFocus();
   });
 
+  it('autocompletado «nickname» (no «username»): el navegador no propone el correo del login como nombre', async () => {
+    const user = renderProfile();
+    await findName('ana');
+    await user.click(screen.getByRole('button', { name: 'Cambiar nombre' }));
+
+    expect(screen.getByRole('textbox', { name: 'Nuevo nombre de usuario' })).toHaveAttribute('autocomplete', 'nickname');
+  });
+
   it('409: «ya está en uso» junto al campo, con el foco en él; la sesión sigue abierta', async () => {
     const user = renderProfile({
       extra: {
@@ -535,6 +543,36 @@ describe('ProfilePage: cambiar la contraseña', () => {
   /** El formulario (con nombre accesible) y su botón de enviar. */
   const passwordForm = () => screen.getByRole('form', { name: 'Cambiar contraseña' });
   const submitButton = () => within(passwordForm()).getAllByRole('button')[0];
+
+  it('autocompletado: campo oculto con el correo (para que el gestor actualice la credencial del login), current/new-password', async () => {
+    const user = renderProfile({ user: makeUser({ email: 'ana@example.com' }) });
+    await findName('ana');
+    await user.click(screen.getByRole('button', { name: 'Cambiar contraseña' }));
+
+    expect(screen.getByLabelText('Contraseña actual')).toHaveAttribute('autocomplete', 'current-password');
+    expect(screen.getByLabelText('Nueva contraseña')).toHaveAttribute('autocomplete', 'new-password');
+    expect(screen.getByLabelText('Repite la nueva contraseña')).toHaveAttribute('autocomplete', 'new-password');
+
+    // El campo de identificación no es accesible a propósito: se busca por su atributo, no por rol.
+    const identity = passwordForm().querySelector<HTMLInputElement>('input[autocomplete="username"]');
+    expect(identity).not.toBeNull();
+    expect(identity).toHaveValue('ana@example.com');
+    expect(identity).toHaveAttribute('readonly');
+    expect(identity).toHaveAttribute('type', 'email');
+    expect(identity).not.toHaveAttribute('name'); // nunca viaja en la petición
+    expect(identity).not.toBeVisible();
+    expect(identity).toHaveAttribute('aria-hidden', 'true');
+    expect(identity).toHaveAttribute('tabindex', '-1');
+    // Fuera del árbol de accesibilidad: el único «textbox» del formulario no existe (los de contraseña no lo son).
+    expect(within(passwordForm()).queryAllByRole('textbox')).toHaveLength(0);
+
+    // Y fuera del orden de tabulación: hacia atrás desde «Contraseña actual» (el foco al abrir) no se para en él.
+    expect(screen.getByLabelText('Contraseña actual')).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(identity).not.toHaveFocus();
+    await user.tab();
+    expect(screen.getByLabelText('Contraseña actual')).toHaveFocus();
+  });
 
   it('éxito: envía la actual y la nueva (no la repetición), avisa de las otras sesiones y esta sigue abierta', async () => {
     let answer!: (response: Response) => void;

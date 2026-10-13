@@ -18,6 +18,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 import com.emilio.streambox.exception.SessionExpiredException;
 import com.emilio.streambox.security.AuthCookieService;
+import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.refresh.RefreshTokenService;
 import com.emilio.streambox.security.refresh.SessionTokens;
 import com.emilio.streambox.service.AuthenticationService;
@@ -41,7 +42,8 @@ class AuthControllerRefreshTest {
     private final AuthCookieService authCookieService = mock(AuthCookieService.class);
 
     private final AuthController controller = new AuthController(
-            mock(AuthenticationService.class), refreshTokenService, authCookieService);
+            mock(AuthenticationService.class), refreshTokenService, authCookieService,
+            mock(LoginAttemptService.class));
 
     /**
      * Sin cookie, vacía o con un valor imposible: 401 (la excepción) con las

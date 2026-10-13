@@ -37,8 +37,8 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **1889** | 1742 con H2 y 147 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **920** | |
+| Backend (JUnit) | **1899** | 1752 con H2 y 147 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
+| Frontend (Vitest) | **922** | |
 | E2E (Playwright) | **154** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
@@ -133,8 +133,8 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - Quedan: secuencias (`qwertyuiopasd`, `234567890123`); los espacios cuentan como caracteres distintos; invisibles **en medio** de la contraseña (`pass`+U+200B+`word1234` pasa la lista); y comparar con listas de contraseñas filtradas (HIBP, *k-anonymity*).
 - **Código de error del 401 (mejora 19)** — *Baja · BAJA*. El token ausente usa `INVALID_CREDENTIALS`; crear `UNAUTHENTICATED`.
 - **Editar perfil: incidencias bajas de la revisión de `qa`** (2026-10-09) — *Baja · BAJA*
-  1. (`security`) Las «IP conocidas» de la cuenta no se olvidan al cambiar la contraseña ni con `logout-all`: quien entró con la contraseña robada conserva su IP como conocida 30 días (con su propio contador, sin sufrir el bloqueo de la cuenta). Olvidarlas en `PasswordChangeService.replaceCredentials` (y quizá en `logoutAll`).
-  2. (`frontend`) Autocompletado: `PasswordForm` sin campo de usuario oculto (el gestor de contraseñas no actualiza la credencial guardada) y `UsernameForm` con `autoComplete="username"` (el navegador puede proponer el correo). Propuesta: `<input type="email" autoComplete="username" value={email} readOnly hidden>` y `autoComplete="nickname"`.
+  1. ✅ **Hecho el 2026-10-09** (`security`): cambiar la contraseña olvida las IP conocidas de la cuenta salvo la de esa petición (que acaba de demostrar la contraseña, como un login), y `logout-all` las olvida todas (solo demuestra un JWT, no la contraseña). Era: ~~las «IP conocidas» de la cuenta no se olvidan al cambiar la contraseña ni con `logout-all`: quien entró con la contraseña robada conserva su IP como conocida 30 días (con su propio contador, sin sufrir el bloqueo de la cuenta). Olvidarlas en `PasswordChangeService.replaceCredentials` (y quizá en `logoutAll`).~~ Backend de 1889 a 1899.
+  2. ✅ **Hecho el 2026-10-09** (`frontend`): campo oculto con el correo (`autoComplete="username"`) en el cambio de contraseña y `autoComplete="nickname"` en el nombre; Vitest de 920 a 922. **Pendiente de comprobar a mano** con un gestor de contraseñas real. Era: ~~Autocompletado: `PasswordForm` sin campo de usuario oculto (el gestor de contraseñas no actualiza la credencial guardada) y `UsernameForm` con `autoComplete="username"` (el navegador puede proponer el correo). Propuesta: `<input type="email" autoComplete="username" value={email} readOnly hidden>` y `autoComplete="nickname"`.~~
   3. (`backend`) Normalización del nombre: los caracteres de formato (`\p{Cf}`) interiores no se quitan (`bo\u200Bb` sigue siendo gemelo de `bob`) y `AdminAccountInitializer` solo hace `trim()`.
   4. (`frontend`) Si la respuesta de `PUT /password` se pierde tras confirmarse, el usuario reintenta con la vieja y lee «La contraseña actual no es correcta»: añadir una pista en el error de red.
   - Huecos de test (`qa`): dos cambios de contraseña simultáneos contra PostgreSQL real; N intentos en paralelo con la actual incorrecta (como mucho 5 BCrypt).

@@ -98,6 +98,11 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter.Reservation;
  * <li>La IP es {@code request.getRemoteAddr()} agrupada con
  * {@link ClientAddress#counterKey(String)} (IPv6 por /64), el mismo criterio que
  * el límite por IP del filtro; nunca se lee {@code X-Forwarded-For} a mano.</li>
+ * <li>Cambiar la contraseña o cerrar sesión en todos los dispositivos
+ * <b>olvida las IPs conocidas</b> de la cuenta (el cambio de contraseña
+ * conserva solo la IP de quien lo hace): quien entró con la contraseña robada
+ * no se lleva 30 días de IP conocida. Ver {@link #forgetKnownIps(String)} y
+ * {@link #forgetKnownIpsExcept(String, String)}.</li>
  * </ul>
  *
  * <p>
@@ -268,6 +273,69 @@ public class LoginAttemptService {
     public void recordSuccess(LoginAttempt attempt) {
         counterOf(attempt).reset(counterKeyOf(attempt));
         knownIps.remember(attempt.key(), attempt.ip());
+    }
+
+    /**
+     * Olvida todas las IPs conocidas de la cuenta. Se llama tras
+     * «cerrar sesión en todos los dispositivos».
+     *
+     * <p>
+     * <b>Por qué.</b> Una IP conocida se libra del bloqueo de la cuenta y tiene
+     * su propio contador durante 30 días. Si quien la «conoció» era un intruso
+     * (entró con la contraseña robada), expulsarlo de las sesiones no basta:
+     * desde su IP seguiría probando contraseñas con su propio presupuesto de
+     * fallos, sin sufrir el bloqueo de la cuenta. Al olvidarlas, todas sus IPs
+     * vuelven a usar el contador de la cuenta.
+     * </p>
+     *
+     * <p>
+     * <b>No se re-registra la IP de la petición</b>: {@code logout-all} solo
+     * prueba que se tiene un JWT válido, no la contraseña, y la regla de
+     * {@link KnownIpRegistry} es que una IP solo se «conoce» con la contraseña
+     * verificada (si no, quien robara la cookie haría conocida su IP).
+     * </p>
+     *
+     * <p>
+     * Los contadores (email, IP) de esas IPs no se borran: dejan de usarse en
+     * cuanto la IP es desconocida y caducan solos en la ventana; borrarlos no
+     * protegería nada y solo podría devolver intentos a alguien.
+     * </p>
+     *
+     * @param email email de la cuenta (se normaliza como en el login)
+     */
+    public void forgetKnownIps(String email) {
+        knownIps.forget(normalize(email));
+    }
+
+    /**
+     * Olvida todas las IPs conocidas de la cuenta salvo la de esta petición,
+     * que queda como la única conocida. Se llama tras un <b>cambio de
+     * contraseña confirmado</b>.
+     *
+     * <p>
+     * Olvidar las demás tiene el mismo motivo que
+     * {@link #forgetKnownIps(String)}: un intruso que entró con la contraseña
+     * antigua no conserva su IP conocida.
+     * </p>
+     *
+     * <p>
+     * <b>Por qué se conserva la IP de quien la cambia.</b> El cambio exige la
+     * contraseña actual verificada con BCrypt desde esa IP, la misma prueba que
+     * un login correcto (la única condición para «conocer» una IP), así que no
+     * se abre ningún camino nuevo. Y protege al titular: el intruso recién
+     * expulsado podría vengarse bloqueando la cuenta con 5 fallos desde
+     * cualquier IP desconocida; si el titular quedara sin IPs conocidas, ese
+     * bloqueo le impediría volver a entrar durante la ventana aunque acabe de
+     * cambiar la contraseña.
+     * </p>
+     *
+     * @param email email de la cuenta (se normaliza como en el login)
+     * @param ip    dirección remota de la petición ({@code getRemoteAddr()});
+     *              se agrupa con {@link ClientAddress#counterKey(String)} como en
+     *              el login; si es {@code null} solo se olvidan las demás
+     */
+    public void forgetKnownIpsExcept(String email, String ip) {
+        knownIps.forgetAllBut(normalize(email), ClientAddress.counterKey(ip));
     }
 
     private SlidingWindowCounter counterOf(LoginAttempt attempt) {

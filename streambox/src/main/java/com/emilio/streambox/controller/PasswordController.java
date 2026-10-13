@@ -19,6 +19,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 
@@ -61,6 +62,9 @@ public class PasswordController {
      *
      * @param principal usuario autenticado de la petición
      * @param request   contraseña actual y nueva
+     * @param httpRequest petición HTTP: su IP ({@code getRemoteAddr()}, nunca
+     *                    {@code X-Forwarded-For} a mano) queda como la única «IP
+     *                    conocida» de la cuenta para el bloqueo del login
      * @param response  respuesta en la que se añaden los {@code Set-Cookie} de la sesión nueva
      */
     @PutMapping("/password")
@@ -72,7 +76,8 @@ public class PasswordController {
             + "streambox_refresh nuevos (una sesión nueva, así que tampoco sirve una copia anterior del refresh "
             + "token de esta). Los JWT de acceso ya emitidos a otras sesiones no se pueden revocar: siguen "
             + "valiendo hasta caducar (como mucho 15 minutos), pero ya no se pueden renovar. Si la contraseña "
-            + "actual es incorrecta no se cambia nada.")
+            + "actual es incorrecta no se cambia nada. Las IPs desde las que se inició sesión dejan de librarse "
+            + "del bloqueo de la cuenta por intentos fallidos, salvo la de esta petición.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Contraseña cambiada; sin cuerpo, con las cookies "
                     + "streambox_token y streambox_refresh nuevas en Set-Cookie"),
@@ -91,10 +96,11 @@ public class PasswordController {
     public void changePassword(
             @AuthenticationPrincipal AuthenticatedUser principal,
             @Valid @RequestBody ChangePasswordRequest request,
+            HttpServletRequest httpRequest,
             HttpServletResponse response) {
 
         SessionTokens tokens = passwordChangeService.changePassword(
-                principal.id(), request.currentPassword(), request.newPassword());
+                principal.id(), request.currentPassword(), request.newPassword(), httpRequest.getRemoteAddr());
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.sessionCookie(tokens.accessToken()));
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.refreshCookie(tokens.refreshToken()));
     }

@@ -51,6 +51,8 @@ Reglas ya vigentes que no debes romper: todas las llamadas pasan por `apiFetch`/
 - No añadas dependencias de npm sin justificarlo y avisar. No hagas commit.
 - **Navegador: usa `agent-browser`** (preferencia del autor) para comprobar de verdad los cambios visibles: maquetación a 375/768/1280 px, textos y estados por rol (USER/ADMIN), foco y teclado, árbol de accesibilidad y capturas. Antes del primer uso, `agent-browser skills get core`. Reglas del apartado «Navegador» de `CLAUDE.md`: sesión propia (`--prefix frontend`), **solo contra una pila aislada con H2** (backend en el 8097 y Vite en el 5197; nunca el 8080 ni `npm run dev` a secas, que usan Supabase), sin arrancar ese backend si otro agente está con Maven (pregúntalo en tu informe si no lo sabes) y cerrando el navegador y esos procesos al terminar. Además verifica con `npm run build`, `npm run lint` y `npm run test`, y di qué queda para la revisión humana (sensaciones, contraste sobre portadas reales, lector de pantalla).
 
+- **Tus tests los escribes tú**, pero el agente `qa` también puede añadir o reforzar tests del frontend (`*.test.ts(x)`, `src/test/`, `e2e/`) como revisor independiente; no los debilites para que pase tu código. Si `qa` te pide un cambio de producción para poder probar algo (un nombre accesible, un rol), hazlo.
+
 ## Al terminar
 
 Informa de: componentes y archivos creados o modificados (con ruta), endpoints consumidos, resultado real de `npm run build` y `npm run lint`, y qué queda por revisar visualmente.

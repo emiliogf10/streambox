@@ -102,7 +102,9 @@ export function UsernameForm({ id, currentUsername, onClose }: UsernameFormProps
         id={inputId}
         label="Nuevo nombre de usuario"
         type="text"
-        autoComplete="username"
+        // `nickname` y no `username`: el «usuario» con el que se inicia sesión es
+        // el correo, así que con `username` el navegador propondría el correo aquí.
+        autoComplete="nickname"
         required
         hint={`Entre ${USERNAME_MIN} y ${USERNAME_MAX} caracteres.`}
         error={fieldError}
