@@ -1,5 +1,6 @@
 /**
- * E2E del detalle de película y de "Mi lista": abrir el modal, añadir y quitar
+ * E2E de la página de una película (`/peliculas/:id`) y de "Mi lista": abrirla,
+ * recargarla, volver con «Atrás», una dirección inexistente, añadir y quitar
  * favoritos (con aviso visible) y vaciar la lista con confirmación.
  *
  * Cada test registra su propio usuario, así que las listas no se mezclan aunque
@@ -8,14 +9,14 @@
 import { addFavoritesByTitle } from './support/api';
 import { MOVIES, videoUrl } from './support/catalog';
 import { expect, movieCard, test } from './support/fixtures';
-import { expectWholePoster } from './support/images';
+import { expectCovers, expectWholePoster } from './support/images';
 
 /** Una película con dos géneros y portada, que aparece en la fila "Novedades". */
 const FILM = MOVIES.find((movie) => movie.title === 'Interstellar');
 if (!FILM) throw new Error('El catálogo de ejemplo debe incluir «Interstellar»');
 
 test.describe('Detalle y favoritos', () => {
-  test('el modal muestra título, géneros y un enlace «Ver ahora» que abre en pestaña nueva', async ({
+  test('la página de una película muestra título, datos, sinopsis completa y un «Ver ahora» que abre en pestaña nueva', async ({
     page,
     user,
     signIn,
@@ -24,46 +25,82 @@ test.describe('Detalle y favoritos', () => {
     await page.goto('/');
     await movieCard(page.getByRole('region', { name: 'Novedades' }), FILM.title).click();
 
-    const dialog = page.getByRole('dialog', { name: FILM.title });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole('heading', { level: 2, name: FILM.title })).toBeVisible();
+    await expect(page).toHaveURL(/\/peliculas\/\d+$/);
+    await expect(page).toHaveTitle(`${FILM.title} — StreamBox`);
+    const header = page.getByRole('region', { name: FILM.title });
+    await expect(header.getByRole('heading', { level: 1, name: FILM.title })).toBeVisible();
     for (const genre of FILM.genres) {
-      await expect(dialog.getByRole('listitem').filter({ hasText: genre })).toBeVisible();
+      await expect(header.getByRole('listitem').filter({ hasText: genre })).toBeVisible();
     }
-    await expect(dialog.getByRole('heading', { level: 3, name: 'Sinopsis' })).toBeVisible();
+    // La sinopsis se lee entera: aquí no hay otro sitio al que mandarla.
+    await expect(header.getByText(FILM.description)).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
 
-    // Cabecera: fondo desenfocado (1.ª imagen) + póster nítido (2.ª), con la misma URL.
-    const images = dialog.locator('img');
+    // Cabecera: fondo desenfocado (1.ª imagen) + póster nítido (2.ª), con la misma URL, como el banner.
+    const images = header.locator('img');
     await expect(images).toHaveCount(2);
     const [backdrop, poster] = [images.first(), images.last()];
     expect(await backdrop.getAttribute('src')).toBe(await poster.getAttribute('src'));
-    // El fondo cubre el ancho del diálogo (mismo defecto que el banner: salía a 600 px de ancho fijo;
-    // el diálogo tiene 1 px de borde a cada lado, de ahí el margen de 2 px).
-    const dialogBox = await dialog.boundingBox();
-    const backdropBox = await backdrop.boundingBox();
-    expect(backdropBox?.width ?? 0).toBeGreaterThanOrEqual((dialogBox?.width ?? Infinity) - 2);
-    // El póster se ve entero, sin recortar (antes la cabecera horizontal mostraba solo una franja).
-    await expectWholePoster(poster, dialog, 'póster del modal');
+    await expectCovers(backdrop, header, 'fondo de la cabecera');
+    await expectWholePoster(poster, header, 'póster de la cabecera');
 
-    const watch = dialog.getByRole('link', { name: /^Ver ahora/ });
+    const watch = header.getByRole('link', { name: /^Ver ahora/ });
     await expect(watch).toHaveAttribute('target', '_blank');
     await expect(watch).toHaveAttribute('rel', /noopener/);
     await expect(watch).toHaveAttribute('href', videoUrl(FILM));
+    // Un usuario normal no ve «Editar».
+    await expect(page.getByRole('link', { name: /^Editar/ })).toHaveCount(0);
   });
 
-  test('añadir una película: aviso visible, aparece en Mi lista y se puede quitar', async ({ page, user, signIn }) => {
+  test('la dirección de una película sirve: recargar la mantiene y «Atrás» vuelve al catálogo', async ({
+    page,
+    user,
+    signIn,
+  }) => {
+    await signIn(user);
+    await page.goto('/peliculas');
+    await movieCard(page.getByRole('region', { name: 'Novedades' }), FILM.title).click();
+    await expect(page.getByRole('heading', { level: 1, name: FILM.title })).toBeVisible();
+    const url = page.url();
+
+    await page.reload();
+    expect(page.url()).toBe(url);
+    await expect(page.getByRole('heading', { level: 1, name: FILM.title })).toBeVisible();
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/peliculas$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Películas' })).toBeVisible();
+  });
+
+  test('una dirección de película que no existe dice «Película no encontrada» y lleva a todas las películas', async ({
+    page,
+    user,
+    signIn,
+  }) => {
+    await signIn(user);
+    for (const path of ['/peliculas/999999', '/peliculas/abc']) {
+      await page.goto(path);
+      await expect(page.getByRole('heading', { level: 1, name: 'Película no encontrada' })).toBeVisible();
+      await expect(page).toHaveTitle('Película no encontrada — StreamBox');
+    }
+    await page.getByRole('link', { name: 'Ver todas las películas' }).click();
+    await expect(page).toHaveURL(/\/peliculas$/);
+    await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
+  });
+
+  test('añadir una película desde su página: aviso visible, aparece en Mi lista y se puede quitar', async ({
+    page,
+    user,
+    signIn,
+  }) => {
     await signIn(user);
     await page.goto('/');
     await movieCard(page.getByRole('region', { name: 'Novedades' }), FILM.title).click();
 
-    const dialog = page.getByRole('dialog', { name: FILM.title });
-    await dialog.getByRole('button', { name: /^Mi lista/ }).click();
-    // El aviso se pinta DENTRO del diálogo abierto (el resto de la página es inerte).
-    await expect(dialog.getByText(`«${FILM.title}» se ha añadido a tu lista.`)).toBeVisible();
-    await expect(dialog.getByRole('button', { name: /^En mi lista/ })).toBeVisible();
-
-    await dialog.getByRole('button', { name: /^Cerrar detalles/ }).click();
-    await expect(dialog).toBeHidden();
+    const header = page.getByRole('region', { name: FILM.title });
+    await header.getByRole('button', { name: /^Mi lista/ }).click();
+    await expect(page.getByText(`«${FILM.title}» se ha añadido a tu lista.`)).toBeVisible();
+    await expect(header.getByRole('button', { name: /^En mi lista/ })).toBeVisible();
 
     await page.getByRole('link', { name: 'Mi lista' }).click();
     await expect(page).toHaveURL(/\/favorites$/);
@@ -75,13 +112,13 @@ test.describe('Detalle y favoritos', () => {
     await page.reload();
     await expect(movieCard(page.getByRole('main'), FILM.title)).toBeVisible();
 
-    // Quitarla desde el mismo modal.
+    // Quitarla desde su página y volver a la lista con «Atrás».
     await movieCard(page.getByRole('main'), FILM.title).click();
-    const details = page.getByRole('dialog', { name: FILM.title });
-    await details.getByRole('button', { name: /^En mi lista/ }).click();
-    await expect(details.getByText(`«${FILM.title}» se ha quitado de tu lista.`)).toBeVisible();
-    await details.getByRole('button', { name: /^Cerrar detalles/ }).click();
+    await page.getByRole('region', { name: FILM.title }).getByRole('button', { name: /^En mi lista/ }).click();
+    await expect(page.getByText(`«${FILM.title}» se ha quitado de tu lista.`)).toBeVisible();
+    await page.goBack();
 
+    await expect(page).toHaveURL(/\/favorites$/);
     await expect(page.getByRole('heading', { level: 2, name: 'Tu lista está vacía' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Explorar catálogo' })).toBeVisible();
   });
@@ -97,7 +134,7 @@ test.describe('Detalle y favoritos', () => {
     await page.goto('/favorites');
 
     const main = page.getByRole('main');
-    await expect(main.getByRole('button', { name: /\d{4} ·/ })).toHaveCount(3);
+    await expect(main.getByRole('link', { name: /\d{4} ·/ })).toHaveCount(3);
 
     // Cancelar: el diálogo se cierra y NO se borra nada.
     await page.getByRole('button', { name: 'Vaciar lista' }).click();
@@ -108,7 +145,7 @@ test.describe('Detalle y favoritos', () => {
     await expect(confirm.getByRole('button', { name: 'Cancelar' })).toBeFocused();
     await confirm.getByRole('button', { name: 'Cancelar' }).click();
     await expect(confirm).toBeHidden();
-    await expect(main.getByRole('button', { name: /\d{4} ·/ })).toHaveCount(3);
+    await expect(main.getByRole('link', { name: /\d{4} ·/ })).toHaveCount(3);
 
     // Confirmar: lista vacía, aviso y foco en el encabezado (el botón ha desaparecido).
     await page.getByRole('button', { name: 'Vaciar lista' }).click();

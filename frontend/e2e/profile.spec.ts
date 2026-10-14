@@ -94,14 +94,15 @@ test.describe('Mi perfil', () => {
     ]);
 
     const preview = page.getByRole('region', { name: 'De tu lista', exact: true });
-    await expect(preview.getByRole('button', { name: /^Interstellar \d{4} ·/ })).toBeVisible();
+    await expect(preview.getByRole('link', { name: /^Interstellar \d{4} ·/ })).toBeVisible();
     await expect(preview.getByRole('link', { name: new RegExp(`^${VISIBLE_SERIES[0].title} `) })).toBeVisible();
 
-    // Una película abre su diálogo de detalles, sin salir del perfil.
-    await preview.getByRole('button', { name: /^Interstellar \d{4} ·/ }).click();
-    await expect(page.getByRole('dialog', { name: 'Interstellar' })).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog')).toBeHidden();
+    // Una película lleva a su página; «Atrás» devuelve al perfil.
+    await preview.getByRole('link', { name: /^Interstellar \d{4} ·/ }).click();
+    await expect(page).toHaveURL(/\/peliculas\/\d+$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(/\/perfil$/);
 
     await preview.getByRole('link', { name: 'Ver toda mi lista' }).click();
     await expect(page).toHaveURL(/\/favorites$/);

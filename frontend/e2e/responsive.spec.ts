@@ -165,11 +165,11 @@ for (const viewport of VIEWPORTS) {
       await expectFullyInsideViewportWidth(banner.getByRole('heading', { level: 2, name: HERO_TITLE }), page, 'título del banner');
       await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Ver ahora/ }), page, '«Ver ahora»');
       await expectFullyInsideViewportWidth(banner.getByRole('button', { name: /^Mi lista/ }), page, '«Mi lista» del banner');
-      await expectFullyInsideViewportWidth(banner.getByRole('button', { name: /^Más información/ }), page, '«Más información»');
+      await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Más información/ }), page, '«Más información»');
 
       // El fondo cubre el banner y el póster nítido (tarjeta 2:3) se ve ENTERO en todos los anchos.
       // Antes, en móvil, el póster era el fondo nítido y el degradado del texto tapaba su mitad
-      // inferior; ahora va pequeño junto al título (como en el modal) y debe verse sin recortes.
+      // inferior; ahora va pequeño junto al título (como en la página de cada título) y debe verse sin recortes.
       const images = banner.locator('img');
       await expectCovers(images.first(), banner, 'fondo del banner');
       await expectWholePoster(images.last(), banner, 'póster del banner');
@@ -245,7 +245,7 @@ for (const viewport of VIEWPORTS) {
       await expectFullyInsideViewportWidth(page.getByRole('heading', { level: 1, name: 'Películas' }), page, 'título «Películas»');
       await expectMovieFilterBarFits(page);
       await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Ver ahora/ }), page, '«Ver ahora»');
-      await expectFullyInsideViewportWidth(banner.getByRole('button', { name: /^Más información/ }), page, '«Más información»');
+      await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Más información/ }), page, '«Más información»');
       await expectWholePoster(banner.locator('img').last(), banner, 'póster del banner de películas');
       await expectNoHorizontalScroll(page);
     });
@@ -259,7 +259,7 @@ for (const viewport of VIEWPORTS) {
       await page.goto(`/peliculas?genero=${actionId}&anio=2014`);
       const form = page.getByRole('form', { name: 'Filtrar películas' });
       const results = page.getByRole('region', { name: 'Resultados' });
-      const cards = results.getByRole('listitem').getByRole('button');
+      const cards = results.getByRole('listitem').getByRole('link');
       await expect(cards).toHaveCount(2);
       await expectMovieFilterBarFits(page);
       await expectFullyInsideViewportWidth(form.getByRole('button', { name: 'Quitar filtros' }), page, '«Quitar filtros»');
@@ -313,18 +313,18 @@ for (const viewport of VIEWPORTS) {
         'La Casa del Lago',
       ]);
       await page.reload();
-      await expect(page.getByRole('main').getByRole('button', { name: /\d{4} ·/ })).toHaveCount(5);
+      await expect(page.getByRole('main').getByRole('link', { name: /\d{4} ·/ })).toHaveCount(5);
       await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Vaciar lista' }), page, '«Vaciar lista»');
       await expectNoHorizontalScroll(page);
 
       // Toda tarjeta cabe entera en horizontal (la rejilla no debe sacarlas de la pantalla).
-      const cards = page.getByRole('main').getByRole('button', { name: /\d{4} ·/ });
+      const cards = page.getByRole('main').getByRole('link', { name: /\d{4} ·/ });
       for (let index = 0; index < 5; index += 1) {
         await expectFullyInsideViewportWidth(cards.nth(index), page, `tarjeta ${index + 1}`);
       }
     });
 
-    test('modal de detalle y diálogo de confirmación caben en pantalla', async ({ page, request, user, signIn }) => {
+    test('página de una película y diálogo de confirmación caben en pantalla', async ({ page, request, user, signIn }) => {
       await addFavoritesByTitle(request, user.token, ['Dredd']);
       await signIn(user);
       await page.goto('/favorites');
@@ -335,12 +335,16 @@ for (const viewport of VIEWPORTS) {
       await expectFullyInsideViewportWidth(confirm.getByRole('button', { name: 'Sí, vaciar lista' }), page, 'botón de confirmar');
       await confirm.getByRole('button', { name: 'Cancelar' }).click();
 
-      await page.getByRole('button', { name: /^Dredd \d{4}/ }).click();
-      const dialog = page.getByRole('dialog', { name: 'Dredd' });
-      await expectFullyInsideViewportWidth(dialog, page, 'modal de detalle');
-      await expectFullyInsideViewportWidth(dialog.getByRole('button', { name: /^Cerrar detalles/ }), page, 'botón de cerrar');
+      await page.getByRole('link', { name: /^Dredd \d{4}/ }).click();
+      await expect(page.getByRole('heading', { level: 1, name: 'Dredd' })).toBeVisible();
+      await expectNavbarFits(page, false);
+      const header = page.getByRole('region', { name: 'Dredd' });
+      await expectFullyInsideViewportWidth(header, page, 'cabecera de la película');
+      await expectFullyInsideViewportWidth(header.getByRole('heading', { level: 1, name: 'Dredd' }), page, 'título');
+      await expectFullyInsideViewportWidth(header.getByRole('link', { name: /^Ver ahora/ }), page, '«Ver ahora»');
+      await expectFullyInsideViewportWidth(header.getByRole('button', { name: /^En mi lista/ }), page, '«En mi lista»');
       // El póster de la cabecera se ve entero también en 375 px (más pequeño, a la izquierda del título).
-      await expectWholePoster(dialog.locator('img').last(), dialog, 'póster del modal');
+      await expectWholePoster(header.locator('img').last(), header, 'póster de la cabecera');
       await expectNoHorizontalScroll(page);
     });
 

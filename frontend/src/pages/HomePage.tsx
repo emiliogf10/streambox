@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Film } from 'lucide-react';
@@ -9,13 +9,11 @@ import { ErrorState } from '../components/ErrorState';
 import { HeroBanner } from '../components/HeroBanner';
 import { LatestSeriesRow } from '../components/LatestSeriesRow';
 import { LoadMoreFooter } from '../components/LoadMoreFooter';
-import { MovieDetailsModal } from '../components/MovieDetailsModal';
 import { MovieRow } from '../components/MovieRow';
 import { useAuth } from '../context/AuthContext';
 import { useCatalog } from '../hooks/useCatalog';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { buildCatalogRows } from '../lib/catalog';
-import type { Movie } from '../lib/types';
 import { ADMIN_MOVIES_PATH } from './admin/adminPaths';
 
 /**
@@ -72,14 +70,14 @@ function EmptyCatalog({ isAdmin }: { isAdmin: boolean }) {
  * Bajo el banner ya no hay paneles de "Sinopsis / Reparto / Ficha": el reparto
  * no existe en la API (el panel solo decía "no disponible") y la ficha repetía
  * año y duración del banner; además empujaban las filas fuera de la primera
- * pantalla. La sinopsis va recortada en el banner y entera en "Más información".
+ * pantalla. La sinopsis va recortada en el banner y entera en la página de la
+ * película («Más información» o cualquier tarjeta llevan a `/peliculas/:id`).
  */
 export function HomePage() {
   useDocumentTitle('Inicio');
   const { isAdmin } = useAuth();
   const { movies, total, status, errorMessage, loadingMore, loadMoreFailed, hasMore, loadMore, reload } =
     useCatalog();
-  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
 
   const hero = movies[0];
   // Las filas se calculan sin la película del banner para no repetirla justo debajo.
@@ -103,11 +101,11 @@ export function HomePage() {
   } else {
     content = (
       <>
-        <HeroBanner movie={hero} onDetails={setSelectedMovie} />
+        <HeroBanner movie={hero} />
 
         {rows.map((row, index) => (
           <Fragment key={row.id}>
-            <MovieRow title={row.title} movies={row.items} onSelectMovie={setSelectedMovie} />
+            <MovieRow title={row.title} movies={row.items} />
             {/* La fila «Series» va justo después de «Novedades»: a la vista sin bajar mucho, sin desplazar al banner. */}
             {index === 0 && <LatestSeriesRow />}
           </Fragment>
@@ -124,8 +122,6 @@ export function HomePage() {
           loadMoreFailed={loadMoreFailed}
           onLoadMore={() => void loadMore()}
         />
-
-        {selectedMovie && <MovieDetailsModal movie={selectedMovie} onClose={() => setSelectedMovie(null)} />}
       </>
     );
   }

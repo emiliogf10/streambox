@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ApiError, apiFetch, getErrorMessage } from '../lib/api';
 import { queryKeys } from '../lib/queryKeys';
 import type { SeriesDetail } from '../lib/types';
+import { parseRouteId } from '../lib/utils';
 
 /**
  * Estado del detalle de una serie. `not-found` es distinto de `error`: un 404
@@ -10,16 +11,6 @@ import type { SeriesDetail } from '../lib/types';
  * la pantalla no ofrece "Reintentar" sino volver al listado.
  */
 export type SeriesDetailStatus = 'loading' | 'ready' | 'not-found' | 'error';
-
-/**
- * Convierte el `:id` de la URL en un id válido (entero positivo) o `null`.
- * `/series/abc` o `/series/1.5` no llegan a pedir nada: son "no encontrada".
- */
-function parseSeriesId(raw: string | undefined): number | null {
-  if (!raw || !/^\d+$/.test(raw)) return null;
-  const id = Number(raw);
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
-}
 
 /** ¿Es el 404 con el que la API dice «no existe o no tiene episodios»? */
 function isNotFound(error: unknown): boolean {
@@ -44,7 +35,8 @@ function isNotFound(error: unknown): boolean {
  * @param rawId el parámetro `:id` de la ruta, tal cual
  */
 export function useSeriesDetail(rawId: string | undefined) {
-  const seriesId = parseSeriesId(rawId);
+  // `/series/abc` o `/series/1.5` no llegan a pedir nada: son «no encontrada» (ver `parseRouteId`).
+  const seriesId = parseRouteId(rawId);
   const detail = useQuery({
     // Sin id válido la consulta está desactivada; la clave da igual (nunca se pide).
     queryKey: queryKeys.series.detail(seriesId ?? 0),

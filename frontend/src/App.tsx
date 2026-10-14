@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from './components/AppShell';
+import { RouteChangeFocus } from './components/RouteChangeFocus';
 import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './components/RouteGuards';
 import { SkipLink } from './components/SkipLink';
 import { AuthProvider } from './context/AuthContext';
@@ -16,6 +17,7 @@ import { MovieFormPage } from './pages/admin/MovieFormPage';
 import { SeriesFormPage } from './pages/admin/SeriesFormPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
+import { MovieDetailPage } from './pages/MovieDetailPage';
 import { MoviesPage } from './pages/MoviesPage';
 import { MyListPage } from './pages/MyListPage';
 import { ProfilePage } from './pages/ProfilePage';
@@ -27,9 +29,9 @@ import { SeriesPage } from './pages/SeriesPage';
  * Mapa de rutas de la aplicación.
  *
  * - `/login` y `/registro`: públicas; si ya hay sesión redirigen a `/`.
- * - `/`, `/peliculas` (con `?genero=&anio=&orden=`), `/series`, `/series/:id`
- *   (con `?temporada=N`), `/favorites` y `/perfil` (datos de la cuenta y resumen de
- *   la lista): privadas, dentro de `AppShell` (barra + contenido). A `/perfil` se
+ * - `/`, `/peliculas` (con `?genero=&anio=&orden=`), `/peliculas/:id` (la página
+ *   de una película), `/series`, `/series/:id` (con `?temporada=N`), `/favorites` y
+ *   `/perfil` (datos de la cuenta y resumen de la lista): privadas, dentro de `AppShell` (barra + contenido). A `/perfil` se
  *   llega desde «Mi perfil» en el menú de usuario de la barra.
  * - `/admin/*`: panel de administración, también dentro de `AppShell` y además
  *   tras `RequireAdmin` (espera a conocer el rol; si no es `ADMIN`, a `/`).
@@ -71,6 +73,7 @@ export function AppRoutes() {
       >
         <Route path="/" element={<HomePage />} />
         <Route path="/peliculas" element={<MoviesPage />} />
+        <Route path="/peliculas/:id" element={<MovieDetailPage />} />
         <Route path="/series" element={<SeriesPage />} />
         <Route path="/series/:id" element={<SeriesDetailPage />} />
         <Route path="/favorites" element={<MyListPage />} />
@@ -117,6 +120,8 @@ export function AppRoutes() {
  * los tests, empieza con la caché vacía.
  *
  * `SkipLink` va antes de las rutas para ser lo primero que recibe el foco con el teclado.
+ * `RouteChangeFocus`, después: al cambiar de página sube el scroll y lleva el
+ * foco al contenido, una vez pintada (y enfocada, si lo hace) la página nueva.
  */
 function App() {
   const [queryClient] = useState(createQueryClient);
@@ -128,6 +133,7 @@ function App() {
             {/* Primer elemento enfocable de toda la aplicación (ver SkipLink). */}
             <SkipLink />
             <AppRoutes />
+            <RouteChangeFocus />
           </AuthProvider>
         </ToastProvider>
       </QueryClientProvider>

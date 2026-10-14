@@ -11,7 +11,7 @@ interface Props {
   /**
    * Nivel del título. `2` (por defecto) cuando el banner es una pieza más de una
    * página que ya tiene su `<h1>` (portada, `/series`); `1` cuando el banner ES
-   * la cabecera de la página (detalle de una serie).
+   * la cabecera de la página (detalle de una película o de una serie).
    */
   headingLevel?: 1 | 2;
   /** Datos del título (`MovieMetaTags`, `SeriesMetaTags`); la etiqueta de acento ("Estreno reciente") va dentro, con su `badge`. */
@@ -19,7 +19,7 @@ interface Props {
   description: string;
   /**
    * `true` (por defecto): sinopsis recortada a 3 líneas, porque la completa está
-   * en otro sitio ("Más información", la página de la serie). `false` en la
+   * en otro sitio (la página de la película o de la serie). `false` en la
    * página de detalle, donde ya no hay otro sitio al que mandarla.
    */
   clampDescription?: boolean;
@@ -31,7 +31,7 @@ interface Props {
  * Banner destacado de un título del catálogo: fondo desenfocado, póster nítido,
  * título, datos, sinopsis y acciones. Lo usan el banner de la portada
  * (`HeroBanner`, la película más reciente), el de `/series` (`SeriesHeroBanner`)
- * y la cabecera de la página de una serie. Antes vivía dentro de `HeroBanner` y
+ * y la cabecera de la página de una película y de una serie. Antes vivía dentro de `HeroBanner` y
  * solo servía para películas; se extrajo para que los tres lugares compartan
  * diseño sin duplicar marcado. Quien lo usa decide QUÉ datos y acciones van.
  *
@@ -48,7 +48,7 @@ interface Props {
  * 1280 px quedaban ~430 px vacíos entre los dos y parecían dos cosas sin
  * relación. Por la ley de proximidad, lo que está junto se lee como un mismo
  * objeto: póster y título son el mismo título, así que van juntos. Es la misma
- * composición que el modal de detalles, de modo que la portada y el detalle se
+ * composición en la portada y en la página de cada título, de modo que se
  * reconocen como una sola pieza del sistema. El espacio libre que queda a la
  * derecha lo ocupa el fondo desenfocado: es atmósfera, no un hueco.
  *

@@ -19,6 +19,7 @@ const params = { pageSize: 20, sort: 'createdAt', direction: 'desc' as const };
 const ENTRIES: Record<string, QueryKey> = {
   portada: queryKeys.paged('/movies', params),
   filtros: queryKeys.paged('/movies/search', { ...params, genreId: 4 }),
+  detallePelicula: queryKeys.movies.detail(5),
   panelPeliculas: queryKeys.movies.admin('', 1),
   series: queryKeys.paged('/series', params),
   detalleSerie: queryKeys.series.detail(3),
@@ -38,8 +39,8 @@ async function invalidatedBy(change: CatalogChange): Promise<string[]> {
 }
 
 describe('keysAffectedBy', () => {
-  it('una película cambia los listados de películas (con y sin filtros, y el del panel) y «Mi lista»', async () => {
-    expect(await invalidatedBy('movies')).toEqual(['portada', 'filtros', 'panelPeliculas', 'miLista']);
+  it('una película cambia los listados de películas (con y sin filtros, y el del panel), su página y «Mi lista»', async () => {
+    expect(await invalidatedBy('movies')).toEqual(['portada', 'filtros', 'detallePelicula', 'panelPeliculas', 'miLista']);
   });
 
   it('una serie o un episodio cambian los listados de series, su detalle, el panel y «Mi lista»', async () => {
@@ -50,6 +51,7 @@ describe('keysAffectedBy', () => {
     expect(await invalidatedBy('genres')).toEqual([
       'portada',
       'filtros',
+      'detallePelicula',
       'panelPeliculas',
       'series',
       'detalleSerie',

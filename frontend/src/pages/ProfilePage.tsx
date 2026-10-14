@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, LogOut, ShieldCheck } from 'lucide-react';
@@ -8,7 +8,6 @@ import { ErrorState } from '../components/ErrorState';
 import { ExploreLink } from '../components/ExploreLink';
 import { LoadingState } from '../components/LoadingState';
 import { MovieCard } from '../components/MovieCard';
-import { MovieDetailsModal } from '../components/MovieDetailsModal';
 import { SeriesCard } from '../components/SeriesCard';
 import { AccountCard } from '../components/profile/AccountCard';
 import { ProfileCard } from '../components/profile/ProfileCard';
@@ -200,19 +199,18 @@ function GenresCard({ status, errorMessage, onRetry, genres, totalTitles }: Genr
 interface ListPreviewProps {
   movies: Movie[];
   series: Series[];
-  onOpenMovie: (movie: Movie) => void;
 }
 
 /**
  * Sección «De tu lista»: hasta cinco títulos guardados (primero películas, luego
  * series) y el enlace «Ver toda mi lista». Reutiliza las tarjetas de siempre:
- * una película abre su diálogo de detalles y una serie lleva a su página.
+ * cada una lleva a la página de su título.
  *
  * Solo se pinta con la lista llena. Con la lista vacía la explicación y la salida
  * («Explorar películas») ya están en «Tus géneros»: repetirlas aquí serían dos
  * estados vacíos casi iguales uno encima de otro.
  */
-function ListPreview({ movies, series, onOpenMovie }: ListPreviewProps) {
+function ListPreview({ movies, series }: ListPreviewProps) {
   const headingId = useId();
   const items = pickListPreview(movies, series);
   return (
@@ -233,7 +231,7 @@ function ListPreview({ movies, series, onOpenMovie }: ListPreviewProps) {
         {items.map((entry) => (
           <li key={`${entry.kind}:${entry.item.id}`}>
             {entry.kind === 'movie' ? (
-              <MovieCard movie={entry.item} onClick={onOpenMovie} className="w-full" />
+              <MovieCard movie={entry.item} className="w-full" />
             ) : (
               <SeriesCard series={entry.item} className="w-full" />
             )}
@@ -276,7 +274,6 @@ export function ProfilePage() {
   const { user, userStatus, isAdmin, refreshUser, logout, isLoggingOut } = useAuth();
   const { movies, series, status, errorMessage, reload } = useFavorites();
   const summaryId = useId();
-  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const genres = useMemo(() => countGenres([...movies, ...series]), [movies, series]);
   const totalTitles = movies.length + series.length;
 
@@ -332,7 +329,7 @@ export function ProfilePage() {
         </div>
 
         {status === 'ready' && totalTitles > 0 && (
-          <ListPreview movies={movies} series={series} onOpenMovie={setSelectedMovie} />
+          <ListPreview movies={movies} series={series} />
         )}
       </>
     );
@@ -341,7 +338,6 @@ export function ProfilePage() {
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
       {content}
-      {selectedMovie && <MovieDetailsModal movie={selectedMovie} onClose={() => setSelectedMovie(null)} />}
     </div>
   );
 }

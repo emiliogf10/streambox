@@ -44,6 +44,7 @@ function routesFor(role: 'ADMIN' | 'USER') {
     'GET /api/movies?page=0&size=1&sort=createdAt&direction=desc': () =>
       jsonResponse(makePage([makeMovie({ id: 1, title: 'Interstellar' })])),
     'GET /api/genres': () => jsonResponse([{ id: 1, name: 'Drama' }]),
+    'GET /api/movies/1': () => jsonResponse(makeMovie({ id: 1, title: 'Interstellar' })),
     'GET /api/series?page=0&size=12&sort=createdAt&direction=desc': () => jsonResponse(makePage([])),
     'GET /api/series?page=0&size=20&sort=createdAt&direction=desc': () =>
       jsonResponse(makePage([makeSeries({ id: 4, title: 'Dark' })])),
@@ -53,6 +54,38 @@ function routesFor(role: 'ADMIN' | 'USER') {
     'GET /api/admin/series/4': () => jsonResponse(makeSeriesDetail({ id: 4, title: 'Dark' })),
   });
 }
+
+describe('Rutas de películas', () => {
+  it('«Más información» de la portada lleva a /peliculas/:id, con su h1 y «Películas» marcado en la barra', async () => {
+    routesFor('USER');
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: '/', session: true });
+
+    const banner = await screen.findByRole('region', { name: 'Interstellar' });
+    await user.click(within(banner).getByRole('link', { name: /^Más información/ }));
+
+    expect(screen.getByText('ruta:/peliculas/1')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Interstellar' })).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: 'Principal' });
+    expect(within(nav).getByRole('link', { name: 'Películas' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('/peliculas/:id se puede abrir directamente (enlace compartido o recarga), barra incluida', async () => {
+    routesFor('USER');
+    renderWithProviders(<AppRoutes />, { route: '/peliculas/1', session: true });
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Interstellar' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Principal' })).toBeInTheDocument();
+  });
+
+  it('sin sesión, /peliculas/:id lleva al login', async () => {
+    routesFor('USER');
+    renderWithProviders(<AppRoutes />, { route: '/peliculas/1' });
+
+    expect(await screen.findByText('ruta:/login')).toBeInTheDocument();
+  });
+});
 
 describe('Rutas de series', () => {
   it('«Series» de la barra lleva a /series, con su h1 y el enlace marcado como actual', async () => {

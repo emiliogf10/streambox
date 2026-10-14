@@ -9,7 +9,7 @@
  *
  * **Por qué determinista.** El degradado se elige a partir del TÍTULO (y no al
  * azar): la misma película se ve igual en la fila, en "Mi lista", en el banner y
- * en el modal, y no cambia de color en cada render ni al recargar.
+ * en su página, y no cambia de color en cada render ni al recargar.
  *
  * **Por qué clases completas en una lista.** Tailwind solo genera las clases que
  * encuentra escritas tal cual en el código: no se pueden componer

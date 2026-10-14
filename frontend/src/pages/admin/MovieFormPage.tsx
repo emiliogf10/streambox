@@ -15,6 +15,7 @@ import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { useGenres } from '../../hooks/useGenres';
 import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
 import { ApiError, apiFetch, getErrorMessage, isAbortError } from '../../lib/api';
+import { moviePath } from '../../lib/catalog';
 import {
   EMPTY_MOVIE_FORM,
   MOVIE_DESCRIPTION_MAX,
@@ -25,7 +26,7 @@ import {
 } from '../../lib/movieValidation';
 import type { MovieFormErrors, MovieFormValues } from '../../lib/movieValidation';
 import type { Movie } from '../../lib/types';
-import { getReturnTo } from './adminPaths';
+import { ADMIN_MOVIES_PATH, getReturnTo } from './adminPaths';
 import { CoverPreview } from './CoverPreview';
 import { focusFirstInvalidField, splitValidationErrors } from './formErrors';
 import { GenreCheckboxes } from './GenreCheckboxes';
@@ -93,6 +94,9 @@ type EditorMode = { kind: 'create' } | { kind: 'edit'; id: number | null };
  * Ruta del formulario de película (`/admin/peliculas/nueva` y
  * `/admin/peliculas/:id/editar`): alta y edición comparten componente.
  *
+ * Se vuelve (al guardar o cancelar) al listado del que se vino o, si se llegó
+ * con «Editar» desde `/peliculas/:id`, a esa película (ver `getReturnTo`).
+ *
  * El formulario se monta con `key` distinta por película. Sin ella, pasar de
  * «Nueva película» a editar una (o de una película a otra) reutilizaría la
  * misma instancia —es el mismo componente en la misma posición— y conservaría
@@ -101,8 +105,9 @@ type EditorMode = { kind: 'create' } | { kind: 'edit'; id: number | null };
 export function MovieFormPage() {
   const { id } = useParams();
   const location = useLocation();
-  const returnTo = getReturnTo(location.state);
   const parsedId = id !== undefined && /^\d+$/.test(id) ? Number(id) : null;
+  // La página de la película solo vale como vuelta si es la de ESTA película (ver `getReturnTo`).
+  const returnTo = getReturnTo(location.state, ADMIN_MOVIES_PATH, parsedId !== null ? moviePath(parsedId) : undefined);
   const mode: EditorMode = id === undefined ? { kind: 'create' } : { kind: 'edit', id: parsedId };
   return <MovieEditor key={id ?? 'nueva'} mode={mode} returnTo={returnTo} />;
 }
@@ -124,7 +129,12 @@ interface LoadResult {
  *   (`lib/movieValidation.ts`) y, además, los `validationErrors` del servidor
  *   junto a cada campo. El foco va al primer campo con error.
  * - **Envío**: el botón se bloquea mientras dura; al terminar, aviso y vuelta al
- *   listado (a la misma página y búsqueda de las que se vino).
+ *   listado (a la misma página y búsqueda de las que se vino) o a la página de
+ *   la película si se vino de ella (con los datos nuevos: `invalidateCatalog`
+ *   deja anticuado también su detalle).
+ * - **Enlace de vuelta**: «Volver a la película» si se vino de ella; si no,
+ *   «Volver al listado». Cuando la película no existe (404) siempre lleva al
+ *   listado: volver a su página sería otro «no encontrada», un callejón sin salida.
  * - **Vista previa de la portada**: ver {@link CoverPreview}.
  * - **Géneros**: casillas cargadas de `GET /api/genres`. Si no hay ninguno, se
  *   explica que hay que crear uno antes y se enlaza a la pestaña Géneros.
@@ -247,6 +257,13 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
       ? `Editar «${current.originalTitle}»`
       : 'Editar película';
 
+  // Volver a una película que no existe sería otro «no encontrada»: en ese caso, al listado.
+  const returnsToMovie = editId !== null && returnTo === moviePath(editId);
+  const back =
+    loadStatus === 'not-found'
+      ? { to: returnsToMovie ? ADMIN_MOVIES_PATH : returnTo, label: 'Volver al listado' }
+      : { to: returnTo, label: returnsToMovie ? 'Volver a la película' : 'Volver al listado' };
+
   let content: ReactNode;
   if (loadStatus === 'loading') {
     content = <LoadingState label="Cargando la película..." />;
@@ -257,8 +274,8 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
         title="No se encontró la película"
         description="Puede que la haya borrado otra persona o que el enlace no sea correcto."
         action={
-          <Link to={returnTo} className={buttonClasses('outline')}>
-            Volver al listado
+          <Link to={back.to} className={buttonClasses('outline')}>
+            {back.label}
           </Link>
         }
       />
@@ -381,11 +398,11 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
   return (
     <section aria-labelledby="movie-form-title">
       <Link
-        to={returnTo}
+        to={back.to}
         className="focus-ring -ml-1 mb-2 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm text-muted transition-colors hover:text-white"
       >
         <ArrowLeft aria-hidden="true" className="size-4" />
-        Volver al listado
+        {back.label}
       </Link>
       <h2 id="movie-form-title" className="text-xl font-semibold tracking-tight wrap-anywhere">
         {heading}

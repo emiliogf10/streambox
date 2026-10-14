@@ -1,11 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import type { KeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { ApiError, apiFetch, getErrorMessage } from '../lib/api';
+import { moviePath, seriesPath } from '../lib/catalog';
 import { pluralize, seriesCardMeta } from '../lib/series';
 import type { Movie, PageResponse, Series } from '../lib/types';
-import { MovieDetailsModal } from './MovieDetailsModal';
 import { MoviePoster } from './MoviePoster';
 
 /** Milisegundos de espera tras la última tecla antes de buscar (evita una petición por letra). */
@@ -14,7 +14,7 @@ const DEBOUNCE_MS = 300;
 /** Resultados que se piden (y se muestran como máximo) de CADA tipo. */
 const RESULTS_SIZE = 10;
 
-/** Un resultado del desplegable: película o serie. El tipo decide qué pasa al elegirlo. */
+/** Un resultado del desplegable: película o serie. El tipo decide a qué página lleva. */
 type SearchOption = { kind: 'movie'; item: Movie } | { kind: 'series'; item: Series };
 
 /** Resultados de la última búsqueda terminada, por tipo. `error` = mensaje si esa mitad falló. */
@@ -53,14 +53,20 @@ const NO_RESULTS: SearchResults = { movies: [], series: [], moviesError: null, s
  *   puede seguir escribiendo): la opción resaltada se señala con `aria-activedescendant`.
  * - Teclado: ↑/↓ recorren TODOS los resultados en el orden en que se ven
  *   (primero películas, luego series; circular), Intro abre el resaltado (o el
- *   primero): una película abre su diálogo de detalles, una serie lleva a su
- *   página. Escape cierra la lista y vacía el campo.
+ *   primero) y lleva a su página (`/peliculas/:id` o `/series/:id`). Escape
+ *   cierra la lista y vacía el campo.
+ * - **Cada opción es un enlace de verdad** (`<a href>` con `role="option"`,
+ *   uno de los roles que HTML permite en un enlace): para el lector de pantalla
+ *   sigue siendo una opción de la lista, pero con el ratón se puede abrir en otra
+ *   pestaña (clic central o con Ctrl/Cmd) o copiar su dirección. No entra en el
+ *   orden de tabulación (`tabIndex={-1}`): en este patrón el foco se queda en el campo.
  * - Una región `aria-live` anuncia el total y el reparto ("3 resultados. 2
  *   películas y 1 serie"), "sin resultados", el error o el fallo parcial: el
  *   desplegable aparece sin mover el foco y, si no, un lector de pantalla no se enteraría.
  */
 export function SearchBar() {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResults>(NO_RESULTS);
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
@@ -69,7 +75,6 @@ export function SearchBar() {
   const [activeIndex, setActiveIndex] = useState(-1);
   // Si el desplegable está visible. Escape y elegir un resultado lo cierran; escribir o enfocar lo abre.
   const [open, setOpen] = useState(false);
-  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
   const inputId = `${baseId}-input`;
@@ -178,10 +183,29 @@ export function SearchBar() {
     if (activeIndex >= 0) document.getElementById(`${baseId}-option-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex, baseId]);
 
-  /** Película → diálogo de detalles (como siempre). Serie → su página. En ambos casos se cierra el buscador. */
+  /** Página de una opción: la de la película o la de la serie. */
+  const pathOf = (option: SearchOption) => (option.kind === 'movie' ? moviePath(option.item.id) : seriesPath(option.item.id));
+
+  /**
+   * Intro sobre una opción: lleva a su página y cierra el buscador. Si es la
+   * página que ya está abierta, **sustituye** la entrada del historial en vez de
+   * añadir otra: si no, «Atrás» llevaría a la misma página. Es lo que ya hace
+   * `Link` con un clic sobre la ruta actual.
+   */
   const handleSelect = (option: SearchOption) => {
-    if (option.kind === 'movie') setSelectedMovie(option.item);
-    else navigate(`/series/${option.item.id}`);
+    const path = pathOf(option);
+    navigate(path, { replace: path === pathname });
+    resetSearch();
+  };
+
+  /**
+   * Clic en una opción. El enlace ya navega solo; aquí solo se cierra el
+   * buscador. Con Ctrl/Cmd/Mayús/Alt el navegador abre la página en otra
+   * pestaña o ventana (y `Link` no navega aquí): el buscador se queda abierto
+   * para poder abrir otro resultado.
+   */
+  const handleOptionClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     resetSearch();
   };
 
@@ -305,30 +329,33 @@ export function SearchBar() {
                     {group.label}
                   </li>
                   {group.options.map(({ option, index }) => (
-                    <li
-                      key={`${option.kind}-${option.item.id}`}
-                      id={optionId(index)}
-                      role="option"
-                      aria-selected={index === activeIndex}
-                      // Evita que el clic robe el foco al campo (el foco debe seguir en el combobox).
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => handleSelect(option)}
-                      // Opción activa: fondo más claro + contorno de acento alrededor de TODA la fila (no solo una barra
-                      // lateral de color): el cambio de forma se ve aunque no se distinga el color.
-                      className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 hover:bg-white/5 aria-selected:bg-white/10 aria-selected:ring-1 aria-selected:ring-accent/70 aria-selected:ring-inset"
-                    >
-                      <MoviePoster
-                        title={option.item.title}
-                        src={option.item.imageUrl}
-                        compact
-                        className="h-12 w-9 shrink-0 rounded-md"
-                      />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-white">{option.item.title}</p>
-                        <p className="text-xs text-muted tabular-nums">
-                          {option.kind === 'movie' ? option.item.releaseYear : seriesCardMeta(option.item)}
-                        </p>
-                      </div>
+                    <li key={`${option.kind}-${option.item.id}`} role="none">
+                      <Link
+                        to={pathOf(option)}
+                        id={optionId(index)}
+                        role="option"
+                        aria-selected={index === activeIndex}
+                        tabIndex={-1}
+                        // Evita que el clic robe el foco al campo (el foco debe seguir en el combobox).
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={handleOptionClick}
+                        // Opción activa: fondo más claro + contorno de acento alrededor de TODA la fila (no solo una barra
+                        // lateral de color): el cambio de forma se ve aunque no se distinga el color.
+                        className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 hover:bg-white/5 aria-selected:bg-white/10 aria-selected:ring-1 aria-selected:ring-accent/70 aria-selected:ring-inset"
+                      >
+                        <MoviePoster
+                          title={option.item.title}
+                          src={option.item.imageUrl}
+                          compact
+                          className="h-12 w-9 shrink-0 rounded-md"
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-white">{option.item.title}</p>
+                          <p className="text-xs text-muted tabular-nums">
+                            {option.kind === 'movie' ? option.item.releaseYear : seriesCardMeta(option.item)}
+                          </p>
+                        </div>
+                      </Link>
                     </li>
                   ))}
                 </ul>
@@ -348,8 +375,6 @@ export function SearchBar() {
           {status === 'error' ? errorMessage : emptyMessage(`«${trimmed}»`)}
         </div>
       )}
-
-      {selectedMovie && <MovieDetailsModal movie={selectedMovie} onClose={() => setSelectedMovie(null)} />}
     </div>
   );
 }

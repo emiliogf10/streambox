@@ -23,7 +23,7 @@ interface MoviePosterProps {
   /** Reduce el hueco de reserva a un icono (miniaturas donde no cabe el título). */
   compact?: boolean;
   /**
-   * Uso como FONDO decorativo (banner y cabecera del modal, desenfocado detrás
+   * Uso como FONDO decorativo (banner de la portada y de las páginas de cada título, desenfocado detrás
    * del póster nítido): si no hay imagen, el hueco es solo el degradado, sin
    * icono ni título (ya los muestra el póster de delante), y siempre oculto a
    * los lectores de pantalla.

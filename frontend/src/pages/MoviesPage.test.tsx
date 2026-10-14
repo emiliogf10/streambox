@@ -12,7 +12,7 @@
  *   parámetros correctos, el recuento en `role="status"`, «Cargar más» sin
  *   duplicados, el vacío con «Quitar filtros», el error y la cancelación de la
  *   petición anterior al cambiar de filtro.
- * - Que una tarjeta abra el diálogo de detalles en las dos vistas.
+ * - Que las tarjetas (y «Más información») enlacen a la página de su película en las dos vistas.
  *
  * La espera de los filtros va con el reloj falso (`test/fakeTimers.ts`): el
  * tiempo solo avanza cuando el test lo pide, nunca con el reloj real.
@@ -208,7 +208,7 @@ describe('MoviesPage sin filtros: banner y filas', () => {
     const banner = await screen.findByRole('region', { name: 'Estreno estrella' });
     expect(within(banner).getByText('Estreno reciente')).toBeInTheDocument();
     expect(within(banner).getByRole('button', { name: /^Mi lista\s*—\s*Estreno estrella$/ })).toBeInTheDocument();
-    expect(within(banner).getByRole('button', { name: /^Más información/ })).toBeInTheDocument();
+    expect(within(banner).getByRole('link', { name: /^Más información/ })).toHaveAttribute('href', `/peliculas/${hero.id}`);
   });
 
   it('jerarquía: un h1 y, debajo, banner, «Novedades» y una fila por género con ≥3 títulos (sin repetir el banner)', async () => {
@@ -216,8 +216,10 @@ describe('MoviesPage sin filtros: banner y filas', () => {
 
     const news = await screen.findByRole('region', { name: 'Novedades' });
     expect(within(news).queryByText('Estreno estrella')).not.toBeInTheDocument();
-    expect(within(news).getAllByRole('button', { name: /\d{4} ·/ })).toHaveLength(3);
-    expect(within(screen.getByRole('region', { name: 'Drama' })).getAllByRole('button')).toHaveLength(3 + 2); // 3 tarjetas + 2 flechas
+    expect(within(news).getAllByRole('link', { name: /\d{4} ·/ })).toHaveLength(3);
+    const drama = screen.getByRole('region', { name: 'Drama' });
+    expect(within(drama).getAllByRole('link')).toHaveLength(3); // las tarjetas
+    expect(within(drama).getAllByRole('button')).toHaveLength(2); // las flechas
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'Estreno estrella',
@@ -228,14 +230,16 @@ describe('MoviesPage sin filtros: banner y filas', () => {
     expect(screen.queryByRole('region', { name: 'Resultados' })).not.toBeInTheDocument();
   });
 
-  it('pulsar una tarjeta abre el diálogo de detalles de esa película', async () => {
+  it('pulsar una tarjeta lleva a la página de esa película (ya no abre un diálogo)', async () => {
     const user = renderPage();
 
     const news = await screen.findByRole('region', { name: 'Novedades' });
-    await user.click(within(news).getByRole('button', { name: /^Tercera/ }));
+    const card = within(news).getByRole('link', { name: /^Tercera/ });
+    expect(card).toHaveAttribute('href', '/peliculas/3');
+    await user.click(card);
 
-    const dialog = await screen.findByRole('dialog', { name: 'Tercera' });
-    expect(within(dialog).getByText('Sinopsis de la película 3.')).toBeInTheDocument();
+    expect(screen.getByText('ruta:/peliculas/3')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('indica cuántas se muestran del total y sin más páginas no ofrece «Cargar más»', async () => {
@@ -259,7 +263,7 @@ describe('MoviesPage sin filtros: cargar más', () => {
     await user.click(await screen.findByRole('button', { name: 'Cargar más películas' }));
 
     expect(await screen.findByText('Mostrando 5 de 5 películas')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /^Quinta/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: /^Quinta/ }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /Cargar más/ })).not.toBeInTheDocument();
   });
 });
@@ -499,11 +503,11 @@ describe('MoviesPage: cambiar filtros', () => {
     await user.selectOptions(genreSelect(), 'Terror');
     passTime(MOVIE_FILTER_DEBOUNCE_MS);
 
-    expect(await within(results()).findByRole('button', { name: /^Solo terror/ })).toBeInTheDocument();
+    expect(await within(results()).findByRole('link', { name: /^Solo terror/ })).toBeInTheDocument();
     expect(dramaSignal.aborted).toBe(true);
 
     await act(async () => releaseDrama(jsonResponse(makePage([makeMovie({ id: 40, title: 'Solo drama' })]))));
-    expect(screen.queryByRole('button', { name: /^Solo drama/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Solo drama/ })).not.toBeInTheDocument();
     await expectCount('1 película');
   });
 });
@@ -538,13 +542,15 @@ describe('MoviesPage: cuadrícula de resultados', () => {
     expect(screen.queryByRole('button', { name: /Cargar más/ })).not.toBeInTheDocument();
   });
 
-  it('pulsar una tarjeta de la cuadrícula abre el diálogo de detalles', async () => {
+  it('las tarjetas de la cuadrícula también enlazan a la página de su película', async () => {
     routeFetch(fetchMock, { ...BASE, [page0]: () => jsonResponse(makePage([hero, others[0]])) });
     const user = renderPage(route);
 
-    await user.click(await within(results()).findByRole('button', { name: /^Segunda/ }));
+    const card = await within(results()).findByRole('link', { name: /^Segunda/ });
+    expect(card).toHaveAttribute('href', `/peliculas/${others[0].id}`);
+    await user.click(card);
 
-    expect(await screen.findByRole('dialog', { name: 'Segunda' })).toBeInTheDocument();
+    expect(screen.getByText(`ruta:/peliculas/${others[0].id}`)).toBeInTheDocument();
   });
 
   it('sin resultados: «No hay películas con estos filtros» y «Quitar filtros» vuelve al catálogo con el foco en «Género»', async () => {
@@ -579,7 +585,7 @@ describe('MoviesPage: cuadrícula de resultados', () => {
     });
     const user = renderPage('/peliculas?anio=2001&orden=duracion-desc');
 
-    await within(results()).findByRole('button', { name: /^Estreno estrella/ });
+    await within(results()).findByRole('link', { name: /^Estreno estrella/ });
     const form = screen.getByRole('form', { name: 'Filtrar películas' });
     await user.click(within(form).getByRole('button', { name: 'Quitar filtros' }));
 
@@ -598,7 +604,7 @@ describe('MoviesPage: cuadrícula de resultados', () => {
     routeFetch(fetchMock, { ...BASE, [page0]: () => jsonResponse(makePage([others[0]])) });
     await user.click(screen.getByRole('button', { name: 'Reintentar' }));
 
-    expect(await within(results()).findByRole('button', { name: /^Segunda/ })).toBeInTheDocument();
+    expect(await within(results()).findByRole('link', { name: /^Segunda/ })).toBeInTheDocument();
     expect(callsWith('genreId=4')).toHaveLength(2);
   });
 });

@@ -5,6 +5,11 @@ import { POSTER_GRID_CLASS } from './posterGridStyles';
 interface CatalogSkeletonProps {
   /** Texto que se anuncia a los lectores de pantalla (y que buscan los tests). */
   label?: string;
+  /**
+   * `true` (por defecto): banner y una fila de tarjetas, como la portada.
+   * `false`: solo el banner, para la página de una película, que no tiene filas debajo.
+   */
+  withRow?: boolean;
 }
 
 /** Tarjetas de la fila de muestra: las suficientes para llenar 1280 px. */
@@ -12,7 +17,8 @@ const CARD_COUNT = 7;
 
 /**
  * Esqueleto de la portada mientras llega el catálogo: la silueta del banner
- * (póster + título, datos y botones) y de una fila de tarjetas.
+ * (póster + título, datos y botones) y de una fila de tarjetas. Sin la fila
+ * (`withRow={false}`) es el de la página de una película.
  *
  * **Por qué un esqueleto y no un spinner.** El spinner centrado decía "espera"
  * pero no "qué": al llegar los datos toda la pantalla cambiaba de golpe. Con
@@ -24,7 +30,7 @@ const CARD_COUNT = 7;
  * anuncia es el texto de `role="status"`, oculto visualmente. El pulso
  * (`animate-pulse`) se quita con `prefers-reduced-motion`.
  */
-export function CatalogSkeleton({ label = 'Cargando catálogo...' }: CatalogSkeletonProps) {
+export function CatalogSkeleton({ label = 'Cargando catálogo...', withRow = true }: CatalogSkeletonProps) {
   const block = 'rounded-lg bg-white/6';
   return (
     <div role="status">
@@ -47,7 +53,7 @@ export function CatalogSkeleton({ label = 'Cargando catálogo...' }: CatalogSkel
           </div>
         </div>
 
-        <RowShapes />
+        {withRow && <RowShapes />}
       </div>
     </div>
   );

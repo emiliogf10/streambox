@@ -36,6 +36,12 @@ export const queryKeys = {
   /** Todo lo que sale de `/api/movies...`. */
   movies: {
     all: ['movies'] as const,
+    /**
+     * Detalle de una película (`GET /api/movies/{id}`, página `/peliculas/:id`).
+     * Cuelga de la raíz `movies`: editar o borrar una película en el panel
+     * (`keysAffectedBy('movies')`) también deja anticuada su página.
+     */
+    detail: (id: number) => ['movies', 'detail', id] as const,
     /** Listado del panel (`/admin/peliculas`): búsqueda y página de la URL. */
     admin: (query: string, page: number) => ['movies', 'admin', { query, page }] as const,
   },

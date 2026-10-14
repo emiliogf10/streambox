@@ -1,0 +1,137 @@
+import { Link, useParams } from 'react-router-dom';
+import { Pencil, SearchX } from 'lucide-react';
+import { buttonClasses } from '../components/buttonStyles';
+import { CatalogSkeleton } from '../components/CatalogSkeleton';
+import { EmptyState } from '../components/EmptyState';
+import { ErrorState } from '../components/ErrorState';
+import { FavoriteButton } from '../components/FavoriteButton';
+import { FeaturedBanner } from '../components/FeaturedBanner';
+import { MovieMetaTags } from '../components/MovieMetaTags';
+import { WatchButton } from '../components/WatchButton';
+import { useAuth } from '../context/AuthContext';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { useMovieDetail } from '../hooks/useMovieDetail';
+import { moviePath } from '../lib/catalog';
+import type { Movie } from '../lib/types';
+import { adminEditMoviePath } from './admin/adminPaths';
+import type { ReturnToState } from './admin/adminPaths';
+
+/** Texto de la sinopsis cuando la película no tiene (la página no deja el hueco en blanco). */
+const NO_DESCRIPTION = 'Sin descripción disponible.';
+
+/**
+ * Página de una película (`/peliculas/:id`).
+ *
+ * **Por qué una página y no el diálogo de antes.** El detalle era un modal sin
+ * dirección propia: no se podía compartir el enlace de una película, «Atrás» no
+ * lo cerraba (salía de la pantalla entera) y al recargar se perdía. Las series
+ * ya tenían su página (`/series/:id`), así que además la aplicación era
+ * incoherente. Ahora todas las tarjetas, el banner, «Mi lista», el perfil y el
+ * buscador enlazan aquí con un enlace de verdad (se abre en otra pestaña, se
+ * copia, se guarda en marcadores).
+ *
+ * Estados (siempre con un único `<h1>`), como en `SeriesDetailPage`:
+ * - **Cargando**: `<h1>` oculto «Película» + la silueta del banner (la misma de
+ *   la portada, sin la fila). Casi nunca se ve: si se llega desde una tarjeta,
+ *   la película ya está en la caché de ese listado y se pinta al instante
+ *   (ver `findCachedMovie` en `useMovieDetail`).
+ * - **No encontrada** (404, o id mal formado en la URL): `<h1>` «Película no
+ *   encontrada» y un enlace a `/peliculas`. Sin «Reintentar»: reintentar no la
+ *   haría aparecer. El mismo texto vale para los dos roles: a diferencia de las
+ *   series (que se ocultan sin episodios), una película existe o no existe, así
+ *   que «se ha retirado del catálogo» es verdad también para un administrador.
+ *   Si la película se borra desde el panel mientras alguien la ve, la
+ *   invalidación de `movies` la vuelve a pedir y la pantalla pasa a este estado.
+ * - **Error** (red, 5xx...): `<h1>` oculto + error con «Reintentar».
+ * - **Lista**: ver {@link MovieDetailView}.
+ */
+export function MovieDetailPage() {
+  const { id } = useParams();
+  const { status, movie, errorMessage, reload } = useMovieDetail(id);
+
+  useDocumentTitle(movie?.title ?? (status === 'not-found' ? 'Película no encontrada' : 'Películas'));
+
+  if (status === 'ready' && movie) return <MovieDetailView movie={movie} />;
+
+  if (status === 'not-found') {
+    return (
+      <div className="px-4 py-6 sm:px-6">
+        <EmptyState
+          titleAs="h1"
+          icon={<SearchX className="size-8" />}
+          title="Película no encontrada"
+          description="Puede que la dirección no sea correcta o que la película se haya retirado del catálogo."
+          action={
+            <Link to="/peliculas" className={buttonClasses('light')}>
+              Ver todas las películas
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="pb-12">
+      <h1 className="sr-only">Película</h1>
+      {status === 'error' ? (
+        <div className="px-4 py-6 sm:px-6">
+          <ErrorState title="No se pudo cargar la película" message={errorMessage} onRetry={reload} />
+        </div>
+      ) : (
+        <CatalogSkeleton label="Cargando película..." withRow={false} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Contenido de una película ya cargada: el mismo {@link FeaturedBanner} de la
+ * portada y de las series, aquí con el título como `<h1>` y la sinopsis entera
+ * (no hay otro sitio donde leerla).
+ *
+ * Acciones, de más a menos importante:
+ * - **«Ver ahora»** ({@link WatchButton}): enlace al vídeo validado con
+ *   `getSafeVideoUrl`; sin URL segura, botón desactivado con el motivo.
+ * - **«Mi lista»** ({@link FavoriteButton}): la lista compartida de `FavoritesContext`.
+ * - **«Editar»**, solo para un administrador (rol confirmado por el servidor;
+ *   mientras carga el usuario no aparece): lleva al formulario del panel. Es
+ *   interfaz, no seguridad: el backend responde 403 a un `USER` que llegue a
+ *   editar. Su nombre accesible incluye el título («Editar Interstellar»), como
+ *   en el listado del panel. Pasa esta página como vuelta (`returnTo`): al
+ *   guardar o cancelar, el formulario vuelve aquí («Volver a la película») y
+ *   no al listado del panel.
+ */
+function MovieDetailView({ movie }: { movie: Movie }) {
+  const { isAdmin } = useAuth();
+
+  return (
+    <div className="pb-12">
+      <FeaturedBanner
+        title={movie.title}
+        imageUrl={movie.imageUrl}
+        headingLevel={1}
+        meta={<MovieMetaTags movie={movie} />}
+        description={movie.description || NO_DESCRIPTION}
+        clampDescription={false}
+        actions={
+          <>
+            <WatchButton videoUrl={movie.videoUrl} title={movie.title} />
+            <FavoriteButton movie={movie} />
+            {isAdmin && (
+              <Link
+                to={adminEditMoviePath(movie.id)}
+                state={{ returnTo: moviePath(movie.id) } satisfies ReturnToState}
+                aria-label={`Editar ${movie.title}`}
+                className={buttonClasses('ghost', 'col-span-2 sm:col-span-1')}
+              >
+                <Pencil aria-hidden="true" className="size-4" />
+                Editar
+              </Link>
+            )}
+          </>
+        }
+      />
+    </div>
+  );
+}

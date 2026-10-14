@@ -38,8 +38,8 @@
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
 | Backend (JUnit) | **1899** | 1752 con H2 y 147 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **922** | |
-| E2E (Playwright) | **154** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
+| Frontend (Vitest) | **997** | |
+| E2E (Playwright) | **161** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
 
@@ -187,7 +187,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   4. Estilo: «no la ven en el catálogo, el buscador ni su lista» → «ni en el catálogo, ni en el buscador ni en su lista».
   5. «Explorar catálogo» (Mi lista) e «Ir al inicio» (`/series`, `/peliculas`) llevan al mismo sitio con nombres distintos.
 - **Películas: detalles abiertos** — *Opcional · BAJA*
-  - **Página propia por película** (`/peliculas/:id`, como las series; hoy el detalle es un modal sin URL).
+  - ✅ ~~**Página propia por película**~~ — **hecho el 2026-10-14**: `/peliculas/:id` y el modal de detalle retirado (ver el [historial](#4-historial-de-trabajos)).
   - Con `?anio=99` en la URL, el año inválido se ignora sin mostrar error en el campo (solo aparece al teclearlo); avisar también ahí es un cambio en `useMovieFilters`.
   - Los mismos filtros (género, año, orden) podrían llevarse a `/series`.
 - **Panel de administración: detalles de diseño** — *Opcional · BAJA*
@@ -220,6 +220,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 
 ### 2.10 Tests, herramientas y notas informativas
 
+- **agent-browser no lanza Chrome** (2026-10-14) — *Media · BAJA* (autor). `agent-browser open` falla con «Chrome exited early (exit code: -1058471934) without writing DevToolsActivePort» y después se queda colgado (así se bloquearon dos agentes). Probar `agent-browser install` (reinstala su Chrome) o `--args "--no-sandbox"`; mientras tanto, usar el Chromium de Playwright del proyecto.
 - **E2E en el contenedor de Claude (Chromium 141)** — *Info*
   - `accessibility.spec.ts:189` (formulario de película: «Volver al listado» tapado por la barra, a 375 y 1280 px) falla con ese navegador. En una página de prueba sin la app, ese Chromium no aplica `scroll-margin-top` a `focus()` si el elemento ya cabe entero en la ventana; el enlace tiene `scroll-margin-top` de 89 px. La interfaz es correcta y en la máquina del autor (Chromium de Playwright 1.63) pasa.
   - Al fallar, los 7 tests del proyecto `catalogo-mutable` salen «did not run»; con `--project=catalogo-mutable --no-deps` pasan 7/7.
@@ -352,6 +353,14 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-10-14 · Página propia por película y adiós al modal
+
+- **Problema:** el detalle de una película era un modal sin URL: no se podía compartir un enlace, «Atrás» no lo cerraba y al recargar se perdía; las series ya tenían su página.
+- **Arreglo** (`frontend`): `pages/MovieDetailPage.tsx` en `/peliculas/:id` (portada, datos, «Ver ahora», «Mi lista» y, solo para ADMIN, «Editar»), con `hooks/useMovieDetail.ts` sobre TanStack Query (clave de detalle dentro de `movies`, así que editar o borrar en el panel la invalida). Estados de carga, error con «Reintentar» y «Película no encontrada» («Puede que la dirección no sea correcta o que la película se haya retirado del catálogo.», con «Ver todas las películas»). Todas las tarjetas, filas, banners, «Mi lista», el perfil y el buscador enlazan con `<Link>` a la página. `MovieDetailsModal` borrado.
+- **Verificación:** Vitest de 922 a **973**; E2E de 154 a **158**; comprobación visual del orquestador a 1280 y 375 px como ADMIN (página, recarga, «Atrás», `/peliculas/999`).
+- **Revisión de `qa`** (apta; añadió 6 tests de casos límite) y arreglos (`frontend`): al cambiar de página se sube el scroll (salvo en «Atrás») y el foco va al `<main>` (`components/RouteChangeFocus.tsx`; antes se entraba a mitad de página en móvil y el lector de pantalla no anunciaba la página nueva; ya pasaba en toda la SPA); «Editar» desde la película vuelve a ella («Volver a la película», validado por lista blanca); Intro en el buscador sobre la película abierta ya no duplica la entrada del historial. Vitest de 973 a **997**; E2E de 158 a **161** (scroll y foco en móvil, comprobados quitando el arreglo).
+- **Incidencia de entorno:** el agente `frontend` se quedó colgado dos veces y agent-browser no consigue lanzar Chrome en la máquina del autor (`Chrome exited early … without writing DevToolsActivePort`), probablemente la misma causa. La comprobación visual se hizo con el Chromium de Playwright del proyecto. Ver sección 2.10.
 
 ### 2026-10-09 · Editar perfil: nombre, contraseña y cerrar sesión en todos los dispositivos
 

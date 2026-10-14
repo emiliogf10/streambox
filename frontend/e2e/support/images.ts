@@ -1,5 +1,5 @@
 /**
- * Comprobaciones geométricas de imágenes para los E2E (banner y modal de detalle).
+ * Comprobaciones geométricas de imágenes para los E2E (banner de la portada y de las páginas de cada título).
  *
  * Existen porque los dos defectos visuales reales de las portadas no se ven en
  * el DOM, solo en las cajas que pinta el navegador:

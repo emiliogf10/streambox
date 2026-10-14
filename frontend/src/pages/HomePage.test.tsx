@@ -151,7 +151,7 @@ describe('HomePage: contenido', () => {
 
     const news = screen.getByRole('region', { name: 'Novedades' });
     expect(within(news).queryByText('Estreno estrella')).not.toBeInTheDocument();
-    expect(within(news).getAllByRole('button', { name: /^(Segunda|Tercera|Cuarta)/ })).toHaveLength(3);
+    expect(within(news).getAllByRole('link', { name: /^(Segunda|Tercera|Cuarta)/ })).toHaveLength(3);
   });
 
   it('jerarquía de encabezados: un único h1 y, debajo, banner y filas como h2 (sin h3 sueltos)', async () => {
@@ -174,7 +174,7 @@ describe('HomePage: contenido', () => {
 
     const row = await screen.findByRole('region', { name: 'Terror' });
 
-    expect(within(row).getAllByRole('button', { name: /^(Segunda|Tercera|Cuarta)/ })).toHaveLength(3);
+    expect(within(row).getAllByRole('link', { name: /^(Segunda|Tercera|Cuarta)/ })).toHaveLength(3);
   });
 
   it('indica cuántas películas se muestran del total', async () => {
@@ -184,14 +184,23 @@ describe('HomePage: contenido', () => {
     expect(screen.queryByRole('button', { name: /Cargar más/ })).not.toBeInTheDocument();
   });
 
-  it('pulsar una tarjeta abre el diálogo de detalles de esa película', async () => {
+  it('cada tarjeta es un enlace a la página de su película y pulsarla lleva a ella (ya no abre un diálogo)', async () => {
     const user = renderHome();
 
     const news = await screen.findByRole('region', { name: 'Novedades' });
-    await user.click(within(news).getByRole('button', { name: /^Tercera/ }));
+    const card = within(news).getByRole('link', { name: /^Tercera/ });
+    expect(card).toHaveAttribute('href', '/peliculas/3');
+    await user.click(card);
 
-    const dialog = await screen.findByRole('dialog', { name: 'Tercera' });
-    expect(within(dialog).getByText('Sinopsis de la película 3.')).toBeInTheDocument();
+    expect(screen.getByText('ruta:/peliculas/3')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('«Más información» del banner lleva a la página de la película destacada', async () => {
+    renderHome();
+
+    const banner = await screen.findByRole('region', { name: hero.title });
+    expect(within(banner).getByRole('link', { name: /^Más información/ })).toHaveAttribute('href', `/peliculas/${hero.id}`);
   });
 });
 
@@ -210,8 +219,8 @@ describe('HomePage: cargar más', () => {
     await user.click(await screen.findByRole('button', { name: 'Cargar más películas' }));
 
     expect(await screen.findByText('Mostrando 5 de 5 películas')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /^Cuarta/ })).toHaveLength(2); // una en Novedades y otra en Terror, no cuatro
-    expect(screen.getAllByRole('button', { name: /^Quinta/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: /^Cuarta/ })).toHaveLength(2); // una en Novedades y otra en Terror, no cuatro
+    expect(screen.getAllByRole('link', { name: /^Quinta/ }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /Cargar más/ })).not.toBeInTheDocument();
   });
 

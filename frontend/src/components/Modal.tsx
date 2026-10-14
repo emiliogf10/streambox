@@ -25,7 +25,7 @@ interface ModalProps {
 }
 
 /**
- * Diálogo modal accesible, base de {@link MovieDetailsModal} y {@link ConfirmDialog}.
+ * Diálogo modal accesible, base de {@link ConfirmDialog} y del formulario de episodios del panel (`EpisodeFormDialog`).
  *
  * Envuelve el elemento nativo `<dialog>` abierto con `showModal()` (ver
  * {@link useModalDialog}), que aporta capa superior, fondo inerte y foco

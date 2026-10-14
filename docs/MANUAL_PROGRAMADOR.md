@@ -1813,7 +1813,7 @@ Solo para `ADMIN`. La barra muestra el enlace **«Administrar»** únicamente si
   - el vacío «No hay películas con estos filtros», con «Quitar filtros»;
   - el error, con «Reintentar».
 
-Las tarjetas abren el modal de detalle de siempre (`MovieDetailsModal`). Una página propia por película (`/peliculas/:id`, como las series) queda como posible mejora en el plan.
+Cada tarjeta es un enlace real a la **página propia de la película** (`/peliculas/:id`, `pages/MovieDetailPage.tsx`, como las series): se puede abrir en otra pestaña, compartir y volver con «Atrás». El antiguo modal de detalle (`MovieDetailsModal`) se retiró el 2026-10-14.
 
 **La barra de filtros** (`components/MovieFilterBar.tsx`) tiene tres controles con su etiqueta: **Género** (`<select>` con «Todos los géneros»), **Año** y **Ordenar por**. «Quitar filtros» solo aparece si hay algún filtro y va **unido al desplegable de orden** (prop `trailing` de `SelectField`). Antes llevaba un margen fijo para alinearse con los controles: cuando bajaba solo de línea a 768 px, dejaba un hueco de 38 px. Ahora baja junto con el desplegable, y lo vigila un E2E.
 
@@ -1836,6 +1836,12 @@ Las tarjetas abren el modal de detalle de siempre (`MovieDetailsModal`). Una pá
 Un detalle que costó un bug: `setSearchParams` de React Router cambia de identidad con cada URL. Por eso, tras aplicar con Intro, se volvía a aplicar el borrador anterior y se deshacía el filtro. Lo evita la marca `handledDraft`, y hay un test que lo reproduce.
 
 **Datos:** las dos vistas usan una sola llamada a `usePagedCatalog`, que acepta una `CatalogQuery` (`sort`, `direction`, `genreId`, `releaseYear`). Los filtros forman parte de la clave de la caché (19.3): al cambiarlos la lista empieza en «cargando», la carga y el «cargar más» del filtro anterior se cancelan y una respuesta lenta suya nunca pisa la del nuevo; volver a un filtro ya visto lo pinta al instante. El pie «Mostrando N de M / Cargar más» es `LoadMoreFooter`, compartido con la portada y `/series`.
+
+### 20.8 bis Página de una película (`pages/MovieDetailPage.tsx` + `hooks/useMovieDetail.ts`) y cambios de página
+
+- **`/peliculas/:id`**, como `/series/:id`: portada, datos, «Ver ahora», «Mi lista» y, solo para ADMIN (mientras carga el usuario se trata como USER), «Editar». Datos con TanStack Query en la clave `['movies', 'detail', id]`, dentro de la raíz `movies`: editar o borrar en el panel la invalida. Si la película ya estaba en un listado, se pinta al instante con esa copia (`placeholderData`), que nunca tapa un 404 ni un error. Un `:id` que no es un entero positivo seguro es «Película no encontrada» sin hacer petición.
+- **«Editar» vuelve a la película.** El enlace pasa `state={{ returnTo }}` y `getReturnTo` (`pages/admin/adminPaths.ts`) solo acepta como vuelta la página exacta de **esa** película (lista blanca: nada de redirecciones abiertas). El formulario dice entonces «Volver a la película».
+- **Al cambiar de página** (`components/RouteChangeFocus.tsx`, en `App`): en un `useLayoutEffect` que solo corre cuando cambia el `pathname`, sube el scroll arriba **salvo en «Atrás»/«Adelante»** (`POP`, donde el navegador restaura la posición) y lleva el foco a `<main id="contenido">` con `preventScroll` (si la página nueva ya puso el foco dentro de su `<main>`, lo respeta). Antes, al abrir una película desde lo bajo de `/peliculas`, en móvil se entraba a mitad de página, y el foco caía en `<body>`, con lo que un lector de pantalla no anunciaba la página nueva. Los cambios solo de búsqueda (filtros, temporada) no mueven nada. Se eligió el `<main>` y no el `<h1>` porque el `<h1>` aún no existe (o cambia) mientras la página carga.
 
 ### 20.9 Estados vacíos según el rol
 
@@ -1952,7 +1958,7 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 | :--- | :--- | :--- | :--- |
 | Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1752 | `.\mvnw.cmd test` (desde `streambox/`) |
 | Backend (PostgreSQL real) | Testcontainers | 147 | Se ejecutan con el anterior (1899 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 922 | `npm run test` (desde `frontend/`) |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 997 | `npm run test` (desde `frontend/`) |
 | Frontend (flujos completos) | Playwright (Chromium) | 150 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend

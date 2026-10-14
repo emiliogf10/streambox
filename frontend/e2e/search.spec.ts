@@ -40,7 +40,7 @@ test.describe('Buscador', () => {
     await expect(page.getByRole('listbox')).toHaveCount(0);
   });
 
-  test('↓ resalta, ↑ vuelve atrás y Intro abre la película resaltada', async ({ page }) => {
+  test('↓ resalta, ↑ vuelve atrás e Intro abre la página de la película resaltada', async ({ page }) => {
     const search = page.getByRole('combobox', { name: 'Buscar películas y series por título' });
     await search.fill('blade');
     const options = page.getByRole('listbox').getByRole('option');
@@ -59,24 +59,35 @@ test.describe('Buscador', () => {
     await expect(search).toHaveAttribute('aria-activedescendant', /.+/);
 
     await search.press('Enter');
-    const dialog = page.getByRole('dialog', { name: 'Blade Runner 2049' });
-    await expect(dialog).toBeVisible();
+    await expect(page).toHaveURL(/\/peliculas\/\d+$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Blade Runner 2049' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     // La lista se cierra y el campo se vacía tras elegir.
     await expect(page.getByRole('listbox')).toHaveCount(0);
     await expect(search).toHaveValue('');
   });
 
-  test('Intro sin resaltar abre la primera coincidencia y un clic en una opción abre su película', async ({ page }) => {
+  test('Intro sin resaltar abre la primera coincidencia y un clic en una opción abre su página', async ({ page }) => {
     const search = page.getByRole('combobox', { name: 'Buscar películas y series por título' });
     await search.fill('dune');
     await expect(page.getByRole('option')).toHaveCount(1);
     await search.press('Enter');
-    await expect(page.getByRole('dialog', { name: 'Dune: Parte Dos' })).toBeVisible();
-    await page.getByRole('button', { name: /^Cerrar detalles/ }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Dune: Parte Dos' })).toBeVisible();
 
+    // Cada opción es un enlace de verdad (se puede abrir en otra pestaña o copiar).
     await search.fill('interstellar');
-    await page.getByRole('option', { name: /Interstellar/ }).click();
-    await expect(page.getByRole('dialog', { name: 'Interstellar' })).toBeVisible();
+    const option = page.getByRole('option', { name: /Interstellar/ });
+    await expect(option).toHaveAttribute('href', /^\/peliculas\/\d+$/);
+    const href = await option.getAttribute('href');
+    await option.click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe(href);
+
+    // Recargar deja la misma película (la dirección sirve) y «Atrás» vuelve a la anterior.
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole('heading', { level: 1, name: 'Dune: Parte Dos' })).toBeVisible();
   });
 
   test('Escape cierra la lista y vacía el campo', async ({ page }) => {

@@ -13,8 +13,8 @@ type Props = { className?: string } & ({ movie: Movie; series?: never } | { seri
 /**
  * Botón "Mi lista" / "En mi lista" de una película o de una serie.
  *
- * Lee y modifica la lista compartida (`useFavorites`), así que el banner, el
- * modal de detalles, la página de una serie y "Mi lista" siempre muestran lo
+ * Lee y modifica la lista compartida (`useFavorites`), así que el banner, la
+ * página de una película o de una serie y "Mi lista" siempre muestran lo
  * mismo. Películas y series son listas distintas en el servidor (una película y
  * una serie pueden tener el mismo id), por eso el botón le dice al contexto de
  * qué tipo es. Mientras hay una petición en curso para ese título se bloquea

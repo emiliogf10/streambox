@@ -55,7 +55,7 @@ for (const viewport of VIEWPORTS) {
       await shot(page, '02-registro-errores', true);
     });
 
-    test('portada, detalle, toast y menú', async ({ page, user, signIn }) => {
+    test('portada, página de una película, toast y menú', async ({ page, user, signIn }) => {
       await signIn(user);
       await page.goto('/');
       const banner = page.getByRole('region', { name: HERO_TITLE });
@@ -83,14 +83,18 @@ for (const viewport of VIEWPORTS) {
 
       await page.evaluate(() => window.scrollTo(0, 0));
       await movieCard(page.getByRole('region', { name: 'Novedades' }), 'Interstellar').click();
-      const dialog = page.getByRole('dialog', { name: 'Interstellar' });
-      await expect(dialog).toBeVisible();
-      await expect.poll(() => dialog.locator('img').last().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
-      await shot(page, '07-modal-detalle');
+      const detail = page.getByRole('region', { name: 'Interstellar' });
+      await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+      await expect.poll(() => detail.locator('img').last().evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+      await shot(page, '07-pagina-pelicula', true);
 
-      await dialog.getByRole('button', { name: /^Mi lista/ }).click();
-      await expect(dialog.getByText('«Interstellar» se ha añadido a tu lista.')).toBeVisible();
-      await shot(page, '08-toast-en-modal');
+      await detail.getByRole('button', { name: /^Mi lista/ }).click();
+      await expect(page.getByText('«Interstellar» se ha añadido a tu lista.')).toBeVisible();
+      await shot(page, '08-toast-en-pagina-pelicula');
+
+      await page.goto('/peliculas/999999');
+      await expect(page.getByRole('heading', { level: 1, name: 'Película no encontrada' })).toBeVisible();
+      await shot(page, '08b-pelicula-no-encontrada');
     });
 
     test('Películas: sin filtros, con filtros, error del año y sin resultados', async ({ page, user, signIn }) => {
@@ -178,7 +182,7 @@ for (const viewport of VIEWPORTS) {
         'Ex Machina',
       ]);
       await page.reload();
-      await expect(page.getByRole('main').getByRole('button', { name: /\d{4} ·/ })).toHaveCount(6);
+      await expect(page.getByRole('main').getByRole('link', { name: /\d{4} ·/ })).toHaveCount(6);
       await page.waitForLoadState('networkidle');
       await shot(page, '10-mi-lista-con-peliculas');
 

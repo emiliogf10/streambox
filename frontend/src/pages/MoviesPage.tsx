@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from 'react';
+import { useId, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Film, SearchX } from 'lucide-react';
@@ -10,7 +10,6 @@ import { ErrorState } from '../components/ErrorState';
 import { HeroBanner } from '../components/HeroBanner';
 import { LoadMoreFooter } from '../components/LoadMoreFooter';
 import { MovieCard } from '../components/MovieCard';
-import { MovieDetailsModal } from '../components/MovieDetailsModal';
 import { MovieFilterBar } from '../components/MovieFilterBar';
 import { MovieRow } from '../components/MovieRow';
 import { POSTER_GRID_CLASS } from '../components/posterGridStyles';
@@ -22,7 +21,6 @@ import { useMovieFilters } from '../hooks/useMovieFilters';
 import { buildCatalogRows } from '../lib/catalog';
 import { DEFAULT_MOVIE_SORT, hasActiveFilters } from '../lib/movieFilters';
 import { pluralize } from '../lib/series';
-import type { Movie } from '../lib/types';
 import { ADMIN_MOVIES_PATH } from './admin/adminPaths';
 
 /** Lo que devuelve `useMovieResults`: lo comparten las dos vistas de la página. */
@@ -31,7 +29,6 @@ type MovieResults = ReturnType<typeof useMovieResults>;
 /** Propiedades comunes de las dos vistas. */
 interface ViewProps {
   results: MovieResults;
-  onSelectMovie: (movie: Movie) => void;
 }
 
 /**
@@ -49,8 +46,9 @@ interface ViewProps {
  * La barra de filtros ({@link MovieFilterBar}) está en las dos, junto al `<h1>`
  * «Películas» (visible, como el de `/series`, y presente en todos los estados).
  * Los filtros viven en la URL (`useMovieFilters`): se comparten con el enlace y
- * «Atrás» vuelve al filtro anterior. Pulsar una tarjeta abre el diálogo de
- * detalles de siempre (`MovieDetailsModal`), en las dos vistas.
+ * «Atrás» vuelve al filtro anterior. En las dos vistas, cada tarjeta (y «Más
+ * información» del banner) lleva a la página de su película (`/peliculas/:id`);
+ * «Atrás» desde ella vuelve aquí con los mismos filtros, porque están en la URL.
  */
 export function MoviesPage() {
   useDocumentTitle('Películas');
@@ -60,7 +58,6 @@ export function MoviesPage() {
   const filterState = useMovieFilters(knownGenreIds);
   const { filters, draft, clear } = filterState;
   const results = useMovieResults(filters);
-  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const genreSelectRef = useRef<HTMLSelectElement>(null);
 
   const draftActive = draft.genre !== '' || draft.year.trim() !== '' || draft.sort !== DEFAULT_MOVIE_SORT;
@@ -93,12 +90,10 @@ export function MoviesPage() {
       </div>
 
       {results.filtered ? (
-        <FilteredResults results={results} onSelectMovie={setSelectedMovie} onClearFilters={clearFilters} />
+        <FilteredResults results={results} onClearFilters={clearFilters} />
       ) : (
-        <CatalogView results={results} onSelectMovie={setSelectedMovie} />
+        <CatalogView results={results} />
       )}
-
-      {selectedMovie && <MovieDetailsModal movie={selectedMovie} onClose={() => setSelectedMovie(null)} />}
     </div>
   );
 }
@@ -113,7 +108,7 @@ export function MoviesPage() {
  * vacía); a un **administrador**, que es quien puede llenarla, le lleva al
  * panel. Mientras carga el usuario, falla cerrado (mensaje de usuario).
  */
-function CatalogView({ results, onSelectMovie }: ViewProps) {
+function CatalogView({ results }: ViewProps) {
   const { isAdmin } = useAuth();
   const { movies, total, status, errorMessage, loadingMore, loadMoreFailed, hasMore, loadMore, reload } = results;
   const hero = movies[0];
@@ -152,9 +147,9 @@ function CatalogView({ results, onSelectMovie }: ViewProps) {
 
   return (
     <>
-      <HeroBanner movie={hero} onDetails={onSelectMovie} />
+      <HeroBanner movie={hero} />
       {rows.map((row) => (
-        <MovieRow key={row.id} title={row.title} movies={row.items} onSelectMovie={onSelectMovie} />
+        <MovieRow key={row.id} title={row.title} movies={row.items} />
       ))}
       <LoadMoreFooter
         shown={movies.length}
@@ -184,7 +179,7 @@ interface FilteredResultsProps extends ViewProps {
  * oye «12 películas» sin que el foco se mueva de la barra. Mientras carga, el
  * recuento queda vacío y lo que se anuncia es el esqueleto («Buscando películas...»).
  */
-function FilteredResults({ results, onSelectMovie, onClearFilters }: FilteredResultsProps) {
+function FilteredResults({ results, onClearFilters }: FilteredResultsProps) {
   const { movies, total, status, errorMessage, loadingMore, loadMoreFailed, hasMore, loadMore, reload } = results;
   const headingId = useId();
 
@@ -212,7 +207,7 @@ function FilteredResults({ results, onSelectMovie, onClearFilters }: FilteredRes
         <ul role="list" className={POSTER_GRID_CLASS}>
           {movies.map((movie) => (
             <li key={movie.id}>
-              <MovieCard movie={movie} onClick={onSelectMovie} className="w-full" />
+              <MovieCard movie={movie} className="w-full" />
             </li>
           ))}
         </ul>

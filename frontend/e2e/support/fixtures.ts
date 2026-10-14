@@ -70,12 +70,13 @@ export function escapeRegExp(text: string): string {
 }
 
 /**
- * Tarjeta (botón) de una película dentro de `scope`. Su nombre accesible es
+ * Tarjeta de una película dentro de `scope`: un ENLACE a su página (`/peliculas/:id`;
+ * antes era un botón que abría un diálogo). Su nombre accesible es
  * «Título 2014 · 2 h 1 min»; se ancla al inicio y exige el año para que
  * «Blade Runner» no case con «Blade Runner 2049».
  */
 export function movieCard(scope: Page | Locator, title: string): Locator {
-  return scope.getByRole('button', { name: new RegExp(`^${escapeRegExp(title)} \\d{4} ·`) });
+  return scope.getByRole('link', { name: new RegExp(`^${escapeRegExp(title)} \\d{4} ·`) });
 }
 
 /**

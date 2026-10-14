@@ -2,7 +2,7 @@
  * E2E de la página `/peliculas` (lo que ve un usuario): la vista por filas sin
  * filtros, la barra de filtros (género, año y orden) con los filtros en la URL,
  * la cuadrícula de resultados con su recuento y «Cargar más», el estado vacío
- * con «Quitar filtros», los años inválidos, el diálogo de detalle y el teclado.
+ * con «Quitar filtros», los años inválidos, el enlace a la página de cada película y el teclado.
  *
  * Usa el catálogo sembrado de `support/catalog.ts` (25 películas con géneros y
  * años conocidos), así que los recuentos son EXACTOS y se calculan a partir de
@@ -311,26 +311,98 @@ test.describe('Página Películas', () => {
     await expectResultTitles(page, ACTION_2014_TITLES);
   });
 
-  test('una tarjeta abre el diálogo de detalle, en las filas y en la cuadrícula', async ({ page }) => {
+  test('una tarjeta lleva a la página de la película, en las filas y en la cuadrícula; «Atrás» conserva los filtros', async ({
+    page,
+  }) => {
     await page.goto('/peliculas');
 
-    const rowCard = movieCard(page.getByRole('region', { name: 'Novedades' }), 'Interstellar');
-    await rowCard.click();
-    const dialog = page.getByRole('dialog', { name: 'Interstellar' });
-    await expect(dialog).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(dialog).toBeHidden();
-    await expect(rowCard).toBeFocused();
+    await movieCard(page.getByRole('region', { name: 'Novedades' }), 'Interstellar').click();
+    await expect(page).toHaveURL(/\/peliculas\/\d+$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/peliculas$/);
 
     await filterBar(page).year.fill('2014');
     await expect(page).toHaveURL(/\?anio=2014$/);
-    const gridCard = movieCard(results(page), 'Interstellar');
-    await gridCard.click();
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole('heading', { name: 'Interstellar' })).toBeVisible();
-    await dialog.getByRole('button', { name: /^Cerrar detalles/ }).click();
-    await expect(dialog).toBeHidden();
-    await expect(gridCard).toBeFocused();
+    await movieCard(results(page), 'Interstellar').click();
+    await expect(page).toHaveURL(/\/peliculas\/\d+$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+
+    // Los filtros viven en la URL: «Atrás» vuelve a la misma búsqueda, con sus resultados.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/peliculas\?anio=2014$/);
+    await expect(filterBar(page).year).toHaveValue('2014');
+    await expect(movieCard(results(page), 'Interstellar')).toBeVisible();
+  });
+
+  test('móvil: tras bajar por la cuadrícula, la película se abre ARRIBA (título a la vista y foco en el contenido); «Atrás» no vuelve arriba del todo', async ({
+    page,
+  }) => {
+    // La SPA conservaba el scroll y el foco de la página anterior (el foco, perdido en <body>).
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/peliculas?orden=titulo-asc');
+    const section = results(page);
+    await section.getByRole('button', { name: 'Cargar más películas' }).click();
+    await expect(section.getByText(`Mostrando ${MOVIES.length} de ${MOVIES.length} películas`)).toBeVisible();
+
+    const lastTitle = ALL_BY_TITLE[ALL_BY_TITLE.length - 1];
+    const card = movieCard(section, lastTitle);
+    await card.scrollIntoViewIfNeeded();
+    const scrolledTo = await page.evaluate(() => window.scrollY);
+    expect(scrolledTo, 'la última tarjeta queda muy por debajo de la primera pantalla').toBeGreaterThan(812);
+
+    await card.click();
+    await expect(page).toHaveURL(/\/peliculas\/\d+$/);
+    const heading = page.getByRole('heading', { level: 1, name: lastTitle });
+    await expect(heading).toBeVisible();
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await expect(heading).toBeInViewport();
+    // El foco no se queda en <body>: va al contenido, para que el lector de pantalla anuncie la página nueva.
+    await expect(page.getByRole('main')).toBeFocused();
+
+    // «Atrás» no sube arriba del todo: el navegador restaura la posición de esa entrada del historial.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/peliculas\?orden=titulo-asc$/);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  });
+
+  test('móvil: un enlace de la barra desde lo más bajo de /peliculas abre la portada arriba, no a la misma altura', async ({
+    page,
+  }) => {
+    // La página de una película cabe entera en 812 px (el navegador la deja arriba igualmente); la portada no,
+    // así que aquí el scroll heredado sí se notaría.
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/peliculas?orden=titulo-asc');
+    const section = results(page);
+    await section.getByRole('button', { name: 'Cargar más películas' }).click();
+    await expect(section.getByText(`Mostrando ${MOVIES.length} de ${MOVIES.length} películas`)).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(812);
+
+    await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Inicio' }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
+    // Comprobación de que la prueba sirve: la portada es más alta que la pantalla, así que podría quedarse abajo.
+    expect(await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBeGreaterThan(812);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await expect(page.getByRole('main')).toBeFocused();
+  });
+
+  test('cambiar un filtro no sube la página (es la misma página con otra búsqueda)', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/peliculas?orden=titulo-asc');
+    const bar = filterBar(page);
+    await expect(results(page).getByRole('status').first()).toHaveText(`${MOVIES.length} películas`);
+    await bar.sort.scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.scrollBy(0, 200));
+    const before = await page.evaluate(() => window.scrollY);
+    expect(before).toBeGreaterThan(0);
+
+    await bar.sort.selectOption({ label: 'Título Z–A' });
+    await expect(page).toHaveURL(/\/peliculas\?orden=titulo-desc$/);
+    await expect(results(page).getByRole('listitem').first()).toContainText(ALL_BY_TITLE[ALL_BY_TITLE.length - 1]);
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
   });
 
   test('teclado: la barra de filtros se recorre con Tab en orden y con foco visible, también «Quitar filtros»', async ({

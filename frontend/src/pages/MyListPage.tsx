@@ -11,11 +11,9 @@ import { ExploreLink } from '../components/ExploreLink';
 import { LoadingState } from '../components/LoadingState';
 import { MovieCard } from '../components/MovieCard';
 import { POSTER_GRID_CLASS } from '../components/posterGridStyles';
-import { MovieDetailsModal } from '../components/MovieDetailsModal';
 import { SeriesCard } from '../components/SeriesCard';
 import { useFavorites } from '../context/FavoritesContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import type { Movie } from '../lib/types';
 
 /**
  * Ilustración del estado vacío: tres huecos de póster (2:3, borde discontinuo)
@@ -105,7 +103,7 @@ function describeClear(movieCount: number, seriesCount: number): string {
  * ya hace las peticiones y avisa con toasts de éxito o error. Aquí se resuelven:
  * - Los tres estados: cargando, error (con "Reintentar") y vacío (si no hay
  *   NINGÚN título de ningún tipo). El `<h1>` "Mi lista" está siempre presente.
- * - Pulsar una película abre su diálogo de detalles; pulsar una serie lleva a su página.
+ * - Cada tarjeta lleva a la página de su título (`/peliculas/:id` o `/series/:id`).
  * - La confirmación de "Vaciar lista" con {@link ConfirmDialog}: es destructiva,
  *   no se puede deshacer y vacía las dos secciones (el contexto explica qué pasa
  *   si una de las dos peticiones falla).
@@ -113,7 +111,6 @@ function describeClear(movieCount: number, seriesCount: number): string {
 export function MyListPage() {
   useDocumentTitle('Mi lista');
   const { movies, series, status, errorMessage, clear, reload } = useFavorites();
-  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -173,7 +170,7 @@ export function MyListPage() {
         >
           {movies.map((movie) => (
             <li key={movie.id}>
-              <MovieCard movie={movie} onClick={setSelectedMovie} className="w-full" />
+              <MovieCard movie={movie} className="w-full" />
             </li>
           ))}
         </ListSection>
@@ -222,8 +219,6 @@ export function MyListPage() {
         onConfirm={() => void handleConfirmClear()}
         onCancel={() => setConfirmOpen(false)}
       />
-
-      {selectedMovie && <MovieDetailsModal movie={selectedMovie} onClose={() => setSelectedMovie(null)} />}
     </div>
   );
 }

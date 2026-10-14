@@ -317,8 +317,8 @@ describe('ProfilePage: con la lista llena', () => {
     await findName('ana');
 
     const preview = await screen.findByRole('region', { name: 'De tu lista' });
-    expect(within(preview).getByRole('button', { name: /^Dune 2021 ·/ })).toBeInTheDocument();
-    expect(within(preview).getByRole('button', { name: /^Arrival 2016 ·/ })).toBeInTheDocument();
+    expect(within(preview).getByRole('link', { name: /^Dune 2021 ·/ })).toBeInTheDocument();
+    expect(within(preview).getByRole('link', { name: /^Arrival 2016 ·/ })).toBeInTheDocument();
     expect(within(preview).getByRole('link', { name: 'Dark 2017–2020 · 3 temporadas' })).toHaveAttribute('href', '/series/1');
     expect(within(preview).getByRole('link', { name: 'Ver toda mi lista' })).toHaveAttribute('href', '/favorites');
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
@@ -336,7 +336,7 @@ describe('ProfilePage: con la lista llena', () => {
     await findName('ana');
 
     const preview = await screen.findByRole('region', { name: 'De tu lista' });
-    expect(within(preview).getAllByRole('button', { name: /\d{4} ·/ }).map((card) => card.textContent)).toEqual(
+    expect(within(preview).getAllByRole('link', { name: /\d{4} ·/ }).map((card) => card.textContent)).toEqual(
       [1, 2, 3, 4, 5].map((id) => expect.stringContaining(`Peli ${id}`)),
     );
     expect(within(preview).queryByText('Peli 6')).not.toBeInTheDocument();
@@ -345,13 +345,16 @@ describe('ProfilePage: con la lista llena', () => {
     expect(valueOf('Películas en mi lista')).toHaveTextContent('6');
   });
 
-  it('pulsar una película abre su diálogo de detalles', async () => {
+  it('una película de «De tu lista» es un enlace a su página y pulsarla lleva a ella', async () => {
     const user = renderProfile({ movies: [dune], series: [] });
     await findName('ana');
 
-    await user.click(await screen.findByRole('button', { name: /^Dune 2021 ·/ }));
+    const card = await screen.findByRole('link', { name: /^Dune 2021 ·/ });
+    expect(card).toHaveAttribute('href', `/peliculas/${dune.id}`);
+    await user.click(card);
 
-    expect(await screen.findByRole('dialog', { name: 'Dune' })).toBeInTheDocument();
+    expect(screen.getByText(`ruta:/peliculas/${dune.id}`)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('títulos sin ningún género: la tarjeta lo dice en lugar de quedarse en blanco', async () => {

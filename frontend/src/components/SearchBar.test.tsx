@@ -6,15 +6,17 @@
  * letra) y cancelable (las DOS peticiones), los roles ARIA correctos
  * (`combobox`, `listbox`, `group`, `option`, `aria-activedescendant`), el manejo
  * con teclado (↑/↓ circular por todos los resultados, de un grupo al otro,
- * Intro, Escape) con el foco SIEMPRE en el campo, qué pasa al elegir (película →
- * diálogo, serie → su página), los estados "sin resultados" y "error", y el
- * fallo de solo una de las dos búsquedas.
+ * Intro, Escape) con el foco SIEMPRE en el campo, qué pasa al elegir (cada
+ * resultado lleva a su página: `/peliculas/:id` o `/series/:id`; las opciones son
+ * enlaces reales fuera del orden de tabulación), los estados "sin resultados" y
+ * "error", y el fallo de solo una de las dos búsquedas.
  *
  * `fetch` está simulado y el retardo de la búsqueda usa temporizadores falsos
  * (ningún test espera tiempo real).
  */
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useNavigationType } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FavoritesProvider } from '../context/FavoritesContext';
 import { installManualTimers, passTime } from '../test/fakeTimers';
@@ -57,12 +59,14 @@ afterEach(() => {
 });
 
 /**
- * Monta el buscador (con la lista de favoritos, que necesita el modal de detalles).
+ * Monta el buscador dentro de la lista de favoritos, como en la barra real (`AppShell`).
  * Por defecto la búsqueda de películas devuelve las tres «Matrix» y la de series, nada.
+ * `route` es la página en la que está abierto el buscador (por defecto, la portada).
  */
 function setup(
   searchResponse: Handler = () => jsonResponse(makePage([matrix, matrixReloaded, matrixRev])),
   seriesResponse: Handler = () => jsonResponse(makePage([])),
+  route = '/',
 ) {
   routeFetch(fetchMock, {
     'GET /api/users/me/favorites': () => jsonResponse([]),
@@ -74,10 +78,16 @@ function setup(
   renderWithProviders(
     <FavoritesProvider>
       <SearchBar />
+      <NavigationTypeProbe />
     </FavoritesProvider>,
-    { session: true },
+    { session: true, route },
   );
   return { user, input: screen.getByRole('combobox', { name: LABEL }) };
+}
+
+/** Escribe cómo se llegó a la ruta actual (`PUSH` añade una entrada al historial; `REPLACE`, no). */
+function NavigationTypeProbe() {
+  return <p>{`navegacion:${useNavigationType()}`}</p>;
 }
 
 /** Región `aria-live` del propio buscador (la zona de avisos de la app también es un `status`). */
@@ -352,14 +362,14 @@ describe('SearchBar: teclado', () => {
     expect(options[1]).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('Intro con una opción resaltada abre los detalles de ESA película y cierra y vacía el buscador', async () => {
+  it('Intro con una opción resaltada lleva a la página de ESA película y cierra y vacía el buscador', async () => {
     const { user, input } = setup();
     await searchMatrix(user);
 
     await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
 
-    const dialog = await screen.findByRole('dialog', { name: 'Matrix Reloaded' });
-    expect(dialog).toBeInTheDocument();
+    expect(screen.getByText(`ruta:/peliculas/${matrixReloaded.id}`)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(input).toHaveValue('');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
@@ -382,7 +392,41 @@ describe('SearchBar: teclado', () => {
 
     await user.keyboard('{Enter}');
 
-    expect(await screen.findByRole('dialog', { name: 'Matrix' })).toBeInTheDocument();
+    expect(screen.getByText(`ruta:/peliculas/${matrix.id}`)).toBeInTheDocument();
+  });
+
+  it('Intro sobre la película que ya está abierta no añade otra entrada al historial (sustituye la actual)', async () => {
+    const { user } = setup(undefined, undefined, `/peliculas/${matrix.id}`);
+    await searchMatrix(user);
+
+    await user.keyboard('{Enter}'); // la primera, «Matrix»: la misma página
+
+    expect(screen.getByText(`ruta:/peliculas/${matrix.id}`)).toBeInTheDocument();
+    expect(screen.getByText('navegacion:REPLACE')).toBeInTheDocument();
+  });
+
+  it('Intro sobre OTRA película desde la página de una película sí añade una entrada (Atrás vuelve a la anterior)', async () => {
+    const { user } = setup(undefined, undefined, `/peliculas/${matrix.id}`);
+    await searchMatrix(user);
+
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
+
+    expect(screen.getByText(`ruta:/peliculas/${matrixReloaded.id}`)).toBeInTheDocument();
+    expect(screen.getByText('navegacion:PUSH')).toBeInTheDocument();
+  });
+
+  it('las opciones son enlaces a la página de cada título, fuera del orden de tabulación', async () => {
+    const { user } = setup(undefined, () => jsonResponse(makePage([matrixSeries])));
+    const list = await searchMatrix(user);
+
+    // `role="option"` sobre un `<a href>`: para el lector de pantalla es una opción; con el ratón, un enlace.
+    const movie = within(list).getByRole('option', { name: /Matrix Reloaded/ });
+    expect(movie.tagName).toBe('A');
+    expect(movie).toHaveAttribute('href', `/peliculas/${matrixReloaded.id}`);
+    expect(movie).toHaveAttribute('tabindex', '-1');
+    // La serie tiene el mismo id que «Matrix» (1): cada tipo enlaza a SU página.
+    expect(within(list).getByRole('option', { name: /Matrix: la serie/ })).toHaveAttribute('href', '/series/1');
+    expect(within(list).getByRole('option', { name: /^Matrix 1999$/ })).toHaveAttribute('href', '/peliculas/1');
   });
 
   it('Escape cierra la lista y vacía el campo', async () => {
@@ -414,13 +458,29 @@ describe('SearchBar: teclado', () => {
 });
 
 describe('SearchBar: ratón', () => {
-  it('pulsar una opción abre sus detalles', async () => {
-    const { user } = setup();
+  it('pulsar una película lleva a su página y cierra y vacía el buscador', async () => {
+    const { user, input } = setup();
     const list = await searchMatrix(user);
 
     await user.click(within(list).getByRole('option', { name: /Matrix Revolutions/ }));
 
-    expect(await screen.findByRole('dialog', { name: 'Matrix Revolutions' })).toBeInTheDocument();
+    expect(screen.getByText(`ruta:/peliculas/${matrixRev.id}`)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(input).toHaveValue('');
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('Ctrl+clic (abrir en otra pestaña) no navega aquí y deja el buscador abierto para elegir otro', async () => {
+    const { user, input } = setup();
+    const list = await searchMatrix(user);
+
+    await user.keyboard('{Control>}');
+    await user.click(within(list).getByRole('option', { name: /Matrix Revolutions/ }));
+    await user.keyboard('{/Control}');
+
+    expect(screen.getByText('ruta:/')).toBeInTheDocument();
+    expect(input).toHaveValue('matrix');
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
   });
 
   it('pulsar una serie lleva a su página', async () => {

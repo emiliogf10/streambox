@@ -58,6 +58,7 @@ function renderForm(route: string, routeState?: unknown) {
         <Route path="/admin/peliculas/nueva" element={<MovieFormPage />} />
         <Route path="/admin/peliculas/:id/editar" element={<MovieFormPage />} />
         <Route path="/admin/generos" element={<p>Pestaña de géneros</p>} />
+        <Route path="/peliculas/:id" element={<p>Página de la película</p>} />
       </Routes>
       <SearchProbe />
     </>,
@@ -477,5 +478,63 @@ describe('MovieFormPage: edición', () => {
     await user.click(screen.getByRole('button', { name: 'Reintentar' }));
 
     expect(await screen.findByRole('heading', { name: 'Editar «Interstellar»' })).toBeInTheDocument();
+  });
+});
+
+describe('MovieFormPage: vuelta a la página de la película', () => {
+  it('desde /peliculas/7: «Volver a la película» y «Cancelar» llevan a ella, no al listado', async () => {
+    routeFetch(fetchMock, { ...GENRES_ROUTE, 'GET /api/movies/7': () => jsonResponse(interstellar) });
+    const user = setupUser();
+    renderForm('/admin/peliculas/7/editar', { returnTo: '/peliculas/7' });
+    await screen.findByRole('heading', { name: 'Editar «Interstellar»' });
+
+    expect(screen.getByRole('link', { name: 'Volver a la película' })).toHaveAttribute('href', '/peliculas/7');
+    expect(screen.queryByRole('link', { name: 'Volver al listado' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Cancelar' })).toHaveAttribute('href', '/peliculas/7');
+
+    await user.click(screen.getByRole('link', { name: 'Cancelar' }));
+    expect(screen.getByText('Página de la película')).toBeInTheDocument();
+    expect(screen.getByText('ruta:/peliculas/7')).toBeInTheDocument();
+  });
+
+  it('al guardar vuelve a la página de la película de la que se vino', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/movies/7': () => jsonResponse(interstellar),
+      'PUT /api/movies/7': () => jsonResponse(interstellar),
+    });
+    const user = setupUser();
+    renderForm('/admin/peliculas/7/editar', { returnTo: '/peliculas/7' });
+    await screen.findByRole('heading', { name: 'Editar «Interstellar»' });
+    await within(genresGroup()).findAllByRole('checkbox');
+
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    expect(await screen.findByText('Página de la película')).toBeInTheDocument();
+    expect(screen.getByText('ruta:/peliculas/7')).toBeInTheDocument();
+  });
+
+  it('la página de OTRA película no vale como vuelta (lista blanca): se vuelve al listado', async () => {
+    routeFetch(fetchMock, { ...GENRES_ROUTE, 'GET /api/movies/7': () => jsonResponse(interstellar) });
+    renderForm('/admin/peliculas/7/editar', { returnTo: '/peliculas/8' });
+    await screen.findByRole('heading', { name: 'Editar «Interstellar»' });
+
+    expect(screen.getByRole('link', { name: 'Volver al listado' })).toHaveAttribute('href', '/admin/peliculas');
+    expect(screen.getByRole('link', { name: 'Cancelar' })).toHaveAttribute('href', '/admin/peliculas');
+    expect(screen.queryByRole('link', { name: 'Volver a la película' })).not.toBeInTheDocument();
+  });
+
+  it('si la película ya no existe (404), no ofrece volver a su página (sería otro «no encontrada»): al listado', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/movies/7': () => errorResponse(404, 'RESOURCE_NOT_FOUND', 'Película no encontrada'),
+    });
+    renderForm('/admin/peliculas/7/editar', { returnTo: '/peliculas/7' });
+
+    expect(await screen.findByRole('heading', { name: 'No se encontró la película' })).toBeInTheDocument();
+    const links = screen.getAllByRole('link', { name: 'Volver al listado' });
+    expect(links).toHaveLength(2);
+    for (const link of links) expect(link).toHaveAttribute('href', '/admin/peliculas');
+    expect(screen.queryByRole('link', { name: 'Volver a la película' })).not.toBeInTheDocument();
   });
 });

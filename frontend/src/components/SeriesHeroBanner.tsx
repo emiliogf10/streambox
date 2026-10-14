@@ -1,5 +1,6 @@
 import { ListVideo } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { seriesPath } from '../lib/catalog';
 import type { Series } from '../lib/types';
 import { buttonClasses } from './buttonStyles';
 import { FavoriteButton } from './FavoriteButton';
@@ -26,7 +27,7 @@ export function SeriesHeroBanner({ series }: { series: Series }) {
       description={series.description}
       actions={
         <>
-          <Link to={`/series/${series.id}`} className={buttonClasses('light')}>
+          <Link to={seriesPath(series.id)} className={buttonClasses('light')}>
             <ListVideo aria-hidden="true" className="size-4" />
             Ver episodios
             <span className="sr-only"> de {series.title}</span>

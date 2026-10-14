@@ -2,7 +2,9 @@
  * E2E del ciclo completo de una película desde el panel: alta (con portada
  * propia `/covers/...` y vista previa), edición y borrado con confirmación. De
  * paso comprueba la caché de datos (TanStack Query): tras editar, `/peliculas`
- * enseña el título nuevo sin recargar la página.
+ * enseña el título nuevo sin recargar la página, la página de la película
+ * (`/peliculas/:id`) ofrece «Editar» al administrador y, tras borrarla, volver a
+ * ella con «Atrás» dice «Película no encontrada».
  *
  * **Se ejecuta aparte y al final** (proyecto `catalogo-mutable` de
  * `playwright.config.ts`, que depende del resto): mientras existe, la película
@@ -114,7 +116,20 @@ test('crea una película con portada propia, la edita y la borra con confirmaci�
   await expect(page.getByRole('heading', { level: 2, name: editedTitle, exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { level: 2, name: title, exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => (window as { __sinRecargar?: boolean }).__sinRecargar)).toBe(true);
-  await page.goBack();
+
+  // Su página (`/peliculas/:id`): para un administrador, «Editar» lleva al formulario del panel.
+  await page
+    .getByRole('region', { name: editedTitle, exact: true })
+    .getByRole('link', { name: /^Más información/ })
+    .click();
+  await expect(page.getByRole('heading', { level: 1, name: editedTitle, exact: true })).toBeVisible();
+  const moviePath = new URL(page.url()).pathname;
+  expect(moviePath).toMatch(/^\/peliculas\/\d+$/);
+  await expect(page.getByRole('link', { name: `Editar ${editedTitle}` })).toHaveAttribute(
+    'href',
+    `/admin${moviePath}/editar`,
+  );
+  await mainNav.getByRole('link', { name: 'Administrar' }).click();
   await expect(page).toHaveURL(/\/admin\/peliculas$/);
 
   // Buscarla por su sufijo y borrarla, con confirmación.
@@ -129,4 +144,13 @@ test('crea una película con portada propia, la edita y la borra con confirmaci�
   await expect(page.getByText(`«${editedTitle}» se ha borrado del catálogo.`)).toBeVisible();
   await expect(page.getByRole('heading', { level: 2, name: `Sin resultados para «${SUFFIX}»` })).toBeVisible();
   await expect(formAlert(page)).toHaveCount(0);
+
+  // Volver con «Atrás» a la página de la película recién borrada: la caché la tenía, pero el borrado la
+  // invalidó, así que se vuelve a pedir y la página dice la verdad (sin recargar: es la misma aplicación).
+  for (let step = 0; step < 4 && new URL(page.url()).pathname !== moviePath; step += 1) await page.goBack();
+  expect(new URL(page.url()).pathname).toBe(moviePath);
+  await expect(page.getByRole('heading', { level: 1, name: 'Película no encontrada' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: editedTitle, exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Ver todas las películas' })).toHaveAttribute('href', '/peliculas');
+  expect(await page.evaluate(() => (window as { __sinRecargar?: boolean }).__sinRecargar)).toBe(true);
 });

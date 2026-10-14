@@ -101,20 +101,23 @@ describe('MyListPage: secciones', () => {
     await screen.findByRole('region', { name: 'Películas' });
     expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['Mi lista']);
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Películas', 'Series']);
-    expect(within(section('Películas')).getAllByRole('button', { name: /\d{4} ·/ })).toHaveLength(2);
+    expect(within(section('Películas')).getAllByRole('link', { name: /\d{4} ·/ })).toHaveLength(2);
     expect(within(section('Series')).getByRole('link', { name: 'Dark 2017–2020 · 3 temporadas' })).toHaveAttribute(
       'href',
       '/series/1',
     );
   });
 
-  it('una película abre su diálogo de detalles; una serie es un enlace (no abre diálogo)', async () => {
+  it('cada película y cada serie es un enlace a su página (ninguna abre un diálogo)', async () => {
     const user = renderList([dune], [dark]);
 
-    await user.click(await within(await screen.findByRole('region', { name: 'Películas' })).findByRole('button', { name: /^Dune/ }));
+    const card = await within(await screen.findByRole('region', { name: 'Películas' })).findByRole('link', { name: /^Dune/ });
+    expect(card).toHaveAttribute('href', `/peliculas/${dune.id}`);
+    expect(within(section('Series')).getByRole('link', { name: /^Dark/ })).toHaveAttribute('href', `/series/${dark.id}`);
+    await user.click(card);
 
-    expect(await screen.findByRole('dialog', { name: 'Dune' })).toBeInTheDocument();
-    expect(within(section('Series')).queryByRole('button', { name: /^Dark/ })).not.toBeInTheDocument();
+    expect(screen.getByText(`ruta:/peliculas/${dune.id}`)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('si solo hay películas, la sección «Series» lo dice y enlaza a /series', async () => {

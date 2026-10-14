@@ -151,7 +151,7 @@ function changeList(lists: Lists, kind: FavoriteKind, change: (list: CatalogItem
 
 /**
  * Proveedor de la lista "Mi lista": UNA copia compartida por todas las pantallas
- * (el modal abierto desde el buscador, el banner, la página de una serie, «Mi
+ * (el banner, la página de una película o de una serie, «Mi
  * lista» y el perfil ven siempre el mismo estado).
  *
  * **Datos en la caché de TanStack Query** (`queryKeys.favorites.all`). Las dos

@@ -21,9 +21,9 @@ import { ADMIN_SERIES_PATH } from './admin/adminPaths';
 /**
  * Página de una serie (`/series/:id`), con la temporada elegida en la URL (`?temporada=2`).
  *
- * Es una página y no un diálogo como el de las películas: tiene temporadas y
- * episodios (demasiado para un modal), y así cada serie y temporada tiene su
- * propia dirección que se puede compartir.
+ * Como la de cada película (`/peliculas/:id`), es una página con dirección
+ * propia: cada serie, y cada temporada, se puede compartir, guardar en
+ * marcadores o recargar, y «Atrás» vuelve a donde se estaba.
  *
  * Estados (siempre con un único `<h1>`):
  * - **Cargando**: `<h1>` oculto «Serie» + indicador.

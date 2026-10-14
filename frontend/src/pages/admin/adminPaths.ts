@@ -37,19 +37,27 @@ export interface ReturnToState {
  *
  * El listado pasa en el estado de la navegación su URL con búsqueda y página
  * (`/admin/peliculas?q=blade&page=2`), para que al terminar de editar el
- * administrador siga donde estaba. Solo se acepta una ruta del propio listado:
- * el estado no lo controla nadie de fuera, pero validar lo que se usa para
- * navegar es una costumbre barata que evita redirecciones a cualquier sitio.
+ * administrador siga donde estaba. La página de una película (`/peliculas/:id`)
+ * pasa la suya, para que «Editar» desde ahí vuelva a la película y no al panel.
+ *
+ * Solo se acepta una ruta del propio listado o, si se indica, la página de
+ * **ese mismo** título (`detailPath`, comparada entera: ni otra película ni
+ * nada que empiece igual). El estado no lo controla nadie de fuera, pero
+ * validar lo que se usa para navegar con una lista blanca es una costumbre
+ * barata que evita redirecciones a cualquier sitio.
  *
  * @param state `location.state` (puede ser cualquier cosa, o nada si se entró escribiendo la URL)
  * @param listPath listado al que pertenece el formulario (por defecto, el de películas); es
  *   también el destino si el estado no sirve
+ * @param detailPath página pública del título que se edita (p. ej. `moviePath(7)`), o nada si
+ *   no hay (alta, o id de la URL no válido)
  */
-export function getReturnTo(state: unknown, listPath: string = ADMIN_MOVIES_PATH): string {
+export function getReturnTo(state: unknown, listPath: string = ADMIN_MOVIES_PATH, detailPath?: string): string {
   if (typeof state === 'object' && state !== null && 'returnTo' in state) {
     const { returnTo } = state as { returnTo: unknown };
-    if (typeof returnTo === 'string' && (returnTo === listPath || returnTo.startsWith(`${listPath}?`))) {
-      return returnTo;
+    if (typeof returnTo === 'string') {
+      if (returnTo === listPath || returnTo.startsWith(`${listPath}?`)) return returnTo;
+      if (detailPath !== undefined && returnTo === detailPath) return returnTo;
     }
   }
   return listPath;

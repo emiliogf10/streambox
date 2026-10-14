@@ -4,7 +4,8 @@
  * Protegen las decisiones del diseño "fondo desenfocado + póster nítido": que
  * ambos salgan de la MISMA URL (una sola descarga), que el fondo sea decorativo
  * para los lectores de pantalla, que la sinopsis aparezca recortada (la completa
- * está en "Más información") y que sin portada no haya ninguna imagen rota.
+ * está en la página de la película, a la que lleva "Más información") y que sin
+ * portada no haya ninguna imagen rota.
  */
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -23,10 +24,10 @@ beforeEach(() => {
   routeFetch(fetchMock, { 'GET /api/users/me/favorites': () => jsonResponse([]) });
 });
 
-function renderBanner(movie: Movie, onDetails = vi.fn()) {
+function renderBanner(movie: Movie) {
   renderWithProviders(
     <FavoritesProvider>
-      <HeroBanner movie={movie} onDetails={onDetails} />
+      <HeroBanner movie={movie} />
     </FavoritesProvider>,
     { session: true },
   );
@@ -102,16 +103,17 @@ describe('HeroBanner', () => {
 
     expect(within(banner).getByRole('link', { name: /^Ver ahora Tenet/ })).toHaveClass('bg-white');
     expect(within(banner).getByRole('button', { name: /^Mi lista/ })).toHaveClass('border');
-    expect(within(banner).getByRole('button', { name: /^Más información/ })).not.toHaveClass('border');
+    expect(within(banner).getByRole('link', { name: /^Más información/ })).not.toHaveClass('border');
   });
 
-  it('«Más información» abre los detalles de la película', async () => {
-    const onDetails = vi.fn();
-    const movie = makeMovie({ id: 6, title: 'Tenet' });
-    const banner = renderBanner(movie, onDetails);
+  it('«Más información» es un enlace a la página de la película (no abre un diálogo) y lleva a ella', async () => {
+    const banner = renderBanner(makeMovie({ id: 6, title: 'Tenet' }));
 
-    await userEvent.setup().click(within(banner).getByRole('button', { name: /^Más información\s*sobre Tenet$/ }));
+    const more = within(banner).getByRole('link', { name: /^Más información\s*sobre Tenet$/ });
+    expect(more).toHaveAttribute('href', '/peliculas/6');
+    expect(more).not.toHaveAttribute('aria-haspopup');
+    await userEvent.setup().click(more);
 
-    expect(onDetails).toHaveBeenCalledWith(movie);
+    expect(screen.getByText('ruta:/peliculas/6')).toBeInTheDocument();
   });
 });

@@ -49,3 +49,21 @@ export function getSafeVideoUrl(rawUrl: string | null | undefined): string | nul
     return null;
   }
 }
+
+/**
+ * Convierte el `:id` de una ruta de detalle (`/peliculas/:id`, `/series/:id`) en
+ * un id válido (entero positivo) o `null`.
+ *
+ * Solo se aceptan dígitos (`^\d+$`): `/peliculas/abc`, `/peliculas/1.5`,
+ * `/peliculas/-1` o `/peliculas/1e3` no llegan a pedir nada y la página dice
+ * «no encontrada» sin preguntar al servidor. `Number.isSafeInteger` descarta
+ * los números tan largos que JavaScript ya no representa con exactitud: con
+ * ellos se pediría OTRO id distinto del escrito.
+ *
+ * @param raw el parámetro tal cual viene de `useParams`
+ */
+export function parseRouteId(raw: string | undefined): number | null {
+  if (!raw || !/^\d+$/.test(raw)) return null;
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}

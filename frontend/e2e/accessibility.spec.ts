@@ -46,7 +46,7 @@ test.describe('Teclado', () => {
     expect(insideMain).toBe(true);
   });
 
-  test('un modal atrapa el foco, Escape lo cierra y el foco vuelve a la tarjeta que lo abrió', async ({
+  test('una tarjeta de película es un enlace: Intro abre su página (h1 = título) y «Atrás» devuelve a la portada', async ({
     page,
     user,
     signIn,
@@ -58,11 +58,39 @@ test.describe('Teclado', () => {
     await card.focus();
     await page.keyboard.press('Enter');
 
-    const dialog = page.getByRole('dialog', { name: 'Interstellar' });
+    await expect(page).toHaveURL(/\/peliculas\/\d+$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+    // Ya no hay diálogo de detalles: la película es una página.
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // Al cambiar de página el foco va al contenido (no se queda en <body>, donde el lector no anunciaría nada),
+    // así que el siguiente Tab llega a las acciones de la película sin recorrer otra vez la barra.
+    await expect(page.getByRole('main')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('link', { name: /^Ver ahora Interstellar/ })).toBeFocused();
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
+  });
+
+  test('un modal atrapa el foco, Escape lo cierra y el foco vuelve al botón que lo abrió', async ({
+    page,
+    user,
+    signIn,
+  }) => {
+    // El diálogo de confirmación del perfil: lo tiene cualquier usuario y usa el mismo `Modal` que el resto.
+    await signIn(user);
+    await page.goto('/perfil');
+
+    const opener = page.getByRole('button', { name: 'Cerrar sesión en todos los dispositivos' });
+    await opener.focus();
+    await page.keyboard.press('Enter');
+
+    const dialog = page.getByRole('alertdialog', { name: '¿Cerrar sesión en todos los dispositivos?' });
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveAttribute('aria-modal', 'true');
-    // El foco entra en el diálogo, en el botón de cerrar.
-    await expect(dialog.getByRole('button', { name: /^Cerrar detalles/ })).toBeFocused();
+    // El foco entra en el diálogo, en la opción segura («Cancelar»).
+    await expect(dialog.getByRole('button', { name: 'Cancelar' })).toBeFocused();
 
     // Tabulando (hacia delante y hacia atrás) el foco NUNCA llega a un elemento de la página de detrás.
     // En Chromium un <dialog> modal deja el resto de la página inerte, pero al pasar del último
@@ -77,7 +105,7 @@ test.describe('Teclado', () => {
 
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
-    await expect(card).toBeFocused();
+    await expect(opener).toBeFocused();
   });
 
   test('el menú de usuario se maneja con teclado: Intro abre, Escape cierra y devuelve el foco', async ({
@@ -358,11 +386,23 @@ test.describe('Estructura accesible (humo)', () => {
     expect(await auditPage(page)).toEqual([]);
   });
 
-  test('con un modal abierto la estructura sigue siendo correcta', async ({ page, user, signIn }) => {
+  test('la página de una película: estructura básica correcta, también la de «no encontrada»', async ({ page, user, signIn }) => {
     await signIn(user);
     await page.goto('/');
     await movieCard(page.getByRole('region', { name: 'Novedades' }), 'Interstellar').click();
-    await expect(page.getByRole('dialog', { name: 'Interstellar' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+    expect(await auditPage(page)).toEqual([]);
+
+    await page.goto('/peliculas/999999');
+    await expect(page.getByRole('heading', { level: 1, name: 'Película no encontrada' })).toBeVisible();
+    expect(await auditPage(page)).toEqual([]);
+  });
+
+  test('con un modal abierto la estructura sigue siendo correcta', async ({ page, user, signIn }) => {
+    await signIn(user);
+    await page.goto('/perfil');
+    await page.getByRole('button', { name: 'Cerrar sesión en todos los dispositivos' }).click();
+    await expect(page.getByRole('alertdialog', { name: '¿Cerrar sesión en todos los dispositivos?' })).toBeVisible();
     expect(await auditPage(page)).toEqual([]);
   });
 });

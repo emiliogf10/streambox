@@ -1,5 +1,6 @@
 /**
- * Funciones puras para organizar el catálogo en filas (portada y página de series).
+ * Funciones puras para organizar el catálogo en filas (portada y página de series)
+ * y las direcciones de las páginas de cada título.
  * Están separadas de los componentes para poder probarlas sin renderizar nada.
  *
  * Son genéricas: sirven igual para películas que para series, porque solo usan
@@ -13,6 +14,19 @@ export interface CatalogRow<T extends CatalogItem = Movie> {
   id: string;
   title: string;
   items: T[];
+}
+
+/**
+ * Página de una película (`/peliculas/:id`). La usan la tarjeta, el banner y el
+ * buscador: en un solo sitio para que ningún enlace se quede con otra forma.
+ */
+export function moviePath(id: number): string {
+  return `/peliculas/${id}`;
+}
+
+/** Página de una serie (`/series/:id`), por la misma razón que {@link moviePath}. */
+export function seriesPath(id: number): string {
+  return `/series/${id}`;
 }
 
 /** Títulos que muestra la fila "Novedades" (y la fila «Series» de la portada). */

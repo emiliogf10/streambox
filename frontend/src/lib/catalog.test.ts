@@ -6,7 +6,7 @@
  * orden por tamaño y luego por nombre).
  */
 import { describe, expect, it } from 'vitest';
-import { MIN_MOVIES_PER_GENRE_ROW, NEWS_ROW_SIZE, buildCatalogRows, mergeById } from './catalog';
+import { MIN_MOVIES_PER_GENRE_ROW, NEWS_ROW_SIZE, buildCatalogRows, mergeById, moviePath, seriesPath } from './catalog';
 import type { Genre } from './types';
 import { makeMovie } from '../test/helpers';
 
@@ -136,5 +136,12 @@ describe('buildCatalogRows', () => {
     const rows = buildCatalogRows(moviesOf([drama], 3, 1));
 
     expect(rows[1].id).toBe('genre-2');
+  });
+});
+
+describe('moviePath y seriesPath', () => {
+  it('cada tipo tiene su página: el mismo id no lleva al mismo sitio', () => {
+    expect(moviePath(7)).toBe('/peliculas/7');
+    expect(seriesPath(7)).toBe('/series/7');
   });
 });

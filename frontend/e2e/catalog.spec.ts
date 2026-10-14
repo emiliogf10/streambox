@@ -11,7 +11,7 @@ import { expectCovers, expectWholePoster } from './support/images';
 /** Géneros que tienen fila propia en la portada (≥ 3 películas cargadas). */
 const GENRE_ROWS = ['Ciencia ficción', 'Acción', 'Drama'];
 
-/** Regex de la etiqueta de una tarjeta: «Título 2014 · 2 h 1 min». */
+/** Regex de la etiqueta de una tarjeta (un enlace): «Título 2014 · 2 h 1 min». */
 const CARD_NAME = /\d{4} ·/;
 
 test.describe('Catálogo', () => {
@@ -26,7 +26,8 @@ test.describe('Catálogo', () => {
     await expect(banner.getByText('Estreno reciente')).toBeVisible();
     await expect(banner.getByRole('link', { name: new RegExp(`^Ver ahora ${HERO_TITLE}`) })).toBeVisible();
     await expect(banner.getByRole('button', { name: /^Mi lista/ })).toBeVisible();
-    await expect(banner.getByRole('button', { name: /^Más información/ })).toBeVisible();
+    // «Más información» es un enlace a la página de la película (ya no abre un diálogo).
+    await expect(banner.getByRole('link', { name: /^Más información/ })).toHaveAttribute('href', /^\/peliculas\/\d+$/);
 
     // Dos imágenes (en este orden en el DOM): el fondo desenfocado y el póster nítido. Las dos son
     // la MISMA URL, así que el navegador la descarga una sola vez.
@@ -54,14 +55,14 @@ test.describe('Catálogo', () => {
     const news = page.getByRole('region', { name: 'Novedades' });
     await expect(news).toBeVisible();
     // La más reciente DESPUÉS del banner abre la fila (el banner no se repite debajo).
-    await expect(news.getByRole('button', { name: CARD_NAME })).toHaveCount(12);
+    await expect(news.getByRole('link', { name: CARD_NAME })).toHaveCount(12);
     await expect(movieCard(news, MOVIES[MOVIES.length - 2].title)).toBeVisible();
     await expect(movieCard(page.getByRole('main'), HERO_TITLE)).toHaveCount(0);
 
     for (const genre of GENRE_ROWS) {
       const row = page.getByRole('region', { name: genre, exact: true });
       await expect(row).toBeVisible();
-      expect(await row.getByRole('button', { name: CARD_NAME }).count()).toBeGreaterThanOrEqual(3);
+      expect(await row.getByRole('link', { name: CARD_NAME }).count()).toBeGreaterThanOrEqual(3);
     }
 
     await expect(page.getByText(`Mostrando ${PAGE_SIZE} de ${MOVIES.length} películas`)).toBeVisible();
@@ -101,12 +102,12 @@ test.describe('Catálogo', () => {
     const rowCount = await rows.count();
     expect(rowCount).toBeGreaterThanOrEqual(4); // banner + Novedades + géneros
     for (let index = 0; index < rowCount; index += 1) {
-      const labels = await rows.nth(index).getByRole('button', { name: CARD_NAME }).allTextContents();
+      const labels = await rows.nth(index).getByRole('link', { name: CARD_NAME }).allTextContents();
       expect(new Set(labels).size, `Fila ${index} con tarjetas repetidas`).toBe(labels.length);
     }
 
     // ...y las 25 películas (banner + resto) están presentes en la página.
-    const allCards = await main.getByRole('button', { name: CARD_NAME }).allTextContents();
+    const allCards = await main.getByRole('link', { name: CARD_NAME }).allTextContents();
     for (const movie of MOVIES.filter((m) => m.title !== HERO_TITLE)) {
       const prefix = `${movie.title}${movie.releaseYear}`;
       expect(

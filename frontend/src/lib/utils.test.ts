@@ -4,9 +4,12 @@
  * `getSafeVideoUrl` es una barrera de seguridad (XSS y suplantación): `videoUrl`
  * viene de la base de datos y acaba en un `href`. Estos tests fijan qué se deja
  * pasar y, sobre todo, todo lo que debe rechazarse.
+ *
+ * `parseRouteId` decide si el `:id` de `/peliculas/:id` o `/series/:id` llega a
+ * pedirse al servidor: lo que no sea un entero positivo exacto es «no encontrada».
  */
 import { describe, expect, it } from 'vitest';
-import { formatDuration, formatWaitTime, getSafeVideoUrl } from './utils';
+import { formatDuration, formatWaitTime, getSafeVideoUrl, parseRouteId } from './utils';
 
 describe('getSafeVideoUrl', () => {
   it.each([
@@ -92,4 +95,22 @@ describe('formatWaitTime', () => {
     expect(formatWaitTime(59.2)).toBe('1 min');
     expect(formatWaitTime(-3)).toBe('0 s');
   });
+});
+
+describe('parseRouteId', () => {
+  it.each([
+    ['1', 1],
+    ['42', 42],
+    ['007', 7],
+    [String(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER],
+  ])('%j es el id %d', (raw, id) => {
+    expect(parseRouteId(raw)).toBe(id);
+  });
+
+  it.each([[undefined], [''], ['0'], ['-1'], ['1.5'], ['1e3'], ['abc'], ['12abc'], [' 3'], ['0x10'], ['9007199254740993']])(
+    '%j no es un id (sin petición: «no encontrada»)',
+    (raw) => {
+      expect(parseRouteId(raw)).toBeNull();
+    },
+  );
 });

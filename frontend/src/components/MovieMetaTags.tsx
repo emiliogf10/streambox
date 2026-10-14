@@ -3,7 +3,7 @@ import { formatDuration } from '../lib/utils';
 import { MetaTags } from './MetaTags';
 
 /**
- * Año, duración y géneros de una película (banner y diálogo de detalles).
+ * Año, duración y géneros de una película (banner y página de la película).
  * El marcado y los estilos son los de {@link MetaTags}, compartidos con las series.
  * `badge` añade la etiqueta de acento del banner («Estreno reciente») como primer dato.
  */
