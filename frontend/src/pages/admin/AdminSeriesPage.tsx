@@ -16,9 +16,12 @@ import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
 import { apiFetch } from '../../lib/api';
 import { queryKeys } from '../../lib/queryKeys';
+import { TITLE_SEARCH_MAX_LENGTH } from '../../lib/titleSearch';
 import { formatEpisodeCount, formatSeasonCount, formatSeriesYears, isOnAir } from '../../lib/series';
 import type { PageResponse, Series } from '../../lib/types';
 import { AdminRowActions } from './AdminRowActions';
+import { ApproximateResultsNotice } from './ApproximateResultsNotice';
+import { approximateResultsText } from './approximateResults';
 import { ADMIN_NEW_SERIES_PATH, adminEditSeriesPath } from './adminPaths';
 import type { ReturnToState } from './adminPaths';
 
@@ -29,8 +32,9 @@ const PAGE_SIZE = 10;
  * Pide una página de la vista de gestión `GET /api/admin/series`, que a
  * diferencia de `/api/series` **incluye las series sin episodios** (las que
  * los usuarios no ven y el administrador tiene que poder completar). Con texto
- * filtra por título y ordena alfabéticamente; sin texto, lo último añadido
- * primero, igual que el listado de películas.
+ * filtra por título y ordena alfabéticamente (si ninguna lo contiene, el
+ * servidor puede devolver las de título parecido, ordenadas por parecido:
+ * `approximate`); sin texto, lo último añadido primero, igual que el listado de películas.
  *
  * Recibe el `signal` de TanStack: si se cambia de página o de búsqueda antes de que responda, se cancela.
  */
@@ -89,6 +93,9 @@ export function AdminSeriesPage() {
   const { pending: toDelete, ask: askDelete, cancel: cancelDelete, confirm: confirmDelete, deleting, headingRef } =
     useCatalogDelete(seriesDeletePath, refreshAfterDelete);
   const { query, page, data } = list;
+  // Títulos parecidos (ninguno contiene lo buscado): de qué búsqueda son, o `null` si son coincidencias.
+  const approximateQuery =
+    list.errorMessage === null && data?.approximate && list.resultsQuery ? list.resultsQuery : null;
 
   const returnState: ReturnToState = { returnTo: `${location.pathname}${location.search}` };
 
@@ -97,6 +104,21 @@ export function AdminSeriesPage() {
     content = <LoadingState label="Cargando series..." />;
   } else if (list.errorMessage !== null) {
     content = <ErrorState title="No se pudieron cargar las series" message={list.errorMessage} onRetry={list.reload} />;
+  } else if (list.searchError !== null) {
+    // El servidor ha rechazado el texto (el motivo se ve bajo el campo): «Reintentar» fallaría igual,
+    // así que se ofrece lo que sí sirve, corregirlo o borrarlo.
+    content = (
+      <EmptyState
+        icon={<SearchX className="size-8" />}
+        title="No se puede buscar ese texto"
+        description="Corrige la búsqueda (el motivo está bajo el campo) o bórrala para ver todas las series."
+        action={
+          <Button variant="outline" onClick={list.clearSearch}>
+            Borrar búsqueda
+          </Button>
+        }
+      />
+    );
   } else if (data && data.totalElements === 0) {
     content = query ? (
       <EmptyState
@@ -125,9 +147,16 @@ export function AdminSeriesPage() {
   } else if (data) {
     content = (
       <>
+        {approximateQuery !== null && <ApproximateResultsNotice kind="series" query={approximateQuery} />}
         <SeriesTable
           series={data.content}
-          caption={`${query ? `Resultados para «${query}»` : 'Series del catálogo'}, página ${page} de ${Math.max(1, data.totalPages)}`}
+          caption={`${
+            approximateQuery !== null
+              ? `Series con un título parecido a «${approximateQuery}»`
+              : query
+                ? `Resultados para «${query}»`
+                : 'Series del catálogo'
+          }, página ${page} de ${Math.max(1, data.totalPages)}`}
           busy={list.loading}
           returnState={returnState}
           onDelete={askDelete}
@@ -175,14 +204,17 @@ export function AdminSeriesPage() {
           autoComplete="off"
           spellCheck={false}
           enterKeyHint="search"
+          maxLength={TITLE_SEARCH_MAX_LENGTH}
+          error={list.searchError ?? undefined}
           placeholder="Ej.: Dark"
           value={list.input}
           onChange={(event) => list.setInput(event.target.value)}
         />
       </div>
-      {/* Anuncia la búsqueda en curso; el resultado lo anuncia «Página X de Y · N series». */}
+      {/* Anuncia la búsqueda en curso y, si lo que llega son títulos parecidos, que no son coincidencias;
+          el recuento lo anuncia «Página X de Y · N series». */}
       <p role="status" className="sr-only">
-        {list.searching ? 'Buscando...' : ''}
+        {list.searching ? 'Buscando...' : approximateQuery !== null ? approximateResultsText('series', approximateQuery) : ''}
       </p>
 
       {content}

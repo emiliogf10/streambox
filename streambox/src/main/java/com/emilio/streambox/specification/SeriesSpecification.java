@@ -63,8 +63,9 @@ public final class SeriesSpecification {
 
     /**
      * Series cuyo título contiene el texto indicado, sin distinguir
-     * mayúsculas y con los comodines de {@code LIKE} tratados como texto
-     * literal (ver {@link LikePatterns}).
+     * mayúsculas ni acentos y con los comodines de {@code LIKE} tratados como
+     * texto literal (ver {@link TitleSearch}). Usa el índice
+     * {@code idx_series_title_search}.
      *
      * @param title texto que debe contener el título
      * @return especificación de filtro por título
@@ -72,7 +73,30 @@ public final class SeriesSpecification {
     public static Specification<Series> hasTitle(String title) {
 
         return (root, query, criteriaBuilder) ->
-                LikePatterns.containsIgnoreCase(criteriaBuilder, root.get("title"), title);
+                TitleSearch.contains(criteriaBuilder, root.get("title"), title);
+    }
+
+    /**
+     * Series cuyo título se parece al texto indicado, tolerando erratas
+     * pequeñas. Mismas reglas que {@link MovieSpecification#hasSimilarTitle(String)}:
+     * segundo intento cuando {@link #hasTitle(String)} no encuentra nada, solo en
+     * PostgreSQL, y ordenada por parecido si la página no trae orden propio.
+     *
+     * <p>
+     * En el catálogo público se combina con {@link #hasEpisodes()} igual que la
+     * búsqueda exacta: la decisión de pasar al segundo intento depende solo de
+     * las series visibles, así que una serie vacía no cambia lo que ve el usuario.
+     * </p>
+     *
+     * @param title texto buscado, posiblemente con erratas
+     * @return especificación de filtro (y orden) por parecido del título
+     */
+    public static Specification<Series> hasSimilarTitle(String title) {
+
+        return (root, query, criteriaBuilder) -> {
+            TitleSearch.orderBySimilarity(query, criteriaBuilder, root.get("title"), root.get("id"), title);
+            return TitleSearch.resembles(criteriaBuilder, root.get("title"), title);
+        };
     }
 
     /**

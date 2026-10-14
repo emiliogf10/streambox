@@ -382,3 +382,92 @@ describe('AdminSeriesPage: borrar', () => {
     expect(await screen.findByRole('row', { name: /^Dark/ })).toBeInTheDocument();
   });
 });
+
+describe('AdminSeriesPage: títulos parecidos (approximate)', () => {
+  const NOTICE =
+    'Ninguna serie contiene «severanse». Estas tienen un título parecido, de la más parecida a la menos (no van por orden alfabético).';
+
+  it('lo dice encima de la tabla (y lo anuncia): ninguna lo contiene y el orden es por parecido', async () => {
+    routeFetch(fetchMock, {
+      [searchKey('severanse')]: () => jsonResponse(makePage([severance, empty], { approximate: true })),
+    });
+    renderList('/admin/series?q=severanse');
+
+    expect(await screen.findByRole('row', { name: /^Severance/ })).toBeInTheDocument();
+    expect(screen.getByText(NOTICE, { selector: 'span' })).toBeInTheDocument();
+    expect(screen.getAllByRole('status').some((element) => element.textContent === NOTICE)).toBe(true);
+    expect(
+      screen.getByRole('table', { name: 'Series con un título parecido a «severanse», página 1 de 1' }),
+    ).toBeInTheDocument();
+    // La marca de las series vacías se sigue viendo: el aviso no la sustituye.
+    expect(screen.getByText(HIDDEN_MARK)).toBeInTheDocument();
+  });
+
+  it('con coincidencias de verdad (approximate: false) no hay aviso', async () => {
+    routeFetch(fetchMock, { [searchKey('dark')]: () => jsonResponse(makePage([dark])) });
+    renderList('/admin/series?q=dark');
+
+    expect(await screen.findByRole('row', { name: /^Dark/ })).toBeInTheDocument();
+    expect(screen.queryByText(/título parecido/)).not.toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Resultados para «dark», página 1 de 1' })).toBeInTheDocument();
+  });
+});
+
+describe('AdminSeriesPage: texto que el servidor no admite (máx. 150, sin caracteres de control)', () => {
+  it('el campo no admite más de 150 caracteres (`maxLength`)', async () => {
+    routeFetch(fetchMock, { [listKey()]: () => jsonResponse(makePage([dark])) });
+    renderList();
+
+    expect(await screen.findByRole('searchbox', { name: 'Buscar por título' })).toHaveAttribute('maxLength', '150');
+  });
+
+  it('un tabulador pegado se envía como un espacio', async () => {
+    installManualTimers();
+    try {
+      routeFetch(fetchMock, {
+        [listKey()]: () => jsonResponse(makePage([dark])),
+        'GET /api/admin/series?title=Breaking+Bad&page=0&size=10&sort=title': () =>
+          jsonResponse(makePage([makeSeries({ id: 8, title: 'Breaking Bad' })])),
+      });
+      const user = userEvent.setup({ delay: null });
+      renderList();
+      await screen.findByRole('row', { name: /^Dark/ });
+
+      await user.click(screen.getByRole('searchbox', { name: 'Buscar por título' }));
+      await user.paste('Breaking\tBad');
+      passTime(300);
+
+      expect(await screen.findByRole('row', { name: /^Breaking Bad/ })).toBeInTheDocument();
+      expect(callsTo('/api/admin/series?title').map(([url]) => String(url))).toEqual([
+        '/api/admin/series?title=Breaking+Bad&page=0&size=10&sort=title',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('si llega el 400 de validación, el motivo sale junto al campo y se ofrece borrar la búsqueda, no «Reintentar»', async () => {
+    routeFetch(fetchMock, {
+      [searchKey('dark')]: () =>
+        errorResponse(400, 'VALIDATION_ERROR', 'Los datos proporcionados no son válidos', {
+          validationErrors: { title: 'La búsqueda no puede contener caracteres de control' },
+        }),
+      [listKey()]: () => jsonResponse(makePage([dark])),
+    });
+    const user = userEvent.setup();
+    renderList('/admin/series?q=dark');
+
+    const reason = 'La búsqueda no puede contener caracteres de control.';
+    expect(await screen.findByText(reason)).toHaveAttribute('role', 'alert');
+    expect(screen.getByRole('searchbox', { name: 'Buscar por título' })).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('heading', { name: 'No se puede buscar ese texto' })).toBeInTheDocument();
+    expect(
+      screen.getByText('Corrige la búsqueda (el motivo está bajo el campo) o bórrala para ver todas las series.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Borrar búsqueda' }));
+
+    expect(await screen.findByRole('row', { name: /^Dark/ })).toBeInTheDocument();
+  });
+});

@@ -3,6 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { QueryKey } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { ApiError, getErrorMessage } from '../lib/api';
+import { getTitleSearchError, normalizeTitleSearch } from '../lib/titleSearch';
 import type { PageResponse } from '../lib/types';
 import { useDebouncedValue } from './useDebouncedValue';
 
@@ -15,12 +16,18 @@ export const ADMIN_SEARCH_DEBOUNCE_MS = 300;
  */
 export type AdminPageFetcher<T> = (query: string, page: number, signal: AbortSignal) => Promise<PageResponse<T>>;
 
+/** Página guardada en la caché junto a la búsqueda que la produjo (ver `resultsQuery`). */
+interface TaggedPage<T> {
+  query: string;
+  result: PageResponse<T>;
+}
+
 /** Clave de la caché de una búsqueda y página (`queryKeys.movies.admin`, `queryKeys.series.admin`). */
 export type AdminListKey = (query: string, page: number) => QueryKey;
 
 /** Lo que devuelve {@link useAdminSearchList}. */
 export interface AdminSearchList<T> {
-  /** Búsqueda aplicada (la de la URL, `?q=`), ya recortada. */
+  /** Búsqueda aplicada (la de la URL, `?q=`), ya limpia (`normalizeTitleSearch`: sin caracteres de control y recortada). */
   query: string;
   /** Página actual, empezando en 1 (`?page=`). */
   page: number;
@@ -31,10 +38,22 @@ export interface AdminSearchList<T> {
   searching: boolean;
   /** Última página recibida; mientras llega la nueva se sigue enseñando la anterior. */
   data: PageResponse<T> | null;
+  /**
+   * Búsqueda a la que pertenece `data` (`''` = listado sin texto; `null` si aún no hay datos).
+   * Mientras llega otra búsqueda puede ser distinta de `query`: un aviso sobre los resultados
+   * visibles (p. ej. «ninguna contiene «x»») debe hablar de esta, no de la que se está pidiendo.
+   */
+  resultsQuery: string | null;
   /** `true` mientras la petición actual no ha respondido. */
   loading: boolean;
-  /** Mensaje de error de la carga actual, o `null` si no ha fallado. */
+  /** Mensaje de error de la carga actual, o `null` si no ha fallado (o si lo que falló es el texto: `searchError`). */
   errorMessage: string | null;
+  /**
+   * Motivo por el que el servidor ha rechazado el TEXTO buscado (400 `VALIDATION_ERROR` en
+   * `title`, p. ej. un `?q=` de más de 150 caracteres), o `null`. Va aparte de `errorMessage`
+   * porque se corrige en el campo, no con «Reintentar» (la misma petición fallaría igual).
+   */
+  searchError: string | null;
   /**
    * `true` si la página pedida está vacía pero hay elementos (p. ej. `?page=9`, o se borró el
    * último de la última página): el hook ya está llevando a la última que existe y no hay que
@@ -87,11 +106,12 @@ export function useAdminSearchList<T>(
   fallbackError: string,
 ): AdminSearchList<T> {
   const [searchParams, setSearchParams] = useSearchParams();
-  const query = (searchParams.get('q') ?? '').trim();
+  // Limpia también lo que llega por la URL: un `?q=` con un tabulador no debe acabar en un 400.
+  const query = normalizeTitleSearch(searchParams.get('q') ?? '');
   const page = parsePage(searchParams.get('page'));
 
   const [input, setInput] = useState(query);
-  const debouncedInput = useDebouncedValue(input.trim(), ADMIN_SEARCH_DEBOUNCE_MS);
+  const debouncedInput = useDebouncedValue(normalizeTitleSearch(input), ADMIN_SEARCH_DEBOUNCE_MS);
   /**
    * Última búsqueda que este hook ha llevado a la URL (o ha recibido de ella). Distingue un cambio
    * de `q` PROPIO (el debounce) de uno EXTERNO (Atrás/Adelante, la pestaña del panel): solo el externo
@@ -103,7 +123,9 @@ export function useAdminSearchList<T>(
 
   const list = useQuery({
     queryKey: queryKey(query, page),
-    queryFn: ({ signal }) => fetchPage(query, page, signal),
+    // La página va junto a la búsqueda que la produjo: mientras se ve la anterior (`keepPreviousData`),
+    // `resultsQuery` sigue diciendo de qué búsqueda son esos resultados, no la que se está escribiendo.
+    queryFn: async ({ signal }): Promise<TaggedPage<T>> => ({ query, result: await fetchPage(query, page, signal) }),
     // Mientras llega otra página u otra búsqueda se sigue viendo la anterior (atenuada por la pantalla).
     placeholderData: keepPreviousData,
   });
@@ -127,9 +149,10 @@ export function useAdminSearchList<T>(
   // Una sesión caducada ya la gestiona AuthProvider (aviso y salida al login): no se pinta como error del listado.
   const sessionExpired = list.error instanceof ApiError && list.error.sessionExpired;
   const failed = list.isError && !list.isFetching && !sessionExpired;
+  const searchError = failed ? getTitleSearchError(list.error) : null;
   /** Datos de la búsqueda y página ACTUALES (no los de la anterior que se enseñan mientras tanto). */
-  const current = list.isPlaceholderData ? undefined : list.data;
-  const data = list.data ?? null;
+  const current = list.isPlaceholderData ? undefined : list.data?.result;
+  const data = list.data?.result ?? null;
   // Cargando: falta la respuesta de la búsqueda/página actual, o se está refrescando (tras borrar, «Reintentar»).
   const loading = !failed && (current === undefined || list.isFetching);
 
@@ -178,10 +201,12 @@ export function useAdminSearchList<T>(
     page,
     input,
     setInput,
-    searching: input.trim() !== query || (loading && data !== null),
+    searching: normalizeTitleSearch(input) !== query || (loading && data !== null),
     data,
+    resultsQuery: list.data?.query ?? null,
     loading,
-    errorMessage: failed ? getErrorMessage(list.error, fallbackError) : null,
+    errorMessage: failed && searchError === null ? getErrorMessage(list.error, fallbackError) : null,
+    searchError,
     pendingPageFix: data !== null && data.content.length === 0 && data.totalElements > 0 && page > 1,
     goToPage,
     clearSearch,

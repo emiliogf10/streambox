@@ -162,14 +162,16 @@ class PostgresCatalogIntegrationTest extends PostgresIntegrationTestSupport {
     /**
      * {@code lower()} de PostgreSQL convierte también las mayúsculas no ASCII
      * (depende del locale de la base de datos, en {@code en_US.utf8} sí): la
-     * búsqueda ignora mayúsculas con {@code ñ} y vocales acentuadas, y sigue
-     * distinguiendo acentos ("manana" no encuentra "Mañana"), igual que en H2.
-     * Con una imagen {@code -alpine} (musl, locale C) {@code lower('Ñ')} no
-     * cambiaría y este test fallaría: de ahí la nota de la imagen en
-     * {@link PostgresIntegrationTestSupport}.
+     * búsqueda ignora mayúsculas con {@code ñ} y vocales acentuadas. Y desde la
+     * V5 ({@code unaccent}) <b>tampoco distingue acentos</b>: "manana" encuentra
+     * "Mañana" y "nono", "Ñoño" (antes no los encontraba). Con una imagen
+     * {@code -alpine} (musl, locale C) {@code lower('Ñ')} no cambiaría y este
+     * test fallaría: de ahí la nota de la imagen en
+     * {@link PostgresIntegrationTestSupport}. El resto de casos de acentos y
+     * erratas está en {@link PostgresTitleSearchIntegrationTest}.
      */
     @Test
-    void laBusquedaIgnoraMayusculasConEnyesYAcentosPeroNoIgnoraLosAcentos() throws Exception {
+    void laBusquedaIgnoraMayusculasYAcentos() throws Exception {
         saveMovie("Mañana", 2000, drama);
         saveMovie("ÁRBOL de la vida", 2011, drama);
         saveMovie("Ñoño", 2012, drama);
@@ -178,8 +180,9 @@ class PostgresCatalogIntegrationTest extends PostgresIntegrationTestSupport {
         assertEquals(List.of("Mañana"), titles(call(SEARCH, "title=mañana")));
         assertEquals(List.of("ÁRBOL de la vida"), titles(call(SEARCH, "title=árbol")));
         assertEquals(List.of("Ñoño"), titles(call(SEARCH, "title=ñOÑ")));
-        assertEquals(List.of(), titles(call(SEARCH, "title=manana")));
-        assertEquals(List.of(), titles(call(SEARCH, "title=arbol")));
+        assertEquals(List.of("Mañana"), titles(call(SEARCH, "title=manana")));
+        assertEquals(List.of("ÁRBOL de la vida"), titles(call(SEARCH, "title=arbol")));
+        assertEquals(List.of("Ñoño"), titles(call(SEARCH, "title=nono")));
     }
 
     /**

@@ -1164,16 +1164,27 @@ Sin ningún filtro, `allOf` de una lista vacía no filtra nada y devuelve todo e
 
 Las tres condiciones están en `…/specification/MovieSpecification.java`:
 
-**`hasTitle`: «contiene», sin distinguir mayúsculas**
+**`hasTitle`: «contiene», sin distinguir mayúsculas ni acentos** (`specification/TitleSearch`; ADR 0013)
 
 ```sql
-lower(title) like lower('%dune%') escape '\'
+streambox_unaccent(lower(title)) like '%' || <texto normalizado y escapado> || '%' escape ''
 ```
 
-- **Comodines escapados.** En `LIKE`, `%` significa «cualquier texto» y `_` «cualquier carácter». Si el usuario busca `100%`, sin escapar encontraría cualquier título que empiece por «100». `escapeLike` antepone `\` a esos caracteres para tratarlos como texto literal.
-- **`lower()` en los dos lados, en la base de datos.** Antes, el texto buscado se pasaba a minúsculas en Java. Java y PostgreSQL no convierten igual algunas letras (`İ` turca, la sigma griega final), así que un título con esas letras no se encontraba. Los tests contra PostgreSQL lo descubrieron (en H2 no pasaba, porque H2 usa la conversión de Java). Ahora las dos minúsculas las hace el mismo motor.
-- La búsqueda **sí distingue acentos**: `manana` no encuentra `Mañana`.
-- Se usan parámetros, nunca concatenación de texto en el SQL, así que **no hay inyección SQL** posible.
+- **Sin acentos.** `streambox_unaccent` es una función propia (migración `V5`): en PostgreSQL envuelve la extensión `unaccent` (instalada en el esquema `extensions`) y es `IMMUTABLE`, porque un índice sobre una expresión lo exige y `unaccent` no lo es; en H2 es un alias a Java (`java.text.Normalizer`). «manana» encuentra «Mañana», «nono» encuentra «Ñoño», «strasse» encuentra «Straße».
+- **Con índice.** En PostgreSQL hay un índice **GIN de trigramas** (`pg_trgm`) sobre `streambox_unaccent(lower(title))` en `movies` y `series`: un `LIKE '%x%'` normal no puede usar un índice B-tree, este sí (desde 3 letras).
+- **Comodines escapados, después de normalizar.** En `LIKE`, `%` es «cualquier texto» y `_` «cualquier carácter»: si el usuario busca `100%`, sin escapar encontraría todo lo que empiece por «100». Se escapan en SQL **después** de quitar acentos, porque `unaccent` convierte los comodines de ancho completo (`％ ＿ ＼`) en los normales; en el orden contrario, buscar `＿` devolvía todo el catálogo (hay test).
+- **`lower()` en los dos lados, en la base de datos.** Java y PostgreSQL no convierten igual algunas letras (`İ` turca, la sigma griega final); los tests contra PostgreSQL lo descubrieron (H2 lo ocultaba). Ahora lo hace el mismo motor.
+- **El texto va como parámetro enlazado** (`HibernateCriteriaBuilder.value(texto)`), nunca como literal dentro del SQL. Con el literal (como hacía `LikePatterns`), un carácter nulo (`?title=a%00b`) llegaba dentro del mensaje del protocolo, PostgreSQL lo rechazaba y la conexión del pool quedaba rota en cada petición. Con el parámetro, el mismo nulo es un error de datos que deja la conexión sana (y ni llega: ver abajo). Los tests de `O'Brien` y `'; DROP TABLE` siguen pasando.
+- **La clave no puede quedar vacía:** un texto de solo acentos sueltos (`́`) no está «en blanco», pero `streambox_unaccent` lo deja en `''` y el patrón sería `LIKE '%%'` (todo el catálogo). Se exige en la base de datos `length(clave) > 0`.
+- **Validación del parámetro:** `title` admite como mucho 150 caracteres (el título más largo posible) y ningún carácter de control (tabulador, saltos de línea, nulo): si no, 400 `VALIDATION_ERROR` (`controller/TitleSearchParameter`). El frontend limita el campo y limpia esos caracteres antes de enviar.
+
+**Tolerancia a erratas** (solo PostgreSQL). Si la búsqueda exacta **no encuentra nada** y tiene **5 letras o más**, `service/TypoTolerantTitleSearch` repite la búsqueda con los mismos filtros y `hasSimilarTitle`: `streambox_word_similarity(búsqueda, título) ≥ 0.4` (de `pg_trgm`). Así «interstelar» encuentra «Interstellar» y «matirx», «The Matrix». La respuesta lleva `approximate: true` y los resultados van **ordenados por parecido**, ignorando el `sort` pedido. Por qué así:
+
+- **Solo si la exacta no da nada:** sumarla siempre traería ruido («matrix» bien escrito traería «Matilda»).
+- **Umbral 0,4 y no el 0,6 por defecto:** con 0,6, «matirx» no encontraría «Matrix».
+- **Mínimo de 5 letras:** con menos, «amro» se parece igual a «Amor», «Amadeus» y «Amélie».
+- **En H2 no hay tolerancia** (la función devuelve 0): imitar `pg_trgm` en Java podría aprobar en los tests resultados que PostgreSQL no da. Se prueba contra PostgreSQL real (`PostgresTitleSearchIntegrationTest`, `PostgresTypoTolerantSearchIntegrationTest`).
+- **Límite asumido:** recorre la tabla (no usa el índice), y por cómo funcionan los trigramas «matirx» también se parece a «Matilda». Si el catálogo creciera mucho, los operadores indexables `<%` serían el siguiente paso (ADR 0013).
 
 **`hasGenre`: con `EXISTS`, no con `JOIN`**
 
@@ -1315,7 +1326,7 @@ Endpoints en el capítulo 13.1. Detalles:
 - **Episodios:** el duplicado de temporada + número se comprueba **antes** de copiar los datos a la entidad. Si fuera después, Hibernate volcaría el cambio antes de la consulta. El `UNIQUE` queda como respaldo ante dos altas simultáneas: `saveAndFlush` y traducción por SQLSTATE (23505 → 409 `EPISODE_ALREADY_EXISTS`, clave foránea → 404). Las rutas de episodio buscan con `findByIdAndSeriesId`: cambiar el `seriesId` de la URL no permite tocar el episodio de otra serie (404).
 - **Favoritos** (`/api/users/me/favorites/series`): mismo patrón que películas (capítulo 15). La ruta literal `/series` tiene prioridad sobre `/{movieId}`, y hay un test que lo comprueba con una película y una serie del mismo id.
 - **Géneros:** borrar un género cuenta películas y series («lo usan 3 películas y 2 series», en singular o plural y omitiendo la parte que vale 0).
-- **Código compartido con películas:** `controller/PageableFactory` (paginación y orden) y `specification/LikePatterns` (búsqueda por título con comodines escapados y `lower()` en la base de datos). Se extrajeron de películas sin cambiar su comportamiento, para que las dos no puedan divergir.
+- **Código compartido con películas:** `controller/PageableFactory` (paginación y orden) y `specification/TitleSearch` (búsqueda por título sin mayúsculas ni acentos, con comodines escapados; antes `LikePatterns`). Se extrajeron de películas sin cambiar su comportamiento, para que las dos no puedan divergir.
 
 ### 15 bis.5 Frontend del usuario
 
@@ -1751,9 +1762,12 @@ Solo `'hidden'` cuenta como oculta (el antiguo `'prerender'` cuenta como visible
 
 ### 20.5 Buscador (`components/SearchBar.tsx`)
 
+> **Límite y limpieza del texto** (`lib/titleSearch.ts`): el campo admite como mucho `TITLE_SEARCH_MAX_LENGTH = 150` caracteres (lo mismo que valida el backend) y, antes de enviar, cada tabulador o salto de línea pegado se convierte en un solo espacio (borrarlo pegaría las palabras: «Blade	Runner» → «BladeRunner»). Si aun así llega el 400 `VALIDATION_ERROR` de `title`, se muestra el motivo del servidor junto al campo (`aria-invalid`), nunca el error genérico, y no se cierra la sesión. El panel hace lo mismo y, en ese caso, ofrece «Borrar búsqueda» en vez de «Reintentar» (la misma petición fallaría igual).
+
 - **Debounce de 300 ms**: no busca con cada tecla, sino cuando dejas de escribir 300 ms.
 - **Cancelación**: si escribes otra letra mientras una búsqueda está en vuelo, la anterior se cancela. Sin esto, una respuesta lenta antigua podría llegar después y sustituir a la nueva.
-- Pide `/movies/search?title=...&size=10&sort=title`.
+- Pide a la vez `/movies/search?title=...&size=10&sort=title` y `/series/search?...` (mismo texto) y pinta dos grupos, «Películas» y «Series».
+- **Títulos parecidos (`approximate`).** Si ningún título *contiene* el texto, el servidor puede devolver los de título parecido (tolerancia a erratas, solo en PostgreSQL; `approximate: true` en la página, ordenados por parecido). Cada tipo decide por su cuenta, así que el texto depende de la combinación (`summarizeApproximate`): si los dos son aproximados, o uno lo es y el otro no trae nada, encima de la lista sale «No hay títulos que contengan «interstelar». Quizá buscabas:»; si el otro grupo sí trae coincidencias, solo «Ninguna película contiene «interstelar»: las películas de la lista tienen un título parecido.» (o «serie»), porque decir «no hay títulos» sería mentira; si el otro falló, «Ninguna película contiene «…». Quizá buscabas:» (de ese no se sabe nada). El grupo aproximado se llama «Películas con título parecido» / «Series con título parecido», el aviso describe el `listbox` (`aria-describedby`) y la región `aria-live` lo anuncia («No hay títulos que contengan interstelar. 1 título parecido: 1 película. …»). Un «aproximado» sin títulos es «Sin resultados».
 - Teclado: ↑/↓ recorren los resultados, Intro abre la película, Escape cierra y vacía.
 - La opción resaltada lleva un contorno de acento alrededor de toda la fila (3,5:1 sobre el fondo), no una barra lateral de color: esa barra es uno de los patrones que más delatan una interfaz generada y, además, solo marca un borde.
 
@@ -1789,6 +1803,7 @@ Solo para `ADMIN`. La barra muestra el enlace **«Administrar»** únicamente si
   - Tabla con portada pequeña (`MoviePoster`), título, año, duración, géneros y acciones «Editar X» y «Borrar X» (el nombre accesible incluye el título).
   - En móvil la tabla se compacta (año, duración y géneros bajo el título, y acciones solo con icono) para no provocar scroll horizontal.
   - Buscador por título con debounce de 300 ms (`useDebouncedValue`); cada búsqueda y página es una entrada de la caché (19.3), y la petición de la búsqueda anterior se cancela. Sin texto pide `/movies?sort=createdAt&direction=desc`; con texto, `/movies/search?title=…&sort=title`.
+  - **Títulos parecidos:** con `approximate: true` (ninguna contiene el texto y el servidor devuelve las parecidas, ordenadas por parecido e ignorando `sort=title`), encima de la tabla sale «Ninguna película contiene «interstelar». Estas tienen un título parecido, de la más parecida a la menos (no van por orden alfabético).» (`ApproximateResultsNotice`; en Series, «Ninguna serie contiene…»), la región `role="status"` lo anuncia y el `<caption>` pasa a «Películas con un título parecido a «…»». El panel no tiene selector de orden: el aviso dice que el orden alfabético habitual no se aplica. El aviso habla de la búsqueda de los resultados **que se ven** (`resultsQuery` de `useAdminSearchList`, que guarda cada página con su búsqueda), no de la que se está pidiendo mientras tanto.
   - Paginación con «Anterior»/«Siguiente», «Página X de Y» y el total (`components/Pagination`). La búsqueda y la página viven en la URL (`?q=&page=`), así que recargar o volver atrás conserva el estado.
   - Estados de carga, vacío y error con reintento.
 - **Borrar película**: `ConfirmDialog` («¿Borrar "Título"? También se quitará de las listas de todos los usuarios…»). Espera al servidor (no es optimista, porque es destructivo). Después avisa e invalida la caché de películas (19.3), lo que recarga la página actual (retrocede una si queda vacía) y pone al día los listados públicos. Un 404 significa que ya estaba borrada: se informa y se recarga.
@@ -1956,9 +1971,9 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1752 | `.\mvnw.cmd test` (desde `streambox/`) |
-| Backend (PostgreSQL real) | Testcontainers | 147 | Se ejecutan con el anterior (1899 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 997 | `npm run test` (desde `frontend/`) |
+| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1887 | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (PostgreSQL real) | Testcontainers | 352 | Se ejecutan con el anterior (2239 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 1032 | `npm run test` (desde `frontend/`) |
 | Frontend (flujos completos) | Playwright (Chromium) | 150 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend

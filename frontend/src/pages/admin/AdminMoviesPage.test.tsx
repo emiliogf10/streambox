@@ -434,3 +434,161 @@ describe('AdminMoviesPage: borrar', () => {
     expect(screen.getByText('Página 1 de 1')).toBeInTheDocument();
   });
 });
+
+describe('AdminMoviesPage: títulos parecidos (approximate)', () => {
+  // Con una errata ninguna película CONTIENE el texto y el servidor devuelve las de título parecido,
+  // ordenadas por parecido e ignorando `sort=title` (solo en PostgreSQL; en H2 siempre es `false`).
+  const NOTICE =
+    'Ninguna película contiene «interstelar». Estas tienen un título parecido, de la más parecida a la menos (no van por orden alfabético).';
+  const interstella = makeMovie({ id: 8, title: 'Interstella 5555', releaseYear: 2003 });
+
+  /** Región `role="status"` de la página cuyo texto es exactamente `text` (hay otras: paginación, avisos). */
+  const statusWith = (text: string) => screen.getAllByRole('status').find((element) => element.textContent === text);
+
+  it('lo dice encima de la tabla (y lo anuncia): ninguna lo contiene y el orden es por parecido', async () => {
+    routeFetch(fetchMock, {
+      [searchKey('interstelar')]: () => jsonResponse(makePage([interstellar, interstella], { approximate: true })),
+    });
+    renderList('/admin/peliculas?q=interstelar');
+
+    expect(await screen.findByRole('row', { name: /^Interstellar/ })).toBeInTheDocument();
+    const notice = screen.getByText(NOTICE, { selector: 'span' });
+    expect(notice.compareDocumentPosition(screen.getByRole('table')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(statusWith(NOTICE)).toBeDefined();
+    // El título de la tabla tampoco dice «Resultados para...», que daría a entender que lo contienen.
+    expect(
+      screen.getByRole('table', { name: 'Películas con un título parecido a «interstelar», página 1 de 1' }),
+    ).toBeInTheDocument();
+  });
+
+  it('con coincidencias de verdad (approximate: false) no hay aviso', async () => {
+    routeFetch(fetchMock, { [searchKey('inter')]: () => jsonResponse(makePage([interstellar])) });
+    renderList('/admin/peliculas?q=inter');
+
+    expect(await screen.findByRole('row', { name: /^Interstellar/ })).toBeInTheDocument();
+    expect(screen.queryByText(/título parecido/)).not.toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Resultados para «inter», página 1 de 1' })).toBeInTheDocument();
+  });
+
+  it('mientras llega otra búsqueda, el aviso sigue hablando de la que se ve (no de la nueva) y luego se va', async () => {
+    installManualTimers();
+    try {
+      let answer: (response: Response) => void = () => {};
+      routeFetch(fetchMock, {
+        [searchKey('interstelar')]: () => jsonResponse(makePage([interstellar], { approximate: true })),
+        [searchKey('dredd')]: () => new Promise<Response>((resolve) => (answer = resolve)),
+      });
+      const user = userEvent.setup({ delay: null });
+      renderList('/admin/peliculas?q=interstelar');
+      expect(await screen.findByText(NOTICE, { selector: 'span' })).toBeInTheDocument();
+
+      const input = screen.getByRole('searchbox', { name: 'Buscar por título' });
+      await user.clear(input);
+      await user.type(input, 'dredd');
+      passTime(300);
+      await waitFor(() => expect(callsTo('/api/movies/search?title=dredd')).toHaveLength(1));
+
+      // Se sigue viendo «Interstellar» (atenuada): el aviso es suyo, nunca «Ninguna película contiene «dredd»».
+      expect(screen.getByText(NOTICE, { selector: 'span' })).toBeInTheDocument();
+      expect(screen.queryByText(/«dredd»/)).not.toBeInTheDocument();
+
+      answer(jsonResponse(makePage([dredd])));
+      expect(await screen.findByRole('row', { name: /^Dredd/ })).toBeInTheDocument();
+      expect(screen.queryByText(NOTICE, { selector: 'span' })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('AdminMoviesPage: texto que el servidor no admite (máx. 150, sin caracteres de control)', () => {
+  /** 400 del servidor con el motivo en `validationErrors.title` (contrato de `TitleSearchParameter`). */
+  const rejected = (reason: string) => () =>
+    errorResponse(400, 'VALIDATION_ERROR', 'Los datos proporcionados no son válidos', { validationErrors: { title: reason } });
+
+  it('el campo no admite más de 150 caracteres (`maxLength`)', async () => {
+    routeFetch(fetchMock, { [listKey()]: () => jsonResponse(makePage([dredd])) });
+    renderList();
+
+    expect(await screen.findByRole('searchbox', { name: 'Buscar por título' })).toHaveAttribute('maxLength', '150');
+  });
+
+  it('un tabulador pegado se envía como un espacio (y así queda en la URL)', async () => {
+    installManualTimers();
+    try {
+      routeFetch(fetchMock, {
+        [listKey()]: () => jsonResponse(makePage([dredd])),
+        'GET /api/movies/search?title=Blade+Runner&page=0&size=10&sort=title': () =>
+          jsonResponse(makePage([makeMovie({ id: 3, title: 'Blade Runner' })])),
+      });
+      const user = userEvent.setup({ delay: null });
+      renderList();
+      await screen.findByRole('row', { name: /^Dredd/ });
+
+      await user.click(screen.getByRole('searchbox', { name: 'Buscar por título' }));
+      await user.paste('Blade\tRunner');
+      passTime(300);
+
+      expect(await screen.findByRole('row', { name: /^Blade Runner/ })).toBeInTheDocument();
+      expect(callsTo('/api/movies/search').map(([url]) => String(url))).toEqual([
+        '/api/movies/search?title=Blade+Runner&page=0&size=10&sort=title',
+      ]);
+      expect(screen.getByText('busqueda:?q=Blade+Runner')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('un `?q=` con un tabulador en la URL también se limpia antes de pedir', async () => {
+    routeFetch(fetchMock, {
+      'GET /api/movies/search?title=Blade+Runner&page=0&size=10&sort=title': () =>
+        jsonResponse(makePage([makeMovie({ id: 3, title: 'Blade Runner' })])),
+    });
+    renderList('/admin/peliculas?q=Blade%09Runner');
+
+    expect(await screen.findByRole('row', { name: /^Blade Runner/ })).toBeInTheDocument();
+  });
+
+  it('si aun así llega el 400 (un `?q=` larguísimo), el motivo sale junto al campo y se ofrece borrar, no «Reintentar»', async () => {
+    const tooLong = 'a'.repeat(151);
+    routeFetch(fetchMock, {
+      [searchKey(tooLong)]: rejected('La búsqueda no puede superar los 150 caracteres'),
+      [listKey()]: () => jsonResponse(makePage([dredd])),
+    });
+    const user = userEvent.setup();
+    renderList(`/admin/peliculas?q=${tooLong}`);
+
+    const reason = 'La búsqueda no puede superar los 150 caracteres.';
+    const field = screen.getByRole('searchbox', { name: 'Buscar por título' });
+    expect(await screen.findByText(reason)).toHaveAttribute('role', 'alert');
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(field).toHaveAccessibleDescription(reason);
+    expect(screen.getByRole('heading', { name: 'No se puede buscar ese texto' })).toBeInTheDocument();
+    expect(
+      screen.getByText('Corrige la búsqueda (el motivo está bajo el campo) o bórrala para ver todas las películas.'),
+    ).toBeInTheDocument();
+    // Ni el mensaje genérico ni un «Reintentar» que fallaría igual; la sesión sigue abierta (sin refresh).
+    expect(screen.queryByText('Los datos proporcionados no son válidos')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).not.toBeInTheDocument();
+    expect(callsTo('/api/auth/refresh')).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Borrar búsqueda' }));
+
+    expect(await screen.findByRole('row', { name: /^Dredd/ })).toBeInTheDocument();
+    expect(field).not.toHaveAttribute('aria-invalid');
+    expect(screen.queryByText(reason)).not.toBeInTheDocument();
+  });
+
+  it('un 400 que no es del título (p. ej. la paginación) sigue siendo un error normal con «Reintentar»', async () => {
+    routeFetch(fetchMock, {
+      [searchKey('dredd')]: () =>
+        errorResponse(400, 'VALIDATION_ERROR', 'Los datos proporcionados no son válidos', {
+          validationErrors: { size: 'El tamaño debe estar entre 1 y 100' },
+        }),
+    });
+    renderList('/admin/peliculas?q=dredd');
+
+    expect(await screen.findByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Buscar por título' })).not.toHaveAttribute('aria-invalid');
+  });
+});

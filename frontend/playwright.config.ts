@@ -23,6 +23,9 @@ import {
  *     eso añade las dependencias de test pero NO `target/test-classes`, así que
  *     `application-test.properties` NO se carga. Por eso toda la configuración
  *     va explícita en variables de entorno (más abajo) y no depende de ese archivo.
+ *     Por lo mismo, lo que este backend necesita de H2 (la V5 de `db/vendor/h2` y
+ *     `H2SearchFunctions`) vive en `src/main`, no en `src/test`
+ *     (lo vigila `VendorMigrationsLocationTest`).
  *  2. Vite en el puerto {@link FRONTEND_PORT}, con su proxy `/api` apuntando al
  *     backend anterior (variable `VITE_API_PROXY_TARGET`, ver `vite.config.ts`).
  *

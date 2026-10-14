@@ -89,6 +89,14 @@ export interface PageResponse<T> {
   totalPages: number;
   hasNext: boolean;
   hasPrevious: boolean;
+  /**
+   * `true` si NINGÚN título contiene el texto buscado y lo que llega son títulos
+   * **parecidos** (tolerancia a erratas: «interstelar» → «Interstellar»). Solo
+   * puede ser `true` en las búsquedas por título (`/movies/search`,
+   * `/series/search`, `/admin/series`); entonces el servidor ordena por
+   * parecido e **ignora `sort`/`direction`**. En los listados sin texto, siempre `false`.
+   */
+  approximate: boolean;
 }
 
 /** Rol de un usuario (`Role`). */

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.emilio.streambox.dto.SeriesDetailResponse;
+import com.emilio.streambox.dto.SeriesPageResponse;
 import com.emilio.streambox.dto.SeriesRequest;
 import com.emilio.streambox.dto.SeriesResponse;
 import com.emilio.streambox.entity.Genre;
@@ -110,6 +111,17 @@ public class SeriesService {
      * búsqueda de películas.
      * </p>
      *
+     * <p>
+     * El título se busca en dos intentos, como en películas
+     * ({@link TypoTolerantTitleSearch}): si "contiene" no encuentra ninguna serie
+     * visible y el texto tiene 5 letras o más, se devuelven series
+     * <em>visibles</em> parecidas (mismos filtros, incluido
+     * {@link SeriesSpecification#hasEpisodes()}), ordenadas por parecido y con
+     * {@code approximate = true}. Como la visibilidad va en los dos intentos,
+     * una serie vacía no decide si hay segundo intento ni aparece en él: sigue
+     * siendo indistinguible de una inexistente.
+     * </p>
+     *
      * @param title       texto que debe contener el título
      * @param genreId     identificador del género
      * @param releaseYear año de estreno
@@ -117,7 +129,7 @@ public class SeriesService {
      * @return página de series con episodios que cumplen todos los filtros
      */
     @Transactional(readOnly = true)
-    public Page<SeriesResponse> searchSeries(
+    public SeriesPageResponse searchSeries(
             String title,
             Long genreId,
             Integer releaseYear,
@@ -126,9 +138,6 @@ public class SeriesService {
         List<Specification<Series>> filters = new ArrayList<>();
         filters.add(SeriesSpecification.hasEpisodes());
 
-        if (title != null && !title.isBlank()) {
-            filters.add(SeriesSpecification.hasTitle(title));
-        }
         if (genreId != null) {
             filters.add(SeriesSpecification.hasGenre(genreId));
         }
@@ -136,7 +145,7 @@ public class SeriesService {
             filters.add(SeriesSpecification.hasReleaseYear(releaseYear));
         }
 
-        return toResponsePage(seriesRepository.findAll(Specification.allOf(filters), pageable));
+        return searchByTitle(filters, title, pageable);
     }
 
     /**
@@ -163,19 +172,20 @@ public class SeriesService {
      * Obtiene una página de <em>todas</em> las series, incluidas las que aún
      * no tienen episodios, filtrando opcionalmente por título.
      *
+     * <p>
+     * El título se busca en dos intentos, igual que en el catálogo público
+     * ({@link TypoTolerantTitleSearch}), pero entre todas las series: el
+     * administrador también se equivoca al teclear.
+     * </p>
+     *
      * @param title    texto que debe contener el título ({@code null} o en blanco = todas)
      * @param pageable página, tamaño y ordenación solicitados
      * @return página de series con sus recuentos (0 en las vacías)
      */
     @Transactional(readOnly = true)
-    public Page<SeriesResponse> getAdminSeries(String title, Pageable pageable) {
+    public SeriesPageResponse getAdminSeries(String title, Pageable pageable) {
 
-        List<Specification<Series>> filters = new ArrayList<>();
-        if (title != null && !title.isBlank()) {
-            filters.add(SeriesSpecification.hasTitle(title));
-        }
-
-        return toResponsePage(seriesRepository.findAll(Specification.allOf(filters), pageable));
+        return searchByTitle(List.of(), title, pageable);
     }
 
     /**
@@ -274,6 +284,23 @@ public class SeriesService {
                 SeriesEpisodeCounts.load(episodeRepository, SeriesEpisodeCounts.ids(page.getContent()));
 
         return page.map(series -> SeriesEpisodeCounts.toResponse(series, stats));
+    }
+
+    /**
+     * Búsqueda por título en dos intentos ({@link TypoTolerantTitleSearch}) con
+     * los filtros indicados, ya convertida a la respuesta paginada.
+     *
+     * @param filters  filtros que no son el título
+     * @param title    texto buscado ({@code null} o en blanco = sin filtro de título)
+     * @param pageable página, tamaño y orden pedidos
+     * @return página de series, con {@code approximate} si son títulos parecidos
+     */
+    private SeriesPageResponse searchByTitle(List<Specification<Series>> filters, String title, Pageable pageable) {
+
+        TypoTolerantTitleSearch.Result<Series> result = TypoTolerantTitleSearch.find(seriesRepository, filters, title,
+                SeriesSpecification::hasTitle, SeriesSpecification::hasSimilarTitle, pageable);
+
+        return SeriesPageResponse.from(toResponsePage(result.page()), result.approximate());
     }
 
     private SeriesDetailResponse toDetail(Series series) {

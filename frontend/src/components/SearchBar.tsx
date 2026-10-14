@@ -5,6 +5,7 @@ import { Search } from 'lucide-react';
 import { ApiError, apiFetch, getErrorMessage } from '../lib/api';
 import { moviePath, seriesPath } from '../lib/catalog';
 import { pluralize, seriesCardMeta } from '../lib/series';
+import { getTitleSearchError, normalizeTitleSearch, TITLE_SEARCH_MAX_LENGTH } from '../lib/titleSearch';
 import type { Movie, PageResponse, Series } from '../lib/types';
 import { MoviePoster } from './MoviePoster';
 
@@ -17,15 +18,76 @@ const RESULTS_SIZE = 10;
 /** Un resultado del desplegable: película o serie. El tipo decide a qué página lleva. */
 type SearchOption = { kind: 'movie'; item: Movie } | { kind: 'series'; item: Series };
 
-/** Resultados de la última búsqueda terminada, por tipo. `error` = mensaje si esa mitad falló. */
+/**
+ * Resultados de la última búsqueda terminada, por tipo. `error` = mensaje si esa mitad falló;
+ * `approximate` = esa mitad no tiene ningún título que contenga el texto y trae títulos parecidos.
+ */
 interface SearchResults {
   movies: Movie[];
   series: Series[];
   moviesError: string | null;
   seriesError: string | null;
+  moviesApproximate: boolean;
+  seriesApproximate: boolean;
 }
 
-const NO_RESULTS: SearchResults = { movies: [], series: [], moviesError: null, seriesError: null };
+const NO_RESULTS: SearchResults = {
+  movies: [],
+  series: [],
+  moviesError: null,
+  seriesError: null,
+  moviesApproximate: false,
+  seriesApproximate: false,
+};
+
+/**
+ * Mensaje de una búsqueda que ha fallado. Si el servidor ha rechazado el texto (400
+ * `VALIDATION_ERROR` en `title`: demasiado largo o con caracteres de control), su motivo
+ * exacto («La búsqueda no puede superar los 150 caracteres.»), que dice qué corregir; si
+ * no, el mensaje habitual del error.
+ */
+function searchErrorMessage(error: unknown, fallback?: string): string {
+  return getTitleSearchError(error) ?? getErrorMessage(error, fallback);
+}
+
+/**
+ * Qué decir cuando al menos un grupo trae títulos PARECIDOS en lugar de coincidencias.
+ * - `lead`: frase que dice dónde no hay coincidencias (recibe el texto, entrecomillado o no).
+ * - `mixed`: el otro grupo sí trae coincidencias de verdad, así que no se puede hablar de "títulos" en general.
+ * - `kindPlural`: el tipo aproximado («películas»/«series»), para la frase del caso mixto.
+ */
+interface ApproximateSummary {
+  lead: (quoted: string) => string;
+  mixed: boolean;
+  kindPlural: 'películas' | 'series';
+}
+
+/**
+ * Resume la parte aproximada de una búsqueda, o `null` si todo lo que se ve son coincidencias.
+ *
+ * El texto tiene que ser verdad en cada combinación (el servidor decide `approximate` por
+ * separado para películas y para series):
+ * - Los dos aproximados, o uno aproximado y el otro sin nada: no hay NINGÚN título que lo
+ *   contenga → «No hay títulos que contengan…».
+ * - Uno aproximado y el otro con coincidencias (`mixed`): sí hay títulos que lo contienen, así
+ *   que solo se puede decir «Ninguna película contiene…» (o serie).
+ * - Uno aproximado y el otro con error: no se sabe qué habría en el otro, así que también se
+ *   habla solo del tipo aproximado (el fallo ya se avisa aparte).
+ */
+function summarizeApproximate(results: SearchResults): ApproximateSummary | null {
+  const { moviesApproximate, seriesApproximate } = results;
+  if (!moviesApproximate && !seriesApproximate) return null;
+  const allTitles = (q: string) => `No hay títulos que contengan ${q}`;
+  if (moviesApproximate && seriesApproximate) return { lead: allTitles, mixed: false, kindPlural: 'películas' };
+
+  const otherError = moviesApproximate ? results.seriesError : results.moviesError;
+  const otherCount = moviesApproximate ? results.series.length : results.movies.length;
+  const kindPlural = moviesApproximate ? 'películas' : 'series';
+  if (otherError === null && otherCount === 0) return { lead: allTitles, mixed: false, kindPlural };
+
+  const lead = (q: string) => (moviesApproximate ? `Ninguna película contiene ${q}` : `Ninguna serie contiene ${q}`);
+  return { lead, mixed: otherError === null, kindPlural };
+}
 
 /**
  * Buscador de películas Y series por título con el patrón ARIA "combobox con
@@ -39,10 +101,25 @@ const NO_RESULTS: SearchResults = { movies: [], series: [], moviesError: null, s
  * las series llegaran después, la lista crecería bajo el puntero y el índice
  * resaltado con el teclado cambiaría de opción.
  *
+ * **Títulos parecidos.** Si ningún título contiene el texto, el servidor puede
+ * devolver los de título PARECIDO (`approximate: true`, tolerancia a erratas:
+ * «interstelar» → «Interstellar»), cada tipo por su cuenta. Entonces se dice
+ * encima de la lista («No hay títulos que contengan «interstelar». Quizá
+ * buscabas:»), el grupo pasa a llamarse «Películas con título parecido» y la
+ * región `aria-live` lo anuncia. Si solo un grupo es aproximado y el otro trae
+ * coincidencias, el aviso habla solo de ese tipo ({@link summarizeApproximate}).
+ *
  * **Fallo parcial.** Si una de las dos falla, se muestra la otra y se avisa
  * debajo («No se pudo buscar en series...»): media respuesta es más útil que
  * ninguna, pero hay que decir que falta algo para que "no hay series" no se
  * confunda con "no se pudo buscar". Si fallan las dos, se muestra el error.
+ *
+ * **Texto válido.** El campo admite como mucho {@link TITLE_SEARCH_MAX_LENGTH}
+ * caracteres y lo que se envía pasa por `normalizeTitleSearch` (un tabulador o
+ * salto de línea pegado se convierte en un espacio): son las reglas del
+ * servidor, que si no responde 400. Si aun así llega ese 400, se enseña su
+ * motivo bajo el campo (marcado con `aria-invalid`), no un error genérico; la
+ * sesión sigue abierta y el buscador vuelve a buscar en cuanto se corrige el texto.
  *
  * **Accesibilidad.**
  * - El `<input>` es un `combobox` con su `<label>` (oculta visualmente, pero
@@ -71,6 +148,8 @@ export function SearchBar() {
   const [results, setResults] = useState<SearchResults>(NO_RESULTS);
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  // `true` si el servidor ha rechazado el TEXTO (400 de validación de `title`): el campo se marca como inválido.
+  const [invalid, setInvalid] = useState(false);
   // Índice (en la lista completa: películas y luego series) de la opción resaltada; -1 = ninguna.
   const [activeIndex, setActiveIndex] = useState(-1);
   // Si el desplegable está visible. Escape y elegir un resultado lo cierran; escribir o enfocar lo abre.
@@ -79,14 +158,19 @@ export function SearchBar() {
   const baseId = useId();
   const inputId = `${baseId}-input`;
   const listId = `${baseId}-list`;
+  const messageId = `${baseId}-message`;
+  // Aviso de títulos parecidos: describe la lista (`aria-describedby`).
+  const noticeId = `${baseId}-approximate`;
   const optionId = (index: number) => `${baseId}-option-${index}`;
 
   useEffect(() => {
-    if (!query.trim()) return;
+    // Lo que se envía va sin caracteres de control (un tabulador pegado): el servidor los rechaza con un 400.
+    const title = normalizeTitleSearch(query);
+    if (!title) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       const options = {
-        params: { title: query.trim(), size: RESULTS_SIZE, sort: 'title' },
+        params: { title, size: RESULTS_SIZE, sort: 'title' },
         signal: controller.signal,
       };
       void Promise.allSettled([
@@ -103,16 +187,23 @@ export function SearchBar() {
 
         if (moviesResult.status === 'rejected' && seriesResult.status === 'rejected') {
           setResults(NO_RESULTS);
-          setErrorMessage(getErrorMessage(moviesResult.reason, 'No se pudo realizar la búsqueda.'));
+          setErrorMessage(searchErrorMessage(moviesResult.reason, 'No se pudo realizar la búsqueda.'));
+          setInvalid(getTitleSearchError(moviesResult.reason) !== null);
           setStatus('error');
           return;
         }
         setResults({
           movies: moviesResult.status === 'fulfilled' ? moviesResult.value.content : [],
           series: seriesResult.status === 'fulfilled' ? seriesResult.value.content : [],
-          moviesError: moviesResult.status === 'rejected' ? getErrorMessage(moviesResult.reason) : null,
-          seriesError: seriesResult.status === 'rejected' ? getErrorMessage(seriesResult.reason) : null,
+          moviesError: moviesResult.status === 'rejected' ? searchErrorMessage(moviesResult.reason) : null,
+          seriesError: seriesResult.status === 'rejected' ? searchErrorMessage(seriesResult.reason) : null,
+          // Solo cuenta si de verdad trae títulos: un "aproximado" vacío no tendría nada que sugerir.
+          moviesApproximate:
+            moviesResult.status === 'fulfilled' && moviesResult.value.approximate && moviesResult.value.content.length > 0,
+          seriesApproximate:
+            seriesResult.status === 'fulfilled' && seriesResult.value.approximate && seriesResult.value.content.length > 0,
         });
+        setInvalid(false);
         setStatus('done');
       });
     }, DEBOUNCE_MS);
@@ -127,6 +218,7 @@ export function SearchBar() {
     setQuery('');
     setResults(NO_RESULTS);
     setStatus('idle');
+    setInvalid(false);
     setActiveIndex(-1);
     setOpen(false);
   };
@@ -139,7 +231,8 @@ export function SearchBar() {
     setQuery(value);
     setActiveIndex(-1);
     setOpen(true);
-    if (value.trim()) {
+    setInvalid(false);
+    if (normalizeTitleSearch(value)) {
       setStatus('loading');
     } else {
       setResults(NO_RESULTS);
@@ -163,10 +256,12 @@ export function SearchBar() {
     ...results.movies.map((item): SearchOption => ({ kind: 'movie', item })),
     ...results.series.map((item): SearchOption => ({ kind: 'series', item })),
   ];
-  const trimmed = query.trim();
+  // Texto tal y como se busca (sin caracteres de control): es el que citan los mensajes.
+  const trimmed = normalizeTitleSearch(query);
   const hasResults = status === 'done' && options.length > 0;
   const expanded = open && hasResults;
   const showMessage = open && !!trimmed && (status === 'error' || (status === 'done' && options.length === 0));
+  const showInvalid = showMessage && status === 'error' && invalid;
 
   /** Aviso de la mitad que falló (solo si la otra fue bien), o `null`. */
   const partialNotice =
@@ -256,12 +351,34 @@ export function SearchBar() {
       ? `Sin resultados en ${results.moviesError === null ? 'películas' : 'series'} para ${quoted}. ${partialNotice}`
       : `Sin resultados para ${quoted}.`;
 
+  const approximate = status === 'done' ? summarizeApproximate(results) : null;
+
+  /** Aviso visible de títulos parecidos, encima de la lista (o `null` si todo son coincidencias). */
+  const approximateNotice = approximate
+    ? approximate.mixed
+      ? `${approximate.lead(`«${trimmed}»`)}: las ${approximate.kindPlural} de la lista tienen un título parecido.`
+      : `${approximate.lead(`«${trimmed}»`)}. Quizá buscabas:`
+    : null;
+
+  /** Anuncio de los resultados: el recuento y, si hay títulos parecidos, que no son coincidencias. */
+  const resultsAnnouncement = (() => {
+    const count = options.length;
+    const tail = `Usa las flechas arriba y abajo para recorrerlos.${partialNotice ? ` ${partialNotice}` : ''}`;
+    if (approximate && !approximate.mixed) {
+      return `${approximate.lead(trimmed)}. ${count} ${count === 1 ? 'título parecido' : 'títulos parecidos'}: ${breakdown}. ${tail}`;
+    }
+    const mixedNote = approximate
+      ? ` ${approximate.lead(trimmed)}: las ${approximate.kindPlural} de la lista tienen un título parecido.`
+      : '';
+    return `${count} ${count === 1 ? 'resultado' : 'resultados'}. ${breakdown}.${mixedNote} ${tail}`;
+  })();
+
   /** Texto que anuncia la región `aria-live` (visualmente oculta). */
   const announcement =
     status === 'loading' && open
       ? 'Buscando...'
       : expanded
-        ? `${options.length} ${options.length === 1 ? 'resultado' : 'resultados'}. ${breakdown}. Usa las flechas arriba y abajo para recorrerlos.${partialNotice ? ` ${partialNotice}` : ''}`
+        ? resultsAnnouncement
         : showMessage
           ? status === 'error'
             ? errorMessage
@@ -269,9 +386,11 @@ export function SearchBar() {
           : '';
 
   /** Grupos del desplegable, en orden; cada opción conserva su índice global (el de las flechas). */
+  // Un grupo de títulos parecidos lo dice en su propio encabezado (que es su nombre accesible): así se
+  // distingue también en el caso mixto, en el que el otro grupo sí son coincidencias.
   const groups = [
-    { key: 'movies', label: 'Películas', options: options.map((option, index) => ({ option, index })).filter(({ option }) => option.kind === 'movie') },
-    { key: 'series', label: 'Series', options: options.map((option, index) => ({ option, index })).filter(({ option }) => option.kind === 'series') },
+    { key: 'movies', label: results.moviesApproximate ? 'Películas con título parecido' : 'Películas', options: options.map((option, index) => ({ option, index })).filter(({ option }) => option.kind === 'movie') },
+    { key: 'series', label: results.seriesApproximate ? 'Series con título parecido' : 'Series', options: options.map((option, index) => ({ option, index })).filter(({ option }) => option.kind === 'series') },
   ].filter((group) => group.options.length > 0);
 
   /** Panel flotante bajo el campo (lista o mensaje). */
@@ -295,10 +414,14 @@ export function SearchBar() {
           aria-controls={expanded ? listId : undefined}
           aria-autocomplete="list"
           aria-activedescendant={expanded && activeIndex >= 0 ? optionId(activeIndex) : undefined}
+          // Texto rechazado por el servidor: el campo se marca como inválido y se describe con el motivo.
+          aria-invalid={showInvalid || undefined}
+          aria-describedby={showInvalid ? messageId : undefined}
           autoComplete="off"
           spellCheck={false}
           enterKeyHint="search"
           placeholder="Buscar títulos..."
+          maxLength={TITLE_SEARCH_MAX_LENGTH}
           value={query}
           onChange={(e) => handleChange(e.target.value)}
           onFocus={() => setOpen(true)}
@@ -314,10 +437,16 @@ export function SearchBar() {
 
       {expanded && (
         <div className={panelClass}>
+          {approximateNotice && (
+            <p id={noticeId} className="border-b border-line px-3 py-2.5 text-xs leading-relaxed text-white/90">
+              {approximateNotice}
+            </p>
+          )}
           <div
             id={listId}
             role="listbox"
             aria-label="Resultados de la búsqueda"
+            aria-describedby={approximateNotice ? noticeId : undefined}
             className="flex max-h-80 flex-col gap-1 overflow-y-auto p-1.5"
           >
             {groups.map((group) => {
@@ -371,7 +500,7 @@ export function SearchBar() {
       )}
 
       {showMessage && (
-        <div className={`${panelClass} p-3 text-sm text-muted`}>
+        <div id={messageId} className={`${panelClass} p-3 text-sm text-muted`}>
           {status === 'error' ? errorMessage : emptyMessage(`«${trimmed}»`)}
         </div>
       )}

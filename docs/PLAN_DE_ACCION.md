@@ -37,8 +37,8 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **1899** | 1752 con H2 y 147 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **997** | |
+| Backend (JUnit) | **2239** | 1887 con H2 y 352 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
+| Frontend (Vitest) | **1032** | |
 | E2E (Playwright) | **161** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
@@ -99,6 +99,36 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 
 ### 2.5 Seguridad
 
+**Lista de comprobación de seguridad (revisada el 2026-10-14 contra el código y el historial de git).** ✅ hecho · 🟡 hecho con flecos · ⬜ pendiente.
+
+| # | Punto | Estado | Dónde / qué falta |
+| :--- | :--- | :--- | :--- |
+| 1 | Ocultar claves de API | ✅ | Ninguna clave en el código ni en el frontend; `JWT_SECRET`, `ADMIN_PASSWORD` y la conexión a la BD van por variables de entorno o por `application-local.properties` (ignorado); `.env.example` sin valores |
+| 2 | Eliminar secretos de Git | ✅ | `application-local.properties` y `.env` nunca se han versionado (historial comprobado); sin patrones de Supabase, JWT ni claves en ningún commit |
+| 3 | Clave pública para la BD | ✅ | StreamBox no usa la clave `anon` de Supabase: el backend se conecta directo con credenciales de servidor y **la Data API está desactivada**; `anon`/`authenticated` sin permisos |
+| 4 | Row-level security | ✅ | RLS activo en todas las tablas de `public` (callback de Flyway en cada arranque) y comprobado por el autor en Supabase. La app se conecta como propietaria (RLS no la limita): es la defensa de la API pública, no del backend, que autoriza en Spring Security |
+| 5 | Cifrar datos sensibles | 🟡 | Contraseñas con BCrypt y *refresh tokens* con SHA-256 (nunca en claro); cifrado en reposo de Supabase. **Falta:** HTTPS/TLS en el despliegue propio (hoy solo `127.0.0.1` por HTTP) + HSTS (tarea 29), y comprobar que la conexión a Supabase exige TLS (`sslmode=require` en la URL JDBC de tu `application-local.properties`; el controlador de PostgreSQL usa `prefer` por defecto) |
+| 6 | Forzar la autenticación | ✅ | `anyRequest().authenticated()`; solo son públicos login, registro, refresh, logout, `health` y la documentación en dev |
+| 7 | Restringir el acceso a registros | ✅ | Recursos personales en `/api/users/me/...` con el id del token (sin IDOR); `/api/admin/**` y escrituras del catálogo solo ADMIN, reglas por ruta; series sin episodios indistinguibles de inexistentes |
+| 8 | Bloquear la manipulación de campos | ✅ | DTOs `record` con solo los campos permitidos (sin *mass assignment*); el registro crea siempre `USER`; `PATCH /api/users/me` rechaza `email`, `role` y `password`; decimales en enteros → 400 |
+| 9 | Proteger las cookies de sesión | 🟡 | `HttpOnly`, `SameSite=Strict`, `Path` restringido (`/api` y `/api/auth`), vida corta y *refresh* rotatorio. **Falta:** `Secure` está a `false` por defecto en `docker-compose.yml` (falla abierto si se pone TLS delante) y HSTS (notas de la auditoría 2, abajo) |
+| 10 | Hashear contraseñas | ✅ | BCrypt (coste 10) con `PasswordPolicy` y límite de 72 bytes |
+| 11 | Rate limiting | 🟡 | Por IP en login, registro y refresh; bloqueo de cuenta con «IP conocida»; intentos del cambio de contraseña. **Falta:** límite para el tráfico autenticado y `limit_req` en nginx (notas de la auditoría 1); contadores en memoria (por réplica) |
+| 12 | Protección contra bots | ⬜ | Solo los límites del punto 11. **Falta:** un CAPTCHA (p. ej. Cloudflare Turnstile o hCaptcha) en el registro y en el login tras varios fallos, validado en el backend. Ver la tarea nueva abajo |
+| 13 | Parametrizar consultas | ✅ | JPQL y SQL nativo con parámetros con nombre; desde el 2026-10-14 la búsqueda por título (`TitleSearch`) también envía el texto como **parámetro enlazado** (`HibernateCriteriaBuilder.value`) y no como literal: antes, un carácter nulo (`%00`) daba 500 y rompía una conexión del pool en PostgreSQL. Además, el parámetro `title` se valida (≤150 caracteres, sin caracteres de control → 400) |
+| 14 | Validar las entradas | 🟡 | Bean Validation en todos los DTOs, `PasswordPolicy`, `@HttpsUrl`, solo JSON (YAML/formulario/multipart → 415), máximos de tamaño. **Falta:** `@Size(max = 100)` en el email del registro, `@NotNull` por elemento en `MovieRequest.genreIds` y desactivar la coerción de escalares de Jackson (ya anotados en 2.5 y 2.6) |
+| 15 | Sanitizar contenidos | ✅ | React escapa todo lo que pinta (sin `dangerouslySetInnerHTML` ni `eval`), CSP estricta en nginx, URLs validadas (`getSafeVideoUrl`, `@HttpsUrl`), nombres normalizados; la API no genera HTML |
+| 16 | Restringir archivos | ✅ | No hay subidas de archivos (multipart desactivado); nginx solo sirve `dist/` y reenvía únicamente `/api/` (`/actuator` no se publica, `;` en la ruta → 400, `server_tokens off`, sin listado de carpetas); la imagen se construye con `.dockerignore` en lista blanca y `application-local.properties` no entra ni en el JAR ni en la imagen. Detalle menor anotado: `disable_symlinks on` como defensa extra |
+| 17 | Devolver solo los datos necesarios | ✅ | DTOs de respuesta sin hash de contraseña ni datos internos (`UserResponse`: id, nombre, email, rol, fecha); errores en `ErrorResponse` sin trazas ni mensajes del framework (también por `/error`); `/actuator/health` sin detalles; series sin episodios indistinguibles. Detalle menor anotado: `GET /api/users` (ADMIN) devuelve todos los usuarios sin paginar |
+| 18 | Cabeceras de seguridad | 🟡 | nginx: CSP estricta, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, COOP y CORP a nivel de `server` (y `nosniff` también en los errores del backend). **Falta:** HSTS, comentado hasta que haya HTTPS (ver 19) |
+| 19 | Forzar HTTPS | ⬜ | Hoy la app solo se publica en `127.0.0.1:8088` por HTTP (nginx escucha en el 8080 del contenedor, sin TLS). **Falta, antes de publicarla:** un proxy o certificado TLS delante (p. ej. Caddy o Traefik con Let's Encrypt, o el del proveedor), redirección 301 de HTTP a HTTPS, activar HSTS y `STREAMBOX_AUTH_COOKIE_SECURE=true` (y `X-Forwarded-Proto` correcto) |
+| 20 | Escanear dependencias | 🟡 | Dependabot semanal para Maven, npm, GitHub Actions, Docker y compose (actualiza versiones). **Falta:** un escaneo de vulnerabilidades que **rompa el CI**: hoy el CI instala con `npm ci --no-audit` y no hay `npm audit`, OWASP Dependency-Check, OSV-Scanner ni CodeQL; y comprobar en GitHub (Settings → Code security) que las *Dependabot alerts* y *security updates* están activadas |
+
+- **Protección contra bots (CAPTCHA)** — *Media · MEDIA* (`security` + `frontend`). Cloudflare Turnstile (gratuito, sin rastreo y sin marcar semáforos) o hCaptcha: el widget en el registro y en el login a partir de N fallos, y el backend valida el token con la API del proveedor antes de crear la cuenta o comprobar la contraseña. Exige una clave de sitio (pública, en el frontend) y una secreta (variable de entorno, nunca en git), una petición saliente desde el backend (hoy el backend no sale a Internet en compose: abrirle solo esa salida) y desactivarlo en los tests. Ajustar la CSP de nginx (`script-src`/`frame-src` del proveedor).
+- **Escaneo de vulnerabilidades en el CI** — *Media · BAJA* (`backend`, que lleva el CI). Un paso que falle con vulnerabilidades altas o críticas: `npm audit --audit-level=high` (o `--omit=dev` para lo que llega a producción) en el job `frontend`, y para Maven OSV-Scanner (`google/osv-scanner-action`, sin claves) u OWASP Dependency-Check; opcionalmente CodeQL para Java y TypeScript. Acciones fijadas por SHA, como el resto del CI. Y activar en GitHub las *Dependabot alerts* y *security updates* (lo hace el autor en Settings).
+- **HTTPS al publicar** — *Alta (antes de publicar) · MEDIA*. Proxy TLS delante de nginx (Caddy o Traefik con Let's Encrypt, o el TLS del proveedor), redirección 301 de HTTP a HTTPS, HSTS (`add_header Strict-Transport-Security` ya preparado y comentado en `frontend/nginx/default.conf`), `STREAMBOX_AUTH_COOKIE_SECURE=true` y `set_real_ip_from`/`real_ip_header` para que el límite por IP vea la IP real. Hoy no aplica (solo `127.0.0.1`).
+- ✅ ~~**Búsqueda por título con parámetro en vez de literal**~~ — **hecho el 2026-10-14** (ver el historial).
+
 - ✅ ~~**Logout que falla abierto (auditoría 2)**~~ — **hecho el 2026-10-08** (`frontend`): la interfaz solo pasa a «sin sesión» cuando el servidor confirma el cierre; si falla por red o 5xx hay un reintento y, si sigue fallando, la sesión se mantiene con un aviso honesto. Ver el [historial](#4-historial-de-trabajos).
 - **Otras notas de la auditoría 2** — *Baja · BAJA*. Lista completa en `run-2/REPORT.md` §6.1.
   - `STREAMBOX_AUTH_COOKIE_SECURE=false` por defecto en compose: falla abierto si se pone TLS delante.
@@ -157,11 +187,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 
 ### 2.7 Base de datos
 
-- **Índice por título y búsqueda tolerante a erratas** — *Opcional hasta tener un catálogo grande · MEDIA* (`database`)
-  - `lower(title) LIKE '%x%'` no usa un índice normal; en PostgreSQL requiere `pg_trgm` + índice GIN (migración específica de PostgreSQL).
-  - El mismo `pg_trgm` daría **búsqueda tolerante a erratas** (`similarity()`, operador `%`), que es lo que el informe de Gemini (2026-10-08) pedía a Elasticsearch/Meilisearch. Con `pg_trgm` se consigue sin otro servidor que sincronizar y en la misma transacción.
-  - Exige tests contra PostgreSQL real (H2 no lo tiene).
-- **Búsqueda sensible a acentos** — *Opcional · MEDIA*. `manana` no encuentra `Mañana` (sí ignora mayúsculas). Hacerla insensible exige `unaccent`, específico de PostgreSQL (migración + Testcontainers, ya disponible).
+- ✅ ~~**Índice por título, búsqueda sin acentos y tolerante a erratas**~~ — **hecho el 2026-10-14** con `unaccent` + `pg_trgm` e índice GIN (ADR 0013; ver el historial).
 - **Unicidad de película** — *Opcional · BAJA*. Valorar `UNIQUE (title, release_year)` (evitaría `AmbiguousTitleException`); antes hay que revisar los datos existentes.
 - **Géneros: unicidad sin mayúsculas en la BD** — *Opcional · MEDIA*. Solo la garantiza el servicio (`existsByNameIgnoreCase`); la `UNIQUE` distingue mayúsculas. Un índice único sobre `lower(name)` lo impondría en la BD, pero es específico de PostgreSQL (H2 no admite índices sobre expresiones).
 - **Favoritos: sin fecha de alta** — *Opcional · MEDIA*. La tabla de unión no guarda cuándo se añadió cada película, así que no se puede ordenar por «añadidas recientemente». Requeriría una entidad `Favorite` con `added_at` y una migración nueva.
@@ -220,7 +246,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 
 ### 2.10 Tests, herramientas y notas informativas
 
-- **agent-browser no lanza Chrome** (2026-10-14) — *Media · BAJA* (autor). `agent-browser open` falla con «Chrome exited early (exit code: -1058471934) without writing DevToolsActivePort» y después se queda colgado (así se bloquearon dos agentes). Probar `agent-browser install` (reinstala su Chrome) o `--args "--no-sandbox"`; mientras tanto, usar el Chromium de Playwright del proyecto.
+- ✅ ~~**agent-browser no lanza Chrome**~~ (2026-10-14) — **resuelto el mismo día**: `agent-browser doctor` pasa («Headless launch + about:blank in 1.56s») y un arranque desde cero tarda 3 s. El fallo («Chrome exited early (exit code: -1058471934)», `0xC0E90002`) coincide con un bloqueo de Windows: **Smart App Control está activado** en el equipo y suele bloquear un ejecutable recién descargado (el Chrome for Testing 155 de agent-browser) hasta que tiene reputación; también hay un antivirus (Bitdefender) que vigila los procesos. Tras lanzar ese Chrome a mano una vez y cerrar las sesiones atascadas (`agent-browser close --all`), funciona. Si vuelve a pasar: `agent-browser doctor`, `agent-browser close --all` y lanzar una vez a mano `%USERPROFILE%\.agent-browser\browsers\chrome-*\chrome.exe --headless=new about:blank`; mientras tanto, el Chromium de Playwright.
 - **E2E en el contenedor de Claude (Chromium 141)** — *Info*
   - `accessibility.spec.ts:189` (formulario de película: «Volver al listado» tapado por la barra, a 375 y 1280 px) falla con ese navegador. En una página de prueba sin la app, ese Chromium no aplica `scroll-margin-top` a `focus()` si el elemento ya cabe entero en la ventana; el enlace tiene `scroll-margin-top` de 89 px. La interfaz es correcta y en la máquina del autor (Chromium de Playwright 1.63) pasa.
   - Al fallar, los 7 tests del proyecto `catalogo-mutable` salen «did not run»; con `--project=catalogo-mutable --no-deps` pasan 7/7.
@@ -354,13 +380,23 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
 
+### 2026-10-14 · Búsqueda sin acentos y tolerante a erratas (ADR 0013)
+
+- **Problema:** «manana» no encontraba «Mañana», una errata («interstelar») no daba nada y `lower(title) LIKE '%x%'` no podía usar índice.
+- **Base de datos** (`database`): migración `V5` **por motor** (`db/vendor/{vendor}`, las dos en `src/main`): en PostgreSQL, `unaccent` y `pg_trgm` en el esquema `extensions`, funciones propias `streambox_unaccent`/`streambox_word_similarity` (`IMMUTABLE`, `BEGIN ATOMIC`, `search_path` vacío) e **índices GIN de trigramas**; en H2, alias a Java (sin tolerancia a erratas). `specification/TitleSearch` sustituye a `LikePatterns`: «contiene» sin mayúsculas ni acentos y escape de comodines **después** de normalizar (`unaccent` convierte `％ ＿` en `% _`).
+- **Backend** (`backend`): si la búsqueda exacta no encuentra nada y tiene 5 letras o más, segundo intento con `word_similarity ≥ 0.4`, mismos filtros, **ordenado por parecido** y marcado con `approximate: true` en la respuesta (`service/TypoTolerantTitleSearch`).
+- **Frontend** (`frontend`): «No hay títulos que contengan «interstelar». Quizá buscabas:» en el buscador (con los casos mixtos) y un aviso equivalente en el panel.
+- **Arreglos por el camino:** la V5 de H2 estaba en `src/test` y el backend de los E2E no la veía (27 E2E en rojo): se movió a `src/main` (`VendorMigrationsLocationTest`). La revisión de `qa` (155 tests nuevos) encontró que un **carácter nulo** daba 500 y **rompía una conexión del pool** (el texto iba como literal en el SQL: ahora es un parámetro enlazado, punto 13 de la lista de seguridad) y que un **acento suelto** («´») devolvía todo el catálogo (la clave quedaba vacía: ahora se exige que no lo esté); el parámetro `title` se valida (≤150 caracteres, sin caracteres de control → 400) y el frontend lo limita y limpia antes de enviar.
+- **Tests:** backend de 1899 a **2239** (352 contra PostgreSQL real); Vitest de 997 a **1032**; E2E **161** en verde.
+- **Supabase:** nada a mano; la `V5` se aplica sola en el siguiente arranque (el autor comprueba antes con `pg_available_extensions` que `unaccent` y `pg_trgm` están disponibles).
+
 ### 2026-10-14 · Página propia por película y adiós al modal
 
 - **Problema:** el detalle de una película era un modal sin URL: no se podía compartir un enlace, «Atrás» no lo cerraba y al recargar se perdía; las series ya tenían su página.
 - **Arreglo** (`frontend`): `pages/MovieDetailPage.tsx` en `/peliculas/:id` (portada, datos, «Ver ahora», «Mi lista» y, solo para ADMIN, «Editar»), con `hooks/useMovieDetail.ts` sobre TanStack Query (clave de detalle dentro de `movies`, así que editar o borrar en el panel la invalida). Estados de carga, error con «Reintentar» y «Película no encontrada» («Puede que la dirección no sea correcta o que la película se haya retirado del catálogo.», con «Ver todas las películas»). Todas las tarjetas, filas, banners, «Mi lista», el perfil y el buscador enlazan con `<Link>` a la página. `MovieDetailsModal` borrado.
 - **Verificación:** Vitest de 922 a **973**; E2E de 154 a **158**; comprobación visual del orquestador a 1280 y 375 px como ADMIN (página, recarga, «Atrás», `/peliculas/999`).
 - **Revisión de `qa`** (apta; añadió 6 tests de casos límite) y arreglos (`frontend`): al cambiar de página se sube el scroll (salvo en «Atrás») y el foco va al `<main>` (`components/RouteChangeFocus.tsx`; antes se entraba a mitad de página en móvil y el lector de pantalla no anunciaba la página nueva; ya pasaba en toda la SPA); «Editar» desde la película vuelve a ella («Volver a la película», validado por lista blanca); Intro en el buscador sobre la película abierta ya no duplica la entrada del historial. Vitest de 973 a **997**; E2E de 158 a **161** (scroll y foco en móvil, comprobados quitando el arreglo).
-- **Incidencia de entorno:** el agente `frontend` se quedó colgado dos veces y agent-browser no consigue lanzar Chrome en la máquina del autor (`Chrome exited early … without writing DevToolsActivePort`), probablemente la misma causa. La comprobación visual se hizo con el Chromium de Playwright del proyecto. Ver sección 2.10.
+- **Incidencia de entorno:** el agente `frontend` se quedó colgado dos veces porque agent-browser no conseguía lanzar Chrome (resuelto el mismo día; ver sección 2.10). La comprobación visual se hizo con el Chromium de Playwright del proyecto.
 
 ### 2026-10-09 · Editar perfil: nombre, contraseña y cerrar sesión en todos los dispositivos
 

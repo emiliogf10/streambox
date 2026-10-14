@@ -393,6 +393,41 @@ class FlywaySchemaIntegrationTest {
                 () -> insertToken(987654L, HASH_A, java.util.UUID.randomUUID(), null));
     }
 
+    // --- V5: búsqueda por título sin acentos (versión de H2, db/vendor/h2) ---
+
+    /**
+     * La V5 de H2 (src/main/resources/db/vendor/h2) se aplica: demuestra que la
+     * ubicación {@code db/vendor/{vendor}} de {@code spring.flyway.locations} se
+     * resuelve a {@code h2}. La de PostgreSQL se prueba en
+     * {@code PostgresTitleSearchIntegrationTest}.
+     */
+    @Test
+    void v5EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '5' AND \"success\" = TRUE"
+                        + " AND \"description\" = 'accent insensitive title search'",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * Las dos funciones que usa {@code TitleSearch} existen con el mismo nombre
+     * que en PostgreSQL. En H2 {@code streambox_word_similarity} devuelve 0 (sin
+     * tolerancia a erratas) y {@code NULL} propaga {@code NULL}, como una función
+     * {@code STRICT} de PostgreSQL.
+     */
+    @Test
+    void lasFuncionesDeBusquedaExistenEnH2() {
+        assertEquals("pokemon elite manana istanbul", jdbc.queryForObject(
+                "SELECT streambox_unaccent(LOWER('Pokémon ÉLITE Mañana İstanbul'))", String.class));
+        assertEquals("% _ \\", jdbc.queryForObject("SELECT streambox_unaccent('％ ＿ ＼')", String.class),
+                "como unaccent, las formas de ancho completo pasan a ASCII");
+        assertEquals(0.0, jdbc.queryForObject(
+                "SELECT streambox_word_similarity('interstelar', 'interstellar')", Double.class));
+        assertEquals(null, jdbc.queryForObject("SELECT streambox_unaccent(NULL)", String.class));
+    }
+
     // --- Utilidades ---
 
     /** Token válido de un día (familia de siete) con el sucesor indicado. */

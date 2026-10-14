@@ -114,7 +114,7 @@ class PostgresBaselineAdoptionIntegrationTest {
 
     /**
      * La historia queda registrada: baseline en la versión 0 (por eso V1 SÍ se
-     * ejecuta), luego V1, V2, V3 y V4, todas correctas. Una segunda ejecución no
+     * ejecuta), luego V1, V2, V3, V4 y la V5 de PostgreSQL (db/vendor/postgresql), todas correctas. Una segunda ejecución no
      * hace nada y {@code validate} pasa (los checksums coinciden).
      */
     @Test
@@ -123,10 +123,10 @@ class PostgresBaselineAdoptionIntegrationTest {
 
         MigrateResult first = flyway(db).migrate();
 
-        assertEquals(4, first.migrationsExecuted, "deben ejecutarse V1, V2, V3 y V4");
+        assertEquals(5, first.migrationsExecuted, "deben ejecutarse V1, V2, V3, V4 y V5");
         List<Map<String, Object>> history = jdbc(db).queryForList(
                 "SELECT version, description, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertEquals(List.of("0", "1", "2", "3", "4"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
+        assertEquals(List.of("0", "1", "2", "3", "4", "5"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
         assertEquals("BASELINE", history.get(0).get("type"));
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
 
@@ -177,7 +177,8 @@ class PostgresBaselineAdoptionIntegrationTest {
         // Se compara como conjunto: el orden de ORDER BY depende de la collation del servidor
         assertEquals(Set.of("idx_favorites_movie_id", "idx_movie_genres_genre_id", "idx_movies_release_year",
                         "idx_series_genres_genre_id", "idx_favorite_series_series_id", "idx_series_release_year",
-                        "idx_refresh_tokens_user_id", "idx_refresh_tokens_family_id", "idx_refresh_tokens_replaced_by_id"),
+                        "idx_refresh_tokens_user_id", "idx_refresh_tokens_family_id", "idx_refresh_tokens_replaced_by_id",
+                        "idx_movies_title_search", "idx_series_title_search"),
                 Set.copyOf(jdbc.queryForList("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
                         + " AND indexname LIKE 'idx\\_%'", String.class)));
     }
@@ -335,7 +336,28 @@ class PostgresBaselineAdoptionIntegrationTest {
     }
 
     /**
-     * Contraste: una base vacía NO recibe fila de baseline (solo V1 a V4) y
+     * La V5 (búsqueda sin acentos) sobre una base heredada con datos: no cambia
+     * ninguna fila, construye los índices GIN con los títulos que ya existían
+     * (válidos, no a medias) y la búsqueda sin acentos encuentra el título
+     * antiguo {@code Mañana} escribiendo {@code manana}.
+     */
+    @Test
+    void laV5SobreUnaBaseAdoptadaIndexaLosTitulosExistentesSinModificarlos() throws Exception {
+        String db = createDatabase(true);
+        flyway(db).migrate();
+        JdbcTemplate jdbc = jdbc(db);
+
+        assertEquals(List.of("Alien", "Mañana"),
+                jdbc.queryForList("SELECT title FROM movies ORDER BY title", String.class));
+        assertEquals(List.of(true, true), jdbc.queryForList("SELECT i.indisvalid FROM pg_index i"
+                + " JOIN pg_class c ON c.oid = i.indexrelid"
+                + " WHERE c.relname IN ('idx_movies_title_search', 'idx_series_title_search')", Boolean.class));
+        assertEquals(List.of("Mañana"), jdbc.queryForList(
+                "SELECT title FROM movies WHERE streambox_unaccent(lower(title)) LIKE '%manana%'", String.class));
+    }
+
+    /**
+     * Contraste: una base vacía NO recibe fila de baseline (solo V1 a V5) y
      * sí tiene cascadas y CHECK. Garantiza que los dos caminos de arranque
      * producen lo que describe cada test.
      */
@@ -346,7 +368,7 @@ class PostgresBaselineAdoptionIntegrationTest {
         flyway(db).migrate();
 
         JdbcTemplate jdbc = jdbc(db);
-        assertEquals(List.of("1", "2", "3", "4"), jdbc.queryForList(
+        assertEquals(List.of("1", "2", "3", "4", "5"), jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history ORDER BY installed_rank", String.class));
         // Ocho claves foráneas en cascada. V1: géneros->película, favoritos->usuario y
         // favoritos->película. V3: géneros->serie, episodios->serie, favoritos de
@@ -399,6 +421,9 @@ class PostgresBaselineAdoptionIntegrationTest {
             assertEquals(List.of(), series.findFavoritesByUserId(alice.getId()));
             Movie manana = movies.findAllByTitleIgnoreCase("MAÑANA").get(0);
             assertEquals(1999, manana.getReleaseYear());
+            // La búsqueda sin acentos (V5) funciona sobre los datos heredados
+            assertEquals(List.of("Mañana"), movieService.searchMovies("manana", null, null,
+                    org.springframework.data.domain.PageRequest.of(0, 10)).content().stream().map(m -> m.title()).toList());
 
             movieService.deleteMovie(manana.getId());
 
@@ -449,16 +474,23 @@ class PostgresBaselineAdoptionIntegrationTest {
     }
 
     /**
-     * Flyway configurado como la aplicación: mismas migraciones y los valores
-     * {@code spring.flyway.baseline-*} leídos de {@code application.properties}.
+     * Flyway configurado como la aplicación: las ubicaciones de
+     * {@code spring.flyway.locations} (con {@code {vendor}} resuelto a
+     * {@code postgresql}, como hace Spring Boot; así entra la V5 de
+     * {@code db/vendor/postgresql} y el callback, que sin los roles de Supabase
+     * no hace nada) y los valores {@code spring.flyway.baseline-*}, leídos de
+     * {@code application.properties}.
      */
     private static Flyway flyway(String database) throws IOException {
         Properties properties = PropertiesLoaderUtils.loadProperties(new ClassPathResource("application.properties"));
         assertEquals("true", properties.getProperty("spring.flyway.baseline-on-migrate"));
+        String[] locations = java.util.Arrays.stream(properties.getProperty("spring.flyway.locations").split(","))
+                .map(location -> location.trim().replace("{vendor}", "postgresql"))
+                .toArray(String[]::new);
         var postgres = PostgresIntegrationTestSupport.postgres();
         return Flyway.configure()
                 .dataSource(url(database), postgres.getUsername(), postgres.getPassword())
-                .locations("classpath:db/migration")
+                .locations(locations)
                 .baselineOnMigrate(Boolean.parseBoolean(properties.getProperty("spring.flyway.baseline-on-migrate")))
                 .baselineVersion(properties.getProperty("spring.flyway.baseline-version"))
                 .load();

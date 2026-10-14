@@ -18,6 +18,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 /**
  * Vistas de gestión de series para el panel de administración
@@ -54,7 +56,8 @@ public class AdminSeriesController {
     /**
      * Lista todas las series, incluidas las que no tienen episodios.
      *
-     * @param title     texto que debe contener el título (opcional; sin él, todas)
+     * @param title     texto que debe contener el título (opcional; sin él, todas); si nada lo
+     *                  contiene, títulos parecidos (ver {@link MovieController#TITLE_DESCRIPTION})
      * @param page      número de página, comenzando desde 0 ({@code page × size} debe ser menor que 2.147.483.647)
      * @param size      número de series por página (1 a 100)
      * @param sort      campo de ordenación (mismos que {@code /api/series})
@@ -64,15 +67,20 @@ public class AdminSeriesController {
     @GetMapping
     @Operation(summary = "Lista las series para el panel", description = "Devuelve de forma paginada todas las "
             + "series, también las que aún no tienen episodios (episodeCount = 0, ocultas para los usuarios). "
-            + "Filtro opcional por título. Requiere rol ADMIN.")
+            + "Filtro opcional por título, con las mismas reglas que /api/series/search: si ninguna serie lo "
+            + "contiene y tiene 5 letras o dígitos o más, devuelve las series con un título parecido, "
+            + "ordenadas por parecido y con approximate: true. Requiere rol ADMIN.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Series obtenidas correctamente"),
-            @ApiResponse(responseCode = "400", description = "Parámetros de paginación u ordenación inválidos"),
+            @ApiResponse(responseCode = "400", description = TitleSearchParameter.BAD_REQUEST_DESCRIPTION),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador")
     })
     public SeriesPageResponse getSeries(
-            @RequestParam(required = false) String title,
+            @RequestParam(required = false) @Parameter(description = MovieController.TITLE_DESCRIPTION)
+            @Size(max = TitleSearchParameter.MAX_LENGTH, message = TitleSearchParameter.MAX_LENGTH_MESSAGE)
+            @Pattern(regexp = TitleSearchParameter.NO_CONTROL_CHARACTERS,
+                    message = TitleSearchParameter.NO_CONTROL_CHARACTERS_MESSAGE) String title,
             @RequestParam(defaultValue = "0") @Min(value = 0, message = "La página no puede ser negativa") int page,
             @RequestParam(defaultValue = "10") @Min(value = 1, message = "El tamaño mínimo de página es 1")
             @Max(value = 100, message = "El tamaño máximo de página es 100") int size,
@@ -81,8 +89,7 @@ public class AdminSeriesController {
             @RequestParam(defaultValue = "asc")
             @Parameter(description = SeriesController.DIRECTION_DESCRIPTION) String direction) {
 
-        return SeriesPageResponse.from(seriesService.getAdminSeries(
-                title, SeriesController.buildPageable(page, size, sort, direction)));
+        return seriesService.getAdminSeries(title, SeriesController.buildPageable(page, size, sort, direction));
     }
 
     /**

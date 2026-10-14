@@ -30,6 +30,8 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 /**
  * Controlador REST del catálogo de series ({@code /api/series}).
@@ -107,26 +109,34 @@ public class SeriesController {
     /**
      * Busca series visibles combinando filtros opcionales, de forma paginada.
      *
-     * @param title       texto que debe contener el título
+     * @param title       texto que debe contener el título (o parecerse, si nada lo contiene; ver
+     *                    {@link MovieController#TITLE_DESCRIPTION})
      * @param genreId     identificador del género
      * @param releaseYear año de estreno
      * @param page        número de página, comenzando desde 0 ({@code page × size} debe ser menor que 2.147.483.647)
      * @param size        número de series por página (1 a 100)
      * @param sort        campo de ordenación (ver {@link #SORTABLE_FIELDS})
      * @param direction   dirección de ordenación: {@code asc} (por defecto) o {@code desc}
-     * @return página de series encontradas
+     * @return página de series encontradas, con {@code approximate = true} si son títulos parecidos
      */
     @GetMapping("/search")
     @Operation(summary = "Busca series", description = "Busca series con episodios aplicando opcionalmente "
-            + "filtros por título (contiene, sin distinguir mayúsculas; % y _ se tratan como texto), género "
-            + "y año de estreno. Los resultados se devuelven de forma paginada y ordenada.")
+            + "filtros por título (contiene, sin distinguir mayúsculas ni acentos; % y _ se tratan como texto), "
+            + "género y año de estreno. Los resultados se devuelven de forma paginada y ordenada. Si ninguna "
+            + "serie contiene el título buscado y este tiene 5 letras o dígitos o más, se devuelven en su "
+            + "lugar las series con un título parecido (tolerancia a erratas, con los mismos filtros y "
+            + "siempre solo series con episodios), ordenadas por parecido en vez de por sort/direction y con "
+            + "approximate: true.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Búsqueda realizada correctamente"),
-            @ApiResponse(responseCode = "400", description = "Parámetros de paginación u ordenación inválidos"),
+            @ApiResponse(responseCode = "400", description = TitleSearchParameter.BAD_REQUEST_DESCRIPTION),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado")
     })
     public SeriesPageResponse searchSeries(
-            @RequestParam(required = false) String title,
+            @RequestParam(required = false) @Parameter(description = MovieController.TITLE_DESCRIPTION)
+            @Size(max = TitleSearchParameter.MAX_LENGTH, message = TitleSearchParameter.MAX_LENGTH_MESSAGE)
+            @Pattern(regexp = TitleSearchParameter.NO_CONTROL_CHARACTERS,
+                    message = TitleSearchParameter.NO_CONTROL_CHARACTERS_MESSAGE) String title,
             @RequestParam(required = false) Long genreId,
             @RequestParam(required = false) Integer releaseYear,
             @RequestParam(defaultValue = "0") @Min(value = 0, message = "La página no puede ser negativa") int page,
@@ -135,8 +145,7 @@ public class SeriesController {
             @RequestParam(defaultValue = "title") @Parameter(description = SORT_DESCRIPTION) String sort,
             @RequestParam(defaultValue = "asc") @Parameter(description = DIRECTION_DESCRIPTION) String direction) {
 
-        return SeriesPageResponse.from(seriesService.searchSeries(
-                title, genreId, releaseYear, buildPageable(page, size, sort, direction)));
+        return seriesService.searchSeries(title, genreId, releaseYear, buildPageable(page, size, sort, direction));
     }
 
     /**

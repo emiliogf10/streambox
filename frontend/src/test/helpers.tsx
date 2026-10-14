@@ -129,6 +129,7 @@ export function makePage<T = Movie>(content: T[], overrides: Partial<PageRespons
     totalPages: 1,
     hasNext: false,
     hasPrevious: false,
+    approximate: false,
     ...overrides,
   };
 }

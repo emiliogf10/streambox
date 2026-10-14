@@ -137,7 +137,8 @@ BEGIN
     END LOOP;
 
     -- Paso 3b: funciones, procedimientos y agregados. Se revoca tambien a PUBLIC
-    -- (ver la cabecera). StreamBox no define ninguna: es solo para lo futuro.
+    -- (ver la cabecera). Desde la V5, StreamBox define dos: streambox_unaccent y
+    -- streambox_word_similarity (busqueda por titulo); este paso las cierra.
     FOR obj IN
         SELECT p.oid::regprocedure::text AS signature
           FROM pg_proc p

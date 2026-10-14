@@ -1,0 +1,36 @@
+-- ===================================================================
+-- V5 (SOLO H2, la base de los tests): equivalente de
+-- src/main/resources/db/vendor/postgresql/V5__accent_insensitive_title_search.sql
+--
+-- POR QUÉ EXISTE
+--   La búsqueda por título (specification/TitleSearch.java) llama a
+--   streambox_unaccent y streambox_word_similarity. En PostgreSQL las crea la V5
+--   de PostgreSQL sobre las extensiones unaccent y pg_trgm, que H2 no tiene.
+--   Aquí se definen con el MISMO nombre como funciones Java (CREATE ALIAS), para
+--   que la misma consulta funcione en los dos motores.
+--
+-- EN QUÉ SE DIFERENCIA DE POSTGRESQL (ver H2SearchFunctions)
+--   - streambox_unaccent: aproximación con java.text.Normalizer (NFKD y sin
+--     marcas diacríticas). Coincide en lo habitual (á, ñ, ü, ç, İ, ﬁ, ％...),
+--     no en todas las reglas de unaccent.
+--   - streambox_word_similarity: devuelve siempre 0, es decir, en H2 NO hay
+--     tolerancia a erratas. Se prueba contra PostgreSQL real (Testcontainers).
+--   - Sin índices: H2 no admite índices sobre expresiones ni trigramas.
+--
+-- POR QUÉ ESTÁ EN src/main (y no en src/test, aunque H2 sea de scope test)
+--   H2 no solo lo usa la suite de Maven: también el backend del E2E y la pila
+--   del navegador, que arrancan con "spring-boot:run -Dspring-boot.run.
+--   useTestClasspath=true". Esa opción añade las DEPENDENCIAS de test (el driver
+--   de H2) pero NO target/test-classes: desde src/test, Flyway con H2 solo veía
+--   V1-V4 y cada búsqueda por título daba 500 (streambox_unaccent no existe).
+--   En PostgreSQL este archivo no se lee nunca ({vendor} = postgresql) y la clase
+--   H2SearchFunctions no depende de H2: viajar en el JAR no cambia nada allí.
+--
+-- RIESGOS PARA DATOS EXISTENTES
+--   Ninguno: solo crea dos alias y H2 se usa siempre en memoria (base nueva en
+--   cada arranque), así que este archivo se puede corregir sin romper checksums
+--   guardados. La V5 de PostgreSQL, en cambio, no se puede editar.
+-- ===================================================================
+
+CREATE ALIAS streambox_unaccent DETERMINISTIC FOR 'com.emilio.streambox.h2.H2SearchFunctions.unaccent';
+CREATE ALIAS streambox_word_similarity DETERMINISTIC FOR 'com.emilio.streambox.h2.H2SearchFunctions.wordSimilarity';

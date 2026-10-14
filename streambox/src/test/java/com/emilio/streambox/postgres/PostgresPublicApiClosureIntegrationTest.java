@@ -263,7 +263,7 @@ class PostgresPublicApiClosureIntegrationTest {
 
         var result = flyway(shared, db, shared.getUsername(), shared.getPassword(), true).migrate();
 
-        assertEquals(4, result.migrationsExecuted);
+        assertEquals(5, result.migrationsExecuted, "V1 a V4 comunes y la V5 de db/vendor/postgresql");
         assertEquals(allTables(shared, db, shared.getUsername(), shared.getPassword()),
                 tablesWithoutRls(shared, db), "sin los roles no se activa RLS en ninguna tabla");
         assertEquals(0, flyway(shared, db, shared.getUsername(), shared.getPassword(), true).migrate().migrationsExecuted);
@@ -399,9 +399,41 @@ class PostgresPublicApiClosureIntegrationTest {
     void laConfiguracionDeFlywayDeclaraLaUbicacionDelCallbackPorMotor() throws IOException {
         String locations = applicationProperties().getProperty("spring.flyway.locations");
 
-        assertEquals(List.of("classpath:db/migration", "classpath:db/callback/{vendor}"),
+        assertEquals(List.of("classpath:db/migration", "classpath:db/vendor/{vendor}", "classpath:db/callback/{vendor}"),
                 Arrays.stream(locations.split(",")).map(String::trim).toList());
         assertTrue(new ClassPathResource("db/callback/postgresql/afterMigrate__close_public_api.sql").exists());
+        assertTrue(new ClassPathResource("db/vendor/postgresql/V5__accent_insensitive_title_search.sql").exists());
+    }
+
+    /**
+     * La V5 crea las primeras funciones propias de StreamBox en {@code public}
+     * ({@code streambox_unaccent} y {@code streambox_word_similarity}). Como
+     * cualquier función nueva, nacen ejecutables por PUBLIC (y, en Supabase,
+     * por {@code anon}): el callback del mismo {@code migrate} las cierra. Las
+     * de las extensiones no aparecen porque la V5 las instala en el esquema
+     * {@code extensions}, fuera de {@code public}, como Supabase.
+     */
+    @Test
+    void lasFuncionesDeBusquedaDeLaV5QuedanCerradasALaApiPublica() throws Exception {
+        String open = createSupabaseLikeDatabase();
+        flyway(open, false).migrate();
+        assertTrue(openObjects(open, "anon").containsAll(
+                List.of("funcion:streambox_unaccent", "funcion:streambox_word_similarity")),
+                "control: sin el callback nacen abiertas: " + openObjects(open, "anon"));
+
+        String db = createSupabaseLikeDatabase();
+        flyway(db, true).migrate();
+
+        assertEquals(List.of(), openObjects(db, "anon"));
+        assertEquals(List.of(), openObjects(db, "authenticated"));
+        assertEquals("42501", sqlStateAs(db, "anon", "SELECT public.streambox_unaccent('Mañana')"));
+        assertEquals(List.of("pg_trgm:extensions", "unaccent:extensions"), adminJdbc(supabaseLike(), db,
+                supabaseLike().getUsername(), supabaseLike().getPassword()).queryForList(
+                        "SELECT e.extname || ':' || n.nspname FROM pg_extension e"
+                                + " JOIN pg_namespace n ON n.oid = e.extnamespace"
+                                + " WHERE e.extname IN ('unaccent', 'pg_trgm') ORDER BY e.extname", String.class));
+        // Y el propietario (el rol con el que conecta la aplicación) sí puede usarlas
+        assertEquals("manana", ownerJdbc(db).queryForObject("SELECT public.streambox_unaccent('mañana')", String.class));
     }
 
     /**

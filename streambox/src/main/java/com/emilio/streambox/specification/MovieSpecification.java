@@ -26,31 +26,16 @@ public final class MovieSpecification {
 
     /**
      * Películas cuyo título contiene el texto indicado, sin distinguir
-     * mayúsculas de minúsculas.
+     * mayúsculas ni acentos: "manana" encuentra "Mañana".
      *
      * <p>
      * Los comodines de {@code LIKE} ({@code %} y {@code _}) que escriba el
      * usuario se tratan como texto literal: buscar {@code "100%"} encuentra
      * títulos que contienen exactamente {@code 100%}, no cualquier título.
-     * </p>
-     *
-     * <p>
-     * <b>Por qué se minusculizan los dos lados en la base de datos.</b> El texto
-     * buscado NO se pasa por {@code String.toLowerCase} de Java: la comparación
-     * la hace la base de datos y la función {@code lower()} de PostgreSQL no
-     * coincide con la de Java en algunos casos ({@code İ}, que Java convierte en
-     * {@code i} + U+0307 y PostgreSQL en {@code i}, y la sigma mayúscula final de
-     * palabra, que Java convierte en {@code ς} y PostgreSQL en {@code σ}). Si cada
-     * lado se minusculizase con un motor distinto, un título con esas letras no se
-     * encontraría buscándolo entero. Aplicando {@code lower()} a ambos lados en el
-     * mismo motor la semántica coincide siempre.
-     * </p>
-     *
-     * <p>
-     * {@code lower()} no altera la barra de escape ni los comodines
-     * ({@code \}, {@code %}, {@code _} no tienen mayúsculas), así que el escapado
-     * se mantiene intacto. La implementación está en
-     * {@link LikePatterns#containsIgnoreCase}, compartida con las series.
+     * La normalización ({@code lower()} y quitar acentos) se hace en la base de
+     * datos a los dos lados y coincide con la expresión del índice
+     * {@code idx_movies_title_search}; los detalles y el porqué están en
+     * {@link TitleSearch}, compartida con las series.
      * </p>
      *
      * @param title texto que debe contener el título
@@ -59,7 +44,38 @@ public final class MovieSpecification {
     public static Specification<Movie> hasTitle(String title) {
 
         return (root, query, criteriaBuilder) ->
-                LikePatterns.containsIgnoreCase(criteriaBuilder, root.get("title"), title);
+                TitleSearch.contains(criteriaBuilder, root.get("title"), title);
+    }
+
+    /**
+     * Películas cuyo título <b>se parece</b> al texto indicado, tolerando
+     * erratas pequeñas: "interstelar" encuentra "Interstellar". Solo en
+     * PostgreSQL ({@code pg_trgm}); en H2 no encuentra nada.
+     *
+     * <p>
+     * Pensada como <b>segundo intento</b>, cuando {@link #hasTitle(String)} no
+     * encuentra nada: sumada siempre a la búsqueda exacta traería títulos
+     * parecidos a una búsqueda bien escrita. Con menos de
+     * {@value TitleSearch#TYPO_TOLERANCE_MIN_CHARACTERS} letras o dígitos no
+     * encuentra nada (ver {@link TitleSearch#toleratesTypos(String)}).
+     * </p>
+     *
+     * <p>
+     * <b>Orden:</b> si la página se pide <b>sin</b> orden
+     * ({@code PageRequest.of(page, size)}), ordena por parecido (el más parecido
+     * primero) y desempata por {@code id}. Si la página trae orden propio,
+     * Spring Data lo sustituye por ese.
+     * </p>
+     *
+     * @param title texto buscado, posiblemente con erratas
+     * @return especificación de filtro (y orden) por parecido del título
+     */
+    public static Specification<Movie> hasSimilarTitle(String title) {
+
+        return (root, query, criteriaBuilder) -> {
+            TitleSearch.orderBySimilarity(query, criteriaBuilder, root.get("title"), root.get("id"), title);
+            return TitleSearch.resembles(criteriaBuilder, root.get("title"), title);
+        };
     }
 
     /**

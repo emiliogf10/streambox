@@ -371,9 +371,15 @@ class CatalogEdgeCasesIntegrationTest {
     /**
      * Un título vacío o solo con espacios se ignora (equivale a no filtrar) y
      * devuelve todo el catálogo; no filtra por "contiene espacios".
+     *
+     * <p>
+     * El tabulador y el salto de línea ya no están aquí: son caracteres de
+     * control y desde que el parámetro se valida son un 400, aunque el texto
+     * esté en blanco (ver {@link #unTituloConCaracteresDeControlEsUnErrorDeValidacion}).
+     * </p>
      */
     @ParameterizedTest
-    @ValueSource(strings = { "", " ", "     ", "\t", "\n" })
+    @ValueSource(strings = { "", " ", "     " })
     void unTituloVacioOEnBlancoNoFiltra(String title) throws Exception {
         saveMovie("Uno", 2000, drama);
         saveMovie("Dos palabras", 2001, drama);
@@ -420,20 +426,42 @@ class CatalogEdgeCasesIntegrationTest {
     }
 
     /**
-     * Un texto de búsqueda larguísimo (más que el título máximo de 150
-     * caracteres, más de 255 y más de 1000) no puede provocar un 500 ni
-     * (en la práctica) devolver resultados: es una búsqueda válida sin
-     * coincidencias.
+     * Un texto de búsqueda más largo que el título máximo (150 caracteres, y
+     * también de más de 255, 1000 o 20.000) es un 400 de validación, nunca un
+     * 500. Antes era un 200 sin resultados; el límite se añadió porque un
+     * texto así, sin coincidencias, pasaba a la búsqueda tolerante a erratas y
+     * obligaba a calcular el parecido con cada título dos veces recorriendo la
+     * tabla. Con 150 no se pierde ninguna búsqueda: ningún título puede
+     * contener un texto más largo que él.
      */
     @ParameterizedTest
     @ValueSource(ints = { 151, 256, 1001, 20_000 })
-    void unTituloMuyLargoDevuelve200SinResultados(int length) throws Exception {
+    void unTituloMuyLargoEsUnErrorDeValidacion(int length) throws Exception {
         saveMovie("Corta", 2000, drama);
 
         call(SEARCH, "title=" + "a".repeat(length))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements").value(0))
-                .andExpect(jsonPath("$.content.length()").value(0));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.validationErrors.title")
+                        .value("La búsqueda no puede superar los 150 caracteres"));
+    }
+
+    /**
+     * Los caracteres de control (tabulador, saltos de línea, NUL) son un 400
+     * de validación, también si el texto está en blanco: la regla es "ningún
+     * carácter de control", sin excepciones (el porqué está en
+     * {@code TitleSearchParameter}).
+     */
+    @ParameterizedTest
+    @ValueSource(strings = { "\t", "\n", "\r\n", "Uno\u0000" })
+    void unTituloConCaracteresDeControlEsUnErrorDeValidacion(String title) throws Exception {
+        saveMovie("Uno", 2000, drama);
+
+        call(SEARCH, "title=" + title)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.validationErrors.title")
+                        .value("La búsqueda no puede contener caracteres de control"));
     }
 
     /**
@@ -453,13 +481,13 @@ class CatalogEdgeCasesIntegrationTest {
     /**
      * La comparación no distingue mayúsculas también con letras no ASCII
      * ({@code ñ}, vocales acentuadas): "MAÑANA" encuentra "Mañana" y al revés.
-     * En cambio <b>sí distingue acentos</b>: "manana" no encuentra "Mañana".
-     * Es el contrato actual (búsqueda sensible a diacríticos); si se quisiera
-     * insensible habría que usar {@code unaccent} (PostgreSQL) y este test
-     * documenta que hoy no se hace.
+     * Y desde la V5 <b>tampoco distingue acentos</b>, en ningún sentido:
+     * "manana" encuentra "Mañana" y "arbol", "ÁRBOL" (antes no los encontraba:
+     * era el contrato anterior, sensible a los diacríticos). La {@code ñ} se
+     * trata como una {@code n}, igual que hace {@code unaccent} en PostgreSQL.
      */
     @Test
-    void laBusquedaIgnoraMayusculasConEnyesYAcentosPeroNoIgnoraLosAcentos() throws Exception {
+    void laBusquedaIgnoraMayusculasYAcentos() throws Exception {
         saveMovie("Mañana", 2000, drama);
         saveMovie("ÁRBOL de la vida", 2011, drama);
 
@@ -472,9 +500,11 @@ class CatalogEdgeCasesIntegrationTest {
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].title").value("ÁRBOL de la vida"));
         call(SEARCH, "title=manana")
-                .andExpect(jsonPath("$.totalElements").value(0));
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].title").value("Mañana"));
         call(SEARCH, "title=arbol")
-                .andExpect(jsonPath("$.totalElements").value(0));
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].title").value("ÁRBOL de la vida"));
     }
 
     /**

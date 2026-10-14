@@ -502,3 +502,219 @@ describe('SearchBar: ratón', () => {
     expect(input).toHaveValue('');
   });
 });
+
+describe('SearchBar: títulos parecidos (approximate)', () => {
+  // Búsqueda con una errata: ningún título CONTIENE «interstelar», pero el servidor devuelve los parecidos
+  // (`approximate: true`, solo en PostgreSQL). Cada tipo decide por su cuenta si es aproximado.
+  const QUERY = 'interstelar';
+  const MOVIES_URL = `GET /api/movies/search?title=${QUERY}&size=10&sort=title`;
+  const SERIES_URL = `GET /api/series/search?title=${QUERY}&size=10&sort=title`;
+  const interstellar = makeMovie({ id: 7, title: 'Interstellar', releaseYear: 2014 });
+  const stellarSeries = makeSeries({ id: 8, title: 'Interestelar: la serie', releaseYear: 2020, endYear: 2021 });
+  // Serie que SÍ contiene el texto (coincidencia real), para el caso mixto.
+  const exactSeries = makeSeries({ id: 9, title: 'Viaje interstelar', releaseYear: 2019, endYear: null });
+
+  const approx = <T,>(content: T[]) => () => jsonResponse(makePage(content, { approximate: true }));
+  const exact = <T,>(content: T[]) => () => jsonResponse(makePage(content));
+
+  /** Monta el buscador, escribe la errata y deja pasar el retardo. */
+  async function search(moviesResponse: Handler, seriesResponse: Handler) {
+    routeFetch(fetchMock, {
+      'GET /api/users/me/favorites': () => jsonResponse([]),
+      [MOVIES_URL]: moviesResponse,
+      [SERIES_URL]: seriesResponse,
+    });
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(
+      <FavoritesProvider>
+        <SearchBar />
+      </FavoritesProvider>,
+      { session: true },
+    );
+    await user.type(screen.getByRole('combobox', { name: LABEL }), QUERY);
+    passDebounce();
+  }
+
+  it('si los dos grupos son parecidos, dice que NINGÚN título lo contiene antes de la lista y lo anuncia', async () => {
+    await search(approx([interstellar]), approx([stellarSeries]));
+
+    const list = await screen.findByRole('listbox', { name: 'Resultados de la búsqueda' });
+    // El aviso describe la lista y va antes que ella.
+    expect(list).toHaveAccessibleDescription('No hay títulos que contengan «interstelar». Quizá buscabas:');
+    const notice = screen.getByText('No hay títulos que contengan «interstelar». Quizá buscabas:');
+    expect(notice.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Los encabezados (nombres de los grupos) también lo dicen.
+    expect(within(list).getByRole('group', { name: 'Películas con título parecido' })).toBeInTheDocument();
+    expect(within(list).getByRole('group', { name: 'Series con título parecido' })).toBeInTheDocument();
+    expect(announced()).toHaveTextContent(
+      /^No hay títulos que contengan interstelar\. 2 títulos parecidos: 1 película y 1 serie\. Usa las flechas/,
+    );
+  });
+
+  it('si un grupo es parecido y el otro está vacío, sigue siendo verdad que ningún título lo contiene', async () => {
+    await search(approx([interstellar]), exact([]));
+
+    const list = await screen.findByRole('listbox', { name: 'Resultados de la búsqueda' });
+    expect(list).toHaveAccessibleDescription('No hay títulos que contengan «interstelar». Quizá buscabas:');
+    expect(within(list).getByRole('group', { name: 'Películas con título parecido' })).toBeInTheDocument();
+    expect(announced()).toHaveTextContent(/^No hay títulos que contengan interstelar\. 1 título parecido: 1 película\./);
+  });
+
+  it('mixto: películas parecidas y series que SÍ lo contienen; el aviso habla solo de las películas', async () => {
+    await search(approx([interstellar]), exact([exactSeries]));
+
+    const list = await screen.findByRole('listbox', { name: 'Resultados de la búsqueda' });
+    const text = 'Ninguna película contiene «interstelar»: las películas de la lista tienen un título parecido.';
+    expect(list).toHaveAccessibleDescription(text);
+    // «No hay títulos que contengan…» sería mentira: la serie sí lo contiene.
+    expect(screen.queryByText(/No hay títulos/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Quizá buscabas/)).not.toBeInTheDocument();
+    expect(within(list).getByRole('group', { name: 'Películas con título parecido' })).toBeInTheDocument();
+    expect(within(list).getByRole('group', { name: 'Series' })).toBeInTheDocument();
+    expect(announced()).toHaveTextContent(
+      /^2 resultados\. 1 película y 1 serie\. Ninguna película contiene interstelar: las películas de la lista tienen un título parecido\. Usa las flechas/,
+    );
+  });
+
+  it('mixto al revés: películas que lo contienen y series parecidas; el aviso habla solo de las series', async () => {
+    const exactMovie = makeMovie({ id: 3, title: 'Interstelar 2', releaseYear: 2030 });
+    await search(exact([exactMovie]), approx([stellarSeries]));
+
+    const list = await screen.findByRole('listbox', { name: 'Resultados de la búsqueda' });
+    expect(list).toHaveAccessibleDescription(
+      'Ninguna serie contiene «interstelar»: las series de la lista tienen un título parecido.',
+    );
+    expect(within(list).getByRole('group', { name: 'Películas' })).toBeInTheDocument();
+    expect(within(list).getByRole('group', { name: 'Series con título parecido' })).toBeInTheDocument();
+  });
+
+  it('si las películas son parecidas y las series fallan, no afirma nada de las series', async () => {
+    await search(approx([interstellar]), () => errorResponse(500, 'INTERNAL_ERROR', 'boom'));
+
+    const list = await screen.findByRole('listbox', { name: 'Resultados de la búsqueda' });
+    expect(list).toHaveAccessibleDescription('Ninguna película contiene «interstelar». Quizá buscabas:');
+    expect(screen.getByRole('note')).toHaveTextContent(/^No se pudo buscar en series\./);
+    expect(announced()).toHaveTextContent(
+      /^Ninguna película contiene interstelar\. 1 título parecido: 1 película\. .*No se pudo buscar en series\./,
+    );
+  });
+
+  it('con coincidencias de verdad (approximate: false) no hay aviso ni encabezados de «parecido»', async () => {
+    await search(exact([makeMovie({ id: 3, title: 'Interstelar 2' })]), exact([exactSeries]));
+
+    const list = await screen.findByRole('listbox', { name: 'Resultados de la búsqueda' });
+    expect(list).not.toHaveAttribute('aria-describedby');
+    expect(screen.queryByText(/Quizá buscabas|título parecido|Ninguna/)).not.toBeInTheDocument();
+    expect(within(list).getByRole('group', { name: 'Películas' })).toBeInTheDocument();
+    expect(within(list).getByRole('group', { name: 'Series' })).toBeInTheDocument();
+    expect(announced()).toHaveTextContent(/^2 resultados\. 1 película y 1 serie\. Usa las flechas/);
+  });
+
+  it('un «aproximado» sin títulos no sugiere nada: es «Sin resultados»', async () => {
+    await search(approx([]), approx([]));
+
+    expect(await screen.findByText('Sin resultados para «interstelar».')).toBeInTheDocument();
+    expect(screen.queryByText(/Quizá buscabas/)).not.toBeInTheDocument();
+  });
+});
+
+describe('SearchBar: texto que el servidor no admite (máx. 150, sin caracteres de control)', () => {
+  /** Monta el buscador con las búsquedas de `routes` (además de la lista de favoritos). */
+  function mount(routes: Record<string, Handler>) {
+    routeFetch(fetchMock, { 'GET /api/users/me/favorites': () => jsonResponse([]), ...routes });
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(
+      <FavoritesProvider>
+        <SearchBar />
+      </FavoritesProvider>,
+      { session: true },
+    );
+    return { user, input: screen.getByRole('combobox', { name: LABEL }) };
+  }
+
+  it('el campo no admite más de 150 caracteres (`maxLength`, el límite del servidor)', () => {
+    const { input } = setup();
+
+    expect(input).toHaveAttribute('maxLength', '150');
+  });
+
+  it('un tabulador pegado se envía como un espacio: busca «Matrix Reloaded», no recibe un 400', async () => {
+    const { user, input } = mount({
+      'GET /api/movies/search?title=Matrix+Reloaded&size=10&sort=title': () => jsonResponse(makePage([matrixReloaded])),
+      'GET /api/series/search?title=Matrix+Reloaded&size=10&sort=title': () => jsonResponse(makePage([])),
+    });
+
+    await user.click(input);
+    await user.paste('Matrix\tReloaded');
+    passDebounce();
+
+    expect(await screen.findByRole('option', { name: /Matrix Reloaded/ })).toBeInTheDocument();
+    const urls = searchCalls().map(([url]) => String(url));
+    expect(urls).toEqual([
+      '/api/movies/search?title=Matrix+Reloaded&size=10&sort=title',
+      '/api/series/search?title=Matrix+Reloaded&size=10&sort=title',
+    ]);
+    // Ni el tabulador (%09) ni ningún otro carácter de control llega al servidor.
+    expect(urls.some((url) => /%0[0-9A-F]|%1[0-9A-F]|%7F/i.test(url))).toBe(false);
+  });
+
+  it('un texto que solo tiene caracteres de control no busca nada', async () => {
+    const { user, input } = mount({});
+
+    await user.click(input);
+    await user.paste('\t\t');
+    passDebounce(1000);
+
+    expect(searchCalls()).toHaveLength(0);
+  });
+
+  it('si aun así llega el 400 de validación, enseña el motivo del servidor junto al campo (no el genérico) y no cierra la sesión', async () => {
+    const rejected = () =>
+      errorResponse(400, 'VALIDATION_ERROR', 'Los datos proporcionados no son válidos', {
+        validationErrors: { title: 'La búsqueda no puede superar los 150 caracteres' },
+      });
+    const { user, input } = mount({
+      [SEARCH_URL]: rejected,
+      [SERIES_SEARCH_URL]: rejected,
+      'GET /api/movies/search?title=matri&size=10&sort=title': () => jsonResponse(makePage([matrix])),
+      'GET /api/series/search?title=matri&size=10&sort=title': () => jsonResponse(makePage([])),
+    });
+
+    await user.type(input, 'matrix');
+    passDebounce();
+
+    const reason = 'La búsqueda no puede superar los 150 caracteres.';
+    // En el panel visible bajo el campo y en la región anunciada.
+    expect(await screen.findAllByText(reason)).toHaveLength(2);
+    expect(announced()).toHaveTextContent(reason);
+    expect(screen.queryByText('Los datos proporcionados no son válidos')).not.toBeInTheDocument();
+    // El campo queda marcado como inválido y descrito por el motivo.
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription(reason);
+    // Ni se cierra la sesión ni se intenta renovar: un 400 no es un 401.
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/auth/refresh')).toBe(false);
+
+    // El buscador sigue funcionando: al corregir el texto, vuelve a buscar y deja de marcarse como inválido.
+    await user.type(input, '{Backspace}');
+    expect(input).not.toHaveAttribute('aria-invalid');
+    passDebounce();
+    expect(await screen.findByRole('option', { name: /Matrix/ })).toBeInTheDocument();
+  });
+
+  it('si solo una mitad recibe el 400, el aviso parcial también dice el motivo real', async () => {
+    const { user, input } = mount({
+      [SEARCH_URL]: () => jsonResponse(makePage([matrix])),
+      [SERIES_SEARCH_URL]: () =>
+        errorResponse(400, 'VALIDATION_ERROR', 'Los datos proporcionados no son válidos', {
+          validationErrors: { title: 'La búsqueda no puede contener caracteres de control' },
+        }),
+    });
+
+    await user.type(input, 'matrix');
+    passDebounce();
+
+    expect(
+      await screen.findByText('No se pudo buscar en series. La búsqueda no puede contener caracteres de control.'),
+    ).toBeInTheDocument();
+  });
+});

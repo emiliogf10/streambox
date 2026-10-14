@@ -12,6 +12,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.emilio.streambox.dto.MoviePageResponse;
 import com.emilio.streambox.dto.MovieRequest;
 import com.emilio.streambox.dto.MovieResponse;
 import com.emilio.streambox.entity.Genre;
@@ -142,6 +143,14 @@ public class MovieService {
      * ningún filtro devuelve el catálogo completo paginado.
      * </p>
      *
+     * <p>
+     * El título se busca en dos intentos ({@link TypoTolerantTitleSearch}):
+     * primero "contiene" (sin mayúsculas ni acentos) con el orden pedido; si no
+     * hay ninguna coincidencia y el texto tiene 5 letras o más, títulos
+     * <em>parecidos</em> con los mismos filtros de género y año, ordenados por
+     * parecido (se ignora el orden pedido) y con {@code approximate = true}.
+     * </p>
+     *
      * @param title       texto que debe contener el título
      * @param genreId     identificador del género
      * @param releaseYear año de estreno
@@ -149,7 +158,7 @@ public class MovieService {
      * @return página de películas que cumplen todos los filtros indicados
      */
     @Transactional(readOnly = true)
-    public Page<MovieResponse> searchMovies(
+    public MoviePageResponse searchMovies(
             String title,
             Long genreId,
             Integer releaseYear,
@@ -157,9 +166,6 @@ public class MovieService {
 
         List<Specification<Movie>> filters = new ArrayList<>();
 
-        if (title != null && !title.isBlank()) {
-            filters.add(MovieSpecification.hasTitle(title));
-        }
         if (genreId != null) {
             filters.add(MovieSpecification.hasGenre(genreId));
         }
@@ -167,8 +173,11 @@ public class MovieService {
             filters.add(MovieSpecification.hasReleaseYear(releaseYear));
         }
 
-        return movieRepository.findAll(Specification.allOf(filters), pageable)
-                .map(MovieMapper::toResponse);
+        TypoTolerantTitleSearch.Result<Movie> result = TypoTolerantTitleSearch.find(movieRepository, filters, title,
+                MovieSpecification::hasTitle, MovieSpecification::hasSimilarTitle, pageable);
+
+        // El mapeo a DTO, aquí dentro: los géneros son LAZY y open-in-view=false.
+        return MoviePageResponse.from(result.page().map(MovieMapper::toResponse), result.approximate());
     }
 
     private Movie findMovie(Long id) {
