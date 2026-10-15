@@ -63,8 +63,11 @@ test.describe('Teclado', () => {
     // Ya no hay diálogo de detalles: la película es una página.
     await expect(page.getByRole('dialog')).toHaveCount(0);
     // Al cambiar de página el foco va al contenido (no se queda en <body>, donde el lector no anunciaría nada),
-    // así que el siguiente Tab llega a las acciones de la película sin recorrer otra vez la barra.
+    // así que el siguiente Tab llega al contenido de la película sin recorrer otra vez la barra: primero
+    // «Volver a películas» (encima del título) y después su primera acción.
     await expect(page.getByRole('main')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('link', { name: 'Volver a películas' })).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(page.getByRole('link', { name: /^Ver ahora Interstellar/ })).toBeFocused();
 

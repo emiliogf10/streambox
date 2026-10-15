@@ -44,6 +44,15 @@ export const queryKeys = {
     detail: (id: number) => ['movies', 'detail', id] as const,
     /** Listado del panel (`/admin/peliculas`): búsqueda y página de la URL. */
     admin: (query: string, page: number) => ['movies', 'admin', { query, page }] as const,
+    /**
+     * «Películas similares» a una película (`GET /api/movies/{id}/similar?limit=N`,
+     * fila al pie de `/peliculas/:id`). Cuelga de la raíz `movies` porque depende
+     * de las películas Y de sus géneros: editar una película (sus géneros deciden
+     * el parecido), borrarla (no debe seguir saliendo como similar) o renombrar un
+     * género invalidan `['movies']` y, con ello, esta fila. El `limit` va en la
+     * clave: con otro tamaño sería otra respuesta.
+     */
+    similar: (id: number, limit: number) => ['movies', 'similar', id, { limit }] as const,
   },
   /** Todo lo que sale de `/api/series...` y `/api/admin/series` (episodios incluidos). */
   series: {

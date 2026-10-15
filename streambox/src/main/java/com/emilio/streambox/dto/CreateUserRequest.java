@@ -31,13 +31,30 @@ import lombok.Setter;
 public class CreateUserRequest implements NewPasswordRequest {
 
     /**
+     * Longitud máxima del email. Coincide con la columna
+     * {@code users.email VARCHAR(100)} (migración {@code V1}); el login usa el
+     * mismo tope ({@code LoginRequest}).
+     */
+    public static final int EMAIL_MAX_LENGTH = 100;
+
+    /** Error de longitud del email (registro, login y comprobación del servicio). */
+    public static final String EMAIL_SIZE_MESSAGE =
+            "El correo electrónico no puede tener más de " + EMAIL_MAX_LENGTH + " caracteres";
+
+    /** Error cuando falta el email (registro y login). */
+    public static final String EMAIL_REQUIRED_MESSAGE = "El correo electrónico es obligatorio";
+
+    /** Error de formato del email (registro y login). */
+    public static final String EMAIL_FORMAT_MESSAGE = "Debe tener un formato de correo electrónico válido";
+
+    /**
      * Nombre de usuario que tendrá el nuevo usuario.
      *
      * <p>
      * No puede estar vacío ni contener únicamente espacios en blanco.
      * Debe tener entre 3 y 50 caracteres.</p>
      */
-    @NotBlank
+    @NotBlank(message = UpdateProfileRequest.USERNAME_REQUIRED_MESSAGE)
     @Size(min = 3, max = 50, message = "El nombre de usuario debe tener entre 3 y 50 caracteres")
     private String username;
 
@@ -46,9 +63,19 @@ public class CreateUserRequest implements NewPasswordRequest {
      *
      * <p>Debe tener un formato de correo electrónico válido y no puede
      * estar vacía.</p>
+     *
+     * <p><b>Máximo de {@value #EMAIL_MAX_LENGTH} caracteres</b>, el de su
+     * columna. {@code @Email} no limita la longitud total (solo la de la parte
+     * local y la de cada trozo del dominio), así que sin {@code @Size} un email
+     * de formato válido pero más largo que la columna llegaba a la base de
+     * datos y el cliente recibía un 409 {@code DATA_INTEGRITY_VIOLATION}
+     * genérico en lugar de un 400 que dijera qué pasa. Un email demasiado largo
+     * <em>y</em> mal formado incumple dos reglas y recibe uno de los dos
+     * mensajes (Bean Validation no garantiza el orden); ambos son ciertos.</p>
      */
-    @Email(message = "Debe tener un formato de correo electrónico válido")
-    @NotBlank
+    @Email(message = EMAIL_FORMAT_MESSAGE)
+    @NotBlank(message = EMAIL_REQUIRED_MESSAGE)
+    @Size(max = EMAIL_MAX_LENGTH, message = EMAIL_SIZE_MESSAGE)
     private String email;
 
     /**

@@ -26,6 +26,12 @@ interface Props<T extends { id: number }> {
   emptyDescription: string;
   /** «Quitar filtros» del estado vacío. */
   onClearFilters: () => void;
+  /**
+   * Acción secundaria opcional del estado vacío, junto a «Quitar filtros» (p. ej.
+   * «Gestionar series» para un administrador). La decide la página, que sabe
+   * para quién es; debe tener aspecto de secundaria (`outline`).
+   */
+  emptySecondaryAction?: ReactNode;
 }
 
 /**
@@ -39,7 +45,8 @@ interface Props<T extends { id: number }> {
  * recuento queda vacío y lo que se anuncia es el esqueleto («Buscando series...»).
  *
  * Sin resultados, el estado vacío ofrece «Quitar filtros» (la salida que
- * siempre funciona); su texto lo da la página, que sabe para quién es.
+ * siempre funciona) y, si la página la da, una acción secundaria a su lado;
+ * su texto también lo da la página, que sabe para quién es.
  */
 export function FilteredCatalogResults<T extends { id: number }>({
   results,
@@ -50,6 +57,7 @@ export function FilteredCatalogResults<T extends { id: number }>({
   emptyTitle,
   emptyDescription,
   onClearFilters,
+  emptySecondaryAction,
 }: Props<T>) {
   const { items, total, status, errorMessage, loadingMore, loadMoreFailed, hasMore, loadMore, reload } = results;
   const headingId = useId();
@@ -66,9 +74,13 @@ export function FilteredCatalogResults<T extends { id: number }>({
         title={emptyTitle}
         description={emptyDescription}
         action={
-          <Button variant="light" onClick={onClearFilters}>
-            Quitar filtros
-          </Button>
+          // En móvil, una debajo de otra; desde `sm`, en fila. La principal va primero (orden de lectura y de tabulación).
+          <div className="flex flex-col items-center gap-3 sm:flex-row">
+            <Button variant="light" onClick={onClearFilters}>
+              Quitar filtros
+            </Button>
+            {emptySecondaryAction}
+          </div>
         }
       />
     );

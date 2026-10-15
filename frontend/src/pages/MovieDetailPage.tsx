@@ -1,5 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { Pencil, SearchX } from 'lucide-react';
+import { BackLink } from '../components/BackLink';
 import { DETAIL_CONTAINER_CLASS, MOVIE_FACTS_CLASS, MOVIE_FACTS_LIST_CLASS } from '../components/bannerGridStyles';
 import { buttonClasses } from '../components/buttonStyles';
 import { DetailSkeleton } from '../components/CatalogSkeleton';
@@ -11,6 +12,7 @@ import { FavoriteButton } from '../components/FavoriteButton';
 import { FeaturedBanner } from '../components/FeaturedBanner';
 import { GenreLinks } from '../components/GenreLinks';
 import { MovieMetaTags } from '../components/MovieMetaTags';
+import { SimilarMoviesRow } from '../components/SimilarMoviesRow';
 import { WatchButton } from '../components/WatchButton';
 import { useAuth } from '../context/AuthContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -52,11 +54,11 @@ const NO_DESCRIPTION = 'Sin descripción disponible.';
  */
 export function MovieDetailPage() {
   const { id } = useParams();
-  const { status, movie, errorMessage, reload } = useMovieDetail(id);
+  const { status, movie, errorMessage, confirmed, reload } = useMovieDetail(id);
 
   useDocumentTitle(movie?.title ?? (status === 'not-found' ? 'Película no encontrada' : 'Películas'));
 
-  if (status === 'ready' && movie) return <MovieDetailView movie={movie} />;
+  if (status === 'ready' && movie) return <MovieDetailView movie={movie} confirmed={confirmed} />;
 
   if (status === 'not-found') {
     return (
@@ -103,6 +105,16 @@ export function MovieDetailPage() {
  * así que la composición se equilibra en cualquier ancho, de 1024 a 1920 px, y
  * en móvil y tableta todo sigue en una columna.
  *
+ * Al pie, la fila **«Películas similares»** ({@link SimilarMoviesRow}), en el
+ * mismo contenedor centrado: se pide solo cuando el servidor ha confirmado la
+ * película (`confirmed`; no con la copia provisional de un listado) y, si no
+ * hay similares, no se pinta. Un fallo suyo queda dentro de la fila.
+ *
+ * Encima del póster, **«Volver a películas»** ({@link BackLink}): la salida a
+ * la sección cuando el historial no sirve (se entró con un enlace compartido o
+ * desde la portada). Es lo primero que alcanza el tabulador en el contenido; la
+ * serie tiene su gemelo «Volver a series».
+ *
  * Acciones, de más a menos importante:
  * - **«Ver ahora»** ({@link WatchButton}): enlace al vídeo validado con
  *   `getSafeVideoUrl`; sin URL segura, botón desactivado con el motivo.
@@ -115,7 +127,7 @@ export function MovieDetailPage() {
  *   guardar o cancelar, el formulario vuelve aquí («Volver a la película») y
  *   no al listado del panel.
  */
-function MovieDetailView({ movie }: { movie: Movie }) {
+function MovieDetailView({ movie, confirmed }: { movie: Movie; confirmed: boolean }) {
   const { isAdmin } = useAuth();
 
   return (
@@ -128,6 +140,7 @@ function MovieDetailView({ movie }: { movie: Movie }) {
         description={movie.description || NO_DESCRIPTION}
         clampDescription={false}
         layout="page"
+        backLink={<BackLink to="/peliculas">Volver a películas</BackLink>}
         actions={
           <>
             <WatchButton videoUrl={movie.videoUrl} title={movie.title} />
@@ -149,7 +162,14 @@ function MovieDetailView({ movie }: { movie: Movie }) {
 
       <div className={`${DETAIL_CONTAINER_CLASS} px-4 sm:px-6`}>
         <FactSheet facts={movieFacts(movie)} className={MOVIE_FACTS_CLASS} listClassName={MOVIE_FACTS_LIST_CLASS} />
-        {/* Aquí irá la fila «Películas similares» (tarea siguiente del plan): no se deja ningún hueco hasta que exista. */}
+      </div>
+      {/* Mismo contenedor centrado, pero sin relleno propio: la fila ya lleva el suyo (y sus tarjetas se alinean con la ficha).
+          `empty:hidden`: sin similares la fila no pinta nada, y su margen no debe dejar un hueco al pie.
+          `key`: la ruta /peliculas/:id reutiliza este componente al pasar de una película a otra; si las dos
+          están en caché nada pasa por «cargando» y React conservaría el mismo <ul>, con el desplazamiento
+          horizontal de la película anterior. Con la clave, cada película empieza su fila por el principio. */}
+      <div className={`${DETAIL_CONTAINER_CLASS} mt-10 empty:hidden md:mt-12`}>
+        <SimilarMoviesRow key={movie.id} movieId={movie.id} enabled={confirmed} />
       </div>
     </div>
   );

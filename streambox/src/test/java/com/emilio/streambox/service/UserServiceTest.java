@@ -21,6 +21,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import com.emilio.streambox.dto.CreateUserRequest;
 import com.emilio.streambox.dto.UpdateProfileRequest;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
@@ -118,6 +119,41 @@ class UserServiceTest {
         assertEquals("username", error.getParameter());
         assertEquals(UpdateProfileRequest.USERNAME_SIZE_MESSAGE, error.getMessage());
         verify(userRepository, never()).findById(any());
+    }
+
+    // ------------------------------------------------------------------
+    // Normalización del email del registro
+    // ------------------------------------------------------------------
+
+    @Test
+    void elEmailSeNormalizaSinEspaciosYEnMinusculas() {
+        assertEquals("ana.lopez@test.com", UserService.normalizeEmail("  Ana.Lopez@TEST.com "));
+    }
+
+    /**
+     * Pasar a minúsculas puede alargar el texto ({@code İ}, U+0130, son dos
+     * caracteres en minúscula): un email de 100 caracteres, que pasa
+     * {@code @Size}, quedaría con 160 y fallaría en la base de datos. El
+     * servicio lo rechaza con el mismo campo y mensaje que {@code @Size} y sin
+     * llegar a consultar ni guardar nada.
+     */
+    @Test
+    void unEmailQueCreceAlPasarloAMinusculasSeRechazaSinTocarLaBase() {
+        String email = "İ".repeat(60) + "@" + "d".repeat(35) + ".com";
+        assertEquals(100, email.length());
+
+        CreateUserRequest request = new CreateUserRequest();
+        request.setUsername("ana_nueva");
+        request.setEmail(email);
+        request.setPassword("un paseo por el retiro en otoño");
+
+        InvalidParameterException error = assertThrows(InvalidParameterException.class,
+                () -> service.registerUser(request));
+
+        assertEquals("email", error.getParameter());
+        assertEquals("El correo electrónico no puede tener más de 100 caracteres", error.getMessage());
+        verify(userRepository, never()).existsByEmail(anyString());
+        verify(userRepository, never()).save(any());
     }
 
     private static UpdateProfileRequest request(String username) {

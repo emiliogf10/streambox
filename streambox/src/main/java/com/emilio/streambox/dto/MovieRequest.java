@@ -54,21 +54,21 @@ import jakarta.validation.constraints.Size;
  */
 public record MovieRequest(
 
-        @NotBlank
+        @NotBlank(message = MovieRequest.TITLE_REQUIRED_MESSAGE)
         @Size(max = 150, message = "El título no puede superar los 150 caracteres")
         String title,
 
-        @NotBlank
-        @Size(max = 1000, message = "La descripción no puede superar los 1000 caracteres")
+        @NotBlank(message = MovieRequest.DESCRIPTION_REQUIRED_MESSAGE)
+        @Size(max = 1000, message = MovieRequest.DESCRIPTION_SIZE_MESSAGE)
         String description,
 
-        @NotNull
-        @Min(1)
+        @NotNull(message = MovieRequest.DURATION_REQUIRED_MESSAGE)
+        @Min(value = 1, message = MovieRequest.DURATION_MIN_MESSAGE)
         Integer duration,
 
-        @NotNull
-        @Min(1888)
-        @Max(2100)
+        @NotNull(message = MovieRequest.RELEASE_YEAR_REQUIRED_MESSAGE)
+        @Min(value = 1888, message = MovieRequest.RELEASE_YEAR_RANGE_MESSAGE)
+        @Max(value = 2100, message = MovieRequest.RELEASE_YEAR_RANGE_MESSAGE)
         Integer releaseYear,
 
         @Schema(description = "URL de la portada. Debe ser una URL https:// absoluta, con host y sin "
@@ -77,7 +77,7 @@ public record MovieRequest(
                 + "letras, números, punto, guion y guion bajo. Solo caracteres ASCII visibles "
                 + "(sin espacios); máximo 500 caracteres.",
                 example = "https://image.tmdb.org/t/p/w500/portada.jpg")
-        @NotBlank
+        @NotBlank(message = MovieRequest.IMAGE_URL_REQUIRED_MESSAGE)
         @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.IMAGE_URL_SIZE_MESSAGE)
         @HttpsUrl(allowLocalCovers = true, maxLength = MovieRequest.URL_MAX_LENGTH,
                 message = MovieRequest.IMAGE_URL_FORMAT_MESSAGE)
@@ -87,14 +87,65 @@ public record MovieRequest(
                 + "credenciales (usuario:clave@). Solo caracteres ASCII visibles (sin espacios); "
                 + "máximo 500 caracteres.",
                 example = "https://videos.streambox.example/watch/dune")
-        @NotBlank
+        @NotBlank(message = MovieRequest.VIDEO_URL_REQUIRED_MESSAGE)
         @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.VIDEO_URL_SIZE_MESSAGE)
         @HttpsUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.VIDEO_URL_FORMAT_MESSAGE)
         String videoUrl,
 
-        @NotEmpty
+        @NotEmpty(message = MovieRequest.GENRES_REQUIRED_MESSAGE)
         @Size(max = MovieRequest.MAX_GENRES, message = MovieRequest.GENRES_SIZE_MESSAGE)
-        Set<Long> genreIds) {
+        Set<@NotNull(message = MovieRequest.GENRE_ID_REQUIRED_MESSAGE) Long> genreIds) {
+
+    /*
+     * Mensajes de "obligatorio" y de rango: son literalmente los que muestra el
+     * formulario del panel de administración (frontend/src/lib/movieValidation.ts),
+     * para que el administrador lea lo mismo lo detecte el cliente o el
+     * servidor. Antes estas restricciones no tenían mensaje y salía el de
+     * Hibernate Validator, que depende del idioma de la JVM ("must not be
+     * blank" en un servidor en inglés).
+     */
+
+    /** Error cuando falta {@code title}. */
+    public static final String TITLE_REQUIRED_MESSAGE = "El título es obligatorio";
+
+    /** Error cuando falta {@code description} (en la interfaz se llama «sinopsis»). */
+    public static final String DESCRIPTION_REQUIRED_MESSAGE = "La sinopsis es obligatoria";
+
+    /**
+     * Error de {@code description} de más de 1000 caracteres. Dice «sinopsis»,
+     * como el formulario de películas; antes decía «descripción» y el mismo
+     * error se leía distinto según lo detectara el cliente o el servidor (las
+     * series y los episodios sí dicen «descripción» en los dos lados).
+     */
+    public static final String DESCRIPTION_SIZE_MESSAGE = "La sinopsis no puede superar los 1000 caracteres";
+
+    /** Error cuando falta {@code duration}. */
+    public static final String DURATION_REQUIRED_MESSAGE = "Indica la duración en minutos";
+
+    /** Error de {@code duration} menor que 1. */
+    public static final String DURATION_MIN_MESSAGE = "La duración debe ser un número entero de minutos mayor que 0";
+
+    /** Error cuando falta {@code releaseYear}. */
+    public static final String RELEASE_YEAR_REQUIRED_MESSAGE = "Indica el año de estreno";
+
+    /** Error de rango de {@code releaseYear}. */
+    public static final String RELEASE_YEAR_RANGE_MESSAGE = "El año debe estar entre 1888 y 2100";
+
+    /** Error cuando falta {@code imageUrl}. */
+    public static final String IMAGE_URL_REQUIRED_MESSAGE = "La URL de la portada es obligatoria";
+
+    /** Error cuando falta {@code videoUrl}. */
+    public static final String VIDEO_URL_REQUIRED_MESSAGE = "La URL del vídeo es obligatoria";
+
+    /** Error cuando {@code genreIds} falta o está vacía. */
+    public static final String GENRES_REQUIRED_MESSAGE = "Elige al menos un género";
+
+    /**
+     * Error de un elemento nulo en {@code genreIds} ({@code [1, null]}),
+     * compartido con {@link SeriesRequest}. Sin esta regla el nulo llegaba al
+     * servicio y a {@code findAllById}, que no admite ids nulos.
+     */
+    public static final String GENRE_ID_REQUIRED_MESSAGE = "Los identificadores de género no pueden ser nulos";
 
     /**
      * Máximo de géneros por título (películas y series).

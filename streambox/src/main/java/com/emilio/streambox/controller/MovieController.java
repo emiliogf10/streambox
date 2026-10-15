@@ -1,5 +1,6 @@
 package com.emilio.streambox.controller;
 
+import java.util.List;
 import java.util.Set;
 
 import org.springframework.data.domain.Pageable;
@@ -57,6 +58,16 @@ public class MovieController {
      */
     private static final Set<String> SORTABLE_FIELDS =
             Set.of("id", "title", "releaseYear", "duration", "createdAt");
+
+    /**
+     * Texto OpenAPI del 400 del alta y la edición (constante porque lo comparten
+     * los dos endpoints que reciben un {@code MovieRequest}).
+     */
+    private static final String WRITE_BAD_REQUEST_DESCRIPTION = "Los datos proporcionados no son válidos. "
+            + "VALIDATION_ERROR: un mensaje en español por campo en validationErrors (los mismos textos "
+            + "que el formulario del panel), también si genreIds contiene un null. MALFORMED_REQUEST: JSON "
+            + "mal formado o un valor de otro tipo (un número en un texto, un texto o un decimal en un "
+            + "número): no se convierte";
 
     /** Texto OpenAPI del parámetro {@code sort} (constante porque lo comparten dos endpoints). */
     private static final String SORT_DESCRIPTION =
@@ -140,6 +151,45 @@ public class MovieController {
     }
 
     /**
+     * Obtiene las películas similares a una dada («Películas similares» de la
+     * página de detalle).
+     *
+     * <p>
+     * Devuelve una lista (no una página): es una fila de recomendaciones de
+     * tamaño acotado, sin navegación entre páginas. El orden lo decide el
+     * servidor (ver {@link MovieService#getSimilarMovies(Long, int)}), por eso no
+     * acepta {@code sort}.
+     * </p>
+     *
+     * @param id    identificador de la película de referencia
+     * @param limit número máximo de películas (1 a 24, por defecto 12)
+     * @return películas similares, de la más a la menos parecida
+     */
+    @GetMapping("/{id}/similar")
+    @Operation(summary = "Obtiene películas similares", description = "Devuelve, ya ordenadas de la más a la "
+            + "menos parecida, las películas que comparten al menos un género con la indicada (sin incluirla): "
+            + "primero las que comparten más géneros; a igualdad, la de año de estreno más cercano; después la "
+            + "añadida más recientemente y, por último, el id. Si la película existe pero no comparte géneros "
+            + "con ninguna, devuelve una lista vacía.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Películas similares obtenidas correctamente "
+                    + "(puede ser una lista vacía)"),
+            @ApiResponse(responseCode = "400", description = "El límite no es un número entero entre 1 y 24, "
+                    + "o el id no es un número entero válido"),
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
+            @ApiResponse(responseCode = "404", description = "Película no encontrada")
+    })
+    public List<MovieResponse> getSimilarMovies(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "" + MovieService.DEFAULT_SIMILAR_LIMIT)
+            @Parameter(description = "Número máximo de películas: de 1 a 24 (por defecto, 12)")
+            @Min(value = MovieService.MIN_SIMILAR_LIMIT, message = "El límite mínimo es 1")
+            @Max(value = MovieService.MAX_SIMILAR_LIMIT, message = "El límite máximo es 24") int limit) {
+
+        return movieService.getSimilarMovies(id, limit);
+    }
+
+    /**
      * Crea una película (solo administradores).
      *
      * @param request datos de la película y de sus géneros
@@ -151,7 +201,7 @@ public class MovieController {
             + "los géneros indicados. Este endpoint requiere permisos de administrador.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Película creada correctamente"),
-            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
+            @ApiResponse(responseCode = "400", description = WRITE_BAD_REQUEST_DESCRIPTION),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
             @ApiResponse(responseCode = "404", description = "Uno o más géneros no existen")
@@ -173,7 +223,7 @@ public class MovieController {
             + "y sus géneros asociados. Requiere rol ADMIN.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Película modificada correctamente"),
-            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
+            @ApiResponse(responseCode = "400", description = WRITE_BAD_REQUEST_DESCRIPTION),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
             @ApiResponse(responseCode = "404", description = "Película o género no encontrado")

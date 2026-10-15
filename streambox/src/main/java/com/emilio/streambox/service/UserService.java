@@ -106,11 +106,12 @@ public class UserService {
      * @return la cuenta creada
      * @throws UserAlreadyExistsException si el nombre de usuario o el email ya están en uso
      * @throws InvalidParameterException  si el nombre normalizado no tiene una longitud válida
+     *                                    o el email normalizado no cabe en su columna
      */
     @Transactional
     public UserResponse registerUser(CreateUserRequest request) {
 
-        String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
+        String email = normalizeEmail(request.getEmail());
         String username = normalizeUsername(request.getUsername());
 
         if (userRepository.existsByUsername(username)) {
@@ -200,6 +201,34 @@ public class UserService {
             }
             throw e;
         }
+    }
+
+    /**
+     * Normaliza el email del registro (sin espacios exteriores y en minúsculas)
+     * y comprueba que el resultado cabe en {@code users.email}.
+     *
+     * <p>
+     * {@code @Size} en {@link CreateUserRequest} mide el texto <em>recibido</em>,
+     * pero pasar a minúsculas puede alargarlo: {@code @Email} admite caracteres
+     * no ASCII en la parte local y, por ejemplo, la {@code İ} (I con punto,
+     * U+0130) se convierte en dos caracteres ({@code i} + punto combinante).
+     * Un email de 100 caracteres válido para la anotación podía acabar con más
+     * de 100 y fallar en la base de datos con un 409 genérico; aquí recibe el
+     * mismo 400 y el mismo mensaje que si fuera largo desde el principio.
+     * </p>
+     *
+     * @param email email recibido (ya validado: no vacío, con formato y como mucho 100 caracteres)
+     * @return el email normalizado
+     * @throws InvalidParameterException si el resultado supera
+     *                                   {@value CreateUserRequest#EMAIL_MAX_LENGTH} caracteres
+     */
+    static String normalizeEmail(String email) {
+
+        String normalized = email.trim().toLowerCase(Locale.ROOT);
+        if (normalized.length() > CreateUserRequest.EMAIL_MAX_LENGTH) {
+            throw new InvalidParameterException("email", CreateUserRequest.EMAIL_SIZE_MESSAGE);
+        }
+        return normalized;
     }
 
     /**

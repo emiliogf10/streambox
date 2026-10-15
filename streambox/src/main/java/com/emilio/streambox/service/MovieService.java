@@ -3,7 +3,10 @@ package com.emilio.streambox.service;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
@@ -18,6 +21,7 @@ import com.emilio.streambox.dto.MovieResponse;
 import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.exception.GenreNotFoundException;
+import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.exception.MovieNotFoundException;
 import com.emilio.streambox.mapper.MovieMapper;
 import com.emilio.streambox.repository.GenreRepository;
@@ -37,6 +41,19 @@ import com.emilio.streambox.specification.MovieSpecification;
  */
 @Service
 public class MovieService {
+
+    /** Mínimo de películas similares que se pueden pedir. */
+    public static final int MIN_SIMILAR_LIMIT = 1;
+
+    /**
+     * Máximo de películas similares que se pueden pedir. Es bajo a propósito:
+     * es una fila de recomendaciones, no un listado, y la carga de géneros de
+     * esas películas va en un {@code IN} sin paginar.
+     */
+    public static final int MAX_SIMILAR_LIMIT = 24;
+
+    /** Número de películas similares si el cliente no indica {@code limit}. */
+    public static final int DEFAULT_SIMILAR_LIMIT = 12;
 
     private final MovieRepository movieRepository;
     private final GenreRepository genreRepository;
@@ -178,6 +195,77 @@ public class MovieService {
 
         // El mapeo a DTO, aquí dentro: los géneros son LAZY y open-in-view=false.
         return MoviePageResponse.from(result.page().map(MovieMapper::toResponse), result.approximate());
+    }
+
+    /**
+     * Devuelve las películas <strong>similares</strong> a una dada, de la más
+     * parecida a la menos parecida (criterio en
+     * {@link MovieRepository#findSimilarMovieIds(Long, int)}: géneros en común,
+     * cercanía del año de estreno, más reciente y, por último, id).
+     *
+     * <p>
+     * <strong>Por qué en tres pasos y no en una sola consulta.</strong>
+     * </p>
+     * <ol>
+     * <li>Se comprueba que la película existe con {@code existsById} (un
+     * {@code count} por clave primaria, sin cargar la película ni sus géneros):
+     * si no existe, el mismo 404 que {@link #getMovieById(Long)}. Sin este paso
+     * una película inexistente devolvería {@code []}, indistinguible de una que
+     * no se parece a ninguna.</li>
+     * <li>Se piden solo los <em>ids</em> ya ordenados y limitados. El
+     * {@code LIMIT} tiene que aplicarse en la base de datos sobre películas, y
+     * eso no es posible si la misma consulta hace {@code JOIN FETCH} de los
+     * géneros (cada película ocuparía tantas filas como géneros tenga, y
+     * Hibernate acabaría limitando en memoria).</li>
+     * <li>Se cargan esas películas con sus géneros en una sola consulta. Como
+     * {@code IN} no conserva ningún orden, el orden se reconstruye recorriendo la
+     * lista de ids del paso anterior. Si una película se borra entre los dos
+     * pasos, simplemente no aparece.</li>
+     * </ol>
+     *
+     * <p>
+     * Coste fijo: tres sentencias SQL (dos si no hay ninguna similar, porque se
+     * evita la carga con una lista vacía), sea cual sea el límite. El mapeo a
+     * DTO se hace aquí dentro, con la transacción abierta
+     * ({@code open-in-view=false}).
+     * </p>
+     *
+     * @param id    identificador de la película de referencia
+     * @param limit número máximo de películas ({@value #MIN_SIMILAR_LIMIT} a
+     *              {@value #MAX_SIMILAR_LIMIT}; el controlador ya lo valida)
+     * @return películas similares ordenadas, sin la propia; vacía si no comparte
+     *         géneros con ninguna
+     * @throws MovieNotFoundException     si la película no existe
+     * @throws InvalidParameterException si el límite está fuera de rango
+     */
+    @Transactional(readOnly = true)
+    public List<MovieResponse> getSimilarMovies(Long id, int limit) {
+
+        // Defensa en profundidad: el controlador ya valida el rango, pero el
+        // límite llega tal cual a un FETCH FIRST y el servicio puede tener
+        // otros llamantes en el futuro.
+        if (limit < MIN_SIMILAR_LIMIT || limit > MAX_SIMILAR_LIMIT) {
+            throw new InvalidParameterException("limit",
+                    "El límite debe estar entre " + MIN_SIMILAR_LIMIT + " y " + MAX_SIMILAR_LIMIT);
+        }
+
+        if (!movieRepository.existsById(id)) {
+            throw new MovieNotFoundException("Película no encontrada");
+        }
+
+        List<Long> ids = movieRepository.findSimilarMovieIds(id, limit);
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, Movie> byId = movieRepository.findAllWithGenresByIdIn(ids).stream()
+                .collect(Collectors.toMap(Movie::getId, Function.identity()));
+
+        return ids.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .map(MovieMapper::toResponse)
+                .toList();
     }
 
     private Movie findMovie(Long id) {

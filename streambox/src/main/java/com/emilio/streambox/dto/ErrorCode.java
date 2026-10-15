@@ -38,7 +38,12 @@ public enum ErrorCode {
     /** El usuario está autenticado pero no tiene permisos para acceder al recurso. */
     ACCESS_DENIED,
 
-    /** El cuerpo de la petición no se puede interpretar (JSON mal formado, tipos incorrectos). */
+    /**
+     * El cuerpo de la petición no se puede interpretar (JSON mal formado, tipos
+     * incorrectos). Incluye un valor de otro tipo JSON que el del campo: un
+     * número o booleano en un texto, un texto en un número, un decimal en un
+     * entero (no se convierten; ver {@code StrictJsonScalarsConfig}).
+     */
     MALFORMED_REQUEST,
 
     /** El método HTTP no está soportado por el endpoint. */

@@ -100,8 +100,40 @@ class CreateUserRequestValidationTest {
     }
 
     // ------------------------------------------------------------------
+    // Email
+    // ------------------------------------------------------------------
+
+    /**
+     * {@code @Email} no limita la longitud total: un email de formato válido
+     * de 101 caracteres solo lo rechaza {@code @Size}, con un único mensaje.
+     * Antes no lo rechazaba nadie y fallaba en la base de datos
+     * ({@code users.email VARCHAR(100)}).
+     */
+    @Test
+    void unEmailDeFormatoValidoDeMasDe100CaracteresDaSoloElMensajeDeLongitud() {
+        String email100 = "x".repeat(64) + "@" + "d".repeat(31) + ".com";
+        String email101 = "x".repeat(64) + "@" + "d".repeat(32) + ".com";
+        assertEquals(100, email100.length());
+
+        assertEquals(List.of(), emailErrors(email100));
+        assertEquals(List.of("El correo electrónico no puede tener más de 100 caracteres"), emailErrors(email101));
+    }
+
+    @Test
+    void unEmailVacioDaSoloElMensajeDeObligatorio() {
+        assertEquals(List.of("El correo electrónico es obligatorio"), emailErrors(""));
+    }
+
+    // ------------------------------------------------------------------
     // Utilidades
     // ------------------------------------------------------------------
+
+    private List<String> emailErrors(String email) {
+        return validator.validate(request("pepito", email, "Rio-Tajo-482")).stream()
+                .filter(v -> v.getPropertyPath().toString().equals("email"))
+                .map(ConstraintViolation::getMessage)
+                .toList();
+    }
 
     private List<String> passwordErrors(String username, String email, String password) {
         return validator.validate(request(username, email, password)).stream()

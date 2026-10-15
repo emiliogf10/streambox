@@ -52,7 +52,10 @@ interface ViewProps {
  * - Con filtros y sin resultados, los dos ven «Quitar filtros». Al usuario se
  *   le dice que no hay series con esos filtros; al administrador, que no hay
  *   series VISIBLES con ellos y que las que no tienen episodios no aparecen
- *   aunque coincidan (es la duda que tendría al no ver una serie que sabe que creó).
+ *   aunque coincidan (es la duda que tendría al no ver una serie que sabe que
+ *   creó). Por eso, junto a «Quitar filtros», el administrador tiene también
+ *   «Gestionar series» (secundaria): es donde están esas series ocultas y
+ *   donde se les añaden episodios, así que el texto no le deja sin salida.
  *
  * Mientras se carga su usuario, a un administrador se le trata como a un
  * usuario normal (falla cerrado, igual que `isAdmin`): un usuario nunca ve el
@@ -85,6 +88,13 @@ export function SeriesPage() {
               : 'Prueba con otro género u otro año, o quita los filtros.'
           }
           onClearFilters={clearFilters}
+          emptySecondaryAction={
+            isAdmin && (
+              <Link to={ADMIN_SERIES_PATH} className={buttonClasses('outline')}>
+                Gestionar series
+              </Link>
+            )
+          }
         />
       ) : (
         <SeriesCatalogView results={results} />

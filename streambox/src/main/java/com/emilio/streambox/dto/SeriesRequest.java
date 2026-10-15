@@ -84,7 +84,7 @@ public record SeriesRequest(
 
         @NotEmpty(message = "Indica al menos un género")
         @Size(max = MovieRequest.MAX_GENRES, message = SeriesRequest.GENRES_SIZE_MESSAGE)
-        Set<@NotNull(message = "Los identificadores de género no pueden ser nulos") Long> genreIds) {
+        Set<@NotNull(message = MovieRequest.GENRE_ID_REQUIRED_MESSAGE) Long> genreIds) {
 
     /**
      * Error de cardinalidad de {@code genreIds}. El tope es el mismo que el de

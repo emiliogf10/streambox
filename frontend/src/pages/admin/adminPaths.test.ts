@@ -30,4 +30,28 @@ describe('getReturnTo', () => {
   it('sin página del título (alta), la de una película no se acepta', () => {
     expect(getReturnTo({ returnTo: '/peliculas/7' })).toBe(ADMIN_MOVIES_PATH);
   });
+
+  it('series: acepta su listado y la página EXACTA de esa serie, y nada más', () => {
+    const at = (returnTo: unknown) => getReturnTo({ returnTo }, ADMIN_SERIES_PATH, '/series/4');
+    expect(at('/series/4')).toBe('/series/4');
+    expect(at('/admin/series?q=dark&page=2')).toBe('/admin/series?q=dark&page=2');
+    // Otra serie, una que empieza igual, la misma con algo detrás, la de una película con el mismo id...
+    for (const other of ['/series/5', '/series/40', '/series/4/', '/series/4?temporada=2', '/series/4#x', '/peliculas/4']) {
+      expect(at(other), other).toBe(ADMIN_SERIES_PATH);
+    }
+    // ...ni URLs externas o que el navegador entendería como de otro sitio.
+    for (const external of ['https://malo.example/series/4', '//malo.example/series/4', 'javascript:alert(1)']) {
+      expect(at(external), external).toBe(ADMIN_SERIES_PATH);
+    }
+    // El listado de películas tampoco vale como vuelta del formulario de series.
+    expect(at('/admin/peliculas')).toBe(ADMIN_SERIES_PATH);
+  });
+
+  it('películas no se afloja: la página de una serie no vale como vuelta del formulario de películas', () => {
+    expect(getReturnTo({ returnTo: '/series/7' }, ADMIN_MOVIES_PATH, '/peliculas/7')).toBe(ADMIN_MOVIES_PATH);
+  });
+
+  it('sin página del título (alta de serie), la de una serie no se acepta', () => {
+    expect(getReturnTo({ returnTo: '/series/4' }, ADMIN_SERIES_PATH)).toBe(ADMIN_SERIES_PATH);
+  });
 });

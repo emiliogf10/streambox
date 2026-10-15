@@ -23,6 +23,7 @@ import {
   validateSeriesImageUrl,
 } from '../../lib/seriesValidation';
 import type { SeriesFormErrors, SeriesFormValues } from '../../lib/seriesValidation';
+import { seriesPath } from '../../lib/catalog';
 import type { SeriesDetail } from '../../lib/types';
 import { ADMIN_SERIES_PATH, adminEditSeriesPath, getReturnTo } from './adminPaths';
 import type { ReturnToState } from './adminPaths';
@@ -81,6 +82,10 @@ type EditorMode = { kind: 'create' } | { kind: 'edit'; id: number | null };
  * Ruta del formulario de serie (`/admin/series/nueva` y
  * `/admin/series/:id/editar`): alta y edición comparten componente.
  *
+ * Se vuelve al listado del que se vino o, si se llegó con «Editar» desde
+ * `/series/:id`, a esa serie: como en películas, la página del título solo vale
+ * como vuelta si es la de ESTA serie (ver `getReturnTo`).
+ *
  * Como en películas, el editor se monta con `key` distinta por serie: al pasar
  * del alta a la edición de la serie recién creada (o de una serie a otra) se
  * empieza de cero, sin arrastrar lo escrito ni los errores de la pantalla anterior.
@@ -88,8 +93,8 @@ type EditorMode = { kind: 'create' } | { kind: 'edit'; id: number | null };
 export function SeriesFormPage() {
   const { id } = useParams();
   const location = useLocation();
-  const returnTo = getReturnTo(location.state, ADMIN_SERIES_PATH);
   const parsedId = id !== undefined && /^\d+$/.test(id) ? Number(id) : null;
+  const returnTo = getReturnTo(location.state, ADMIN_SERIES_PATH, parsedId !== null ? seriesPath(parsedId) : undefined);
   const mode: EditorMode = id === undefined ? { kind: 'create' } : { kind: 'edit', id: parsedId };
   return <SeriesEditor key={id ?? 'nueva'} mode={mode} returnTo={returnTo} />;
 }
@@ -118,7 +123,12 @@ interface LoadResult {
  * - **Al guardar cambios se queda en la página** (con aviso): la edición de una
  *   serie es también donde se gestionan sus episodios, y volver al listado
  *   obligaría a entrar otra vez para seguir. «Volver al listado» y «Cancelar»
- *   siguen a mano.
+ *   siguen a mano. También si se vino desde la página de la serie: ahí la
+ *   vuelta es a mano, con «Volver a la serie».
+ * - **Enlace de vuelta**: «Volver a la serie» si se vino de ella; si no,
+ *   «Volver al listado». Si la página de la serie ya no se puede ver (la serie
+ *   no existe, o se le acaban de quitar todos los episodios y queda oculta),
+ *   lleva al listado: volver daría «Serie no encontrada».
  * - **No se puede enviar hasta que cargan los géneros**: sin ellos no se ve qué
  *   géneros tiene la serie ni se puede corregir la elección. El botón queda
  *   desactivado con una explicación visible.
@@ -249,6 +259,14 @@ function SeriesEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string }
 
   const heading = !isEdit ? 'Nueva serie' : saved && current?.status === 'ready' ? `Editar «${saved.title}»` : 'Editar serie';
 
+  // La página pública de una serie sin episodios (o borrada) es un 404: en ese caso se vuelve al listado.
+  const returnsToSeries = editId !== null && returnTo === seriesPath(editId);
+  const seriesPageHidden = loadStatus === 'not-found' || saved?.episodeCount === 0;
+  const back =
+    returnsToSeries && !seriesPageHidden
+      ? { to: returnTo, label: 'Volver a la serie' }
+      : { to: returnsToSeries ? ADMIN_SERIES_PATH : returnTo, label: 'Volver al listado' };
+
   let content: ReactNode;
   if (loadStatus === 'loading') {
     content = <LoadingState label="Cargando la serie..." />;
@@ -259,8 +277,8 @@ function SeriesEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string }
         title="No se encontró la serie"
         description="Puede que la haya borrado otra persona o que el enlace no sea correcto."
         action={
-          <Link to={returnTo} className={buttonClasses('outline')}>
-            Volver al listado
+          <Link to={back.to} className={buttonClasses('outline')}>
+            {back.label}
           </Link>
         }
       />
@@ -362,8 +380,8 @@ function SeriesEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string }
                   Podrás guardar cuando se carguen los géneros.
                 </p>
               )}
-              <Link to={returnTo} className={buttonClasses('outline')}>
-                {isEdit ? 'Volver al listado' : 'Cancelar'}
+              <Link to={back.to} className={buttonClasses('outline')}>
+                {isEdit ? back.label : 'Cancelar'}
               </Link>
               <Button
                 type="submit"
@@ -384,11 +402,11 @@ function SeriesEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string }
   return (
     <section aria-labelledby="series-form-title">
       <Link
-        to={returnTo}
+        to={back.to}
         className="focus-ring -ml-1 mb-2 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm text-muted transition-colors hover:text-white"
       >
         <ArrowLeft aria-hidden="true" className="size-4" />
-        Volver al listado
+        {back.label}
       </Link>
       <h2 id="series-form-title" className="text-xl font-semibold tracking-tight wrap-anywhere">
         {heading}

@@ -5,7 +5,7 @@
  */
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { BANNER_GRID_CLASS, DETAIL_BANNER_GRID_CLASS, DETAIL_POSTER_SIZE_CLASS } from './bannerGridStyles';
+import { BANNER_GRID_CLASS, DETAIL_BACK_ROW_CLASS, DETAIL_BANNER_GRID_CLASS, DETAIL_POSTER_SIZE_CLASS } from './bannerGridStyles';
 import { CatalogSkeleton, DetailSkeleton } from './CatalogSkeleton';
 
 describe('CatalogSkeleton', () => {
@@ -41,10 +41,16 @@ describe('DetailSkeleton', () => {
     expect(status.querySelector('[aria-hidden="true"]')).toHaveClass('animate-pulse', 'motion-reduce:animate-none');
   });
 
-  it('la cabecera usa la rejilla centrada y el tamaño de póster de la página real (constantes compartidas)', () => {
+  it('la cabecera usa la fila del enlace de vuelta, la rejilla centrada y el tamaño de póster de la página real (constantes compartidas)', () => {
     render(<DetailSkeleton label="Cargando película..." kind="movie" />);
 
-    const grid = screen.getByRole('status').querySelector('[aria-hidden="true"] > div');
+    const shapes = screen.getByRole('status').querySelector('[aria-hidden="true"]');
+    // Primero la fila de «Volver a películas»/«Volver a series» (misma altura que el enlace: 44 px)...
+    const backRow = shapes?.children[0];
+    expect(backRow).toHaveClass(...DETAIL_BACK_ROW_CLASS.split(' '));
+    expect(backRow?.firstElementChild).toHaveClass('min-h-11');
+    // ...y debajo, la rejilla del banner.
+    const grid = shapes?.children[1];
     expect(grid).toHaveClass(...DETAIL_BANNER_GRID_CLASS.split(' '));
     expect(grid?.firstElementChild).toHaveClass(...DETAIL_POSTER_SIZE_CLASS.split(' '));
   });

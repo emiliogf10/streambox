@@ -157,6 +157,20 @@ describe('useMovieDetail: pintado inmediato desde la caché', () => {
     expect(result.current.errorMessage).toBe('Servidor caído');
   });
 
+  it('`confirmed` es false con la copia provisional y true cuando responde el servidor', async () => {
+    const client = createTestQueryClient();
+    cacheAsPagedList(client, [makeMovie({ id: 3 })]);
+    let answer!: (movie: unknown) => void;
+    apiFetch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+
+    const { result } = renderHook(() => useMovieDetail('3'), { wrapper: queryWrapper(client) });
+
+    expect(result.current.status).toBe('ready');
+    expect(result.current.confirmed).toBe(false);
+    await act(async () => answer(makeMovie({ id: 3 })));
+    expect(result.current.confirmed).toBe(true);
+  });
+
   it('una película que no está en ninguna caché espera a la petición ("cargando")', () => {
     const client = createTestQueryClient();
     cacheAsPagedList(client, [makeMovie({ id: 1 })]);
@@ -182,6 +196,14 @@ describe('findCachedMovie', () => {
     expect(findCachedMovie(client, 2)).toBe(inAdmin);
     expect(findCachedMovie(client, 3)).toBe(inFavorites);
     expect(findCachedMovie(client, 4)).toBeUndefined();
+  });
+
+  it('la encuentra también en la fila «Películas similares» de otra película (un array suelto)', () => {
+    const client = createTestQueryClient();
+    const similar = makeMovie({ id: 9, title: 'Similar' });
+    client.setQueryData(queryKeys.movies.similar(3, 12), [makeMovie({ id: 8 }), similar]);
+
+    expect(findCachedMovie(client, 9)).toBe(similar);
   });
 
   it('no confunde una SERIE con el mismo id con una película (las series no se miran)', () => {

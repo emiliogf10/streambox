@@ -7,9 +7,10 @@
  * queda), la lista de episodios con su «Ver» seguro (URL validada; insegura →
  * desactivado), la ficha (emisión y estado con palabras, géneros en texto
  * porque `/series` aún no se filtra) y los estados: cargando, 404 «Serie no
- * encontrada» y error con reintento.
+ * encontrada» y error con reintento. También «Volver a series» y «Editar»
+ * SOLO para un administrador, con la vuelta a esta página desde el formulario.
  */
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,12 +27,14 @@ import {
 } from '../test/helpers';
 import { UserStatusProbe } from '../test/UserStatusProbe';
 import type { SeriesDetail } from '../lib/types';
+import { SeriesFormPage } from './admin/SeriesFormPage';
 import { SeriesDetailPage } from './SeriesDetailPage';
 
 const fetchMock = vi.fn<typeof fetch>();
 
 const FAVORITES = { 'GET /api/users/me/favorites': () => jsonResponse([]) };
 const DETAIL = 'GET /api/series/7';
+const AS_ADMIN = { [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })) };
 
 /** Serie de dos temporadas (3 + 2 episodios) con una sinopsis larga. */
 const series = makeSeriesDetail({
@@ -109,6 +112,82 @@ describe('SeriesDetailPage: cabecera', () => {
     renderDetail();
 
     expect(await screen.findByRole('button', { name: /^Mi lista\s*—\s*La casa de cristal$/ })).toBeInTheDocument();
+  });
+
+  it('«Volver a series» lleva a /series y va antes del título (primera parada del contenido con Tab)', async () => {
+    renderDetail();
+
+    const heading = await screen.findByRole('heading', { level: 1, name: 'La casa de cristal' });
+    const back = screen.getByRole('link', { name: 'Volver a series' });
+    expect(back).toHaveAttribute('href', '/series');
+    expect(back.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe('SeriesDetailPage: «Editar» según el rol', () => {
+  it('un usuario normal no ve «Editar» (ni siquiera cuando ya se sabe su rol)', async () => {
+    renderDetail();
+
+    await screen.findByRole('heading', { level: 1, name: 'La casa de cristal' });
+    expect(await screen.findByText('estado:ready')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Editar/ })).not.toBeInTheDocument();
+  });
+
+  it('un administrador ve «Editar La casa de cristal», que lleva al formulario de la serie en el panel', async () => {
+    renderDetail('/series/7', () => jsonResponse(series), AS_ADMIN);
+
+    const edit = await screen.findByRole('link', { name: 'Editar La casa de cristal' });
+    expect(edit).toHaveAttribute('href', '/admin/series/7/editar');
+    expect(edit).toHaveTextContent('Editar');
+  });
+
+  it('mientras se carga el usuario (que resulta ser ADMIN) no aparece «Editar»; aparece al confirmarse el rol', async () => {
+    let answerUser!: (response: Response) => void;
+    renderDetail('/series/7', () => jsonResponse(series), {
+      [CURRENT_USER]: () => new Promise<Response>((resolve) => (answerUser = resolve)),
+    });
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'La casa de cristal' })).toBeInTheDocument();
+    expect(screen.getByText('estado:loading')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Editar/ })).not.toBeInTheDocument();
+
+    await act(async () => answerUser(jsonResponse(makeUser({ role: 'ADMIN' }))));
+
+    expect(await screen.findByRole('link', { name: 'Editar La casa de cristal' })).toBeInTheDocument();
+  });
+
+  it('«Editar» pasa esta página como vuelta: el formulario ofrece «Volver a la serie» y lleva de nuevo aquí', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      ...AS_ADMIN,
+      [DETAIL]: () => jsonResponse(series),
+      'GET /api/admin/series/7': () => jsonResponse(series),
+      'GET /api/genres': () => jsonResponse(series.genres),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <FavoritesProvider>
+        <Routes>
+          <Route path="/series/:id" element={<SeriesDetailPage />} />
+          <Route path="/admin/series" element={<p>Listado de series</p>} />
+          <Route path="/admin/series/:id/editar" element={<SeriesFormPage />} />
+        </Routes>
+      </FavoritesProvider>,
+      { session: true, route: '/series/7' },
+    );
+
+    await user.click(await screen.findByRole('link', { name: 'Editar La casa de cristal' }));
+    await screen.findByRole('heading', { name: 'Editar «La casa de cristal»' });
+    // El de arriba y el de junto a «Guardar cambios»: los dos vuelven a la serie, ninguno al listado.
+    const backLinks = screen.getAllByRole('link', { name: 'Volver a la serie' });
+    expect(backLinks).toHaveLength(2);
+    for (const link of backLinks) expect(link).toHaveAttribute('href', '/series/7');
+    expect(screen.queryByRole('link', { name: 'Volver al listado' })).not.toBeInTheDocument();
+
+    await user.click(backLinks[0]);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'La casa de cristal' })).toBeInTheDocument();
+    expect(screen.getByText('ruta:/series/7')).toBeInTheDocument();
   });
 });
 

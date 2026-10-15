@@ -8,14 +8,16 @@
  * en la edición de la serie nueva** con el aviso de añadir episodios, que al
  * guardar cambios se quede en la página, que la edición cargue la vista de
  * gestión (`GET /api/admin/series/{id}`, que devuelve también las series
- * vacías) y que monte la sección «Episodios». `fetch` está simulado; sesión,
+ * vacías) y que monte la sección «Episodios». También la vuelta a la página
+ * de la serie cuando se llega con «Editar» desde ella (solo la de ESA serie y
+ * solo si sigue visible). `fetch` está simulado; sesión,
  * avisos y router son los reales.
  */
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Genre } from '../../lib/types';
+import type { Genre, SeriesDetail } from '../../lib/types';
 import { installManualTimers, passTime } from '../../test/fakeTimers';
 import { errorResponse, jsonResponse, makeSeriesDetail, renderWithProviders, routeFetch } from '../../test/helpers';
 import { SeriesFormPage } from './SeriesFormPage';
@@ -54,6 +56,7 @@ function renderForm(route: string, routeState?: unknown) {
       <Route path="/admin/series/nueva" element={<SeriesFormPage />} />
       <Route path="/admin/series/:id/editar" element={<SeriesFormPage />} />
       <Route path="/admin/generos" element={<p>Pestaña de géneros</p>} />
+      <Route path="/series/:id" element={<p>Página de la serie</p>} />
     </Routes>,
     { route, session: true, routeState },
   );
@@ -392,5 +395,83 @@ describe('SeriesFormPage: edición', () => {
 
     expect(await screen.findByText('Serie no encontrada')).toHaveAttribute('role', 'alert');
     expect(field.title()).toHaveValue('Otro título');
+  });
+});
+
+describe('SeriesFormPage: vuelta a la página de la serie', () => {
+  it('desde /series/4: los dos enlaces dicen «Volver a la serie» y llevan a ella, no al listado', async () => {
+    routeFetch(fetchMock, { ...GENRES_ROUTE, 'GET /api/admin/series/4': () => jsonResponse(dark) });
+    const user = setupUser();
+    renderForm('/admin/series/4/editar', { returnTo: '/series/4' });
+    await screen.findByRole('heading', { name: 'Editar «Dark»' });
+
+    const links = screen.getAllByRole('link', { name: 'Volver a la serie' });
+    expect(links).toHaveLength(2);
+    for (const link of links) expect(link).toHaveAttribute('href', '/series/4');
+    expect(screen.queryByRole('link', { name: 'Volver al listado' })).not.toBeInTheDocument();
+
+    await user.click(links[1]);
+    expect(screen.getByText('Página de la serie')).toBeInTheDocument();
+    expect(screen.getByText('ruta:/series/4')).toBeInTheDocument();
+  });
+
+  it('al guardar se queda en la edición (ahí están los episodios) y la vuelta sigue siendo a la serie', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/admin/series/4': () => jsonResponse(dark),
+      'PUT /api/series/4': () => jsonResponse(dark),
+    });
+    const user = setupUser();
+    renderForm('/admin/series/4/editar', { returnTo: '/series/4' });
+    await screen.findByRole('heading', { name: 'Editar «Dark»' });
+    await within(genresGroup()).findAllByRole('checkbox');
+
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    expect(await screen.findByText('Se han guardado los cambios de «Dark».')).toBeInTheDocument();
+    expect(screen.getByText('ruta:/admin/series/4/editar')).toBeInTheDocument();
+    for (const link of screen.getAllByRole('link', { name: 'Volver a la serie' })) {
+      expect(link).toHaveAttribute('href', '/series/4');
+    }
+  });
+
+  it.each([['/series/5'], ['/series/40'], ['/series/4?temporada=2'], ['/peliculas/4'], ['https://malo.example/series/4']])(
+    'una vuelta que no es la página exacta de ESTA serie (%s) no vale (lista blanca): se vuelve al listado',
+    async (returnTo) => {
+      routeFetch(fetchMock, { ...GENRES_ROUTE, 'GET /api/admin/series/4': () => jsonResponse(dark) });
+      renderForm('/admin/series/4/editar', { returnTo });
+      await screen.findByRole('heading', { name: 'Editar «Dark»' });
+
+      for (const link of screen.getAllByRole('link', { name: 'Volver al listado' })) {
+        expect(link).toHaveAttribute('href', '/admin/series');
+      }
+      expect(screen.queryByRole('link', { name: 'Volver a la serie' })).not.toBeInTheDocument();
+    },
+  );
+
+  it('si la serie ya no existe (404), no ofrece volver a su página (sería otro «no encontrada»): al listado', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/admin/series/4': () => errorResponse(404, 'RESOURCE_NOT_FOUND', 'Serie no encontrada'),
+    });
+    renderForm('/admin/series/4/editar', { returnTo: '/series/4' });
+
+    expect(await screen.findByRole('heading', { name: 'No se encontró la serie' })).toBeInTheDocument();
+    const links = screen.getAllByRole('link', { name: 'Volver al listado' });
+    expect(links).toHaveLength(2);
+    for (const link of links) expect(link).toHaveAttribute('href', '/admin/series');
+    expect(screen.queryByRole('link', { name: 'Volver a la serie' })).not.toBeInTheDocument();
+  });
+
+  it('si la serie se queda sin episodios (oculta: su página daría 404), la vuelta es al listado', async () => {
+    const empty: SeriesDetail = { ...dark, seasons: [], seasonCount: 0, episodeCount: 0 };
+    routeFetch(fetchMock, { ...GENRES_ROUTE, 'GET /api/admin/series/4': () => jsonResponse(empty) });
+    renderForm('/admin/series/4/editar', { returnTo: '/series/4' });
+    await screen.findByRole('heading', { name: 'Editar «Dark»' });
+
+    const links = screen.getAllByRole('link', { name: 'Volver al listado' });
+    expect(links).toHaveLength(2);
+    for (const link of links) expect(link).toHaveAttribute('href', '/admin/series');
+    expect(screen.queryByRole('link', { name: 'Volver a la serie' })).not.toBeInTheDocument();
   });
 });

@@ -28,9 +28,18 @@ public class LoginRequest {
      *
      * <p>Debe tener un formato de correo electrónico válido y no puede
      * estar vacía.</p>
+     *
+     * <p><b>Máximo de {@value CreateUserRequest#EMAIL_MAX_LENGTH} caracteres</b>,
+     * el mismo que el registro y la columna {@code users.email}. No puede dejar
+     * fuera a ninguna cuenta existente: ninguna puede tener un email más largo
+     * que su columna. Así un email enorme recibe un 400 antes de llegar a
+     * {@code AuthenticationService}: no se normaliza, no se consulta en la base
+     * de datos ni se guarda como clave de los contadores de intentos (que
+     * viven en memoria). Los mensajes son los del registro.</p>
      */
-    @Email
-    @NotBlank
+    @Email(message = CreateUserRequest.EMAIL_FORMAT_MESSAGE)
+    @NotBlank(message = CreateUserRequest.EMAIL_REQUIRED_MESSAGE)
+    @Size(max = CreateUserRequest.EMAIL_MAX_LENGTH, message = CreateUserRequest.EMAIL_SIZE_MESSAGE)
     private String email;
 
     /**
@@ -56,7 +65,7 @@ public class LoginRequest {
      * <b>no gasta intento</b> de la cuenta (sí cuenta para el límite por IP,
      * que se aplica antes que nada).</p>
      */
-    @NotBlank
+    @NotBlank(message = "La contraseña es obligatoria")
     @Size(max = MAX_PASSWORD_LENGTH,
             message = "La contraseña no puede tener más de " + MAX_PASSWORD_LENGTH + " caracteres")
     private String password;

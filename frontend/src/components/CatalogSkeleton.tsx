@@ -1,6 +1,7 @@
 import {
   BANNER_GRID_CLASS,
   BANNER_POSTER_SIZE_CLASS,
+  DETAIL_BACK_ROW_CLASS,
   DETAIL_BANNER_GRID_CLASS,
   DETAIL_CONTAINER_CLASS,
   DETAIL_POSTER_SIZE_CLASS,
@@ -53,29 +54,39 @@ export function CatalogSkeleton({ label = 'Cargando catálogo...', withRow = tru
 /**
  * Siluetas del banner destacado con las medidas de `FeaturedBanner`: las del
  * banner de la portada o, con `page`, las de la cabecera centrada de la página
- * de un título (`layout="page"`).
+ * de un título (`layout="page"`), con la fila de su enlace de vuelta encima.
  */
 function BannerShapes({ page }: { page: boolean }) {
   const block = 'rounded-lg bg-white/6';
   return (
-    <div className={page ? DETAIL_BANNER_GRID_CLASS : BANNER_GRID_CLASS}>
-      <div
-        className={`${block} aspect-2/3 w-full md:rounded-xl ${page ? DETAIL_POSTER_SIZE_CLASS : BANNER_POSTER_SIZE_CLASS}`}
-      />
-      <div className={`contents md:flex md:w-full md:flex-col md:gap-4 ${page ? 'md:flex-1' : 'md:max-w-2xl'}`}>
-        <div className={`${block} h-9 w-4/5 md:h-12 ${page ? 'md:max-w-xl' : ''}`} />
-        <div className={`${block} col-span-2 h-5 w-2/3 ${page ? 'md:max-w-sm' : ''}`} />
-        <div className={`col-span-2 flex flex-col gap-2 ${page ? 'md:max-w-[65ch]' : ''}`}>
-          <div className={`${block} h-4 w-full`} />
-          <div className={`${block} h-4 w-11/12`} />
-          <div className={`${block} h-4 w-3/5`} />
+    <>
+      {/* La fila del enlace de vuelta de la página real («Volver a series»), con su misma altura (44 px). */}
+      {page && (
+        <div className={DETAIL_BACK_ROW_CLASS}>
+          <div className="flex min-h-11 items-center">
+            <div className={`${block} h-4 w-32`} />
+          </div>
         </div>
-        <div className="col-span-2 grid grid-cols-2 gap-3 sm:flex">
-          <div className={`${block} h-11 sm:w-32`} />
-          <div className={`${block} h-11 sm:w-32`} />
+      )}
+      <div className={page ? DETAIL_BANNER_GRID_CLASS : BANNER_GRID_CLASS}>
+        <div
+          className={`${block} aspect-2/3 w-full md:rounded-xl ${page ? DETAIL_POSTER_SIZE_CLASS : BANNER_POSTER_SIZE_CLASS}`}
+        />
+        <div className={`contents md:flex md:w-full md:flex-col md:gap-4 ${page ? 'md:flex-1' : 'md:max-w-2xl'}`}>
+          <div className={`${block} h-9 w-4/5 md:h-12 ${page ? 'md:max-w-xl' : ''}`} />
+          <div className={`${block} col-span-2 h-5 w-2/3 ${page ? 'md:max-w-sm' : ''}`} />
+          <div className={`col-span-2 flex flex-col gap-2 ${page ? 'md:max-w-[65ch]' : ''}`}>
+            <div className={`${block} h-4 w-full`} />
+            <div className={`${block} h-4 w-11/12`} />
+            <div className={`${block} h-4 w-3/5`} />
+          </div>
+          <div className="col-span-2 grid grid-cols-2 gap-3 sm:flex">
+            <div className={`${block} h-11 sm:w-32`} />
+            <div className={`${block} h-11 sm:w-32`} />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -150,7 +161,10 @@ function RowShapes() {
   const block = 'rounded-lg bg-white/6';
   return (
     <div className="px-4 sm:px-6">
-      <div className={`${block} mb-3 h-6 w-32`} />
+      {/* `md:min-h-10`: la cabecera de `PosterRow` reserva desde `md` la altura de sus flechas; el esqueleto también, para no saltar. */}
+      <div className="mb-3 flex items-center md:min-h-10">
+        <div className={`${block} h-6 w-32`} />
+      </div>
       <div className="flex gap-3 overflow-hidden sm:gap-4">
         {Array.from({ length: CARD_COUNT }, (_, index) => (
           <div key={index} className="w-36 shrink-0 sm:w-44">

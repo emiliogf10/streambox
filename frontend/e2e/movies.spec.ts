@@ -496,3 +496,109 @@ test.describe('Página Películas', () => {
     await expect(bar.genre).toBeFocused();
   });
 });
+
+/**
+ * Fila «Películas similares» al pie de `/peliculas/:id`, contra el backend real
+ * (`GET /api/movies/{id}/similar?limit=12`). El catálogo sembrado está elegido
+ * para que el resultado sea EXACTO sin depender del desempate entre películas
+ * con los mismos géneros en común (el contrato solo fija «más géneros en común
+ * primero»): por eso se compara el conjunto de títulos y no su orden.
+ */
+test.describe('Películas similares', () => {
+  test.beforeEach(async ({ user, signIn }) => {
+    await signIn(user);
+  });
+
+  /** Títulos de la fila «Películas similares» de la página abierta. */
+  async function similarTitles(page: Page): Promise<string[]> {
+    const row = page.getByRole('region', { name: 'Películas similares' });
+    await expect(row).toBeVisible();
+    // El título es el primer párrafo de cada tarjeta (el segundo es «2014 · 2h 49m»).
+    return row.getByRole('link').evaluateAll((cards) => cards.map((card) => card.querySelector('p')?.textContent ?? ''));
+  }
+
+  /** Abre la página de una película del catálogo sembrado buscándola por año en `/peliculas`. */
+  async function openMovie(page: Page, title: string): Promise<void> {
+    const movie = MOVIES.find((candidate) => candidate.title === title)!;
+    await page.goto(`/peliculas?anio=${movie.releaseYear}`);
+    await movieCard(results(page), title).click();
+    await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+  }
+
+  test('las 12 que comparten dos géneros con «Dune: Parte Dos» (que tiene los tres), sin ella misma; tras la ficha', async ({
+    page,
+  }) => {
+    await openMovie(page, HERO_TITLE);
+    // Dune es Ciencia ficción + Acción + Drama: las de DOS géneros en común son exactamente 12 (el límite).
+    const expected = MOVIES.filter(
+      (movie) => movie.title !== HERO_TITLE && movie.genres.length === 2,
+    ).map((movie) => movie.title);
+    expect(expected).toHaveLength(12);
+
+    expect((await similarTitles(page)).sort()).toEqual([...expected].sort());
+    const headings = await page.getByRole('heading', { level: 2 }).allTextContents();
+    expect(headings.indexOf('Películas similares')).toBeGreaterThan(headings.indexOf('Ficha'));
+  });
+
+  test('con un solo género («Puerto Seco», Drama) salen todas las demás de Drama', async ({ page }) => {
+    await openMovie(page, 'Puerto Seco');
+    const expected = MOVIES.filter((movie) => movie.title !== 'Puerto Seco' && movie.genres.includes('Drama')).map(
+      (movie) => movie.title,
+    );
+
+    expect((await similarTitles(page)).sort()).toEqual([...expected].sort());
+  });
+
+  test('pulsar una similar abre su página arriba, con el foco en el contenido, y la fila pasa a ser la suya', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await openMovie(page, HERO_TITLE);
+    const row = page.getByRole('region', { name: 'Películas similares' });
+    const card = movieCard(row, 'Interstellar');
+    await card.scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+
+    await card.click();
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await expect(page.getByRole('main')).toBeFocused();
+    // Ya son las de Interstellar: está Dune (comparte Ciencia ficción y Drama) y no Interstellar.
+    await expect(movieCard(row, HERO_TITLE)).toBeVisible();
+    await expect(movieCard(row, 'Interstellar')).toHaveCount(0);
+    // A 375 px la fila se desplaza por dentro: la página no tiene scroll horizontal.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
+  /**
+   * Regresión (revisión QA, corregida con `key={movie.id}` en MovieDetailPage).
+   * Al pulsar una similar cuya página y cuya fila YA estaban en la caché, React
+   * reutilizaba la misma `PosterRow` (la ruta no cambia de componente y nada
+   * pasa por «cargando»), así que la fila nueva heredaba el desplazamiento
+   * horizontal de la anterior: empezaba a mitad, con las más parecidas fuera de
+   * la vista. Con datos nuevos no pasaba porque la silueta desmonta la fila.
+   */
+  test('volver a una película ya vista desde la fila desplazada empieza la fila nueva por el principio', async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 900 });
+    await openMovie(page, HERO_TITLE);
+    const row = page.getByRole('region', { name: 'Películas similares' });
+    const scroller = row.getByRole('list');
+
+    // Deja Interstellar (detalle y fila) en la caché y vuelve a Dune desde la fila de Interstellar.
+    await movieCard(row, 'Interstellar').click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+    await movieCard(row, HERO_TITLE).click();
+    await expect(page.getByRole('heading', { level: 1, name: HERO_TITLE })).toBeVisible();
+    await expect(movieCard(row, 'Interstellar')).toBeVisible();
+
+    // Desplaza la fila de Dune hasta el final y abre Interstellar (en caché) desde ahí.
+    await scroller.evaluate((list) => (list.scrollLeft = list.scrollWidth));
+    await expect.poll(() => scroller.evaluate((list) => list.scrollLeft)).toBeGreaterThan(0);
+    // Clic sin que Playwright desplace la fila para enseñar la tarjeta (como un usuario que ya la ve).
+    await movieCard(row, 'Interstellar').evaluate((card: HTMLElement) => card.click());
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+
+    expect(await scroller.evaluate((list) => list.scrollLeft)).toBe(0);
+  });
+});

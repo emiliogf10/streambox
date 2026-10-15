@@ -90,7 +90,9 @@ public class AuthController {
             @ApiResponse(responseCode = "204", description = "Autenticación correcta; sin cuerpo, "
                     + "con las cookies streambox_token y streambox_refresh en Set-Cookie"),
             @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos "
-                    + "(email con formato incorrecto, contraseña vacía o de más de 1024 caracteres). No "
+                    + "(VALIDATION_ERROR: email vacío, con formato incorrecto o de más de 100 caracteres, "
+                    + "contraseña vacía o de más de 1024 caracteres; MALFORMED_REQUEST: un campo que no "
+                    + "es texto, p. ej. la contraseña como número). No "
                     + "gasta intento de la cuenta. En el login no se aplica la política de longitud del "
                     + "registro: las cuentas antiguas siguen pudiendo entrar"),
             @ApiResponse(responseCode = "401", description = "Credenciales incorrectas (código "

@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { SearchX } from 'lucide-react';
+import { Pencil, SearchX } from 'lucide-react';
+import { BackLink } from '../components/BackLink';
 import {
   DETAIL_CONTAINER_CLASS,
   SERIES_BODY_GRID_CLASS,
@@ -23,7 +24,7 @@ import { WatchButton } from '../components/WatchButton';
 import { useAuth } from '../context/AuthContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useSeriesDetail } from '../hooks/useSeriesDetail';
-import { formatAddedDate } from '../lib/catalog';
+import { formatAddedDate, seriesPath } from '../lib/catalog';
 import {
   episodeCode,
   formatEpisodeCount,
@@ -33,7 +34,8 @@ import {
   SEASON_PARAM,
 } from '../lib/series';
 import type { SeriesDetail } from '../lib/types';
-import { ADMIN_SERIES_PATH } from './admin/adminPaths';
+import { ADMIN_SERIES_PATH, adminEditSeriesPath } from './admin/adminPaths';
+import type { ReturnToState } from './admin/adminPaths';
 
 /**
  * Página de una serie (`/series/:id`), con la temporada elegida en la URL (`?temporada=2`).
@@ -117,8 +119,15 @@ export function SeriesDetailPage() {
  * - **Cabecera**: el mismo {@link FeaturedBanner} del banner de `/series`, aquí
  *   con el título como `<h1>`, la sinopsis entera (no hay otro sitio donde
  *   leerla) y el contenido centrado (`layout="page"`), igual que la página de
- *   una película. Acciones: «Empezar a ver» (primer episodio de la primera
- *   temporada) y «Mi lista».
+ *   una película. Encima, «Volver a series» ({@link BackLink}), gemelo de
+ *   «Volver a películas». Acciones: «Empezar a ver» (primer episodio de la
+ *   primera temporada), «Mi lista» y, solo para un administrador (rol
+ *   confirmado por el servidor; mientras carga el usuario no aparece),
+ *   **«Editar»**: lleva al formulario del panel, con el nombre accesible
+ *   «Editar Dark» como en el listado del panel, y pasa esta página como vuelta
+ *   (`returnTo`), así que el formulario ofrece «Volver a la serie» en lugar de
+ *   «Volver al listado». Es interfaz, no seguridad: el backend responde 403 a
+ *   un `USER` que intente editar.
  * - **Cuerpo** (`SERIES_BODY_GRID_CLASS`), en el mismo contenedor centrado: los
  *   episodios y la {@link FactSheet ficha}; desde `lg`, la ficha va en una
  *   columna lateral, y en móvil y tableta, debajo de los episodios (que son lo
@@ -131,6 +140,7 @@ export function SeriesDetailPage() {
  *   la lista ha cambiado sin tener que ir a buscarla.
  */
 function SeriesDetailView({ series }: { series: SeriesDetail }) {
+  const { isAdmin } = useAuth();
   const [searchParams] = useSearchParams();
   const episodesHeadingId = useId();
   const seasonNumber = resolveSeasonNumber(searchParams.get(SEASON_PARAM), series.seasons);
@@ -147,6 +157,7 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
         description={series.description}
         clampDescription={false}
         layout="page"
+        backLink={<BackLink to="/series">Volver a series</BackLink>}
         actions={
           <>
             {firstEpisode && (
@@ -159,6 +170,17 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
               />
             )}
             <FavoriteButton series={series} />
+            {isAdmin && (
+              <Link
+                to={adminEditSeriesPath(series.id)}
+                state={{ returnTo: seriesPath(series.id) } satisfies ReturnToState}
+                aria-label={`Editar ${series.title}`}
+                className={buttonClasses('ghost', 'col-span-2 sm:col-span-1')}
+              >
+                <Pencil aria-hidden="true" className="size-4" />
+                Editar
+              </Link>
+            )}
           </>
         }
       />

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import {
   BANNER_GRID_CLASS,
   BANNER_POSTER_SIZE_CLASS,
+  DETAIL_BACK_ROW_CLASS,
   DETAIL_BANNER_GRID_CLASS,
   DETAIL_POSTER_SIZE_CLASS,
 } from './bannerGridStyles';
@@ -38,6 +39,14 @@ interface Props {
    * un título» de {@link FeaturedBanner}.
    */
   layout?: 'banner' | 'page';
+  /**
+   * Solo con `layout="page"`: enlace de vuelta a la sección (un `BackLink`),
+   * en su propia fila encima del póster y del título, dentro del banner para
+   * que el fondo desenfocado siga llegando hasta la barra superior. Las dos
+   * páginas de un título lo pasan: la rejilla de la página cuenta con esa fila
+   * y lleva menos relleno arriba (ver `DETAIL_BANNER_GRID_CLASS`).
+   */
+  backLink?: ReactNode;
 }
 
 /**
@@ -79,7 +88,8 @@ interface Props {
  * la página (la ficha, los episodios) y la columna de texto ocupa todo lo que
  * deja el póster: la sinopsis sigue limitada a ~65 caracteres por línea para
  * leerse bien, pero el título largo ya no se parte antes de tiempo. El fondo
- * desenfocado sigue de borde a borde.
+ * desenfocado sigue de borde a borde. Encima del póster, en su propia fila,
+ * va el enlace de vuelta a la sección (`backLink`).
  *
  * **Acciones.** En móvil las dos primeras comparten fila y el resto va debajo
  * (rejilla de dos columnas); desde `sm`, en línea.
@@ -100,6 +110,7 @@ export function FeaturedBanner({
   clampDescription = true,
   actions,
   layout = 'banner',
+  backLink,
 }: Props) {
   const titleId = useId();
   const Heading = headingLevel === 1 ? 'h1' : 'h2';
@@ -127,6 +138,8 @@ export function FeaturedBanner({
         {/* El borde inferior se funde con la página: el banner no parece una caja pegada encima. */}
         <div className="absolute inset-0 bg-linear-to-t from-canvas via-canvas/40 via-30% to-transparent" />
       </div>
+
+      {isPage && backLink && <div className={DETAIL_BACK_ROW_CLASS}>{backLink}</div>}
 
       <div className={isPage ? DETAIL_BANNER_GRID_CLASS : BANNER_GRID_CLASS}>
         <MoviePoster

@@ -38,7 +38,8 @@ export interface ReturnToState {
  * El listado pasa en el estado de la navegación su URL con búsqueda y página
  * (`/admin/peliculas?q=blade&page=2`), para que al terminar de editar el
  * administrador siga donde estaba. La página de una película (`/peliculas/:id`)
- * pasa la suya, para que «Editar» desde ahí vuelva a la película y no al panel.
+ * o de una serie (`/series/:id`) pasa la suya, para que «Editar» desde ahí
+ * vuelva al título y no al panel.
  *
  * Solo se acepta una ruta del propio listado o, si se indica, la página de
  * **ese mismo** título (`detailPath`, comparada entera: ni otra película ni
@@ -46,11 +47,16 @@ export interface ReturnToState {
  * validar lo que se usa para navegar con una lista blanca es una costumbre
  * barata que evita redirecciones a cualquier sitio.
  *
+ * La misma función sirve a películas y series sin aflojar ninguna de las dos:
+ * cada formulario pasa su propio listado y la página de su título, así que el
+ * de series no acepta la página de una película (ni la de otra serie) y al
+ * revés.
+ *
  * @param state `location.state` (puede ser cualquier cosa, o nada si se entró escribiendo la URL)
  * @param listPath listado al que pertenece el formulario (por defecto, el de películas); es
  *   también el destino si el estado no sirve
- * @param detailPath página pública del título que se edita (p. ej. `moviePath(7)`), o nada si
- *   no hay (alta, o id de la URL no válido)
+ * @param detailPath página pública del título que se edita (`moviePath(7)`, `seriesPath(4)`), o
+ *   nada si no hay (alta, o id de la URL no válido)
  */
 export function getReturnTo(state: unknown, listPath: string = ADMIN_MOVIES_PATH, detailPath?: string): string {
   if (typeof state === 'object' && state !== null && 'returnTo' in state) {

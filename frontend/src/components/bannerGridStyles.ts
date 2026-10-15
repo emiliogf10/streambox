@@ -10,9 +10,18 @@
  * película y serie y su esqueleto, `DetailSkeleton`. Si cada una llevara su copia, un cambio de espaciado en
  * el banner dejaría al esqueleto desalineado y la página "saltaría" al llegar
  * los datos.
+ *
+ * La rejilla va sin el relleno vertical ({@link BANNER_GRID_CLASS} y
+ * {@link DETAIL_BANNER_GRID_CLASS} añaden cada una el suyo): si la cabecera de
+ * la página sumara su relleno al del banner, habría dos clases `pt-*` sin
+ * prefijo en el mismo elemento y no estaría claro cuál gana (en Tailwind lo
+ * decide el orden del CSS generado, no el del atributo `class`).
  */
-export const BANNER_GRID_CLASS =
-  'grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-x-4 gap-y-5 px-4 pt-6 pb-8 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-x-6 sm:px-6 md:flex md:gap-10 md:pt-10 md:pb-12 lg:gap-12';
+const BANNER_GRID_BASE_CLASS =
+  'grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-x-4 gap-y-5 px-4 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-x-6 sm:px-6 md:flex md:gap-10 lg:gap-12';
+
+/** Rejilla del banner de la portada y de `/series` (ver {@link BANNER_GRID_BASE_CLASS}). */
+export const BANNER_GRID_CLASS = `${BANNER_GRID_BASE_CLASS} pt-6 pb-8 md:pt-10 md:pb-12`;
 
 /**
  * Contenedor de las páginas de un título (`/peliculas/:id`, `/series/:id`):
@@ -30,8 +39,23 @@ export const BANNER_GRID_CLASS =
  */
 export const DETAIL_CONTAINER_CLASS = 'mx-auto w-full max-w-6xl';
 
-/** Rejilla del banner en la página de un título: la del banner, centrada y con más aire en escritorio. */
-export const DETAIL_BANNER_GRID_CLASS = `${BANNER_GRID_CLASS} ${DETAIL_CONTAINER_CLASS} lg:pt-14 lg:pb-16`;
+/**
+ * Rejilla del banner en la página de un título: la del banner, centrada y con
+ * más aire abajo en escritorio. Arriba lleva menos relleno que el banner de la
+ * portada porque encima tiene la fila del enlace de vuelta
+ * ({@link DETAIL_BACK_ROW_CLASS}), que ya separa el póster de la barra superior.
+ */
+export const DETAIL_BANNER_GRID_CLASS = `${BANNER_GRID_BASE_CLASS} ${DETAIL_CONTAINER_CLASS} pt-2 pb-8 md:pt-4 md:pb-12 lg:pt-8 lg:pb-16`;
+
+/**
+ * Fila del enlace de vuelta («Volver a películas», «Volver a series») en la
+ * página de un título: encima del póster y del `<h1>`, dentro del banner (sobre
+ * su fondo desenfocado, que así sigue llegando hasta la barra superior sin un
+ * corte) y alineada con el resto del contenido centrado. La comparten
+ * `FeaturedBanner` y su esqueleto, `DetailSkeleton`, para que la cabecera no
+ * salte al llegar los datos.
+ */
+export const DETAIL_BACK_ROW_CLASS = `${DETAIL_CONTAINER_CLASS} px-4 pt-3 sm:px-6 md:pt-5 lg:pt-6`;
 
 /** Ancho del póster nítido del banner (portada y `/series`) desde `md`. */
 export const BANNER_POSTER_SIZE_CLASS = 'md:w-48 lg:w-56';

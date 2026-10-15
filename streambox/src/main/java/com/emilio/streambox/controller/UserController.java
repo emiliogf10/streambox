@@ -147,7 +147,9 @@ public class UserController {
                     + "debe tener entre 12 y 64 caracteres, ocupar como máximo 72 bytes en UTF-8, no ser "
                     + "común ni trivial y no contener el nombre de usuario ni la parte local del email. "
                     + "Si incumple varias reglas solo se informa de una, por este orden: longitud, bytes, "
-                    + "común, datos personales"),
+                    + "común, datos personales. El email admite como máximo 100 caracteres (también una "
+                    + "vez pasado a minúsculas). Un campo con un valor de otro tipo (p. ej. la contraseña "
+                    + "como número) no se convierte: 400 MALFORMED_REQUEST"),
             @ApiResponse(responseCode = "409", description = "El nombre de usuario o el correo ya están en uso"),
             @ApiResponse(responseCode = "429", description = "Demasiados registros desde esta IP; "
                     + "ver cabecera Retry-After")

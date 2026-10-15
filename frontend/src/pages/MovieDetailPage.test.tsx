@@ -33,6 +33,9 @@ const fetchMock = vi.fn<typeof fetch>();
 
 const FAVORITES = { 'GET /api/users/me/favorites': () => jsonResponse([]) };
 const DETAIL = 'GET /api/movies/7';
+/** Las similares de la película 7: por defecto ninguna (la fila no se pinta y no estorba a los demás tests). */
+const SIMILAR = 'GET /api/movies/7/similar?limit=12';
+const NO_SIMILAR = { [SIMILAR]: () => jsonResponse([]) };
 const AS_ADMIN = { [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })) };
 
 /** Película con una sinopsis larga (la página no la recorta). */
@@ -63,7 +66,7 @@ function renderDetail(
   detail: () => Response | Promise<Response> = () => jsonResponse(movie),
   extra: Parameters<typeof routeFetch>[1] = {},
 ) {
-  routeFetch(fetchMock, { ...FAVORITES, [DETAIL]: detail, ...extra });
+  routeFetch(fetchMock, { ...FAVORITES, ...NO_SIMILAR, [DETAIL]: detail, ...extra });
   const user = userEvent.setup();
   renderWithProviders(
     <FavoritesProvider>
@@ -210,6 +213,27 @@ describe('MovieDetailPage: ficha', () => {
   });
 });
 
+describe('MovieDetailPage: «Volver a películas»', () => {
+  it.each([
+    ['un usuario', {}],
+    ['un administrador', AS_ADMIN],
+  ])('para %s, lleva a /peliculas y va antes del título (primera parada del contenido con Tab)', async (_role, extra) => {
+    renderDetail('/peliculas/7', () => jsonResponse(movie), extra);
+
+    const heading = await screen.findByRole('heading', { level: 1, name: 'Interstellar' });
+    const back = screen.getByRole('link', { name: 'Volver a películas' });
+    expect(back).toHaveAttribute('href', '/peliculas');
+    expect(back.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('en «no encontrada» no se repite: ya está «Ver todas las películas»', async () => {
+    renderDetail('/peliculas/7', () => errorResponse(404, 'RESOURCE_NOT_FOUND', 'Película no encontrada con id 7'));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Película no encontrada' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Volver a películas' })).not.toBeInTheDocument();
+  });
+});
+
 describe('MovieDetailPage: «Editar» según el rol', () => {
   it('un usuario normal no ve «Editar» (ni siquiera cuando ya se sabe su rol)', async () => {
     renderDetail();
@@ -231,6 +255,7 @@ describe('MovieDetailPage: «Editar» según el rol', () => {
     let current = movie;
     routeFetch(fetchMock, {
       ...FAVORITES,
+      ...NO_SIMILAR,
       ...AS_ADMIN,
       [DETAIL]: () => jsonResponse(current),
       'GET /api/genres': () => jsonResponse(movie.genres),

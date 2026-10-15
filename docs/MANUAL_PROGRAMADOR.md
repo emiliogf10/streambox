@@ -469,7 +469,7 @@ Una clave primaria compuesta `(user_id, movie_id)` sirve para buscar por `user_i
 
 | Índice | Para qué consulta |
 | :--- | :--- |
-| `idx_movie_genres_genre_id` | Filtro por género en `/api/movies/search?genreId=` |
+| `idx_movie_genres_genre_id` | Filtro por género en `/api/movies/search?genreId=` y «películas similares» (§14.6) |
 | `idx_favorites_movie_id` | Borrar una película (encontrar sus favoritos) |
 | `idx_movies_release_year` | Filtro por año |
 
@@ -1094,6 +1094,7 @@ public List<MovieResponse> getFavorites(@AuthenticationPrincipal AuthenticatedUs
 | `GET` | `/api/movies` | Autenticado | `MovieController.getMovies` (paginado) |
 | `GET` | `/api/movies/{id}` | Autenticado | `MovieController.getMovieById` |
 | `GET` | `/api/movies/search` | Autenticado | `MovieController.searchMovies` (paginado, filtros) |
+| `GET` | `/api/movies/{id}/similar?limit=` | Autenticado | `MovieController.getSimilarMovies` → `MovieService.getSimilarMovies` (lista, no página; §14.7) |
 | `POST` | `/api/movies` | ADMIN | `MovieController.createMovie` |
 | `PUT` | `/api/movies/{id}` | ADMIN | `MovieController.updateMovie` |
 | `DELETE` | `/api/movies/{id}` | ADMIN | `MovieController.deleteMovie` |
@@ -1133,7 +1134,7 @@ public MovieResponse createMovie(@Valid @RequestBody MovieRequest request) {
 
 ### 13.3 Validación (Bean Validation)
 
-Las reglas viven en los DTOs de petición. Por ejemplo, `MovieRequest`:
+Las reglas viven en los DTOs de petición. Por ejemplo, `MovieRequest` (simplificado: en el código cada anotación lleva su `message`):
 
 ```java
 public record MovieRequest(
@@ -1143,8 +1144,14 @@ public record MovieRequest(
     @NotNull @Min(1888) @Max(2100) Integer releaseYear,
     @NotBlank @Size(max = 500) @HttpsUrl(allowLocalCovers = true, maxLength = 500) String imageUrl,
     @NotBlank @Size(max = 500) @HttpsUrl(maxLength = 500) String videoUrl,
-    @NotEmpty Set<Long> genreIds) { }
+    @NotEmpty @Size(max = 20) Set<@NotNull Long> genreIds) { }
 ```
+
+**Todas las restricciones llevan su mensaje en español.** Sin `message`, Hibernate Validator usa el suyo, que depende del idioma de la JVM: en un servidor en inglés el cliente recibía «must not be blank». En `MovieRequest` los textos son **literalmente los del formulario del panel** (`frontend/src/lib/movieValidation.ts`: «El título es obligatorio», «La sinopsis es obligatoria», «Indica la duración en minutos», «El año debe estar entre 1888 y 2100», «La URL de la portada es obligatoria», «Elige al menos un género»…), en constantes del propio `record`, para que el administrador lea lo mismo lo detecte el cliente o el servidor. Lo mismo en el registro y el login («El correo electrónico es obligatorio», «La contraseña es obligatoria»…).
+
+**Ids de género nulos:** `Set<@NotNull Long>` (en películas y series) convierte `"genreIds": [1, null]` en un 400 `VALIDATION_ERROR` («Los identificadores de género no pueden ser nulos»). Antes, en películas, el nulo llegaba a `findAllById`, que no admite ids nulos, y el cliente recibía un **500**.
+
+**Longitud del email (registro y login):** como mucho 100 caracteres, la columna `users.email VARCHAR(100)`. `@Email` no limita la longitud total (solo la parte local y cada trozo del dominio), así que un email de formato válido y más largo llegaba a la base de datos y respondía un **409 engañoso**. Además, `UserService.normalizeEmail` vuelve a medir el email **tras pasarlo a minúsculas**, porque puede crecer (la `İ` se convierte en dos caracteres; el mismo problema que con los géneros, capítulo 14.5): mismo 400 y mismo mensaje. En el login el tope no deja fuera a nadie (ninguna cuenta puede tener un email más largo que su columna) y evita que un email enorme llegue al servicio y a los contadores de intentos en memoria.
 
 **URLs de portada y vídeo (`validation/HttpsUrl` + `HttpsUrlValidator`).** Antes se usaba `@URL` de Hibernate Validator, que acepta cualquier esquema (`http:`, `file:`, `ftp:`, `jar:`…), y no había límite de longitud: una URL de más de 500 caracteres llegaba a la columna `VARCHAR(500)` y el cliente recibía un **409 engañoso**. Ahora:
 
@@ -1157,6 +1164,13 @@ public record MovieRequest(
 **Géneros por título:** `genreIds` admite entre 1 y 20 géneros, en películas y en series (`MovieRequest.MAX_GENRES`). Sin tope, la lista acaba en un `IN (...)` sin límite dentro de `findAllById`; PostgreSQL admite como mucho 32 767 parámetros.
 
 **Decimales en campos enteros:** un número con decimales en un campo entero del JSON (`"duration": 100.5`, `"seasonNumber": 1.5`, incluso `100.0`) responde 400 `MALFORMED_REQUEST` en lugar de truncarse en silencio. Jackson trae esa conversión activada por defecto y se desactiva con `spring.jackson.deserialization.accept-float-as-int=false` en `application.properties`. Se aplica al `JsonMapper` de Jackson 3, con el que Spring Boot 4 lee los cuerpos; Jackson 2 solo lo usa `SecurityErrorResponseWriter` para escribir los 401/403. Lo más grave era `"genreIds": [5.5]`, que asignaba **otro género** (el 5). Los parámetros de consulta (`?page=1`) no se ven afectados, porque los convierte Spring. Tests: `JsonIntegerCoercionIntegrationTest`.
+
+**Cada campo acepta solo su tipo JSON (sin conversión de escalares).** Jackson también convertía por defecto entre escalares: `"password": 123456789012.5` (un número) creaba la cuenta con la contraseña `"123456789012.5"`, `"title": true` una película titulada «true» y `"duration": "90"` se leía como 90. El cliente mandaba una cosa y se guardaba otra, y la validación se aplicaba a un texto que nadie escribió. `config/StrictJsonScalarsConfig` (un `JsonMapperBuilderCustomizer`, porque `spring.jackson.*` no configura coerciones) hace dos cosas, y hacen falta las dos:
+
+- desactiva `MapperFeature.ALLOW_COERCION_OF_SCALARS`, que cubre los destinos numéricos y booleanos (texto → número, número → booleano);
+- pone a `Fail` la coerción del tipo lógico `Textual` desde `Integer`, `Float` y `Boolean`. `ALLOW_COERCION_OF_SCALARS` **no** cubre el texto: Jackson no considera `String` un escalar «convertible» para esa característica, así que sin este ajuste `"password": 123` seguía entrando.
+
+El resultado es un 400 `MALFORMED_REQUEST` con el mensaje genérico (sin detalles del parser), como un JSON mal formado. El frontend no se ve afectado: envía cada campo con su tipo (`lib/types.ts`; los números del formulario se convierten con `Number(...)` antes de enviar). Los campos `Object` de `UpdateProfileRequest` siguen aceptando cualquier valor (no hay nada que convertir) y los parámetros de consulta no pasan por Jackson. Tests: `InputValidationHardeningIntegrationTest`.
 
 **Los cuerpos solo se leen en JSON.** Spring MVC elige con qué «conversor» leer un `@RequestBody` según el `Content-Type`, y registra automáticamente los de cualquier formato cuya librería esté en el *classpath*. springdoc trae `jackson-dataformat-yaml`, así que **toda la API aceptaba también YAML** sin que nadie lo hubiera pedido: entrada del cliente analizada por SnakeYAML, sin necesidad, y además un `login` en YAML se saltaba el arreglo de NV-A (capítulo 11). `config/JsonOnlyMessageConvertersConfig` quita los conversores YAML con `configureMessageConverters(HttpMessageConverters.ServerBuilder)` (la API de Spring Framework 7; la de la `List` está obsoleta). Los reconoce por los tipos que anuncian (subtipo `yaml`, `x-yaml` o `*+yaml`) y no con `isCompatibleWith`, porque los conversores genéricos anuncian `*/*` y se quitarían por error. Resultado: un cuerpo YAML recibe 415 `UNSUPPORTED_MEDIA_TYPE`, pedir la respuesta con `Accept: application/yaml` da 406, y `/v3/api-docs.yaml` sigue funcionando (springdoc genera el YAML él mismo y lo devuelve como `byte[]`). `JsonOnlyRequestBodyIntegrationTest` falla si cualquier `@RequestBody` de la API se puede leer desde un tipo que no sea JSON, por ejemplo si mañana una dependencia trae un conversor XML o CBOR.
 
@@ -1290,6 +1304,76 @@ Los administradores pueden crear (`POST`), renombrar (`PUT /api/genres/{id}`) y 
 
 **Borrado.** Si alguna película usa el género, se responde 409 `GENRE_IN_USE` con el recuento («lo usan 3 películas»; `MovieRepository.countByGenres_Id`, un `COUNT` que no carga películas). ¿Por qué no borrar y ya? La clave foránea `movie_genres.genre_id` **no** tiene `ON DELETE CASCADE` a propósito, y toda película debe tener al menos un género: borrar en cascada podría dejar películas sin ninguno. La base de datos respalda la regla: si alguien asigna el género justo entre la comprobación y el borrado, la FK salta en el `flush` y cualquier `DataIntegrityViolationException` en ese punto se traduce también a `GENRE_IN_USE`, esta vez sin cifra (tras un `flush` fallido la transacción ya no admite más consultas). `SqlStates` es el ayudante que saca el `SQLSTATE` de la cadena de causas; lo usan `GenreService` (solo para la unicidad, `23505`), `FavoriteService`, `SeriesFavoriteService` y `EpisodeService`.
 
+### 14.6 Películas similares (la consulta)
+
+Primera versión, sin IA: dada una película, las que **comparten más géneros** con ella. Viven en `MovieRepository` dos métodos que el servicio usa uno detrás de otro:
+
+```java
+List<Long>  findSimilarMovieIds(Long movieId, int limit);       // ids ya ordenados
+List<Movie> findAllWithGenresByIdIn(Collection<Long> ids);       // películas + géneros, SIN orden
+```
+
+**El criterio.** Son candidatas las películas con al menos un género en común, excluida la propia. Orden total y determinista: (1) géneros en común, de más a menos; (2) distancia en años `ABS(año candidata − año origen)`, de menos a más; (3) `created_at` más reciente primero; (4) `id` ascendente (sin él, dos películas empatadas en todo podrían cambiar de sitio entre llamadas, como en §14.2).
+
+**La consulta de ids (SQL nativo):**
+
+```sql
+SELECT candidata.movie_id
+FROM movie_genres origen
+JOIN movie_genres candidata ON candidata.genre_id = origen.genre_id
+                           AND candidata.movie_id <> origen.movie_id
+JOIN movies pelicula_origen ON pelicula_origen.id = origen.movie_id
+JOIN movies m               ON m.id = candidata.movie_id
+WHERE origen.movie_id = :movieId
+GROUP BY candidata.movie_id, m.release_year, m.created_at, pelicula_origen.release_year
+ORDER BY COUNT(*) DESC, ABS(m.release_year - pelicula_origen.release_year), m.created_at DESC, candidata.movie_id
+FETCH FIRST :limit ROWS ONLY
+```
+
+- **Auto-join de `movie_genres`.** `origen` son las filas de la película dada; `candidata`, las de otras películas con el mismo género. Cada fila del join es *un género compartido*, así que `COUNT(*)` por película es el número de géneros en común (la PK `(movie_id, genre_id)` impide contar uno dos veces). Las películas sin nada en común no llegan a aparecer: no hace falta filtrarlas.
+- **Por qué nativo y no JPQL:** es una agregación sobre la tabla de unión; en JPQL habría que pasar por la entidad `Genre` y repetir la película de origen en subconsultas. En SQL se lee tal cual y su plan es el que se ha revisado.
+- **Portable:** `FETCH FIRST n ROWS ONLY` es el `LIMIT` del estándar SQL y lo entienden PostgreSQL y H2 (con parámetro enlazado). Las columnas del `ORDER BY` se repiten en el `GROUP BY` porque H2 no deduce que dependen del `id`.
+- **Nulos:** `release_year` y `created_at` son `NOT NULL` (también en las bases anteriores a Flyway), así que `ABS` nunca recibe un nulo.
+- **Solo ids:** el `LIMIT` se aplica en la base de datos sobre películas, no sobre filas película×género (ver la nota de §8.3 sobre paginar con `JOIN FETCH`).
+
+**La carga sin N+1.** `findAllWithGenresByIdIn` es un `select m from Movie m where m.id in :ids` con `@EntityGraph("genres")`: **una** consulta con `JOIN` a los géneros. Aquí el `JOIN FETCH` de la colección sí es seguro, porque no hay paginación (el límite, como mucho 24, ya se aplicó al elegir los ids); con la carga por lotes serían dos consultas. En total, **dos sentencias** pase lo que pase (lo cuentan los tests con las estadísticas de Hibernate). Como `IN` no garantiza orden, **el servicio reconstruye el orden** a partir de la lista de ids (un `Map<Long, Movie>`).
+
+**Índices (`EXPLAIN ANALYZE` en PostgreSQL 16, datos sintéticos con 20 géneros):** la película de origen se localiza con la PK de `movie_genres` (empieza por `movie_id`), las candidatas con `idx_movie_genres_genre_id` y las películas por su PK (o un `Seq Scan` + `Hash Join` cuando hay muchas candidatas, que es lo barato). El orden final es un *top-N heapsort* que solo guarda las `limit` primeras. Tiempos: 0,3 ms con 200 películas, 2 ms con 5 000 y 33 ms con 100 000 (13 000 candidatas). **No hace falta ningún índice nuevo.** El coste crece con el número de películas que comparten algún género (hay que contarlas todas para saber cuáles son las mejores); si el catálogo llegara a esos tamaños, un índice `(genre_id, movie_id)` permitiría leer las candidatas solo del índice, pero la mejora real sería precalcular las similitudes.
+
+**Tests:** los casos están una sola vez en `repository/SimilarMoviesQueryContract` (una *interfaz de test* de JUnit 5: sus métodos `default` con `@Test` se ejecutan en cada clase que la implementa) y se ejecutan en H2 (`SimilarMoviesRepositoryIntegrationTest`) y en PostgreSQL real (`postgres/PostgresSimilarMoviesIntegrationTest`). Cada caso fija los datos para que solo decida el criterio que prueba (por ejemplo, en el de `created_at` los ids crecen en sentido contrario, para que el desempate por `id` no pueda dar el resultado por casualidad).
+
+### 14.7 Películas similares (el endpoint)
+
+`GET /api/movies/{id}/similar?limit=12` → `MovieController.getSimilarMovies` → `MovieService.getSimilarMovies`. Lo usa la fila «Películas similares» de la página de detalle (`/peliculas/:id`).
+
+**Contrato.**
+
+| Caso | Respuesta |
+| :--- | :--- |
+| Película con similares | 200, **array** de `MovieResponse` (el mismo DTO que los listados, con sus géneros), ya ordenado según §14.6 |
+| Existe pero no comparte géneros con ninguna (o no tiene) | 200 `[]` |
+| No existe | 404 `RESOURCE_NOT_FOUND`, **el mismo cuerpo** que `GET /api/movies/{id}` («Película no encontrada») |
+| `limit` fuera de 1..24 | 400 `VALIDATION_ERROR` con `validationErrors.limit` («El límite mínimo es 1» / «El límite máximo es 24») |
+| `limit` no entero (`abc`, `1.5`, desborda `int`) | 400 `VALIDATION_ERROR` («El valor no tiene el formato esperado») |
+| Sin sesión | 401 |
+
+- **Lista y no página.** Es una fila de recomendaciones de tamaño acotado: no hay «página 2» que pedir, así que no lleva `page`/`size`/`sort` (el orden lo decide el servidor). El límite por defecto (12), el mínimo y el máximo (24) son constantes de `MovieService` (`DEFAULT_SIMILAR_LIMIT`, `MIN_SIMILAR_LIMIT`, `MAX_SIMILAR_LIMIT`) que usan también las anotaciones `@Min`/`@Max` del controlador. El máximo es bajo a propósito: la carga de géneros va en un `IN` sin paginar.
+- **¿Por qué 404 y no `[]` si no existe?** Para que el cliente distinga «esa película no existe» de «no se parece a ninguna», y para que la ruta se comporte igual que el detalle.
+
+**El servicio, en tres pasos** (todo dentro de un `@Transactional(readOnly = true)`, porque el mapeo a DTO lee los géneros):
+
+1. `existsById(id)`: un `count` por clave primaria que no carga la película ni sus géneros. Si es falso, `MovieNotFoundException` (la misma que `getMovieById`).
+2. `findSimilarMovieIds(id, limit)`: los ids ya ordenados y limitados (§14.6). Si la lista está vacía, devuelve `List.of()` **sin** lanzar la carga.
+3. `findAllWithGenresByIdIn(ids)` → `Map<Long, Movie>` → se recorre la lista de ids para **reconstruir el orden** (el `IN` no lo conserva) y se mapea con `MovieMapper`. Si una película se borra entre los pasos 2 y 3, simplemente no aparece (no hay `NullPointerException`).
+
+El servicio también rechaza un `limit` fuera de rango (`InvalidParameterException`): el controlador ya lo valida, pero ese número acaba en un `FETCH FIRST` y el servicio podría tener otros llamantes. *Defensa en profundidad.*
+
+**Coste medido** (estadísticas de Hibernate): el servicio ejecuta **3 sentencias** con resultados (existencia + ids + películas con géneros) y **2** sin ninguna similar, sea cual sea el límite. De punta a punta, con la autenticación (que lee el usuario en cada petición), son 4 sentencias, dos más que el 404.
+
+**Seguridad.** No hizo falta tocar `SecurityConfig`: la ruta cae en la regla de lectura del catálogo (`GET`/`HEAD` sobre `/api/movies/**`, cualquier autenticado) y cualquier otro método en la de escritura (solo `ADMIN`), así que un `POST` de un USER es 403 antes de llegar a Spring MVC.
+
+**Tests.** `controller/SimilarMoviesIntegrationTest` (MockMvc, datos confirmados de verdad): el orden de punta a punta con los cuatro criterios a la vez, la exclusión de la propia, `[]`, el límite por defecto y explícito, los 400, el 404 idéntico al del detalle, 401/403/`HEAD` y el número de sentencias. `service/MovieServiceSimilarTest` (Mockito) fija lo que la base de datos no deja ver: que el orden sale de la lista de ids aunque la carga devuelva las películas desordenadas, que sin candidatas no se lanza la segunda consulta y que una película borrada entre medias se omite.
+
 ---
 
 ## 15. Favoritos («Mi lista»)
@@ -1406,7 +1490,7 @@ Endpoints en el capítulo 13.1. Detalles:
 - **Componentes genéricos.** Las piezas visuales de películas se generalizaron para servir a las dos: `PosterCard`, `PosterRow<T>`, `FeaturedBanner` y `MetaTags`, sobre un tipo común `CatalogItem` (`lib/types.ts`). `MovieCard`, `MovieRow`, `HeroBanner`… quedan como envoltorios finos con la misma API, y por eso sus tests no cambiaron. `useCatalog` se apoya en `usePagedCatalog`, que también usan las series, y `buildCatalogRows<T>` es genérica (`CatalogRow.items`).
 - **`/series` (`SeriesPage`):** sin filtros, la misma estructura que la portada. Banner con la serie más reciente (marca «Novedad»; la acción principal «Ver episodios» enlaza a su página, porque una serie no tiene un único vídeo), «Novedades», filas por género (≥3 títulos **sin contar el del banner**), «Cargar más series» y los estados de carga, vacío y error. Con la **misma barra de filtros que `/peliculas`** (género, año de estreno y orden en la URL; capítulo 20.8), una cuadrícula con los resultados de `GET /api/series/search` (`useSeriesResults` en `hooks/useSeriesCatalog.ts`).
 - **`/series/:id` (`SeriesDetailPage`):**
-  - Cabecera con `FeaturedBanner` (h1, sinopsis completa, «Empezar a ver» el primer episodio y «Mi lista»), centrada como la de una película, y ficha lateral junto a los episodios (ver 20.8 bis).
+  - Cabecera con `FeaturedBanner` («Volver a series» encima, h1, sinopsis completa, «Empezar a ver» el primer episodio, «Mi lista» y, solo para ADMIN, «Editar»), centrada como la de una película, y ficha lateral junto a los episodios (ver 20.8 bis).
   - **Selector de temporada** (`SeasonPicker`): son enlaces `?temporada=N` con `aria-current` y navegación con `replace`, no un `<select>` ni el patrón `tablist`. La temporada vive en la URL, así que se puede compartir y abrir en otra pestaña; con un `<select>`, en Windows cada flecha cambiaría la URL. Solo aparece con dos o más temporadas. Una temporada inválida o ausente muestra la primera (`resolveSeasonNumber`). «Temporada 2 · 8 episodios» está en una región `role="status"`, que anuncia el cambio sin mover el foco.
   - `EpisodeList`: una `<ol>` con un h3 «N. Título», la duración, la sinopsis si la hay y «Ver», que abre el vídeo validado con `getSafeVideoUrl` (nombre accesible «Ver T1:E3 Título»). Sin miniatura por episodio, porque aún no tienen imagen propia.
   - Un 404 o un id mal formado muestran «Serie no encontrada» con un enlace a `/series`.
@@ -1433,6 +1517,7 @@ Endpoints en el capítulo 13.1. Detalles:
   - Valida con `lib/seriesValidation.ts`, que copia literalmente los mensajes del servidor, y no deja enviar hasta que cargan los géneros.
   - **Al crear, lleva a la edición** de la serie nueva («Serie creada. Añade episodios para que sea visible»).
   - Al guardar cambios se queda en la página, porque debajo está la gestión de episodios.
+  - La vuelta es «Volver al listado» o, si se llegó con «Editar» desde la página de la serie (`/series/:id`, solo ADMIN), «Volver a la serie» (validada por lista blanca con `getReturnTo`; ver 20.8 bis).
 - **Episodios** (`SeriesEpisodesSection` + `EpisodeFormDialog`):
   - Están agrupados por temporada. Cada uno tiene las acciones «Editar episodio T1:E3 Título» y «Borrar episodio T1:E3 Título»; el código hace único el nombre accesible.
   - **Añadir y editar usan un único diálogo.** Al añadir, propone la última temporada y el número siguiente al más alto, y lo recalcula si cambias la temporada, salvo que ya hayas escrito el número a mano.
@@ -1468,7 +1553,7 @@ Todos los errores de la API, vengan de donde vengan, tienen la misma forma (`dto
   "code": "VALIDATION_ERROR",
   "message": "Los datos proporcionados no son válidos",
   "path": "/api/movies",
-  "validationErrors": { "title": "no debe estar vacío", "releaseYear": "debe ser menor que o igual a 2100" }
+  "validationErrors": { "title": "El título es obligatorio", "releaseYear": "El año debe estar entre 1888 y 2100" }
 }
 ```
 
@@ -1481,7 +1566,7 @@ Todos los errores de la API, vengan de donde vengan, tienen la misma forma (`dto
 | `code` | HTTP | Cuándo |
 | :--- | :--- | :--- |
 | `VALIDATION_ERROR` | 400 | `@Valid` falla, parámetro mal formado, `sort`/`direction`/`page` no permitidos |
-| `MALFORMED_REQUEST` | 400 | JSON mal escrito o con tipos imposibles |
+| `MALFORMED_REQUEST` | 400 | JSON mal escrito o con un valor de otro tipo (número en un texto, texto o decimal en un número: no se convierten; capítulo 13.3) |
 | `INVALID_CREDENTIALS` | 401 | Login incorrecto (con `remainingAttempts`), y también 401 por falta de token o token de acceso caducado |
 | `SESSION_EXPIRED` | 401 | `POST /api/auth/refresh` sin una sesión renovable válida: hay que volver a iniciar sesión (capítulo 10.4 bis) |
 | `ACCESS_DENIED` | 403 | Autenticado sin el rol necesario |
@@ -1932,10 +2017,12 @@ Un detalle que costó un bug: `setSearchParams` de React Router cambia de identi
 
 ### 20.8 bis Página de una película (`pages/MovieDetailPage.tsx` + `hooks/useMovieDetail.ts`) y cambios de página
 
-- **`/peliculas/:id`**, como `/series/:id`: portada, datos, «Ver ahora», «Mi lista» y, solo para ADMIN (mientras carga el usuario se trata como USER), «Editar». Datos con TanStack Query en la clave `['movies', 'detail', id]`, dentro de la raíz `movies`: editar o borrar en el panel la invalida. Si la película ya estaba en un listado, se pinta al instante con esa copia (`placeholderData`), que nunca tapa un 404 ni un error. Un `:id` que no es un entero positivo seguro es «Película no encontrada» sin hacer petición.
-- **Maquetación (también la de `/series/:id`).** La cabecera es el `FeaturedBanner` de la portada con `layout="page"`: el fondo desenfocado sigue de borde a borde, pero el contenido va en un contenedor centrado `max-w-6xl` (`DETAIL_CONTAINER_CLASS` en `components/bannerGridStyles.ts`, el mismo ancho que `/perfil` y el panel), con un póster mayor (`DETAIL_POSTER_SIZE_CLASS`) y la columna de texto ocupando lo que deja el póster (la sinopsis, a ≤65 caracteres por línea). Antes, en escritorio, todo quedaba en una franja a la izquierda y más de media pantalla vacía: en la portada el banner se alinea a la izquierda con las filas que tiene debajo, pero aquí no hay filas. Debajo va la **ficha** (`components/FactSheet.tsx`: `<section>` «Ficha» con un `<dl>`; solo datos de la API, nunca un valor vacío): en una película, «Estreno», «Duración», «Géneros» como enlaces a `/peliculas?genero=…` (`components/GenreLinks.tsx`, con `catalogByGenrePath` de `lib/catalogFilters.ts`) y «En el catálogo desde» (`formatAddedDate` en `lib/catalog.ts`, en UTC como «Miembro desde»), en banda bajo una línea; en una serie, «Emisión» («Desde 2021» si no tiene año de fin; «2021–2027» si lo tiene), «Estado» (`isOnAir` en `lib/series.ts`: «En emisión» si no hay año de fin **o si es futuro** —el backend admite hasta 2100—; «Finalizada» solo si ya ha llegado; el año actual es un parámetro para poder probarlo; lo usan también el banner y el panel), temporadas, episodios, géneros como enlaces a `/series?genero=…` (el mismo `GenreLinks`: desde una serie se sigue explorando series, no películas) y la fecha, en una tarjeta lateral junto a los episodios desde `lg` (`SERIES_BODY_GRID_CLASS`) y debajo de ellos en móvil y tableta. El esqueleto de carga (`DetailSkeleton`, en `components/CatalogSkeleton.tsx`) usa las mismas constantes, así que nada salta al llegar los datos. La fila «Películas similares» irá tras la ficha (sin hueco reservado mientras no exista). Lo vigila `e2e/responsive.spec.ts` («Pantalla ancha» a 1440 y 1920 px: mismo margen a los dos lados).
+- **`/peliculas/:id`**, como `/series/:id`: «Volver a películas», portada, datos, «Ver ahora», «Mi lista» y, solo para ADMIN (mientras carga el usuario se trata como USER), «Editar». Datos con TanStack Query en la clave `['movies', 'detail', id]`, dentro de la raíz `movies`: editar o borrar en el panel la invalida. Si la película ya estaba en un listado, se pinta al instante con esa copia (`placeholderData`), que nunca tapa un 404 ni un error. Un `:id` que no es un entero positivo seguro es «Película no encontrada» sin hacer petición.
+- **Maquetación (también la de `/series/:id`).** La cabecera es el `FeaturedBanner` de la portada con `layout="page"`: el fondo desenfocado sigue de borde a borde, pero el contenido va en un contenedor centrado `max-w-6xl` (`DETAIL_CONTAINER_CLASS` en `components/bannerGridStyles.ts`, el mismo ancho que `/perfil` y el panel), con un póster mayor (`DETAIL_POSTER_SIZE_CLASS`) y la columna de texto ocupando lo que deja el póster (la sinopsis, a ≤65 caracteres por línea). Antes, en escritorio, todo quedaba en una franja a la izquierda y más de media pantalla vacía: en la portada el banner se alinea a la izquierda con las filas que tiene debajo, pero aquí no hay filas. Debajo va la **ficha** (`components/FactSheet.tsx`: `<section>` «Ficha» con un `<dl>`; solo datos de la API, nunca un valor vacío): en una película, «Estreno», «Duración», «Géneros» como enlaces a `/peliculas?genero=…` (`components/GenreLinks.tsx`, con `catalogByGenrePath` de `lib/catalogFilters.ts`) y «En el catálogo desde» (`formatAddedDate` en `lib/catalog.ts`, en UTC como «Miembro desde»), en banda bajo una línea; en una serie, «Emisión» («Desde 2021» si no tiene año de fin; «2021–2027» si lo tiene), «Estado» (`isOnAir` en `lib/series.ts`: «En emisión» si no hay año de fin **o si es futuro** —el backend admite hasta 2100—; «Finalizada» solo si ya ha llegado; el año actual es un parámetro para poder probarlo; lo usan también el banner y el panel), temporadas, episodios, géneros como enlaces a `/series?genero=…` (el mismo `GenreLinks`: desde una serie se sigue explorando series, no películas) y la fecha, en una tarjeta lateral junto a los episodios desde `lg` (`SERIES_BODY_GRID_CLASS`) y debajo de ellos en móvil y tableta. El esqueleto de carga (`DetailSkeleton`, en `components/CatalogSkeleton.tsx`) usa las mismas constantes, así que nada salta al llegar los datos. Tras la ficha, la fila «Películas similares» (punto siguiente). Lo vigila `e2e/responsive.spec.ts` («Pantalla ancha» a 1440 y 1920 px: mismo margen a los dos lados).
+- **«Películas similares»** (`components/SimilarMoviesRow.tsx` + `hooks/useSimilarMovies.ts`): al pie de la página, en el mismo contenedor centrado que la ficha, la `MovieRow` de la portada (mismas tarjetas, enlaces a `/peliculas/:id`, flechas solo si la fila desborda) con un `<h2>` «Películas similares». Pide `GET /api/movies/{id}/similar?limit=12` (`SIMILAR_MOVIES_LIMIT`; el servidor admite 1–24) y pinta el array **en el orden en que llega** (el servidor ya ordena por géneros en común y excluye la propia película). Clave `['movies', 'similar', id, { limit }]`, bajo la raíz `movies`: editar o borrar una película o renombrar un género en el panel (`keysAffectedBy`) la vuelve a pedir. **Solo se pide con la película confirmada por el servidor**: `useMovieDetail` devuelve `confirmed`, falso mientras se enseña la copia provisional de un listado (`placeholderData`) y en «no encontrada», así que un 404 de la película no llega a pedir similares. Estados: cargando → `RowSkeleton` («Cargando películas similares...»; su cabecera reserva ya desde `md` la altura de las flechas, como `PosterRow`, para no saltar); **lista vacía o 404 → no se pinta nada**, ni el título (un encabezado sin tarjetas prometería algo que no hay); error (red, 5xx, 429...) → `ErrorState compact` «No se pudieron cargar las películas similares» con «Reintentar», que solo repite la fila: la película sigue en pantalla. Sin `placeholderData` propio: al pulsar una similar, la fila pasa a cargando y nunca enseña las de la película anterior (que pueden incluir la nueva). A cambio, `findCachedMovie` también busca en estos arrays, así que **la película pulsada se pinta al instante** con la copia de la fila; el cambio de `pathname` hace que `RouteChangeFocus` suba el scroll y lleve el foco a `<main>` (la tarjeta pulsada desaparece en el mismo render, así que el foco no se queda en ella). Mismo texto para USER y ADMIN. Tests: `components/SimilarMoviesRow.test.tsx` (URL exacta, orden, estados, copia provisional, invalidación y navegación con foco y scroll), `hooks/useMovieDetail.test.tsx` (`confirmed` y la búsqueda en arrays), `lib/queryKeys.test.ts` y el bloque «Películas similares» de `e2e/movies.spec.ts` (el catálogo sembrado da un resultado exacto sin depender del desempate: «Dune: Parte Dos» tiene los tres géneros y exactamente 12 películas comparten dos con ella).
 - **Nombres accesibles sin `sr-only` pegado al texto.** El enlace de un género se anuncia «Drama, ver todas las películas del género» (o «…las series del género» en la ficha de una serie) con `aria-label` (empieza por el texto visible, WCAG 2.5.3). Con el patrón anterior (texto visible + `<span class="sr-only">, ver todas…</span>`) Chromium leía «Drama **,** ver…»: el `sr-only` lleva `position: absolute`, el navegador lo trata como bloque y separa su texto con un espacio. jsdom no aplica CSS y no lo ve, así que **esto solo se prueba en Chromium real** (`toHaveAccessibleName` o `toMatchAriaSnapshot` en Playwright: `e2e/movies.spec.ts`, `series.spec.ts`, `profile.spec.ts`, `admin.spec.ts`). Donde `aria-label` no vale (un `<li>` o un `status`, como «Tus géneros» del perfil y `Pagination`), lo visible va con `aria-hidden` y la frase entera en un único `sr-only`.
-- **«Editar» vuelve a la película.** El enlace pasa `state={{ returnTo }}` y `getReturnTo` (`pages/admin/adminPaths.ts`) solo acepta como vuelta la página exacta de **esa** película (lista blanca: nada de redirecciones abiertas). El formulario dice entonces «Volver a la película».
+- **«Editar» vuelve al título (película o serie).** Las dos páginas lo tienen, solo para ADMIN, con el nombre accesible «Editar Interstellar». El enlace pasa `state={{ returnTo: moviePath(id) }}` (o `seriesPath(id)`) y `getReturnTo` (`pages/admin/adminPaths.ts`) solo acepta como vuelta el listado de **su** panel o la página exacta de **ese** título (lista blanca: ni otra película u otra serie, ni `/series/4?temporada=2`, ni una URL externa; nada de redirecciones abiertas). Es una sola función para los dos formularios: cada uno le pasa su listado y su página, así que el de series no acepta la página de una película y al revés. El formulario dice entonces «Volver a la película» / «Volver a la serie» (arriba y junto a «Guardar»). Diferencia: la película **vuelve sola al guardar**; la serie **se queda en la edición** (es donde se gestionan sus episodios, 20.7) y se vuelve a mano. Si la página del título ya no se puede ver (la película o la serie no existe, o a la serie se le acaban de quitar todos los episodios y queda oculta), la vuelta es al listado: volver daría otro «no encontrada».
+- **«Volver a películas» / «Volver a series»** (`components/BackLink.tsx`): enlace discreto (texto pequeño con flecha, sin caja de botón) en su propia fila **encima** del póster y del `<h1>`, dentro del banner (prop `backLink` de `FeaturedBanner`) para que el fondo desenfocado siga llegando hasta la barra superior. Es un enlace a la sección y no `navigate(-1)`: sirve justo cuando el historial no ayuda (enlace compartido, marcador, se viene de la portada o de «Mi lista»), dice adónde lleva y se abre en otra pestaña; para volver a una búsqueda filtrada, «Atrás» la conserva. Color `text-white/85` (y no `text-muted`) porque va sobre el fondo del banner, donde ese blanco ya tiene calculado su contraste en el peor caso (6,0:1). Área táctil de 44 px. Su fila (`DETAIL_BACK_ROW_CLASS`) la reproduce el esqueleto, y la rejilla de la página (`DETAIL_BANNER_GRID_CLASS`) lleva por eso menos relleno arriba que la del banner de la portada (las dos parten de una base sin relleno vertical, para no tener dos `pt-*` en el mismo elemento). No sale en «no encontrada», que ya ofrece «Ver todas las películas/series». Tras un cambio de página es **la primera parada del tabulador** en el contenido (el foco va a `<main>`, ver el punto siguiente), antes de «Ver ahora».
 - **Al cambiar de página** (`components/RouteChangeFocus.tsx`, en `App`): en un `useLayoutEffect` que solo corre cuando cambia el `pathname`, sube el scroll arriba **salvo en «Atrás»/«Adelante»** (`POP`, donde el navegador restaura la posición) y lleva el foco a `<main id="contenido">` con `preventScroll` (si la página nueva ya puso el foco dentro de su `<main>`, lo respeta). Antes, al abrir una película desde lo bajo de `/peliculas`, en móvil se entraba a mitad de página, y el foco caía en `<body>`, con lo que un lector de pantalla no anunciaba la página nueva. Los cambios solo de búsqueda (filtros, temporada) no mueven nada. Se eligió el `<main>` y no el `<h1>` porque el `<h1>` aún no existe (o cambia) mientras la página carga.
 
 ### 20.9 Estados vacíos según el rol
@@ -1945,7 +2032,7 @@ Un estado vacío tiene que **decir la verdad a quien lo lee**. El caso que lo mo
 - **`/series` y `/peliculas` vacías:**
   - Al **usuario** le dicen «Todavía no hay series/películas. Cuando se publiquen aparecerán aquí.», con «Ir al inicio».
   - Al **administrador** le explican el motivo («las series solo aparecen cuando tienen al menos un episodio») y le ofrecen «Gestionar series/películas», que lleva al panel.
-- **`/series` con filtros y sin resultados:** los dos roles ven «Quitar filtros». Al **usuario** se le dice «No hay series con estos filtros» y que pruebe con otro género u otro año o los quite (no «para ver todas»: el catálogo podría estar vacío, y el texto debe ser verdad siempre). Al **administrador**, «No hay series **visibles** con estos filtros» y que las series sin episodios no aparecen aunque coincidan: es justo la duda que tendría al no ver una serie que sabe que creó (el buscador del servidor también las excluye). En `/peliculas` no hay títulos ocultos, así que el texto es el mismo para los dos.
+- **`/series` con filtros y sin resultados:** los dos roles ven «Quitar filtros». Al **usuario** se le dice «No hay series con estos filtros» y que pruebe con otro género u otro año o los quite (no «para ver todas»: el catálogo podría estar vacío, y el texto debe ser verdad siempre). Al **administrador**, «No hay series **visibles** con estos filtros» y que las series sin episodios no aparecen aunque coincidan: es justo la duda que tendría al no ver una serie que sabe que creó (el buscador del servidor también las excluye). Por eso el administrador tiene además **«Gestionar series»** (acción secundaria, `outline`, después de «Quitar filtros»; prop `emptySecondaryAction` de `FilteredCatalogResults`): lleva al panel, donde están esas series ocultas y se les añaden episodios. En `/peliculas` no hay títulos ocultos, así que el texto es el mismo para los dos y no hay acción secundaria.
 - **Fila «Series» de la portada:** para un usuario, si no hay series visibles, no se pinta. Un administrador ve en su lugar una sola línea que explica por qué los usuarios no la ven, con «Gestionar series».
 - **Portada sin películas:** delega en la fila «Series» si las hay. Solo si no hay nada se muestra «El catálogo está vacío» (con su versión para administradores).
 - **`/series/:id` con 404:** el administrador lee además que una serie sin episodios solo se ve en el panel. El texto no confirma que la serie exista.
@@ -2104,7 +2191,7 @@ Cada bug corregido deja un test que **falla sin el arreglo**. Se comprueba quita
 
 ### 23.1 Añadir un endpoint nuevo
 
-Ejemplo: `GET /api/movies/{id}/similar`.
+Ejemplo: `GET /api/movies/{id}/similar` (ya existe: §14.7 sirve de modelo completo).
 
 1. **Servicio**: método en `MovieService` con `@Transactional(readOnly = true)` que devuelva DTOs (mapeo dentro de la transacción).
 2. **Controlador**: método en `MovieController` con `@GetMapping("/{id}/similar")`, `@Operation` y `@ApiResponses` en español con los códigos reales (401, 404…).

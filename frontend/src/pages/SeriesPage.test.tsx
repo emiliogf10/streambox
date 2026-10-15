@@ -511,6 +511,25 @@ describe('SeriesPage: cuadrícula de resultados', () => {
     expect(screen.getAllByRole('button', { name: 'Quitar filtros' })).toHaveLength(2);
   });
 
+  it('sin resultados, a un administrador: junto a «Quitar filtros», «Gestionar series» lleva al panel (donde están las ocultas)', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })),
+      [page0]: () => jsonResponse(makePage([])),
+    });
+
+    renderPage(route);
+
+    const empty = await screen.findByRole('heading', { level: 2, name: 'No hay series visibles con estos filtros' });
+    const emptyState = empty.closest('div')!.parentElement!;
+    const clear = within(emptyState).getByRole('button', { name: 'Quitar filtros' });
+    const manage = within(emptyState).getByRole('link', { name: 'Gestionar series' });
+    expect(manage).toHaveAttribute('href', '/admin/series');
+    // «Quitar filtros» sigue siendo la principal: va antes (orden de lectura y de tabulación).
+    expect(clear.compareDocumentPosition(manage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: 'Gestionar series' })).toHaveLength(1);
+  });
+
   it('sin resultados y con el usuario aún cargando: el mensaje de usuario (falla cerrado)', async () => {
     routeFetch(fetchMock, {
       ...FAVORITES,
@@ -522,6 +541,8 @@ describe('SeriesPage: cuadrícula de resultados', () => {
 
     expect(await screen.findByRole('heading', { level: 2, name: 'No hay series con estos filtros' })).toBeInTheDocument();
     expect(screen.getByText('estado:loading')).toBeInTheDocument();
+    // Ni el enlace al panel: mientras no se confirma el rol, nada de administrador.
+    expect(screen.queryByRole('link', { name: 'Gestionar series' })).not.toBeInTheDocument();
   });
 
   it('error: lo explica y «Reintentar» repite la búsqueda', async () => {

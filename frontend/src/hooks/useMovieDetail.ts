@@ -23,8 +23,14 @@ function hasContent(value: unknown): value is { content: unknown[] } {
   return typeof value === 'object' && value !== null && Array.isArray((value as { content?: unknown }).content);
 }
 
-/** Saca las películas de un dato de la caché: un listado infinito (`pages`), una página suelta o «Mi lista». */
+/**
+ * Saca las películas de un dato de la caché: un listado infinito (`pages`), una
+ * página suelta, «Mi lista» o un array suelto (la fila «Películas similares»,
+ * `queryKeys.movies.similar`: así, al pulsar una similar, su página también se
+ * pinta al instante).
+ */
 function moviesIn(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
   if (typeof data !== 'object' || data === null) return [];
   if ('pages' in data && Array.isArray(data.pages)) return data.pages.flatMap((page) => (hasContent(page) ? page.content : []));
   if (hasContent(data)) return data.content;
@@ -83,6 +89,10 @@ export function findCachedMovie(queryClient: QueryClient, id: number): Movie | u
  *   (ver {@link findCachedMovie}).
  * - **Cambio de película sin datos viejos**: cada id es una clave distinta, así
  *   que nunca se enseña la película anterior con la URL nueva.
+ * - **`confirmed`**: `true` solo cuando la película la ha confirmado el servidor
+ *   (no es la copia provisional de un listado). Lo que depende de que exista de
+ *   verdad, como la fila «Películas similares», espera a él: si la copia fuera
+ *   de una película ya borrada, no se pediría nada para luego tirarlo.
  *
  * @param rawId el parámetro `:id` de la ruta, tal cual
  */
@@ -105,9 +115,14 @@ export function useMovieDetail(rawId: string | undefined) {
 
   const settledError = detail.isError && !detail.isFetching ? detail.error : null;
   if (movieId === null || isNotFound(settledError)) {
-    return { status: 'not-found' as const, movie: null, errorMessage: '', reload };
+    return { status: 'not-found' as const, movie: null, errorMessage: '', confirmed: false, reload };
   }
-  if (detail.data !== undefined) return { status: 'ready' as const, movie: detail.data, errorMessage: '', reload };
-  if (settledError) return { status: 'error' as const, movie: null, errorMessage: getErrorMessage(settledError), reload };
-  return { status: 'loading' as const, movie: null, errorMessage: '', reload };
+  if (detail.data !== undefined) {
+    const confirmed = !detail.isPlaceholderData;
+    return { status: 'ready' as const, movie: detail.data, errorMessage: '', confirmed, reload };
+  }
+  if (settledError) {
+    return { status: 'error' as const, movie: null, errorMessage: getErrorMessage(settledError), confirmed: false, reload };
+  }
+  return { status: 'loading' as const, movie: null, errorMessage: '', confirmed: false, reload };
 }

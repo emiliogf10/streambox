@@ -3,6 +3,8 @@ package com.emilio.streambox.dto;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -195,9 +197,62 @@ class MovieRequestValidationTest {
                 violations.get(0).getConstraintDescriptor().getAnnotation().annotationType());
     }
 
+    /**
+     * Un id nulo dentro de la lista ({@code [1, null]}) es un error con
+     * mensaje propio; antes no lo rechazaba nadie y llegaba al servicio.
+     */
+    @Test
+    void unIdDeGeneroNuloSeRechaza() {
+        Set<Long> genreIds = new HashSet<>(Arrays.asList(1L, null));
+        MovieRequest request = new MovieRequest("Dune", "Sinopsis", 155, 2021, VALID_IMAGE, VALID_VIDEO, genreIds);
+
+        List<String> messages = validator.validate(request).stream().map(ConstraintViolation::getMessage).toList();
+
+        assertEquals(List.of("Los identificadores de género no pueden ser nulos"), messages);
+    }
+
+    // ------------------------------------------------------------------
+    // Mensajes de los campos obligatorios y de los rangos
+    // ------------------------------------------------------------------
+
+    /**
+     * Sin ningún dato, cada campo da exactamente un error y con el texto del
+     * formulario del frontend ({@code movieValidation.ts}). Antes estas
+     * restricciones no tenían mensaje y salía el de Hibernate Validator, en el
+     * idioma de la JVM.
+     */
+    @Test
+    void cadaCampoObligatorioTieneUnUnicoMensajeEnEspanol() {
+        MovieRequest empty = new MovieRequest(null, null, null, null, null, null, null);
+
+        assertEquals(List.of("El título es obligatorio"), messagesFor(empty, "title"));
+        assertEquals(List.of("La sinopsis es obligatoria"), messagesFor(empty, "description"));
+        assertEquals(List.of("Indica la duración en minutos"), messagesFor(empty, "duration"));
+        assertEquals(List.of("Indica el año de estreno"), messagesFor(empty, "releaseYear"));
+        assertEquals(List.of("La URL de la portada es obligatoria"), messagesFor(empty, "imageUrl"));
+        assertEquals(List.of("La URL del vídeo es obligatoria"), messagesFor(empty, "videoUrl"));
+        assertEquals(List.of("Elige al menos un género"), messagesFor(empty, "genreIds"));
+    }
+
+    @Test
+    void losRangosDeDuracionYAnioTienenElTextoDelFrontend() {
+        String duration = "La duración debe ser un número entero de minutos mayor que 0";
+        String year = "El año debe estar entre 1888 y 2100";
+
+        assertEquals(List.of(duration), messagesFor(movie(0, 2021), "duration"));
+        assertEquals(List.of(year), messagesFor(movie(155, 1887), "releaseYear"));
+        assertEquals(List.of(year), messagesFor(movie(155, 2101), "releaseYear"));
+        assertTrue(validator.validate(movie(1, 1888)).isEmpty());
+        assertTrue(validator.validate(movie(1, 2100)).isEmpty());
+    }
+
     // ------------------------------------------------------------------
     // Utilidades
     // ------------------------------------------------------------------
+
+    private static MovieRequest movie(int duration, int releaseYear) {
+        return new MovieRequest("Dune", "Sinopsis", duration, releaseYear, VALID_IMAGE, VALID_VIDEO, Set.of(1L));
+    }
 
     private static MovieRequest request(String imageUrl, String videoUrl) {
         return new MovieRequest("Dune", "Sinopsis", 155, 2021, imageUrl, videoUrl, Set.of(1L));

@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **2239** | 1887 con H2 y 352 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **1099** | |
-| E2E (Playwright) | **173** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
+| Backend (JUnit) | **2337** | 1971 con H2 y 366 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
+| Frontend (Vitest) | **1137** | |
+| E2E (Playwright) | **177** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
 
@@ -48,8 +48,8 @@ Todos en verde en la máquina del autor.
 Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que verse y usarse bien en móvil, tablet y escritorio** (y cualquier tamaño intermedio); toda pantalla nueva o rehecha se comprueba como mínimo a 375, 768 y 1280 px, y a 1920 px en escritorio ancho.
 
 1. ✅ ~~**Rehacer la maquetación de la página de película**~~ — **hecho el 2026-10-15** (también `/series/:id`; ver el [historial](#4-historial-de-trabajos)).
-2. ✅ ~~**Escaneo de vulnerabilidades en el CI**~~ — **hecho el 2026-10-15** (faltan tus ajustes en GitHub: [2.4](#24-acciones-tuyas-datos-y-decisiones)).
-3. **«Películas similares»** en cada página de película ([2.9](#29-funcionalidades-nuevas)).
+2. ✅ ~~**Escaneo de vulnerabilidades en el CI**~~ — **hecho el 2026-10-15** (y los ajustes de GitHub, hechos por el autor).
+3. ✅ ~~**«Películas similares»**~~ — **hecho el 2026-10-15** (ver el [historial](#4-historial-de-trabajos)).
 4. **«Me gusta» y recomendaciones en el inicio** ([2.9](#29-funcionalidades-nuevas)).
 5. **Revisión visual humana** del frontend ([2.3](#23-revisión-visual-humana-del-frontend)).
 6. **Antes de publicar la app:** HTTPS, HSTS, cookie `Secure` y CAPTCHA (puntos 9, 12, 18 y 19 de la lista de seguridad).
@@ -62,11 +62,8 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 
 | Tema | Prioridad | Dónde |
 | :--- | :--- | :--- |
-| Ajustes de seguridad de GitHub (alertas, *code scanning*, PR de forks) | Media | [2.4](#24-acciones-tuyas-datos-y-decisiones) |
-| «Películas similares» | Media | [2.9](#29-funcionalidades-nuevas) |
 | «Me gusta» y recomendaciones | Media | [2.9](#29-funcionalidades-nuevas) |
 | Revisión visual humana | Media | [2.3](#23-revisión-visual-humana-del-frontend) |
-| Portadas locales y URLs antiguas en tu base | Media | [2.4](#24-acciones-tuyas-datos-y-decisiones) |
 | Bloqueo de cuenta como arma (residual) | Media | [2.5](#25-seguridad) |
 | CORS y cabeceras por perfil (S12) | Media | [2.5](#25-seguridad) |
 | Reproductor integrado y siguientes pasos de series | Media | [2.9](#29-funcionalidades-nuevas) |
@@ -94,18 +91,18 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 ### 2.4 Acciones tuyas (datos y decisiones)
 
 - ✅ ~~**Auditoría: comprobar Supabase**~~ — **hecho por el autor el 2026-10-08**: todas las tablas con RLS, ningún permiso para `anon`/`authenticated`, privilegios por defecto cerrados para el rol de la app y **Data API desactivada** (ver el [historial](#4-historial-de-trabajos)).
-- **Ajustes de seguridad en GitHub** (tras subir `seguridad.yml`) — *Media · BAJA*
+- ✅ ~~**Ajustes de seguridad en GitHub**~~ — **hecho por el autor el 2026-10-15** (se conservan los pasos como referencia)
   1. **Settings → Advanced Security** (antes «Code security and analysis»): activar *Dependency graph*, *Dependabot alerts* y *Dependabot security updates*.
   2. En esa misma página, que **CodeQL no esté en *default setup*** (chocaría con el workflow, que es *advanced setup*).
   3. **Settings → Actions → General → «Fork pull request workflows»**: *Require approval for all external contributors* (un PR de un desconocido no ejecuta nada hasta que lo apruebes).
   4. Opcional: un **ruleset** sobre `main` con *Require code scanning results* (CodeQL y OSV-Scanner, umbral *High or higher*) y un **CODEOWNERS** para `.github/` y `osv-scanner.toml` (un PR puede editar el propio escaneo o sus excepciones; así siempre lo revisas tú).
   5. Comprobar en la pestaña **Actions** que `Seguridad` sale en verde y en **Security → Code scanning** que aparecen CodeQL y OSV-Scanner. Los workflows programados se desactivan tras 60 días sin actividad en el repositorio (se reactivan desde Actions).
 - **Si algún día se publica la app** — *Alta (antes de publicar) · BAJA*: `STREAMBOX_BIND_ADDRESS=0.0.0.0` solo con TLS delante, y `set_real_ip_from`/`real_ip_header` en nginx. Hoy no aplica (solo se publica en `127.0.0.1`).
-- **Portadas locales: ejecutar el SQL** — *Media · BAJA*
+- ✅ ~~**Portadas locales: ejecutar el SQL**~~ — **hecho por el autor el 2026-10-15**
   - Desde la tarea 21 la UI usa solo `imageUrl`: las películas cuyo `image_url` no apunte a una imagen alcanzable muestran un hueco con el título.
   - Se arregla ejecutando a mano `docs/portadas-locales.sql` (pone las 10 portadas de ejemplo en `/covers/*.webp`; opcional e idempotente; no se ha ejecutado).
   - Desde el 2026-10-04 esas rutas pasan la validación de la API (`@HttpsUrl` admite `/covers/<archivo>`), así que también puedes ponerlas desde el panel, película a película.
-- **URLs antiguas en tu base de datos** — *Media · BAJA*
+- ✅ ~~**URLs antiguas en tu base de datos**~~ — **revisado por el autor el 2026-10-15**
   - El panel no deja guardar una película con `imageUrl`/`videoUrl` `http://` o con caracteres no ASCII (el `PUT` reenvía todos los campos).
   - Para localizarlas (consulta de solo lectura, lánzala tú en Supabase):
     `SELECT id, title, image_url, video_url FROM movies WHERE (image_url NOT LIKE 'https://%' AND image_url NOT LIKE '/covers/%') OR video_url NOT LIKE 'https://%';`
@@ -131,13 +128,13 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 | 11 | Rate limiting | 🟡 | Por IP en login, registro y refresh; bloqueo de cuenta con «IP conocida»; intentos del cambio de contraseña. **Falta:** límite para el tráfico autenticado y `limit_req` en nginx (notas de la auditoría 1); contadores en memoria (por réplica) |
 | 12 | Protección contra bots | ⬜ | Solo los límites del punto 11. **Falta:** un CAPTCHA (p. ej. Cloudflare Turnstile o hCaptcha) en el registro y en el login tras varios fallos, validado en el backend. Ver la tarea nueva abajo |
 | 13 | Parametrizar consultas | ✅ | JPQL y SQL nativo con parámetros con nombre; desde el 2026-10-14 la búsqueda por título (`TitleSearch`) también envía el texto como **parámetro enlazado** (`HibernateCriteriaBuilder.value`) y no como literal: antes, un carácter nulo (`%00`) daba 500 y rompía una conexión del pool en PostgreSQL. Además, el parámetro `title` se valida (≤150 caracteres, sin caracteres de control → 400) |
-| 14 | Validar las entradas | 🟡 | Bean Validation en todos los DTOs, `PasswordPolicy`, `@HttpsUrl`, solo JSON (YAML/formulario/multipart → 415), máximos de tamaño. **Falta:** `@Size(max = 100)` en el email del registro, `@NotNull` por elemento en `MovieRequest.genreIds` y desactivar la coerción de escalares de Jackson (ya anotados en 2.5 y 2.6) |
+| 14 | Validar las entradas | ✅ | Bean Validation en todos los DTOs, `PasswordPolicy`, `@HttpsUrl`, solo JSON (YAML/formulario/multipart → 415), máximos de tamaño. Desde el 2026-10-15: email ≤100 en registro y login (también tras pasarlo a minúsculas), `genreIds` sin `null` (antes 500), **sin conversión automática de escalares** (`StrictJsonScalarsConfig`: un número en un campo de texto → 400 `MALFORMED_REQUEST`) y mensajes en español iguales a los del frontend |
 | 15 | Sanitizar contenidos | ✅ | React escapa todo lo que pinta (sin `dangerouslySetInnerHTML` ni `eval`), CSP estricta en nginx, URLs validadas (`getSafeVideoUrl`, `@HttpsUrl`), nombres normalizados; la API no genera HTML |
 | 16 | Restringir archivos | ✅ | No hay subidas de archivos (multipart desactivado); nginx solo sirve `dist/` y reenvía únicamente `/api/` (`/actuator` no se publica, `;` en la ruta → 400, `server_tokens off`, sin listado de carpetas); la imagen se construye con `.dockerignore` en lista blanca y `application-local.properties` no entra ni en el JAR ni en la imagen. Detalle menor anotado: `disable_symlinks on` como defensa extra |
 | 17 | Devolver solo los datos necesarios | ✅ | DTOs de respuesta sin hash de contraseña ni datos internos (`UserResponse`: id, nombre, email, rol, fecha); errores en `ErrorResponse` sin trazas ni mensajes del framework (también por `/error`); `/actuator/health` sin detalles; series sin episodios indistinguibles. Detalle menor anotado: `GET /api/users` (ADMIN) devuelve todos los usuarios sin paginar |
 | 18 | Cabeceras de seguridad | 🟡 | nginx: CSP estricta, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, COOP y CORP a nivel de `server` (y `nosniff` también en los errores del backend). **Falta:** HSTS, comentado hasta que haya HTTPS (ver 19) |
 | 19 | Forzar HTTPS | ⬜ | Hoy la app solo se publica en `127.0.0.1:8088` por HTTP (nginx escucha en el 8080 del contenedor, sin TLS). **Falta, antes de publicarla:** un proxy o certificado TLS delante (p. ej. Caddy o Traefik con Let's Encrypt, o el del proveedor), redirección 301 de HTTP a HTTPS, activar HSTS y `STREAMBOX_AUTH_COOKIE_SECURE=true` (y `X-Forwarded-Proto` correcto) |
-| 20 | Escanear dependencias | ✅ | Dependabot semanal (actualiza versiones) y, desde el 2026-10-15, `.github/workflows/seguridad.yml` en cada push, PR y cada lunes: `npm audit` (altas en producción, críticas en desarrollo), **OSV-Scanner** sobre Maven con transitivas y npm (rompe con cualquier vulnerabilidad y **también si el escaneo no termina**; excepciones con motivo y caducidad ≤90 días, validadas) y CodeQL (Java, TypeScript y workflows) en la pestaña Security. Encontró 17 vulnerabilidades reales (Tomcat y Jackson), corregidas. **Te toca:** los ajustes de GitHub de [2.4](#24-acciones-tuyas-datos-y-decisiones). Opcional: escanear las imágenes Docker |
+| 20 | Escanear dependencias | ✅ | Dependabot semanal (actualiza versiones) y, desde el 2026-10-15, `.github/workflows/seguridad.yml` en cada push, PR y cada lunes: `npm audit` (altas en producción, críticas en desarrollo), **OSV-Scanner** sobre Maven con transitivas y npm (rompe con cualquier vulnerabilidad y **también si el escaneo no termina**; excepciones con motivo y caducidad ≤90 días, validadas) y CodeQL (Java, TypeScript y workflows) en la pestaña Security. Encontró 17 vulnerabilidades reales (Tomcat y Jackson), corregidas. Opcional: escanear las imágenes Docker |
 
 - **Protección contra bots (CAPTCHA)** — *Media · MEDIA* (`security` + `frontend`). Cloudflare Turnstile (gratuito, sin rastreo y sin marcar semáforos) o hCaptcha: el widget en el registro y en el login a partir de N fallos, y el backend valida el token con la API del proveedor antes de crear la cuenta o comprobar la contraseña. Exige una clave de sitio (pública, en el frontend) y una secreta (variable de entorno, nunca en git), una petición saliente desde el backend (hoy el backend no sale a Internet en compose: abrirle solo esa salida) y desactivarlo en los tests. Ajustar la CSP de nginx (`script-src`/`frame-src` del proveedor).
 - ✅ ~~**Escaneo de vulnerabilidades en el CI**~~ — **hecho el 2026-10-15** (ver el [historial](#4-historial-de-trabajos)).
@@ -191,9 +188,9 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 
 ### 2.6 Backend y API
 
-- **Coerción de escalares de Jackson** — *Baja · BAJA*. `"password": 123456789012.5` (un número) crea la cuenta con ese texto; `true` da 400 de longitud. Desactivar `ALLOW_COERCION_OF_SCALARS` para que un campo de texto solo acepte texto (cambio global: revisar que el frontend envía los números como números).
+- ✅ ~~**Coerción de escalares de Jackson**~~ — **hecho el 2026-10-15** (punto 14). Era: `"password": 123456789012.5` (un número) crea la cuenta con ese texto; `true` da 400 de longitud. Desactivar `ALLOW_COERCION_OF_SCALARS` para que un campo de texto solo acepte texto (cambio global: revisar que el frontend envía los números como números).
 - **Validador de URLs: puertos y `_`** — *Baja · BAJA*. `java.net.URI` acepta puertos imposibles (`:99999`, `:0`) y rechaza hosts con guion bajo (`cdn_1.example.com`) que los navegadores sí cargan. Sin riesgo (el servidor nunca abre estas URLs); decidir el comportamiento.
-- **`@NotBlank` sin mensaje en `MovieRequest`** — *Baja · BAJA*. Los campos obligatorios de película usan el mensaje por defecto, que depende del idioma de la JVM. El frontend ya los valida antes con sus propios textos; poner mensajes en español cambia el contrato (coordinar con `lib/movieValidation.ts`).
+- ✅ ~~**`@NotBlank` sin mensaje en `MovieRequest`**~~ — **hecho el 2026-10-15** (mismos textos que `lib/movieValidation.ts`). Era: Los campos obligatorios de película usan el mensaje por defecto, que depende del idioma de la JVM. El frontend ya los valida antes con sus propios textos; poner mensajes en español cambia el contrato (coordinar con `lib/movieValidation.ts`).
 - **Normalización del email duplicada** — *Baja · BAJA*. `UserService`, `AuthenticationService`, `LoginAttemptService` y `AdminAccountInitializer` normalizan cada uno el email: centralizarlo evita que diverjan. `UserService` recorta el usuario con `trim()` (un espacio de no separación final crearía un «gemelo» visual): usar la expresión de `GenreService`.
 - **OpenAPI: 500 sin documentar** — *Opcional · BAJA*. Ningún endpoint documenta el 500; se podría añadir desde `ErrorResponseOpenApiCustomizer`. Algunas descripciones de 409 no nombran su `code` (`USER_ALREADY_EXISTS`, `MOVIE_ALREADY_IN_FAVORITES`).
 - **DTOs de petición con Lombok** — *Opcional · BAJA*. `CreateUserRequest` y `LoginRequest` siguen siendo clases con `@Getter/@Setter`: convertirlas a `record` por coherencia con `MovieRequest` y `GenreRequest`.
@@ -218,9 +215,9 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 
 - ✅ ~~**Página de película: rehacer la maquetación**~~ — **hecho el 2026-10-15** (y `/series/:id`; ver el [historial](#4-historial-de-trabajos)).
 - **Páginas de detalle: lo que queda (decisión tuya)** — *Opcional · BAJA* (`frontend`)
-  - **«Editar» en la página de una serie** (como en la de película), con «Volver a la serie» en `SeriesFormPage`.
+  - ✅ ~~**«Editar» en la página de una serie**~~ — **hecho el 2026-10-15** (como en la de película), con «Volver a la serie» en `SeriesFormPage`.
   - ✅ ~~**Géneros de la ficha de una serie como enlaces**~~ — **hecho el 2026-10-15**: enlazan a `/series?genero=<id>`.
-  - A 1920 px, con una sola banda de ficha, queda aire debajo hasta que exista «Películas similares».
+  - ✅ ~~A 1920 px, con una sola banda de ficha, queda aire debajo hasta que exista «Películas similares».~~ — resuelto: ya existe la fila «Películas similares».
   - Año y duración salen en el banner y en la ficha (como el «Acerca de» de Netflix): ¿se queda la repetición y la línea separadora?
   - El esqueleto de la serie pinta siempre el selector de temporadas, aunque luego solo haya una (pequeño salto).
   - En la ficha de una serie, «Temporadas: 1» y «Episodios: 1» usan la etiqueta en plural (habitual en una ficha; el banner sí dice «1 temporada»).
@@ -229,7 +226,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 - **Diseño: propuestas de las revisiones (decisión tuya)** — *Opcional · BAJA*
   - **Fuente:** Geist Sans (licencia OFL, `woff2` alojado en `public/fonts`, compatible con la CSP). Hoy se usa la del sistema (Segoe UI en Windows), lo más genérico que queda; no se instaló porque es un recurso nuevo.
   - Subir el borde `white/30` de los botones `outline` y de `SeasonPicker` (≈2,7:1) a `field-border` (cambia todos los botones secundarios).
-  - Un enlace «Volver a series» en el detalle de una serie.
+  - ✅ ~~Un enlace «Volver a series» en el detalle de una serie~~ — **hecho el 2026-10-15** (y «Volver a películas» en el de película, `components/BackLink.tsx`).
   - Unificar los tres cuadros de error (`ErrorState`, `LatestSeriesRow`, `GenreCheckboxes`) en `ErrorState compact`.
   - La fila «Contraseña» de `/perfil`, con puntos, podría sugerir que se puede editar.
   - Opcional: `impeccable init` para generar `PRODUCT.md`/`DESIGN.md` con el contexto de diseño del proyecto.
@@ -244,7 +241,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - Con `?anio=99` en la URL, el año inválido se ignora sin mostrar error en el campo (solo aparece al teclearlo); avisar también ahí es un cambio en `useCatalogFilters` (afecta a películas y series).
   - ✅ ~~Los mismos filtros (género, año, orden) podrían llevarse a `/series`~~ — **hecho el 2026-10-15** (ver el [historial](#4-historial-de-trabajos)).
   - **«Año» en series = año de estreno** (decisión tuya): una serie de 2019 a 2023 no sale con `?anio=2021`. Si se quiere «en emisión ese año» es un cambio de backend (`SeriesSpecification.hasReleaseYear`); si no, quizá la etiqueta debería decir «Año de estreno».
-  - **Vacío con filtros para ADMIN en `/series`:** explica que las series sin episodios no aparecen, pero no ofrece «Gestionar series» como acción secundaria (opcional).
+  - ✅ **hecho el 2026-10-15** ("Gestionar series" como acción secundaria). Era: **Vacío con filtros para ADMIN en `/series`:** explica que las series sin episodios no aparecen, pero no ofrece «Gestionar series» como acción secundaria (opcional).
 - **Panel de administración: detalles de diseño** — *Opcional · BAJA*
   - Al cargar los géneros, el formulario de película salta ~128 px en móvil (reservar el hueco con esqueletos).
   - Durante una búsqueda, el título accesible de la tabla ya describe la búsqueda nueva mientras se ven las filas antiguas (atenuadas, `aria-busy`).
@@ -253,6 +250,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 - ✅ ~~**Portadas pesadas en `public/covers/`**~~ — **hecho el 2026-10-09**: las 21 JPG recomprimidas **con el mismo nombre** (máx. 800 px de ancho, calidad 82, progresivas, sin metadatos): de 17,9 MB a 3,5 MB (la carpeta, de 19 MB a 4,4 MB). Ninguna URL cambia, así que tu base de datos no se toca. E2E 150/150.
 - **E2E de dos pestañas** — *Baja · BAJA* (`frontend`). La propagación de la sesión entre pestañas está probada con Vitest (dos canales) y a mano con `agent-browser`, pero no con un E2E (`context.newPage()` en `e2e/auth.spec.ts`).
 - **Detalles del frontend (limpieza y auditoría)** — *Opcional · BAJA*
+  - Tras pulsar «Reintentar» en un `ErrorState`, el botón desaparece (pasa a la silueta) y el foco cae en `<body>`: llevarlo al contenido que llega o a la región (visto en «Películas similares», 2026-10-15).
   - `public/favicon.svg` es el logo por defecto de Vite (decisión de diseño).
   - La prop `alt` de `MoviePoster` no se usa en producción (siempre `alt=""`), pero está documentada y probada (4 tests).
   - `oxlint -W suspicious` avisa de `exhaustive-effect-dependencies` en `FavoritesContext`, `useCatalog`, `MovieRow` y `SearchBar` (revisar las dependencias de esos efectos).
@@ -261,7 +259,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 
 ### 2.9 Funcionalidades nuevas
 
-- **«Películas similares» en cada película** — *Media · BAJA-MEDIA* (`backend` + `frontend`). Para que el usuario siga navegando por títulos de su gusto. Primera versión sin IA: las que comparten más géneros con la película (y, de desempate, años cercanos y novedad), excluida ella misma, con un endpoint propio (p. ej. `GET /api/movies/{id}/similar?limit=…`) y una fila al final de `/peliculas/:id` (lo mismo para series si encaja). Sin N+1 y con índices adecuados (`database` si hace falta).
+- ✅ ~~**«Películas similares» en cada película**~~ — **hecho el 2026-10-15** (`GET /api/movies/{id}/similar`, ver el [historial](#4-historial-de-trabajos)). Queda opcional: **lo mismo para series** (`series_genres`, misma consulta) y, si el catálogo creciera mucho, precalcular o cachear (el coste crece con las películas que comparten género, no con `limit`).
 - **«Me gusta» y recomendaciones personalizadas** — *Media · MEDIA-ALTA* (`database` + `backend` + `security` + `frontend`). Decisiones del autor (2026-10-14):
   - **Un corazón** (sí/no), no estrellas ni pulgares.
   - **Distinto de «Mi lista»:** «Mi lista» = *quiero verla*; «me gusta» = *la vi y me gustó*. La interfaz debe dejar clara la diferencia (iconos y textos distintos).
@@ -289,6 +287,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - Al fallar, los 7 tests del proyecto `catalogo-mutable` salen «did not run»; con `--project=catalogo-mutable --no-deps` pasan 7/7.
 - **E2E inestables con la máquina cargada** — *Baja · BAJA*
   - Un aviso que aparece bajo el cursor queda pausado por el *hover* y puede tapar un botón de la fila (p. ej. «Borrar» en Géneros, `admin.spec.ts:122`). Pausar solo con movimiento real del puntero, o colocar los avisos sin tapar acciones, cambia el comportamiento: queda como propuesta.
+  - El 2026-10-15, con la batería en 8 min (en vez de ~4), falló una vez `auth.spec.ts:484` (dos pestañas renuevan a la vez); por separado pasó 3/3.
   - El 2026-10-08, con la batería tardando casi 4 minutos en lugar de ~1, fallaron entre 2 y 4 E2E distintos por tiempo agotado; el último commit, sin los cambios del día, falló igual. Con la máquina menos cargada, 144/144.
   - Tests E2E de entre 15 y 19 s (`admin-series.spec.ts:61`, géneros de `admin.spec.ts`, `admin-peliculas.spec.ts:31`), por debajo del límite de 30 s.
   - Vitest: un fallo suelto no reproducible (1 de ~20 ejecuciones) y, en otra ocasión, 5 fallos en una de cuatro ejecuciones con la máquina cargada (80 s en vez de 33 s; no se guardó la salida). Si reaparece, mirar primero los tiempos de espera.
@@ -417,13 +416,29 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
 
+### 2026-10-15 · «Películas similares» (punto 3 del orden)
+
+- **Qué:** al pie de `/peliculas/:id`, una fila con las películas más parecidas, para seguir navegando. Primera versión sin IA.
+- **Consulta** (`database`): `MovieRepository.findSimilarMovieIds` (SQL nativo portable: auto-join de `movie_genres`, `COUNT(*)` = géneros en común; orden: géneros en común ↓, distancia en años ↑, `created_at` ↓, `id` ↑; `FETCH FIRST`) + `findAllWithGenresByIdIn` (`@EntityGraph`). Sin índice nuevo: `EXPLAIN ANALYZE` en PostgreSQL 16 da 0,3 ms con 200 películas, 2 ms con 5 000 y 33 ms con 100 000. Manual §14.6.
+- **Endpoint** (`backend`): `GET /api/movies/{id}/similar?limit=` (1–24, por defecto 12) → lista ordenada; 404 igual que el detalle; `MovieService.getSimilarMovies` en tres pasos (existencia, ids, carga con géneros) y el orden reconstruido con un `Map`: **3 sentencias** sea cual sea el número de películas. La regla de lectura del catálogo ya lo cubría. Manual §13.1 y §14.7; README.
+- **Frontend** (`frontend`): `hooks/useSimilarMovies.ts` (TanStack, clave bajo `movies`: editar o borrar en el panel la refresca) y `components/SimilarMoviesRow.tsx` (reutiliza `PosterRow`; vacío → no se pinta nada; error → aviso con «Reintentar» sin romper la página). Manual §20.8 bis.
+- **Revisión de `qa`** (+31 tests de backend, entre ellos un oráculo que compara el orden de la base con el criterio calculado en Java en H2 y PostgreSQL; +5 de Vitest; +1 E2E): sin fallos en el backend. Encontró que la fila **heredaba el desplazamiento horizontal** de la película anterior si las dos estaban en caché (React reutilizaba el mismo `<ul>`): corregido con `key={movie.id}` y su E2E de regresión. OpenAPI: el 400 también cubre un id no numérico.
+- **Verificación:** backend **2337** (366 contra PostgreSQL), Vitest **1137**, E2E **177** + 24 omitidos; build y lint limpios.
+- **Pendiente menor:** tras «Reintentar», el foco cae en `<body>` (pasa en todos los `ErrorState` con `onRetry`, ver 2.8); `docs/api/openapi.yaml` y la colección de Postman no tienen aún el endpoint (regenerar con `docs/api/README.md`).
+
+### 2026-10-15 · Punto 14 de seguridad cerrado y página de serie a la par que la de película
+
+- **Validación de entradas** (`backend`): email ≤100 caracteres en registro y login (y de nuevo tras normalizarlo: `İ` pasa a 2 caracteres al bajarla a minúsculas); `genreIds` sin `null` (`[1, null]` daba 500 por una NPE en `MovieService.resolveGenres`); `config/StrictJsonScalarsConfig` desactiva la conversión automática de escalares de Jackson 3 (`"password": 123456789012.5` creaba la cuenta: ahora 400 `MALFORMED_REQUEST`); mensajes de `MovieRequest` en español e **idénticos a los del formulario** («La sinopsis no puede superar los 1000 caracteres»…). OpenAPI y manual (cap. 13.3 y 14) al día. El frontend ya enviaba números como números: sin efectos. Backend de 2239 a **2263**. Pendiente: demostrar ejecutándolo que cada test nuevo falla sin su arreglo (el agente no pudo desactivar el código temporalmente: se lo impidió el sistema de permisos).
+- **Página de serie** (`frontend`): «Editar» solo para ADMIN con vuelta a la serie (`getReturnTo`, lista blanca: rechaza otra serie, query, URLs externas, `//host` y `javascript:`), «Volver a series» y «Volver a películas» (`components/BackLink.tsx`, también en el esqueleto para que nada salte) y «Gestionar series» en el vacío con filtros del ADMIN. Al guardar, el formulario de serie no vuelve solo (es donde se gestionan los episodios): se vuelve con «Volver a la serie». Vitest de 1099 a **1120**.
+- **Verificación** (orquestador): build y lint limpios, Vitest 1120/1120, E2E **173** + 24 omitidos (uno inestable con la máquina cargada, ver 2.10).
+
 ### 2026-10-15 · Escaneo de vulnerabilidades en el CI (punto 20 de seguridad)
 
 - **Problema:** Dependabot actualizaba versiones, pero nada avisaba de que una dependencia actual (directa o transitiva) tuviera una vulnerabilidad conocida, ni la paraba en un PR; el CI instalaba con `npm ci --no-audit`.
 - **Arreglo** (`backend`): `.github/workflows/seguridad.yml`, en cada push a `main`, cada PR y **cada lunes** (las CVE aparecen sin que cambie el código): `npm-audit` (sin instalar; altas o críticas en producción, críticas en desarrollo), `osv` (**OSV-Scanner** sobre Maven, resolviendo las transitivas desde Maven Central, y npm; script propio `.github/scripts/osv-escanear.sh` con la imagen fijada por digest) y `codeql` (Java, TypeScript y los propios workflows, en la pestaña Security). Permisos mínimos por job y acciones fijadas por SHA. Excepciones en `osv-scanner.toml`, validadas por `.github/scripts/validar_osv_toml.py` (motivo y caducidad ≤90 días; nada de ignorar paquetes enteros). Cap. 4.6 del manual; README con insignia y tabla.
 - **Lo que encontró nada más crearlo:** **17 vulnerabilidades reales** (3 críticas) en `tomcat-embed-core` 11.0.24 y Jackson 2.21.5 / 3.1.5, transitivas de Spring Boot 4.1.1, todas en producción. Spring Boot 4.1.2 aún no existía: se sobrescribieron las versiones en el `pom.xml` (Tomcat 11.0.27, Jackson 2.21.7 y 3.1.7, solo de parche y con ≥7 días publicadas) con una regla de `maven-enforcer-plugin` que obliga a revisarlas al subir Spring Boot. Backend **2239** (352 contra PostgreSQL) y E2E **173** en verde; OSV, 0 vulnerabilidades.
 - **Revisión de `security`:** el workflow reutilizable oficial de OSV **fallaba abierto** (con Maven Central caído daba verde y subía un SARIF vacío que, en `main`, cerraba las alertas de Security): sustituido por el job propio, que falla si el escaneo no termina (probado bloqueando la red). También el validador de excepciones y los comentarios de permisos (zizmor 0 avisos, actionlint 0). En una segunda revisión: el escaneo se comprueba **en positivo** (cuenta en `results.json` los paquetes de cada manifiesto, con `--all-packages`: ≥100 de Maven y ≥150 de npm; antes, si dejaban de resolverse las transitivas o desaparecía un manifiesto, salía en verde), la salida de las herramientas va entre `::stop-commands::` (un `groupId` preparado en un `pom.xml` de un PR **sí** podía inyectar comandos al runner a través del mensaje de error: comprobado) y el validador escapa lo que imprime y exige 20 letras o cifras en el motivo.
-- **Te toca:** los ajustes de GitHub de [2.4](#24-acciones-tuyas-datos-y-decisiones).
+- **Ajustes de GitHub:** hechos por el autor el mismo día (2.4).
 
 ### 2026-10-15 · Filtros en `/series` y flechas de las filas solo cuando hacen falta
 
