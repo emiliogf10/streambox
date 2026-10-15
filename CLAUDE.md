@@ -15,7 +15,7 @@ Plataforma de streaming tipo Netflix. Es un **proyecto de portfolio**: el objeti
 | `streambox/` | Backend: Java 21, Spring Boot 4.1, Maven (wrapper `mvnw`), PostgreSQL, Flyway |
 | `frontend/` | SPA: React 19, Vite, TypeScript, Tailwind v4 |
 | `docs/` | Plan de acción y documentación |
-| `.github/` | CI (`workflows/ci.yml`: backend, frontend, e2e y docker) y Dependabot |
+| `.github/` | CI (`workflows/ci.yml`: backend, frontend, e2e y docker), escaneo de vulnerabilidades (`workflows/seguridad.yml`: npm audit, OSV-Scanner que falla si el escaneo no termina, CodeQL; scripts en `scripts/`, excepciones en `osv-scanner.toml` de la raíz con motivo y caducidad ≤90 días) y Dependabot. **`streambox/pom.xml` sobrescribe Tomcat y Jackson** (vulnerables en Spring Boot 4.1.1); una regla del enforcer rompe el build al cambiar el padre: al subir Spring Boot, quita las sobrescrituras que ya cubra (cap. 4.6 del manual) |
 | raíz | `docker-compose.yml` (db + backend + frontend con nginx), `.env.example` (plantilla; `.env` está ignorado) |
 | `.claude/agents/` | Agentes especializados (ver abajo) |
 

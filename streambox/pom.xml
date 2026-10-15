@@ -20,6 +20,39 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
 <scm><connection /><developerConnection /><tag /><url /></scm>
 <properties>
 <java.version>21</java.version>
+<!--
+  PARCHES DE SEGURIDAD TEMPORALES (2026-10-15) sobre versiones que fija el
+  padre. Spring Boot 4.1.1 (el ultimo publicado) gestiona Tomcat 11.0.24 y
+  Jackson 2.21.5 / 3.1.5, que tienen 17 vulnerabilidades conocidas que llegan
+  a produccion (las detecta OSV-Scanner en .github/workflows/seguridad.yml).
+  Sobrescribir estas propiedades de spring-boot-dependencies cambia la
+  version de TODOS los artefactos de cada grupo a la vez (sin mezclas).
+  Solo subidas de parche, y la version mas reciente con al menos 7 dias
+  publicada (el mismo criterio que el "cooldown" de Dependabot).
+
+  QUITAR CADA PROPIEDAD al subir el padre a un Spring Boot que gestione esa
+  version o una mayor (miralo en su spring-boot-dependencies-X.pom). Si se
+  deja, ganaria a la del padre nuevo y podria dejarnos en una version MAS
+  ANTIGUA: Dependabot sube el padre pero no toca estas propiedades.
+-->
+<!--
+  Tomcat (servidor web embebido): 11.0.24 tiene 3 vulnerabilidades criticas
+  (GHSA-9xv2-5v5q-p794, GHSA-gcx9-497g-6cp6, GHSA-h3x4-894j-xpx5), arregladas
+  en 11.0.25. La propiedad cubre tomcat-embed-core, -el y -websocket.
+-->
+<tomcat.version>11.0.27</tomcat.version>
+<!--
+  Jackson 2 (com.fasterxml.jackson): lo usa jjwt-jackson para leer los JWT.
+  2.21.5 tiene vulnerabilidades altas y medias en jackson-core y
+  jackson-databind, arregladas en 2.21.7.
+-->
+<jackson-2-bom.version>2.21.7</jackson-2-bom.version>
+<!--
+  Jackson 3 (tools.jackson): el JSON de Spring MVC (peticiones y respuestas de
+  toda la API). 3.1.5 tiene vulnerabilidades altas y medias en jackson-core y
+  jackson-databind, arregladas en 3.1.7.
+-->
+<jackson-bom.version>3.1.7</jackson-bom.version>
 </properties>
 <dependencies>
 <dependency>
@@ -186,6 +219,41 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
 <artifactId>lombok</artifactId>
 </path>
 </annotationProcessorPaths>
+</configuration>
+</execution>
+</executions>
+</plugin>
+<!--
+  RECORDATORIO OBLIGATORIO de los parches de seguridad de <properties>
+  (tomcat.version, jackson-2-bom.version, jackson-bom.version).
+  Esas propiedades ganan a las del padre: si Dependabot sube Spring Boot y
+  nadie las quita, podriamos quedarnos en una version MAS ANTIGUA que la que
+  trae el padre nuevo, sin que nada avise. Esta regla hace que el build falle
+  en cuanto cambia la version del padre, asi que el pull request de Dependabot
+  se quedara en rojo en el CI hasta que alguien revise las propiedades: quitar
+  las que el padre nuevo ya cubre y actualizar aqui la version esperada (o
+  quitar la regla).
+  Fase validate: falla al principio de cualquier comando de Maven (compile,
+  test, package...), antes de compilar nada.
+  SE QUITA JUNTO CON LA ULTIMA SOBRESCRITURA: sin parches no hay nada que
+  recordar. Version del plugin gestionada por el parent.
+-->
+<plugin>
+<groupId>org.apache.maven.plugins</groupId>
+<artifactId>maven-enforcer-plugin</artifactId>
+<executions>
+<execution>
+<id>revisar-parches-al-subir-spring-boot</id>
+<phase>validate</phase>
+<goals><goal>enforce</goal></goals>
+<configuration>
+<rules>
+<requireProperty>
+<property>project.parent.version</property>
+<regex>4\.1\.1</regex>
+<regexMessage>Has cambiado la version de Spring Boot (spring-boot-starter-parent). Revisa las propiedades tomcat.version, jackson-2-bom.version y jackson-bom.version de pom.xml: quita cada una si el padre nuevo ya trae esa version o una mayor (miralo en su spring-boot-dependencies-X.pom). Despues actualiza la version esperada en esta regla del maven-enforcer-plugin, o quita la regla si ya no queda ninguna sobrescritura.</regexMessage>
+</requireProperty>
+</rules>
 </configuration>
 </execution>
 </executions>

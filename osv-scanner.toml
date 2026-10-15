@@ -1,0 +1,38 @@
+# ===================================================================
+# Excepciones de OSV-Scanner (job "osv" de .github/workflows/seguridad.yml)
+#
+# El job falla con CUALQUIER vulnerabilidad conocida en las dependencias.
+# Lo normal es arreglarla subiendo la versión (directamente o fijando la
+# transitiva en el pom.xml / overrides del package.json). Solo cuando no se
+# puede (no hay versión arreglada, o la vulnerabilidad no nos afecta y
+# arreglarla rompe algo) se añade aquí una excepción, y SIEMPRE con:
+#
+#   id           el identificador del aviso (GHSA-..., CVE-... u OSV-...),
+#                tal y como sale en la columna "OSV URL" del informe.
+#   reason       por qué se acepta el riesgo: qué parte del aviso no nos
+#                afecta y por qué, o qué estamos esperando.
+#   ignoreUntil  fecha de caducidad (AAAA-MM-DD, sin comillas). Al pasar,
+#                la excepción deja de valer y el CI vuelve a fallar: obliga
+#                a revisarla en lugar de olvidarla para siempre. Mejor
+#                semanas que meses.
+#
+# Estas reglas NO son solo una recomendación: antes de escanear, el job
+# ejecuta .github/scripts/validar_osv_toml.py, que hace fallar el CI si
+# alguna excepción no tiene "id", tiene un "reason" con menos de 20 letras
+# o cifras, no tiene "ignoreUntil", lo tiene entre comillas (sería una cadena
+# y no caducaría) o caduca a más de 90 días de hoy. También rechaza
+# cualquier clave que no sea [[IgnoredVulns]] con id/reason/ignoreUntil,
+# en particular [[PackageOverrides]], que ignoraría un paquete entero.
+# Probarlo en local: python3 .github/scripts/validar_osv_toml.py osv-scanner.toml
+#
+# Ejemplo (desactivado):
+#
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# ignoreUntil = 2026-12-31
+# reason = "Solo afecta a <función de la librería>, que StreamBox no usa (<dónde se comprueba>). Pendiente de <versión> de Spring Boot, que trae la arreglada."
+#
+# Nunca se ignora un paquete entero ni todas las vulnerabilidades de una
+# vez (el validador lo impide): cada excepción es un aviso concreto. Si una excepción ya no hace
+# falta, OSV-Scanner lo dice en el log ("has unused ignores"): bórrala.
+# ===================================================================

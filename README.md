@@ -1,11 +1,12 @@
 # 🎬 StreamBox
 
 [![CI](https://github.com/emiliogf10/streambox/actions/workflows/ci.yml/badge.svg)](https://github.com/emiliogf10/streambox/actions/workflows/ci.yml)
+[![Seguridad](https://github.com/emiliogf10/streambox/actions/workflows/seguridad.yml/badge.svg)](https://github.com/emiliogf10/streambox/actions/workflows/seguridad.yml)
 [![Docker](https://img.shields.io/badge/Docker-compose-2496ED.svg?logo=docker)](#-arrancar-con-docker-recomendado)
 [![Java 21](https://img.shields.io/badge/Java-21-orange.svg?logo=openjdk)](https://www.oracle.com/java/)
-[![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1.0-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
+[![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-blue.svg?logo=postgresql)](https://www.postgresql.org/)
-[![JWT](https://img.shields.io/badge/JWT-JJWT%200.12.6-black.svg?logo=jsonwebtokens)](https://github.com/jwtk/jjwt)
+[![JWT](https://img.shields.io/badge/JWT-JJWT%200.13.0-black.svg?logo=jsonwebtokens)](https://github.com/jwtk/jjwt)
 [![OpenAPI](https://img.shields.io/badge/Swagger-OpenAPI%203-green.svg?logo=swagger)](https://swagger.io/)
 
 **StreamBox** es una plataforma de streaming y vídeo bajo demanda (OTT) al estilo Netflix: una API RESTful en **Java 21** y **Spring Boot 4** más una SPA en **React**. Ofrece una arquitectura modular y segura para gestionar usuarios, catálogo cinematográfico, búsquedas avanzadas con especificaciones dinámicas y listas personalizadas de favoritos ("Mi Lista").
@@ -15,7 +16,7 @@
 ## 🚀 Características Principales
 
 - **🔐 Autenticación y Autorización Stateless**:
-  - Emisión y validación de tokens JWT mediante `io.jsonwebtoken (JJWT 0.12.6)`.
+  - Emisión y validación de tokens JWT mediante `io.jsonwebtoken (JJWT 0.13.0)`.
   - Control de acceso basado en roles (**`USER`** y **`ADMIN`**).
   - Manejadores de excepción personalizados para `401 Unauthorized` y `403 Forbidden` en formato JSON estructurado.
 - **🎥 Catálogo y Búsqueda Dinámica**:
@@ -51,11 +52,11 @@
 | :--- | :--- |
 | **Frontend** | React 19, Vite, TypeScript, Tailwind CSS v4, TanStack Query (caché de datos del servidor) |
 | **Lenguaje Backend** | Java 21 LTS |
-| **Framework** | Spring Boot 4.1.0 |
+| **Framework** | Spring Boot 4.1.1 |
 | **Módulos Spring** | Spring WebMVC, Spring Data JPA, Spring Security, Spring Validation |
 | **Persistencia** | PostgreSQL (producción/local), Hibernate ORM, **Flyway** (migraciones) |
 | **Testing** | JUnit 5, MockMvc, `@SpringBootTest`, H2 (en memoria), Testcontainers (PostgreSQL real); Vitest y Playwright en el frontend |
-| **Seguridad** | JJWT (0.12.6), BCryptPasswordEncoder |
+| **Seguridad** | JJWT (0.13.0), BCryptPasswordEncoder |
 | **Documentación** | SpringDoc OpenAPI Starter WebMVC UI 3.1.0 |
 | **Productividad** | Lombok |
 | **Herramienta de Construcción** | Maven (con Wrapper `mvnw.cmd` / `mvnw`) |
@@ -87,7 +88,8 @@ streambox/                 # raíz del repositorio
 ├── frontend/              # SPA React + Vite + Tailwind CSS (Interfaz OTT)
 ├── docs/                  # Manual del programador, plan de acción, ADR y scripts SQL
 ├── docker-compose.yml     # db + backend + frontend (nginx)
-└── .github/               # CI (GitHub Actions) y Dependabot
+├── osv-scanner.toml       # Excepciones del escaneo de vulnerabilidades (con motivo y caducidad)
+└── .github/               # CI, escaneo de seguridad (workflows + scripts/) y Dependabot
 ```
 
 ---
@@ -348,6 +350,14 @@ Cada `push` a `main` y cada pull request ejecutan [`.github/workflows/ci.yml`](.
 | `docker` | Construye las dos imágenes, levanta el stack con `docker compose` y hace una prueba de humo (CSP, 401 de la API, login del administrador) |
 
 Ningún job necesita secretos del repositorio. [Dependabot](.github/dependabot.yml) propone cada lunes las actualizaciones de Maven, npm, GitHub Actions e imágenes Docker, agrupadas y en pull requests que pasan por el mismo CI.
+
+**Escaneo de seguridad** ([`.github/workflows/seguridad.yml`](.github/workflows/seguridad.yml)): en cada `push` a `main`, en cada pull request y **cada lunes** (una vulnerabilidad nueva aparece sin que cambie el código):
+
+| Job | Qué comprueba | ¿Rompe el CI? |
+| :--- | :--- | :--- |
+| `npm-audit` | Vulnerabilidades conocidas en `frontend/package-lock.json` | Sí: altas o críticas en producción; críticas en desarrollo |
+| `osv` | [OSV-Scanner](https://google.github.io/osv-scanner/) sobre Maven (con las dependencias transitivas) y npm | Sí, con cualquier vulnerabilidad **y también si el escaneo no llega a terminar** (p. ej. Maven Central caído: nunca da verde sin haber analizado). Las excepciones van en [`osv-scanner.toml`](osv-scanner.toml) y un paso previo exige en cada una motivo y caducidad de 90 días como máximo |
+| `codeql` | Análisis estático de Java, TypeScript y los propios workflows | No: sus avisos aparecen en la pestaña *Security* |
 
 ---
 

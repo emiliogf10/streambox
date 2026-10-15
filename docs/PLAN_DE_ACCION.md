@@ -48,7 +48,7 @@ Todos en verde en la máquina del autor.
 Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que verse y usarse bien en móvil, tablet y escritorio** (y cualquier tamaño intermedio); toda pantalla nueva o rehecha se comprueba como mínimo a 375, 768 y 1280 px, y a 1920 px en escritorio ancho.
 
 1. ✅ ~~**Rehacer la maquetación de la página de película**~~ — **hecho el 2026-10-15** (también `/series/:id`; ver el [historial](#4-historial-de-trabajos)).
-2. **Escaneo de vulnerabilidades en el CI** (punto 20 de la lista de seguridad, [2.5](#25-seguridad)).
+2. ✅ ~~**Escaneo de vulnerabilidades en el CI**~~ — **hecho el 2026-10-15** (faltan tus ajustes en GitHub: [2.4](#24-acciones-tuyas-datos-y-decisiones)).
 3. **«Películas similares»** en cada página de película ([2.9](#29-funcionalidades-nuevas)).
 4. **«Me gusta» y recomendaciones en el inicio** ([2.9](#29-funcionalidades-nuevas)).
 5. **Revisión visual humana** del frontend ([2.3](#23-revisión-visual-humana-del-frontend)).
@@ -62,7 +62,7 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 
 | Tema | Prioridad | Dónde |
 | :--- | :--- | :--- |
-| Escaneo de vulnerabilidades en el CI | Media | [2.5](#25-seguridad) |
+| Ajustes de seguridad de GitHub (alertas, *code scanning*, PR de forks) | Media | [2.4](#24-acciones-tuyas-datos-y-decisiones) |
 | «Películas similares» | Media | [2.9](#29-funcionalidades-nuevas) |
 | «Me gusta» y recomendaciones | Media | [2.9](#29-funcionalidades-nuevas) |
 | Revisión visual humana | Media | [2.3](#23-revisión-visual-humana-del-frontend) |
@@ -94,6 +94,12 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 ### 2.4 Acciones tuyas (datos y decisiones)
 
 - ✅ ~~**Auditoría: comprobar Supabase**~~ — **hecho por el autor el 2026-10-08**: todas las tablas con RLS, ningún permiso para `anon`/`authenticated`, privilegios por defecto cerrados para el rol de la app y **Data API desactivada** (ver el [historial](#4-historial-de-trabajos)).
+- **Ajustes de seguridad en GitHub** (tras subir `seguridad.yml`) — *Media · BAJA*
+  1. **Settings → Advanced Security** (antes «Code security and analysis»): activar *Dependency graph*, *Dependabot alerts* y *Dependabot security updates*.
+  2. En esa misma página, que **CodeQL no esté en *default setup*** (chocaría con el workflow, que es *advanced setup*).
+  3. **Settings → Actions → General → «Fork pull request workflows»**: *Require approval for all external contributors* (un PR de un desconocido no ejecuta nada hasta que lo apruebes).
+  4. Opcional: un **ruleset** sobre `main` con *Require code scanning results* (CodeQL y OSV-Scanner, umbral *High or higher*) y un **CODEOWNERS** para `.github/` y `osv-scanner.toml` (un PR puede editar el propio escaneo o sus excepciones; así siempre lo revisas tú).
+  5. Comprobar en la pestaña **Actions** que `Seguridad` sale en verde y en **Security → Code scanning** que aparecen CodeQL y OSV-Scanner. Los workflows programados se desactivan tras 60 días sin actividad en el repositorio (se reactivan desde Actions).
 - **Si algún día se publica la app** — *Alta (antes de publicar) · BAJA*: `STREAMBOX_BIND_ADDRESS=0.0.0.0` solo con TLS delante, y `set_real_ip_from`/`real_ip_header` en nginx. Hoy no aplica (solo se publica en `127.0.0.1`).
 - **Portadas locales: ejecutar el SQL** — *Media · BAJA*
   - Desde la tarea 21 la UI usa solo `imageUrl`: las películas cuyo `image_url` no apunte a una imagen alcanzable muestran un hueco con el título.
@@ -131,10 +137,13 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 | 17 | Devolver solo los datos necesarios | ✅ | DTOs de respuesta sin hash de contraseña ni datos internos (`UserResponse`: id, nombre, email, rol, fecha); errores en `ErrorResponse` sin trazas ni mensajes del framework (también por `/error`); `/actuator/health` sin detalles; series sin episodios indistinguibles. Detalle menor anotado: `GET /api/users` (ADMIN) devuelve todos los usuarios sin paginar |
 | 18 | Cabeceras de seguridad | 🟡 | nginx: CSP estricta, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, COOP y CORP a nivel de `server` (y `nosniff` también en los errores del backend). **Falta:** HSTS, comentado hasta que haya HTTPS (ver 19) |
 | 19 | Forzar HTTPS | ⬜ | Hoy la app solo se publica en `127.0.0.1:8088` por HTTP (nginx escucha en el 8080 del contenedor, sin TLS). **Falta, antes de publicarla:** un proxy o certificado TLS delante (p. ej. Caddy o Traefik con Let's Encrypt, o el del proveedor), redirección 301 de HTTP a HTTPS, activar HSTS y `STREAMBOX_AUTH_COOKIE_SECURE=true` (y `X-Forwarded-Proto` correcto) |
-| 20 | Escanear dependencias | 🟡 | Dependabot semanal para Maven, npm, GitHub Actions, Docker y compose (actualiza versiones). **Falta:** un escaneo de vulnerabilidades que **rompa el CI**: hoy el CI instala con `npm ci --no-audit` y no hay `npm audit`, OWASP Dependency-Check, OSV-Scanner ni CodeQL; y comprobar en GitHub (Settings → Code security) que las *Dependabot alerts* y *security updates* están activadas |
+| 20 | Escanear dependencias | ✅ | Dependabot semanal (actualiza versiones) y, desde el 2026-10-15, `.github/workflows/seguridad.yml` en cada push, PR y cada lunes: `npm audit` (altas en producción, críticas en desarrollo), **OSV-Scanner** sobre Maven con transitivas y npm (rompe con cualquier vulnerabilidad y **también si el escaneo no termina**; excepciones con motivo y caducidad ≤90 días, validadas) y CodeQL (Java, TypeScript y workflows) en la pestaña Security. Encontró 17 vulnerabilidades reales (Tomcat y Jackson), corregidas. **Te toca:** los ajustes de GitHub de [2.4](#24-acciones-tuyas-datos-y-decisiones). Opcional: escanear las imágenes Docker |
 
 - **Protección contra bots (CAPTCHA)** — *Media · MEDIA* (`security` + `frontend`). Cloudflare Turnstile (gratuito, sin rastreo y sin marcar semáforos) o hCaptcha: el widget en el registro y en el login a partir de N fallos, y el backend valida el token con la API del proveedor antes de crear la cuenta o comprobar la contraseña. Exige una clave de sitio (pública, en el frontend) y una secreta (variable de entorno, nunca en git), una petición saliente desde el backend (hoy el backend no sale a Internet en compose: abrirle solo esa salida) y desactivarlo en los tests. Ajustar la CSP de nginx (`script-src`/`frame-src` del proveedor).
-- **Escaneo de vulnerabilidades en el CI** — *Media · BAJA* (`backend`, que lleva el CI). Un paso que falle con vulnerabilidades altas o críticas: `npm audit --audit-level=high` (o `--omit=dev` para lo que llega a producción) en el job `frontend`, y para Maven OSV-Scanner (`google/osv-scanner-action`, sin claves) u OWASP Dependency-Check; opcionalmente CodeQL para Java y TypeScript. Acciones fijadas por SHA, como el resto del CI. Y activar en GitHub las *Dependabot alerts* y *security updates* (lo hace el autor en Settings).
+- ✅ ~~**Escaneo de vulnerabilidades en el CI**~~ — **hecho el 2026-10-15** (ver el [historial](#4-historial-de-trabajos)).
+- **Sobrescrituras temporales de Tomcat y Jackson en `streambox/pom.xml`** — *Alta cuando llegue · BAJA* (`backend`). `tomcat.version` 11.0.27, `jackson-2-bom.version` 2.21.7 y `jackson-bom.version` 3.1.7 tapan las de Spring Boot 4.1.1 (vulnerables). **Al subir Spring Boot hay que quitar las que el padre nuevo ya cubra**: si no, podrían dejar versiones más antiguas que las suyas. Una regla de `maven-enforcer-plugin` hace fallar el build en cuanto cambia la versión del padre, para que nadie lo olvide (también el PR de Dependabot); la regla se quita con la última sobrescritura. Cap. 4.6 del manual.
+- **Escanear las imágenes Docker** — *Opcional · BAJA* (`backend` + `security`). Los paquetes del sistema de las imágenes base (Alpine, JRE, nginx) no los ve OSV. Trivy o Grype sobre las imágenes ya construidas en el job `docker` de `ci.yml` (SARIF, `CRITICAL,HIGH`, solo con arreglo disponible), fijado por SHA.
+- **Versión de OSV-Scanner por digest** — *Info*. El job `osv` usa la imagen `ghcr.io/google/osv-scanner-action` fijada por digest dentro de un `run:`, que Dependabot no actualiza: subirla a mano de vez en cuando y, al hacerlo, volver a comprobar los textos de error que busca el script y el formato de `results.json` (cap. 4.6 del manual). Detalle opcional: limitar el `id` de las excepciones a `[A-Za-z0-9._:-]` (hoy admite caracteres invisibles; no abre nada, la excepción simplemente no se aplicaría).
 - **HTTPS al publicar** — *Alta (antes de publicar) · MEDIA*. Proxy TLS delante de nginx (Caddy o Traefik con Let's Encrypt, o el TLS del proveedor), redirección 301 de HTTP a HTTPS, HSTS (`add_header Strict-Transport-Security` ya preparado y comentado en `frontend/nginx/default.conf`), `STREAMBOX_AUTH_COOKIE_SECURE=true` y `set_real_ip_from`/`real_ip_header` para que el límite por IP vea la IP real. Hoy no aplica (solo `127.0.0.1`).
 - ✅ ~~**Búsqueda por título con parámetro en vez de literal**~~ — **hecho el 2026-10-14** (ver el historial).
 
@@ -407,6 +416,14 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-10-15 · Escaneo de vulnerabilidades en el CI (punto 20 de seguridad)
+
+- **Problema:** Dependabot actualizaba versiones, pero nada avisaba de que una dependencia actual (directa o transitiva) tuviera una vulnerabilidad conocida, ni la paraba en un PR; el CI instalaba con `npm ci --no-audit`.
+- **Arreglo** (`backend`): `.github/workflows/seguridad.yml`, en cada push a `main`, cada PR y **cada lunes** (las CVE aparecen sin que cambie el código): `npm-audit` (sin instalar; altas o críticas en producción, críticas en desarrollo), `osv` (**OSV-Scanner** sobre Maven, resolviendo las transitivas desde Maven Central, y npm; script propio `.github/scripts/osv-escanear.sh` con la imagen fijada por digest) y `codeql` (Java, TypeScript y los propios workflows, en la pestaña Security). Permisos mínimos por job y acciones fijadas por SHA. Excepciones en `osv-scanner.toml`, validadas por `.github/scripts/validar_osv_toml.py` (motivo y caducidad ≤90 días; nada de ignorar paquetes enteros). Cap. 4.6 del manual; README con insignia y tabla.
+- **Lo que encontró nada más crearlo:** **17 vulnerabilidades reales** (3 críticas) en `tomcat-embed-core` 11.0.24 y Jackson 2.21.5 / 3.1.5, transitivas de Spring Boot 4.1.1, todas en producción. Spring Boot 4.1.2 aún no existía: se sobrescribieron las versiones en el `pom.xml` (Tomcat 11.0.27, Jackson 2.21.7 y 3.1.7, solo de parche y con ≥7 días publicadas) con una regla de `maven-enforcer-plugin` que obliga a revisarlas al subir Spring Boot. Backend **2239** (352 contra PostgreSQL) y E2E **173** en verde; OSV, 0 vulnerabilidades.
+- **Revisión de `security`:** el workflow reutilizable oficial de OSV **fallaba abierto** (con Maven Central caído daba verde y subía un SARIF vacío que, en `main`, cerraba las alertas de Security): sustituido por el job propio, que falla si el escaneo no termina (probado bloqueando la red). También el validador de excepciones y los comentarios de permisos (zizmor 0 avisos, actionlint 0). En una segunda revisión: el escaneo se comprueba **en positivo** (cuenta en `results.json` los paquetes de cada manifiesto, con `--all-packages`: ≥100 de Maven y ≥150 de npm; antes, si dejaban de resolverse las transitivas o desaparecía un manifiesto, salía en verde), la salida de las herramientas va entre `::stop-commands::` (un `groupId` preparado en un `pom.xml` de un PR **sí** podía inyectar comandos al runner a través del mensaje de error: comprobado) y el validador escapa lo que imprime y exige 20 letras o cifras en el motivo.
+- **Te toca:** los ajustes de GitHub de [2.4](#24-acciones-tuyas-datos-y-decisiones).
 
 ### 2026-10-15 · Filtros en `/series` y flechas de las filas solo cuando hacen falta
 

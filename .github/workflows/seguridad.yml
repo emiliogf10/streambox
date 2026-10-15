@@ -1,0 +1,273 @@
+# ===================================================================
+# Seguridad de StreamBox: vulnerabilidades conocidas en las dependencias
+# y análisis estático del código (GitHub Actions)
+#
+#   npm-audit   npm audit del frontend con la base de avisos de GitHub.
+#               ROMPE el CI con una vulnerabilidad alta o crítica en las
+#               dependencias de producción, o crítica en cualquiera.
+#   osv         OSV-Scanner (Google) sobre streambox/pom.xml (directas Y
+#               transitivas) y frontend/package-lock.json. ROMPE el CI con
+#               cualquier vulnerabilidad conocida que no tenga una excepción
+#               vigente en osv-scanner.toml, si el escaneo no termina o si
+#               ese archivo incumple las reglas de las excepciones. Publica
+#               el detalle en la pestaña Security.
+#   codeql      Análisis estático de GitHub (Java, TypeScript y los propios
+#               workflows). Informa en la pestaña Security; NO rompe el CI
+#               por sí solo (ver el comentario del job).
+#
+# Por qué un workflow aparte de ci.yml: además de en cada push y pull
+# request, este corre UNA VEZ POR SEMANA aunque nadie toque el código. Una
+# vulnerabilidad nueva se publica sobre una versión que ya usábamos: el
+# código no cambia, pero el proyecto pasa a ser vulnerable, y un CI que
+# solo corre al hacer push no se enteraría. Además, si algo de esto
+# falla, ci.yml (tests, build, E2E) sigue diciendo por separado si el
+# código funciona.
+#
+# Dependabot (.github/dependabot.yml) es complementario: propone versiones
+# nuevas, pero no avisa de que la versión ACTUAL tiene un fallo conocido ni
+# para un pull request que introduce una dependencia vulnerable. Esto sí.
+#
+# Mismas reglas que ci.yml: actions fijadas por SHA con la versión en un
+# comentario (Dependabot las actualiza), sin secretos del repositorio y
+# permisos mínimos (solo los jobs que publican en la pestaña Security
+# tienen "security-events: write"). La imagen de OSV-Scanner va fijada
+# por digest y se actualiza a mano (ver el job "osv").
+#
+# El repositorio es público: si pasara a privado, la subida a Security de
+# "osv" y "codeql" necesitaría además "actions: read"
+# (github/codeql-action#2117).
+# ===================================================================
+name: Seguridad
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Lunes a las 04:17 UTC (06:17 en Madrid en verano, 05:17 en invierno):
+  # antes de que Dependabot abra sus pull requests a las 07:00, para que la
+  # revisión semanal empiece sabiendo qué está afectado. El minuto "raro"
+  # evita las horas en punto, cuando GitHub acumula ejecuciones programadas
+  # y las retrasa. Solo corre sobre la rama por defecto (main).
+  schedule:
+    - cron: '17 4 * * 1'
+
+# Igual que en ci.yml: un push nuevo a la misma rama cancela el análisis
+# anterior, que ya no interesa.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Mínimo privilegio por defecto: solo leer el repositorio. Cada job amplía
+# lo justo.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # La misma versión mayor de Node que ci.yml y frontend/Dockerfile: el
+  # resultado de npm audit depende de la versión de npm.
+  NODE_VERSION: '24'
+
+jobs:
+  # -----------------------------------------------------------------
+  # npm audit: pregunta al registro de npm (base de avisos de GitHub) por
+  # cada paquete del package-lock.json.
+  #
+  # Dos umbrales distintos, porque el riesgo no es el mismo:
+  #   - Producción (React, React Router, TanStack Query...): acaba en el
+  #     navegador de los usuarios. Rompe con una ALTA o CRÍTICA.
+  #   - Desarrollo (Vite, Vitest, Playwright, oxlint...): solo se ejecuta en
+  #     la máquina del programador y en el CI, nunca llega al usuario. Rompe
+  #     solo con una CRÍTICA. Las demás las sigue viendo OSV-Scanner y las
+  #     propone arreglar Dependabot.
+  #
+  # No instala nada: con --package-lock-only, npm audit lee el árbol del
+  # package-lock.json (que ya dice qué paquete es de desarrollo) sin
+  # necesitar node_modules. Así el job tarda segundos y no ejecuta código de
+  # ninguna dependencia.
+  # -----------------------------------------------------------------
+  npm-audit:
+    name: npm audit (frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Sin caché de npm: no se descarga ningún paquete.
+      - name: Instalar Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Dependencias de producción (falla con altas o críticas)
+        run: npm audit --package-lock-only --omit=dev --audit-level=high
+
+      # "!cancelled()": se ejecuta aunque el paso anterior haya fallado, para
+      # ver los dos informes en la misma ejecución.
+      - name: Todas las dependencias (falla con críticas)
+        if: ${{ !cancelled() }}
+        run: npm audit --package-lock-only --audit-level=critical
+
+  # -----------------------------------------------------------------
+  # OSV-Scanner: compara las dependencias con osv.dev, la base abierta de
+  # Google que reúne los avisos de GitHub, de Maven, de npm y de los
+  # propios proyectos. Sin claves ni cuentas.
+  #
+  # Maven: el pom.xml solo declara las dependencias directas (18 paquetes);
+  # sus versiones, y las ~160 transitivas (Tomcat, Jackson, Hibernate...),
+  # las fija el padre spring-boot-starter-parent. OSV-Scanner v2 resuelve
+  # ese árbol él solo (descarga el pom del padre y los de cada dependencia
+  # de Maven Central, sin ejecutar Maven), así que no hace falta generar
+  # antes la lista con "mvn dependency:tree". También respeta las
+  # propiedades que sobrescriben versiones en nuestro pom.xml (los parches
+  # de Tomcat y Jackson): resuelve las mismas versiones que
+  # "mvnw dependency:list".
+  #
+  # Por qué un job propio y NO el workflow reutilizable oficial
+  # (google/osv-scanner-action): el reutilizable FALLA ABIERTO. Si Maven
+  # Central u osv.dev no responden, el escáner sale con error pero deja un
+  # results.json vacío; el reutilizable solo comprueba que el archivo
+  # exista, el informe dice "No issues found" y el job sale en VERDE sin
+  # haber analizado nada. Y en main, ese SARIF vacío CERRARÍA las alertas
+  # abiertas de la pestaña Security. Comprobado en local con Maven Central
+  # bloqueado. El escaneo lo hace .github/scripts/osv-escanear.sh, que
+  # falla CERRADO (ver sus comentarios): con cualquier código que no sea
+  # 0 o 1, con "Error during extraction"/"failed resolution" en el log,
+  # sin results.json y si results.json no confirma EN POSITIVO que se
+  # analizaron streambox/pom.xml y frontend/package-lock.json con un
+  # mínimo de paquetes (lista a mano en el script: un manifiesto nuevo no
+  # se exige hasta añadirlo allí); y solo entonces genera y publica el
+  # SARIF.
+  #
+  # La imagen va fijada por DIGEST (sha256), no solo por etiqueta: una
+  # etiqueta se puede mover a otra imagen; el digest identifica siempre
+  # la misma. OJO: Dependabot NO actualiza un digest escrito en un "run:"
+  # o en una variable (solo los de "uses:", Dockerfiles y compose). Hay
+  # que subirla A MANO: cuando salga una versión nueva de
+  # google/osv-scanner-action, cambiar la etiqueta y su digest (lo da
+  # "docker buildx imagetools inspect ghcr.io/google/osv-scanner-action:vX.Y.Z",
+  # el de la línea "Digest:" de la lista de manifiestos). Ver el manual,
+  # cap. 4.6.
+  # -----------------------------------------------------------------
+  osv:
+    name: OSV-Scanner (Maven y npm)
+    runs-on: ubuntu-latest
+    # Normalmente tarda menos de un minuto; el límite corta un escaneo
+    # colgado (p. ej. un registro que no responde) en lugar de esperar las
+    # 6 horas por defecto.
+    timeout-minutes: 15
+    permissions:
+      contents: read # descargar el código
+      security-events: write # subir el SARIF a la pestaña Security
+    env:
+      # VERSIÓN DE OSV-SCANNER: se actualiza a mano (ver arriba). Al
+      # subirla, comprueba en local con la versión nueva (manual, cap. 4.6)
+      # que el script sigue fallando cerrado: que los textos de error de su
+      # lista negra ("Error during extraction", "failed resolution") salen
+      # igual con Maven Central bloqueado, y que results.json mantiene el
+      # formato que usa la comprobación en positivo (source.path y
+      # packages, con las transitivas de Maven).
+      OSV_IMAGEN: ghcr.io/google/osv-scanner-action:v2.6.0@sha256:71ad04ab2f8798be47870f9b18817ad317c2f8f2f97aa6726ba10d5578bc174a
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # OSV acepta excepciones sin motivo ni caducidad (para siempre) y
+      # paquetes enteros ignorados (PackageOverrides). El script hace
+      # obligatorias las reglas de osv-scanner.toml: id, motivo con al
+      # menos 20 letras o cifras y caducidad (fecha sin comillas) a 90 días
+      # como mucho; y rechaza cualquier otra clave. "-I": Python aislado, que no
+      # cargue módulos del directorio de trabajo.
+      - name: Validar las excepciones (osv-scanner.toml)
+        run: python3 -I .github/scripts/validar_osv_toml.py osv-scanner.toml
+
+      # Código en solo lectura; resultados en el directorio temporal del
+      # runner, fuera del repositorio. Si el escaneo no termina, el paso
+      # falla y NO publica la salida "sarif".
+      - name: Escanear las dependencias
+        id: escaneo
+        run: bash .github/scripts/osv-escanear.sh "$GITHUB_WORKSPACE" "$RUNNER_TEMP/osv"
+
+      # Se sube también cuando el paso anterior falla por vulnerabilidades
+      # (es cuando interesa verlas en Security), pero SOLO si el escaneo
+      # terminó: el script publica "sarif" únicamente en ese caso. Subir un
+      # informe de un escaneo incompleto cerraría alertas que siguen
+      # abiertas. "category" fija el nombre del análisis en Security, como
+      # en CodeQL.
+      - name: Subir el informe a la pestaña Security
+        if: ${{ !cancelled() && steps.escaneo.outputs.sarif != '' }}
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: ${{ steps.escaneo.outputs.sarif }}
+          category: osv-scanner
+
+  # -----------------------------------------------------------------
+  # CodeQL: el análisis estático de GitHub. Busca patrones de código
+  # vulnerable (inyección SQL, XSS, rutas manipulables, deserialización,
+  # secretos en el código...), no dependencias. Gratis en repositorios
+  # públicos.
+  #
+  # Tres lenguajes, uno por ejecución de la matriz (en paralelo):
+  #   java-kotlin            el backend. "build-mode: none": CodeQL analiza
+  #                          el código fuente sin compilarlo (y resuelve las
+  #                          dependencias del pom.xml por su cuenta). Es más
+  #                          rápido y no necesita Java ni Maven en el job.
+  #   javascript-typescript  el frontend (no necesita compilación).
+  #   actions                los propios workflows de .github/: detecta
+  #                          inyección de expresiones ${{ }} en "run:",
+  #                          permisos excesivos, checkouts peligrosos en
+  #                          pull_request_target...
+  #
+  # No rompe el CI por sí solo: la action sube los resultados y termina en
+  # verde aunque haya alertas (CodeQL tiene falsos positivos, y lo
+  # razonable es revisarlos y descartarlos uno a uno en la pestaña
+  # Security). La forma limpia de que bloquee es una regla del repositorio,
+  # no este archivo: Settings → Rules → Rulesets → "Require code scanning
+  # results" con CodeQL y umbral "High or higher": entonces un pull request
+  # que INTRODUCE una alerta alta no se puede fusionar (ver el manual,
+  # cap. 4.6).
+  # -----------------------------------------------------------------
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read # descargar el código
+      security-events: write # subir los resultados a la pestaña Security
+    strategy:
+      # Que un lenguaje falle no cancela el análisis de los demás.
+      fail-fast: false
+      matrix:
+        language: [java-kotlin, javascript-typescript, actions]
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preparar CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      # "category" identifica cada análisis en la pestaña Security. Por
+      # defecto CodeQL la deriva del nombre del workflow y del job; fijarla
+      # evita que, al renombrar uno de los dos, las alertas existentes se
+      # queden huérfanas y vuelvan a aparecer como nuevas.
+      - name: Analizar y subir los resultados
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:${{ matrix.language }}
