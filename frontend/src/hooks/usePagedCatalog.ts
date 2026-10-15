@@ -15,24 +15,45 @@ export type CatalogStatus = 'loading' | 'ready' | 'error';
  * Orden y filtros opcionales de un catálogo paginado. Sin ellos, el catálogo va
  * del título más reciente al más antiguo (`sort=createdAt&direction=desc`).
  *
- * `genreId` y `releaseYear` solo los entiende `GET /api/movies/search`: quien
- * los pasa debe pedir ese endpoint.
+ * `genreId` y `releaseYear` solo los entienden los buscadores
+ * (`GET /api/movies/search` y `GET /api/series/search`): quien los pasa debe
+ * pedir uno de ellos.
  */
 export interface CatalogQuery {
-  /** Campo de orden de la lista blanca del servidor (`createdAt`, `title`, `releaseYear`, `duration`, `id`). */
+  /**
+   * Campo de orden de la lista blanca del servidor: `createdAt`, `title`,
+   * `releaseYear` e `id` en los dos catálogos, y `duration` solo en películas.
+   */
   sort?: string;
   direction?: 'asc' | 'desc';
   genreId?: number;
   releaseYear?: number;
 }
 
+/** Lo que devuelve {@link usePagedCatalog}: los títulos cargados y el estado de cada carga. */
+export interface PagedCatalog<T> {
+  /** Títulos de todas las páginas cargadas, en el orden del servidor y sin duplicados. */
+  items: T[];
+  /** Total de títulos que hay en el servidor (no solo los cargados). */
+  total: number;
+  status: CatalogStatus;
+  /** Motivo del fallo de la carga inicial (`''` si no ha fallado). */
+  errorMessage: string;
+  loadingMore: boolean;
+  loadMoreFailed: boolean;
+  hasMore: boolean;
+  loadMore: () => Promise<void>;
+  reload: () => void;
+}
+
 /** Lista vacía compartida: mientras no hay datos, `items` no cambia de identidad en cada render. */
 const NO_ITEMS: never[] = [];
 
 /**
- * Carga un catálogo paginado (`/movies`, `/series` o `/movies/search`) con
- * «cargar más». Es la lógica común de `useCatalog` (portada), los hooks de
- * series, `useCatalogPresence` y la página `/peliculas` (`useMovieResults`).
+ * Carga un catálogo paginado (`/movies`, `/series` o sus buscadores
+ * `/movies/search` y `/series/search`) con «cargar más». Es la lógica común de
+ * `useCatalog` (portada), los hooks de series, `useCatalogPresence` y las
+ * páginas `/peliculas` y `/series` (`useMovieResults`, `useSeriesResults`).
  *
  * **Con TanStack Query** (`useInfiniteQuery`): cada página pedida se guarda en
  * la caché bajo una clave con el endpoint, el tamaño, el orden y los filtros
@@ -67,7 +88,7 @@ export function usePagedCatalog<T extends { id: number }>(
   pageSize: number,
   loadMoreErrorMessage: string,
   query: CatalogQuery = {},
-) {
+): PagedCatalog<T> {
   const { sort = 'createdAt', direction = 'desc', genreId, releaseYear } = query;
   const toast = useToast();
 

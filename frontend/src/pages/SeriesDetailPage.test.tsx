@@ -5,8 +5,9 @@
  * lista»), la temporada en la URL (por defecto la primera; un valor inválido no
  * rompe nada), el selector de temporada (enlaces con `aria-current`, el foco se
  * queda), la lista de episodios con su «Ver» seguro (URL validada; insegura →
- * desactivado), y los estados: cargando, 404 «Serie no encontrada» y error con
- * reintento.
+ * desactivado), la ficha (emisión y estado con palabras, géneros en texto
+ * porque `/series` aún no se filtra) y los estados: cargando, 404 «Serie no
+ * encontrada» y error con reintento.
  */
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -227,12 +228,172 @@ describe('SeriesDetailPage: temporada y episodios', () => {
   });
 });
 
+/** Pares «nombre: valor» de la ficha, en orden. */
+async function factSheet(): Promise<string[]> {
+  const sheet = await screen.findByRole('region', { name: 'Ficha' });
+  return within(sheet)
+    .getAllByRole('term')
+    .map((term) => `${term.textContent}: ${factText(term.nextElementSibling)}`);
+}
+
+/** Texto de un valor de la ficha; si es una lista (los géneros, que son enlaces), sus elementos separados por comas. */
+function factText(dd: Element | null): string {
+  const items = dd ? Array.from(dd.querySelectorAll('li')) : [];
+  return items.length > 0 ? items.map((item) => item.textContent).join(', ') : (dd?.textContent ?? '');
+}
+
+/** Datos del banner («Datos de la serie»), en orden. */
+function bannerFacts(): string[] {
+  return within(screen.getByRole('list', { name: 'Datos de la serie' }))
+    .getAllByRole('listitem')
+    .map((item) => item.textContent ?? '');
+}
+
+describe('SeriesDetailPage: ficha', () => {
+  it('serie terminada: años, «Finalizada», temporadas, episodios, géneros y fecha de alta', async () => {
+    renderDetail('/series/7', () =>
+      jsonResponse({ ...series, genres: [{ id: 1, name: 'Drama' }, { id: 2, name: 'Thriller' }], createdAt: '2026-10-03T12:00:00Z' }),
+    );
+
+    expect(await factSheet()).toEqual([
+      'Emisión: 2019–2022',
+      'Estado: Finalizada',
+      'Temporadas: 2',
+      'Episodios: 5',
+      'Géneros: Drama, Thriller',
+      'En el catálogo desde: 3 de octubre de 2026',
+    ]);
+  });
+
+  it('los géneros enlazan a /series filtrada por ese género (no a películas), con un nombre que empieza por el texto visible', async () => {
+    renderDetail('/series/7', () =>
+      jsonResponse({ ...series, genres: [{ id: 1, name: 'Drama' }, { id: 2, name: 'Thriller' }] }),
+    );
+
+    const sheet = await screen.findByRole('region', { name: 'Ficha' });
+    const genres = within(sheet).getAllByRole('link');
+    expect(genres.map((link) => link.getAttribute('href'))).toEqual(['/series?genero=1', '/series?genero=2']);
+    expect(genres[0]).toHaveAccessibleName('Drama, ver todas las series del género');
+    expect(genres[1]).toHaveAccessibleName('Thriller, ver todas las series del género');
+  });
+
+  it('pulsar un género de la ficha lleva a /series con ese filtro', async () => {
+    const user = renderDetail('/series/7', () => jsonResponse({ ...series, genres: [{ id: 1, name: 'Drama' }] }));
+
+    await user.click(
+      within(await screen.findByRole('region', { name: 'Ficha' })).getByRole('link', {
+        name: 'Drama, ver todas las series del género',
+      }),
+    );
+
+    expect(screen.getByText('ruta:/series')).toBeInTheDocument();
+    expect(screen.getByText('busqueda:?genero=1')).toBeInTheDocument();
+  });
+
+  it('serie en emisión: «Desde 2021» y «En emisión» (no la raya sola de «2021–»)', async () => {
+    renderDetail('/series/7', () => jsonResponse({ ...series, releaseYear: 2021, endYear: null }));
+
+    const facts = await factSheet();
+    expect(facts).toContain('Emisión: Desde 2021');
+    expect(facts).toContain('Estado: En emisión');
+  });
+
+  /**
+   * Revisión QA: casos límite de la ficha de una serie. Una serie con una sola
+   * temporada y un solo episodio (sin selector de temporada, singular en el
+   * banner y en el estado), una que empieza y termina el mismo año (sin raya
+   * «2021–2021») y una sin géneros y con fecha inválida (sin datos vacíos).
+   */
+  it('una temporada y un episodio, en emisión: ficha con «1», singular en el resto y sin selector', async () => {
+    // Sin copiar `series` entera: sus `seasonCount`/`episodeCount` (2 y 5) ganarían a los calculados.
+    const tiny = makeSeriesDetail({
+      id: 7,
+      title: series.title,
+      genres: series.genres,
+      releaseYear: 2025,
+      endYear: null,
+      seasons: [{ seasonNumber: 1, episodes: [makeEpisode({ seasonNumber: 1, episodeNumber: 1 })] }],
+    });
+    renderDetail('/series/7', () => jsonResponse(tiny));
+
+    expect(await factSheet()).toEqual([
+      'Emisión: Desde 2025',
+      'Estado: En emisión',
+      'Temporadas: 1',
+      'Episodios: 1',
+      'Géneros: Drama',
+      'En el catálogo desde: 1 de enero de 2026',
+    ]);
+    expect(screen.getByRole('list', { name: 'Datos de la serie' })).toHaveTextContent(/1 temporada\s*1 episodio(?!s)/);
+    expect(screen.getByText('Temporada 1 · 1 episodio')).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Temporadas' })).not.toBeInTheDocument();
+  });
+
+  it('empieza y termina el mismo año: «Emisión: 2021» (sin raya) y «Finalizada»', async () => {
+    renderDetail('/series/7', () => jsonResponse({ ...series, releaseYear: 2021, endYear: 2021 }));
+
+    const facts = await factSheet();
+    expect(facts).toContain('Emisión: 2021');
+    expect(facts).toContain('Estado: Finalizada');
+  });
+
+  /**
+   * El backend admite un año de fin futuro (hasta 2100): una serie con el final
+   * ya anunciado no puede salir «Finalizada» antes de tiempo. La ficha da el
+   * rango anunciado y el estado «En emisión», y el banner dice lo mismo.
+   */
+  it('año de fin futuro: «Emisión: 2021–<año siguiente>» y «En emisión» (no «Finalizada»), también en el banner', async () => {
+    const nextYear = new Date().getFullYear() + 1;
+    renderDetail('/series/7', () => jsonResponse({ ...series, releaseYear: 2021, endYear: nextYear }));
+
+    const facts = await factSheet();
+    expect(facts).toContain(`Emisión: 2021–${nextYear}`);
+    expect(facts).toContain('Estado: En emisión');
+    expect(facts).not.toContain('Estado: Finalizada');
+    expect(bannerFacts()).toEqual([`2021–${nextYear}`, 'En emisión', '2 temporadas', '5 episodios', 'Drama']);
+  });
+
+  it('año de fin = el actual: ya cuenta como «Finalizada»', async () => {
+    const thisYear = new Date().getFullYear();
+    renderDetail('/series/7', () => jsonResponse({ ...series, releaseYear: 2021, endYear: thisYear }));
+
+    const facts = await factSheet();
+    expect(facts).toContain(`Emisión: 2021–${thisYear}`);
+    expect(facts).toContain('Estado: Finalizada');
+    expect(bannerFacts()).not.toContain('En emisión');
+  });
+
+  it('sin géneros y con una fecha de alta inválida: esos dos datos no aparecen (nunca un valor vacío)', async () => {
+    renderDetail('/series/7', () => jsonResponse({ ...series, genres: [], createdAt: 'no-es-una-fecha' }));
+
+    expect(await factSheet()).toEqual(['Emisión: 2019–2022', 'Estado: Finalizada', 'Temporadas: 2', 'Episodios: 5']);
+    expect(screen.getByRole('region', { name: 'Ficha' })).not.toHaveTextContent('Invalid Date');
+  });
+
+  it('jerarquía de encabezados: h1 (título), h2 «Episodios» con sus h3 y después el h2 «Ficha»', async () => {
+    renderDetail();
+
+    await screen.findByRole('region', { name: 'Ficha' });
+    const headings = screen.getAllByRole('heading').map((heading) => `${heading.tagName}:${heading.textContent}`);
+    expect(headings).toEqual([
+      'H1:La casa de cristal',
+      'H2:Episodios',
+      'H3:1. Episodio 1',
+      'H3:2. Episodio 2',
+      'H3:3. Episodio 3',
+      'H2:Ficha',
+    ]);
+  });
+});
+
 describe('SeriesDetailPage: estados', () => {
-  it('mientras carga: «Cargando serie...» y un h1 (oculto)', () => {
+  it('mientras carga: la silueta de la página con «Cargando serie...» y un h1 (oculto)', () => {
     renderDetail('/series/7', () => new Promise<Response>(() => {}));
 
-    expect(screen.getByText('Cargando serie...')).toBeInTheDocument();
+    // Anunciado en una región `role="status"` (las formas del esqueleto son decorativas).
+    expect(screen.getByText('Cargando serie...').closest('[role="status"]')).not.toBeNull();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 1 })).toHaveClass('sr-only');
   });
 
   it('404: «Serie no encontrada» (h1) con enlace a /series y sin «Reintentar»', async () => {

@@ -9,7 +9,7 @@
  * última creada, «Serie Fantasma Sin Episodios», no tiene ninguno.
  */
 import type { Locator, Page } from '@playwright/test';
-import { addSeriesFavoritesByTitle, findSeriesIdAsAdmin, loginAdmin } from './support/api';
+import { addSeriesFavoritesByTitle, findSeriesIdAsAdmin, genreIdByName, loginAdmin } from './support/api';
 import {
   EMPTY_SERIES,
   episodeTitle,
@@ -237,5 +237,131 @@ test.describe('Series', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Serie no encontrada' })).toBeVisible();
     await page.getByRole('link', { name: 'Ver todas las series' }).click();
     await expect(page).toHaveURL(/\/series$/);
+  });
+});
+
+/**
+ * Filtros de `/series` (los mismos que `/peliculas`: `useCatalogFilters`), con
+ * el servidor de verdad: `GET /api/series/search` con `genreId`, `releaseYear`,
+ * `sort` y `direction`. Los recuentos salen de `SERIES` (`support/catalog.ts`)
+ * y nunca cuentan la serie sin episodios, aunque coincida con el filtro.
+ */
+test.describe('Series: filtros', () => {
+  test.beforeEach(async ({ user, signIn }) => {
+    await signIn(user);
+  });
+
+  /** Controles de la barra de filtros de `/series`. */
+  function filterBar(page: Page) {
+    const form = page.getByRole('form', { name: 'Filtrar series' });
+    return {
+      genre: form.getByRole('combobox', { name: 'Género' }),
+      year: form.getByRole('textbox', { name: 'Año' }),
+      sort: form.getByRole('combobox', { name: 'Ordenar por' }),
+      clear: form.getByRole('button', { name: 'Quitar filtros' }),
+    };
+  }
+
+  /** Visibles que cumplen la condición, en el orden por defecto («Más recientes»: el inverso al de creación). */
+  function newestFirstWhere(predicate: (series: (typeof VISIBLE_SERIES)[number]) => boolean): string[] {
+    return VISIBLE_SERIES.filter(predicate)
+      .map((series) => series.title)
+      .reverse();
+  }
+
+  /** La cuadrícula muestra EXACTAMENTE estas series, en este orden, con su recuento. */
+  async function expectResults(page: Page, titles: readonly string[]) {
+    const results = page.getByRole('region', { name: 'Resultados' });
+    await expect(results.getByRole('status').first()).toHaveText(titles.length === 1 ? '1 serie' : `${titles.length} series`);
+    const cards = results.getByRole('listitem');
+    await expect(cards).toHaveCount(titles.length);
+    await expect(cards).toContainText(titles);
+  }
+
+  test('género y después año: la URL los acumula, los resultados son exactos (sin la serie sin episodios) y «Atrás» deshace cada paso', async ({
+    page,
+    request,
+    user,
+  }) => {
+    const dramaId = await genreIdByName(request, user.token, 'Drama');
+    await page.goto('/series');
+    await expect(page.getByRole('region', { name: SERIES_HERO.title })).toBeVisible();
+    const bar = filterBar(page);
+
+    await bar.genre.selectOption({ label: 'Drama' });
+    await expect(page).toHaveURL(new RegExp(`/series\\?genero=${dramaId}$`));
+    // «Serie Fantasma Sin Episodios» también es de Drama, pero no se ve.
+    await expectResults(page, newestFirstWhere((series) => series.genres.includes('Drama')));
+    await expect(page.getByRole('main').getByText(EMPTY_SERIES.title)).toHaveCount(0);
+
+    await bar.year.fill('2021');
+    await expect(page).toHaveURL(new RegExp(`/series\\?genero=${dramaId}&anio=2021$`));
+    await expectResults(page, ['Herederos del Silencio']);
+
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`/series\\?genero=${dramaId}$`));
+    await expect(bar.year).toHaveValue('');
+    await expectResults(page, newestFirstWhere((series) => series.genres.includes('Drama')));
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/series$/);
+    await expect(page.getByRole('region', { name: SERIES_HERO.title })).toBeVisible();
+  });
+
+  test('ordenar por año (más antiguas) pide el orden al servidor y no ofrece órdenes por duración', async ({ page }) => {
+    await page.goto('/series');
+    const bar = filterBar(page);
+    await expect(bar.sort.getByRole('option')).toHaveText([
+      'Más recientes',
+      'Título A–Z',
+      'Título Z–A',
+      'Año: más nuevas',
+      'Año: más antiguas',
+    ]);
+
+    await bar.sort.selectOption({ label: 'Año: más antiguas' });
+
+    await expect(page).toHaveURL(/\/series\?orden=anio-asc$/);
+    const byYear = [...VISIBLE_SERIES].sort((a, b) => a.releaseYear - b.releaseYear).map((series) => series.title);
+    await expectResults(page, byYear);
+  });
+
+  test('sin resultados (2025: solo la serie sin episodios): «No hay series con estos filtros» y «Quitar filtros» vuelve al banner', async ({
+    page,
+  }) => {
+    expect(EMPTY_SERIES.releaseYear).toBe(2025);
+    await page.goto('/series?anio=2025');
+
+    await expect(page.getByRole('heading', { level: 2, name: 'No hay series con estos filtros' })).toBeVisible();
+    await expect(page.getByText('Prueba con otro género u otro año, o quita los filtros.')).toBeVisible();
+    // El del estado vacío (el último: el de la barra va antes en la página).
+    await page.getByRole('main').getByRole('button', { name: 'Quitar filtros' }).last().click();
+
+    await expect(page).toHaveURL(/\/series$/);
+    await expect(page.getByRole('region', { name: SERIES_HERO.title })).toBeVisible();
+    await expect(filterBar(page).genre).toBeFocused();
+  });
+
+  /**
+   * Los géneros de la ficha de una serie llevan a `/series` filtrada (no a
+   * películas). El nombre accesible se comprueba EXACTO en Chromium real: con
+   * un `<span class="sr-only">` saldría «Acción , ver todas…» (ver
+   * `GenreLinks` y el test equivalente de `movies.spec.ts`).
+   */
+  test('un género de la ficha de una serie lleva a /series con ese filtro; su nombre accesible no tiene espacio ante la coma', async ({
+    page,
+    request,
+    user,
+  }) => {
+    const actionId = await genreIdByName(request, user.token, 'Acción');
+    await openHeroSeries(page);
+    const link = page.getByRole('region', { name: 'Ficha' }).getByRole('link', { name: /^Acción\b/ });
+    await expect(link).toHaveAccessibleName('Acción, ver todas las series del género');
+
+    await link.click();
+
+    await expect(page).toHaveURL(new RegExp(`/series\\?genero=${actionId}$`));
+    await expect(filterBar(page).genre).toHaveValue(String(actionId));
+    await expectResults(page, newestFirstWhere((series) => series.genres.includes('Acción')));
   });
 });

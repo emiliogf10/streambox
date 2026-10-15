@@ -22,6 +22,7 @@ const ENTRIES: Record<string, QueryKey> = {
   detallePelicula: queryKeys.movies.detail(5),
   panelPeliculas: queryKeys.movies.admin('', 1),
   series: queryKeys.paged('/series', params),
+  filtrosSeries: queryKeys.paged('/series/search', { ...params, releaseYear: 2016 }),
   detalleSerie: queryKeys.series.detail(3),
   panelSeries: queryKeys.series.admin('dark', 2),
   generos: queryKeys.genres.all,
@@ -43,8 +44,8 @@ describe('keysAffectedBy', () => {
     expect(await invalidatedBy('movies')).toEqual(['portada', 'filtros', 'detallePelicula', 'panelPeliculas', 'miLista']);
   });
 
-  it('una serie o un episodio cambian los listados de series, su detalle, el panel y «Mi lista»', async () => {
-    expect(await invalidatedBy('series')).toEqual(['series', 'detalleSerie', 'panelSeries', 'miLista']);
+  it('una serie o un episodio cambian los listados de series (con y sin filtros), su detalle, el panel y «Mi lista»', async () => {
+    expect(await invalidatedBy('series')).toEqual(['series', 'filtrosSeries', 'detalleSerie', 'panelSeries', 'miLista']);
   });
 
   it('un género cambia todo lo que lleva nombres de géneros, salvo su propia lista (ya la actualiza el panel)', async () => {
@@ -54,6 +55,7 @@ describe('keysAffectedBy', () => {
       'detallePelicula',
       'panelPeliculas',
       'series',
+      'filtrosSeries',
       'detalleSerie',
       'panelSeries',
       'miLista',

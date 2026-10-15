@@ -40,6 +40,8 @@ test.describe('Acceso al panel', () => {
     const pagination = page.getByRole('navigation', { name: 'Paginación de películas' });
     await expect(pagination).toContainText(`Página 1 de ${pages}`);
     await expect(pagination).toContainText(`${MOVIES.length} películas`);
+    // Se lee con coma y sin espacio delante (el punto medio es solo visual).
+    await expect(pagination.getByRole('status')).toMatchAriaSnapshot(`- status: Página 1 de ${pages}, ${MOVIES.length} películas`);
 
     // Las portadas salen de imageUrl (portadas propias /covers/...).
     await expect(movieRow(page, HERO_TITLE).locator('img')).toHaveAttribute('src', /^\/covers\/[A-Za-z0-9][\w.-]*$/);

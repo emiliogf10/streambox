@@ -1,6 +1,11 @@
 import { useId } from 'react';
 import type { ReactNode } from 'react';
-import { BANNER_GRID_CLASS } from './bannerGridStyles';
+import {
+  BANNER_GRID_CLASS,
+  BANNER_POSTER_SIZE_CLASS,
+  DETAIL_BANNER_GRID_CLASS,
+  DETAIL_POSTER_SIZE_CLASS,
+} from './bannerGridStyles';
 import { MoviePoster } from './MoviePoster';
 
 /** Propiedades de {@link FeaturedBanner}. */
@@ -25,6 +30,14 @@ interface Props {
   clampDescription?: boolean;
   /** Botones y enlaces de acción, de más a menos importante. */
   actions: ReactNode;
+  /**
+   * `banner` (por defecto): pieza de la portada o de `/series`, alineada a la
+   * izquierda con las filas de tarjetas que tiene debajo. `page`: cabecera de
+   * la página de un título, con el contenido centrado en un ancho máximo
+   * (`DETAIL_CONTAINER_CLASS`) y un póster algo mayor; ver la nota «Página de
+   * un título» de {@link FeaturedBanner}.
+   */
+  layout?: 'banner' | 'page';
 }
 
 /**
@@ -58,6 +71,16 @@ interface Props {
  * marcado, la columna de texto usa `display: contents` en móvil (sus hijos
  * pasan a ser celdas de la rejilla exterior) y `flex` desde `md`.
  *
+ * **Página de un título (`layout="page"`).** En la portada el banner va
+ * alineado a la izquierda con las filas que tiene debajo. En la página de una
+ * película o de una serie no hay filas que lo acompañen, y a 1280 px el
+ * contenido se quedaba en una franja a la izquierda con más de media pantalla
+ * vacía. Ahí el contenido va centrado en el mismo ancho máximo que el resto de
+ * la página (la ficha, los episodios) y la columna de texto ocupa todo lo que
+ * deja el póster: la sinopsis sigue limitada a ~65 caracteres por línea para
+ * leerse bien, pero el título largo ya no se parte antes de tiempo. El fondo
+ * desenfocado sigue de borde a borde.
+ *
  * **Acciones.** En móvil las dos primeras comparten fila y el resto va debajo
  * (rejilla de dos columnas); desde `sm`, en línea.
  *
@@ -76,9 +99,11 @@ export function FeaturedBanner({
   description,
   clampDescription = true,
   actions,
+  layout = 'banner',
 }: Props) {
   const titleId = useId();
   const Heading = headingLevel === 1 ? 'h1' : 'h2';
+  const isPage = layout === 'page';
 
   return (
     <section aria-labelledby={titleId} className="relative isolate overflow-hidden">
@@ -103,16 +128,16 @@ export function FeaturedBanner({
         <div className="absolute inset-0 bg-linear-to-t from-canvas via-canvas/40 via-30% to-transparent" />
       </div>
 
-      <div className={BANNER_GRID_CLASS}>
+      <div className={isPage ? DETAIL_BANNER_GRID_CLASS : BANNER_GRID_CLASS}>
         <MoviePoster
           title={title}
           src={imageUrl}
           priority
-          className="aspect-2/3 w-full shrink-0 rounded-lg shadow-2xl shadow-black/60 ring-1 ring-white/15 md:w-48 md:rounded-xl lg:w-56"
+          className={`aspect-2/3 w-full shrink-0 rounded-lg shadow-2xl shadow-black/60 ring-1 ring-white/15 md:rounded-xl ${isPage ? DETAIL_POSTER_SIZE_CLASS : BANNER_POSTER_SIZE_CLASS}`}
         />
 
         {/* Móvil: `contents` (cada hijo es una celda de la rejilla). Desde md: columna junto al póster. */}
-        <div className="contents md:flex md:max-w-2xl md:min-w-0 md:flex-col">
+        <div className={`contents md:flex md:min-w-0 md:flex-col ${isPage ? 'md:flex-1' : 'md:max-w-2xl'}`}>
           <Heading
             id={titleId}
             className="text-[1.75rem] leading-[1.1] font-extrabold tracking-tight text-balance break-words text-white sm:text-4xl md:mb-4 lg:text-5xl"
@@ -125,7 +150,7 @@ export function FeaturedBanner({
 
           {description && (
             <p
-              className={`col-span-2 max-w-[60ch] text-sm leading-relaxed text-pretty text-gray-200 md:mt-4 md:text-base ${clampDescription ? 'line-clamp-3' : ''}`}
+              className={`col-span-2 ${isPage ? 'max-w-[65ch]' : 'max-w-[60ch]'} text-sm leading-relaxed text-pretty text-gray-200 md:mt-4 md:text-base ${clampDescription ? 'line-clamp-3' : ''}`}
             >
               {description}
             </p>

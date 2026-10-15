@@ -1,18 +1,23 @@
 import { Link, useParams } from 'react-router-dom';
 import { Pencil, SearchX } from 'lucide-react';
+import { DETAIL_CONTAINER_CLASS, MOVIE_FACTS_CLASS, MOVIE_FACTS_LIST_CLASS } from '../components/bannerGridStyles';
 import { buttonClasses } from '../components/buttonStyles';
-import { CatalogSkeleton } from '../components/CatalogSkeleton';
+import { DetailSkeleton } from '../components/CatalogSkeleton';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
+import { FactSheet } from '../components/FactSheet';
+import type { Fact } from '../components/FactSheet';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { FeaturedBanner } from '../components/FeaturedBanner';
+import { GenreLinks } from '../components/GenreLinks';
 import { MovieMetaTags } from '../components/MovieMetaTags';
 import { WatchButton } from '../components/WatchButton';
 import { useAuth } from '../context/AuthContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useMovieDetail } from '../hooks/useMovieDetail';
-import { moviePath } from '../lib/catalog';
+import { formatAddedDate, moviePath } from '../lib/catalog';
 import type { Movie } from '../lib/types';
+import { formatDuration } from '../lib/utils';
 import { adminEditMoviePath } from './admin/adminPaths';
 import type { ReturnToState } from './admin/adminPaths';
 
@@ -31,8 +36,8 @@ const NO_DESCRIPTION = 'Sin descripción disponible.';
  * copia, se guarda en marcadores).
  *
  * Estados (siempre con un único `<h1>`), como en `SeriesDetailPage`:
- * - **Cargando**: `<h1>` oculto «Película» + la silueta del banner (la misma de
- *   la portada, sin la fila). Casi nunca se ve: si se llega desde una tarjeta,
+ * - **Cargando**: `<h1>` oculto «Película» + la silueta de la página (banner
+ *   centrado y ficha, ver `DetailSkeleton`). Casi nunca se ve: si se llega desde una tarjeta,
  *   la película ya está en la caché de ese listado y se pinta al instante
  *   (ver `findCachedMovie` en `useMovieDetail`).
  * - **No encontrada** (404, o id mal formado en la URL): `<h1>` «Película no
@@ -79,7 +84,7 @@ export function MovieDetailPage() {
           <ErrorState title="No se pudo cargar la película" message={errorMessage} onRetry={reload} />
         </div>
       ) : (
-        <CatalogSkeleton label="Cargando película..." withRow={false} />
+        <DetailSkeleton label="Cargando película..." kind="movie" />
       )}
     </div>
   );
@@ -87,8 +92,16 @@ export function MovieDetailPage() {
 
 /**
  * Contenido de una película ya cargada: el mismo {@link FeaturedBanner} de la
- * portada y de las series, aquí con el título como `<h1>` y la sinopsis entera
- * (no hay otro sitio donde leerla).
+ * portada y de las series, aquí con el título como `<h1>`, la sinopsis entera
+ * (no hay otro sitio donde leerla) y el contenido centrado (`layout="page"`),
+ * y debajo su {@link FactSheet ficha}.
+ *
+ * **Maquetación.** Antes la página era solo el banner de la portada: en
+ * escritorio, el póster y el texto quedaban en una franja a la izquierda y el
+ * resto de la pantalla, a la derecha y debajo, vacío. Ahora banner y ficha
+ * comparten un contenedor centrado con ancho máximo (`DETAIL_CONTAINER_CLASS`),
+ * así que la composición se equilibra en cualquier ancho, de 1024 a 1920 px, y
+ * en móvil y tableta todo sigue en una columna.
  *
  * Acciones, de más a menos importante:
  * - **«Ver ahora»** ({@link WatchButton}): enlace al vídeo validado con
@@ -114,6 +127,7 @@ function MovieDetailView({ movie }: { movie: Movie }) {
         meta={<MovieMetaTags movie={movie} />}
         description={movie.description || NO_DESCRIPTION}
         clampDescription={false}
+        layout="page"
         actions={
           <>
             <WatchButton videoUrl={movie.videoUrl} title={movie.title} />
@@ -132,6 +146,31 @@ function MovieDetailView({ movie }: { movie: Movie }) {
           </>
         }
       />
+
+      <div className={`${DETAIL_CONTAINER_CLASS} px-4 sm:px-6`}>
+        <FactSheet facts={movieFacts(movie)} className={MOVIE_FACTS_CLASS} listClassName={MOVIE_FACTS_LIST_CLASS} />
+        {/* Aquí irá la fila «Películas similares» (tarea siguiente del plan): no se deja ningún hueco hasta que exista. */}
+      </div>
     </div>
   );
+}
+
+/**
+ * Datos de la ficha de una película. Los géneros solo aparecen si tiene alguno
+ * y la fecha de alta solo si es válida: nunca un dato vacío. Hoy una película
+ * siempre tiene géneros (la API exige al menos uno al darla de alta y al
+ * editarla, y no deja borrar un género en uso: `GenreInUseException`), así que
+ * la comprobación es solo defensiva, por si la respuesta llegara sin ellos.
+ */
+function movieFacts(movie: Movie): Fact[] {
+  const facts: Fact[] = [
+    { term: 'Estreno', detail: movie.releaseYear },
+    { term: 'Duración', detail: formatDuration(movie.duration) },
+  ];
+  if (movie.genres.length > 0) {
+    facts.push({ term: 'Géneros', detail: <GenreLinks kind="movies" genres={movie.genres} />, wide: true });
+  }
+  const added = formatAddedDate(movie.createdAt);
+  if (added) facts.push({ term: 'En el catálogo desde', detail: added });
+  return facts;
 }

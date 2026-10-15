@@ -22,7 +22,7 @@ import userEvent from '@testing-library/user-event';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FavoritesProvider } from '../context/FavoritesContext';
-import { MOVIE_FILTER_DEBOUNCE_MS } from '../hooks/useMovieFilters';
+import { CATALOG_FILTER_DEBOUNCE_MS } from '../hooks/useCatalogFilters';
 import { installManualTimers, passTime } from '../test/fakeTimers';
 import {
   CURRENT_USER,
@@ -219,7 +219,8 @@ describe('MoviesPage sin filtros: banner y filas', () => {
     expect(within(news).getAllByRole('link', { name: /\d{4} ·/ })).toHaveLength(3);
     const drama = screen.getByRole('region', { name: 'Drama' });
     expect(within(drama).getAllByRole('link')).toHaveLength(3); // las tarjetas
-    expect(within(drama).getAllByRole('button')).toHaveLength(2); // las flechas
+    // Sin flechas: jsdom no maqueta y la fila no desborda (las flechas según el ancho, en `PosterRow.test`).
+    expect(within(drama).queryAllByRole('button')).toHaveLength(0);
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'Estreno estrella',
@@ -362,7 +363,7 @@ describe('MoviesPage: cambiar filtros', () => {
     await user.selectOptions(genreSelect(), 'Drama');
 
     // Antes de la espera no pasa nada: ni URL ni petición.
-    passTime(MOVIE_FILTER_DEBOUNCE_MS - 1);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS - 1);
     expect(screen.getByText('busqueda:')).toBeInTheDocument();
     expect(callsWith('/movies/search')).toHaveLength(0);
 
@@ -381,7 +382,7 @@ describe('MoviesPage: cambiar filtros', () => {
     await user.selectOptions(sortSelect(), 'Título A–Z');
     await user.selectOptions(sortSelect(), 'Año: más nuevas');
     await user.selectOptions(sortSelect(), 'Año: más antiguas');
-    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS);
 
     expect(await screen.findByText('busqueda:?orden=anio-asc')).toBeInTheDocument();
     await expectCount('1 película');
@@ -401,10 +402,10 @@ describe('MoviesPage: cambiar filtros', () => {
     });
 
     await user.selectOptions(genreSelect(), 'Drama');
-    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS);
     expect(await screen.findByText('busqueda:?genero=4')).toBeInTheDocument();
     await user.selectOptions(genreSelect(), 'Terror');
-    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS);
     expect(await screen.findByText('busqueda:?genero=7')).toBeInTheDocument();
     await expectCount('2 películas');
 
@@ -421,10 +422,10 @@ describe('MoviesPage: cambiar filtros', () => {
       [searchKey({ genreId: 7 })]: () => jsonResponse(makePage([others[0], others[1]])),
     });
     await user.selectOptions(genreSelect(), 'Drama');
-    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS);
     await expectCount('1 película');
     await user.selectOptions(genreSelect(), 'Terror');
-    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS);
     await expectCount('2 películas');
 
     await user.click(screen.getByRole('button', { name: 'Atrás del navegador' }));
@@ -448,7 +449,7 @@ describe('MoviesPage: cambiar filtros', () => {
     });
 
     await user.type(yearInput(), '1500');
-    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS);
 
     expect(yearInput()).toHaveAttribute('aria-invalid', 'true');
     expect(yearInput()).toHaveAccessibleDescription('Escribe un año entre 1888 y 2100.');
@@ -457,7 +458,7 @@ describe('MoviesPage: cambiar filtros', () => {
 
     await user.clear(yearInput());
     await user.type(yearInput(), '2014');
-    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS);
 
     expect(await screen.findByText('busqueda:?anio=2014')).toBeInTheDocument();
     expect(yearInput()).not.toHaveAttribute('aria-invalid');
@@ -468,7 +469,7 @@ describe('MoviesPage: cambiar filtros', () => {
     const user = await renderReady();
 
     await user.type(yearInput(), '20');
-    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS);
     expect(yearInput()).not.toHaveAttribute('aria-invalid');
 
     await user.tab();
@@ -495,13 +496,13 @@ describe('MoviesPage: cambiar filtros', () => {
     });
 
     await user.selectOptions(genreSelect(), 'Drama');
-    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS);
     await waitFor(() => expect(callsWith('genreId=4')).toHaveLength(1));
     const dramaSignal = callsWith('genreId=4')[0][1]?.signal as AbortSignal;
     expect(screen.getByText('Buscando películas...')).toBeInTheDocument();
 
     await user.selectOptions(genreSelect(), 'Terror');
-    passTime(MOVIE_FILTER_DEBOUNCE_MS);
+    passTime(CATALOG_FILTER_DEBOUNCE_MS);
 
     expect(await within(results()).findByRole('link', { name: /^Solo terror/ })).toBeInTheDocument();
     expect(dramaSignal.aborted).toBe(true);
@@ -566,7 +567,7 @@ describe('MoviesPage: cuadrícula de resultados', () => {
     const emptyState = empty.closest('div')!.parentElement!;
     // Quitar los filtros enseña todas las películas (no "todo el catálogo": las series están en /series).
     expect(emptyState).toHaveTextContent(
-      'Prueba con otro género u otro año, o quita los filtros para ver todas las películas.',
+      'Prueba con otro género u otro año, o quita los filtros.',
     );
     await user.click(within(emptyState).getByRole('button', { name: 'Quitar filtros' }));
 

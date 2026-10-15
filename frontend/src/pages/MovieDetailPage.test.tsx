@@ -2,14 +2,15 @@
  * Tests de `MovieDetailPage` (`/peliculas/:id`) con el hook real y `fetch` simulado.
  *
  * Protegen: la cabecera (h1 único, datos, sinopsis completa, título de la
- * pestaña), «Ver ahora» seguro (URL validada; insegura → desactivado), «Mi
+ * pestaña), la ficha (datos con nombre y géneros que enlazan a `/peliculas`
+ * filtrada), «Ver ahora» seguro (URL validada; insegura → desactivado), «Mi
  * lista» de verdad (petición y aviso), «Editar» SOLO para un administrador, y
  * los estados: cargando (silueta del banner), 404 «Película no encontrada» con
  * el mismo texto para los dos roles, id mal formado sin petición y error con
  * reintento. Y los casos límite del final: rol sin confirmar (falla cerrado),
  * ids enormes y el 401 que pasa por la renovación de la sesión.
  */
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -128,6 +129,87 @@ describe('MovieDetailPage: contenido', () => {
   });
 });
 
+/** Valor (`<dd>`) de un dato de la ficha, buscado por su nombre (`<dt>`). */
+function factValue(term: string): HTMLElement {
+  const sheet = screen.getByRole('region', { name: 'Ficha' });
+  const dt = within(sheet).getByText(term, { selector: 'dt' });
+  const dd = dt.nextElementSibling;
+  if (!(dd instanceof HTMLElement) || dd.tagName !== 'DD') throw new Error(`«${term}» no tiene valor`);
+  return dd;
+}
+
+describe('MovieDetailPage: ficha', () => {
+  it('cada dato con su nombre: estreno, duración, géneros y fecha de alta (en UTC)', async () => {
+    // 23:30 UTC del 3 de octubre: en el huso de Madrid ya sería día 4; se muestra el día de la API.
+    renderDetail('/peliculas/7', () => jsonResponse({ ...movie, createdAt: '2026-10-03T23:30:00Z' }));
+
+    const sheet = await screen.findByRole('region', { name: 'Ficha' });
+    expect(within(sheet).getByRole('heading', { level: 2, name: 'Ficha' })).toBeInTheDocument();
+    expect(factValue('Estreno')).toHaveTextContent('2014');
+    expect(factValue('Duración')).toHaveTextContent('2h 49m');
+    expect(factValue('En el catálogo desde')).toHaveTextContent('3 de octubre de 2026');
+  });
+
+  it('los géneros enlazan a /peliculas filtrada por ese género, con un nombre que empieza por el texto visible', async () => {
+    renderDetail();
+
+    const genres = within(await screen.findByRole('region', { name: 'Ficha' })).getAllByRole('link');
+    expect(genres.map((link) => link.getAttribute('href'))).toEqual(['/peliculas?genero=1', '/peliculas?genero=2']);
+    expect(genres[0]).toHaveAccessibleName('Ciencia ficción, ver todas las películas del género');
+    expect(genres[1]).toHaveAccessibleName('Drama, ver todas las películas del género');
+  });
+
+  it('sin géneros ni fecha válida no deja datos vacíos: esos dos no aparecen', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse({ ...movie, genres: [], createdAt: 'no-es-una-fecha' }));
+
+    const sheet = await screen.findByRole('region', { name: 'Ficha' });
+    expect(within(sheet).getAllByRole('term').map((term) => term.textContent)).toEqual(['Estreno', 'Duración']);
+    expect(within(sheet).queryByRole('link')).not.toBeInTheDocument();
+    expect(sheet).not.toHaveTextContent('Invalid Date');
+  });
+
+  /**
+   * Revisión QA: la ficha es un `<h2>` que va DESPUÉS del `<h1>` del título
+   * (la navegación por encabezados no salta niveles ni encuentra la ficha antes
+   * que el título), y el `<dl>` solo contiene grupos `<div>` con un `<dt>` y un `<dd>`.
+   */
+  it('jerarquía de encabezados: un solo h1 (el título) y después el h2 «Ficha»; el <dl> está bien formado', async () => {
+    renderDetail();
+
+    const sheet = await screen.findByRole('region', { name: 'Ficha' });
+    const headings = screen.getAllByRole('heading').map((heading) => `${heading.tagName}:${heading.textContent}`);
+    expect(headings).toEqual(['H1:Interstellar', 'H2:Ficha']);
+
+    const dl = sheet.querySelector('dl');
+    expect(dl).not.toBeNull();
+    for (const group of Array.from(dl!.children)) {
+      expect(group.tagName).toBe('DIV');
+      expect(Array.from(group.children).map((child) => child.tagName)).toEqual(['DT', 'DD']);
+    }
+  });
+
+  it('una película de menos de una hora: «Duración» en minutos, sin «0h»', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse({ ...movie, duration: 45 }));
+
+    await screen.findByRole('region', { name: 'Ficha' });
+    expect(factValue('Duración')).toHaveTextContent(/^45m$/);
+  });
+
+  it('un administrador ve la misma ficha (con los enlaces de género) que un usuario', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse(movie), AS_ADMIN);
+
+    await screen.findByRole('link', { name: 'Editar Interstellar' });
+    const sheet = screen.getByRole('region', { name: 'Ficha' });
+    expect(within(sheet).getAllByRole('term').map((term) => term.textContent)).toEqual([
+      'Estreno',
+      'Duración',
+      'Géneros',
+      'En el catálogo desde',
+    ]);
+    expect(within(sheet).getAllByRole('link')).toHaveLength(2);
+  });
+});
+
 describe('MovieDetailPage: «Editar» según el rol', () => {
   it('un usuario normal no ve «Editar» (ni siquiera cuando ya se sabe su rol)', async () => {
     renderDetail();
@@ -184,7 +266,7 @@ describe('MovieDetailPage: «Editar» según el rol', () => {
 });
 
 describe('MovieDetailPage: estados', () => {
-  it('mientras carga: la silueta del banner con «Cargando película...» y un h1 (oculto)', () => {
+  it('mientras carga: la silueta de la página con «Cargando película...» y un h1 (oculto)', () => {
     renderDetail('/peliculas/7', () => new Promise<Response>(() => {}));
 
     // Anunciado en una región `role="status"` (las formas del esqueleto son decorativas).

@@ -93,3 +93,21 @@ export function buildCatalogRows<T extends CatalogItem>(items: T[]): CatalogRow<
 
   return [...rows, ...genreRows];
 }
+
+/**
+ * Fecha en la que un título entró en el catálogo, en español
+ * («14 de octubre de 2026»), a partir del `createdAt` de la API.
+ *
+ * Se formatea en UTC por la misma razón que «Miembro desde» del perfil
+ * (`formatMemberSince`): la API entrega un instante UTC y, sin fijar la zona,
+ * un título dado de alta a las 23:30 saldría con un día u otro según el huso
+ * del navegador de quien lo mira.
+ *
+ * @param createdAt instante ISO-8601 (`CatalogItem.createdAt`)
+ * @returns el texto, o `null` si la fecha no es válida (así no se pinta «Invalid Date»)
+ */
+export function formatAddedDate(createdAt: string): string | null {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(date);
+}

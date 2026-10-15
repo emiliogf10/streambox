@@ -1,11 +1,12 @@
 /**
- * Tests de `CatalogSkeleton`: se anuncia como estado de carga con su texto y
- * las formas grises son decorativas (no llegan a los lectores de pantalla).
+ * Tests de `CatalogSkeleton` y `DetailSkeleton`: se anuncian como estado de
+ * carga con su texto, las formas grises son decorativas (no llegan a los
+ * lectores de pantalla) y miden lo mismo que lo que sustituyen.
  */
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { BANNER_GRID_CLASS } from './bannerGridStyles';
-import { CatalogSkeleton } from './CatalogSkeleton';
+import { BANNER_GRID_CLASS, DETAIL_BANNER_GRID_CLASS, DETAIL_POSTER_SIZE_CLASS } from './bannerGridStyles';
+import { CatalogSkeleton, DetailSkeleton } from './CatalogSkeleton';
 
 describe('CatalogSkeleton', () => {
   it('es un `role="status"` cuyo único texto es la etiqueta de carga', () => {
@@ -28,5 +29,23 @@ describe('CatalogSkeleton', () => {
 
     const grid = screen.getByRole('status').querySelector('[aria-hidden="true"] > div');
     expect(grid).toHaveClass(...BANNER_GRID_CLASS.split(' '));
+  });
+});
+
+describe('DetailSkeleton', () => {
+  it.each(['movie', 'series'] as const)('(%s) es un `role="status"` cuyo único texto es la etiqueta, con las formas ocultas', (kind) => {
+    render(<DetailSkeleton label="Cargando película..." kind={kind} />);
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(/^Cargando película\.\.\.$/);
+    expect(status.querySelector('[aria-hidden="true"]')).toHaveClass('animate-pulse', 'motion-reduce:animate-none');
+  });
+
+  it('la cabecera usa la rejilla centrada y el tamaño de póster de la página real (constantes compartidas)', () => {
+    render(<DetailSkeleton label="Cargando película..." kind="movie" />);
+
+    const grid = screen.getByRole('status').querySelector('[aria-hidden="true"] > div');
+    expect(grid).toHaveClass(...DETAIL_BANNER_GRID_CLASS.split(' '));
+    expect(grid?.firstElementChild).toHaveClass(...DETAIL_POSTER_SIZE_CLASS.split(' '));
   });
 });

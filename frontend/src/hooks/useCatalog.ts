@@ -1,5 +1,5 @@
-import { hasActiveFilters, movieFiltersToQuery } from '../lib/movieFilters';
-import type { MovieFilters } from '../lib/movieFilters';
+import { catalogFiltersToQuery, hasActiveFilters } from '../lib/catalogFilters';
+import type { CatalogFilters } from '../lib/catalogFilters';
 import type { Movie } from '../lib/types';
 import { usePagedCatalog } from './usePagedCatalog';
 
@@ -24,7 +24,7 @@ export function useCatalog() {
 }
 
 /**
- * Películas de la página `/peliculas` según sus filtros (ver `lib/movieFilters.ts`).
+ * Películas de la página `/peliculas` según sus filtros (ver `lib/catalogFilters.ts`).
  *
  * - **Sin filtros:** exactamente lo mismo que la portada ({@link useCatalog}):
  *   `GET /movies?...&sort=createdAt&direction=desc`, para el banner y las filas.
@@ -40,13 +40,13 @@ export function useCatalog() {
  * @param filters filtros aplicados (los de la URL, ya validados)
  * @returns lo mismo que `useCatalog` y, además, `filtered` (si hay filtros activos)
  */
-export function useMovieResults(filters: MovieFilters) {
+export function useMovieResults(filters: CatalogFilters) {
   const filtered = hasActiveFilters(filters);
   const { items, ...rest } = usePagedCatalog<Movie>(
     filtered ? '/movies/search' : '/movies',
     PAGE_SIZE,
     LOAD_MORE_ERROR,
-    filtered ? movieFiltersToQuery(filters) : undefined,
+    filtered ? catalogFiltersToQuery(filters, 'movies') : undefined,
   );
   return { movies: items, filtered, ...rest };
 }

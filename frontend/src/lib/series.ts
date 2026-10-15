@@ -7,7 +7,8 @@ import type { Season, Series } from './types';
 
 /**
  * Años de emisión de una serie, con raya (–) como separador:
- * - `2019–2022` si terminó;
+ * - `2019–2022` si tiene año de fin (también si ese año es futuro: el rango
+ *   anunciado es correcto; si ya terminó o no, lo dice {@link isOnAir});
  * - `2021–` si sigue en emisión (`endYear` es `null`): el hueco tras la raya
  *   es la convención de "hasta hoy". La etiqueta «En emisión» que lo acompaña
  *   lo dice con palabras (no se confía solo en el signo);
@@ -22,9 +23,18 @@ export function formatSeriesYears(releaseYear: number, endYear: number | null): 
   return `${releaseYear}–${endYear}`;
 }
 
-/** `true` si la serie sigue en emisión (no tiene año de fin). */
-export function isOnAir(series: Pick<Series, 'endYear'>): boolean {
-  return series.endYear === null;
+/**
+ * `true` si la serie sigue en emisión: no tiene año de fin o ese año todavía no
+ * ha llegado. El backend admite un `endYear` futuro (hasta 2100: el final ya
+ * anunciado de una serie), y una serie que acaba en 2027 no está «Finalizada»
+ * en 2026. Si el año de fin es el actual o uno pasado, se da por terminada.
+ *
+ * @param series serie (basta su año de fin)
+ * @param currentYear año de referencia; por defecto el actual del reloj del
+ *   navegador. Se puede inyectar para probar los límites sin depender de la fecha.
+ */
+export function isOnAir(series: Pick<Series, 'endYear'>, currentYear: number = new Date().getFullYear()): boolean {
+  return series.endYear === null || series.endYear > currentYear;
 }
 
 /**

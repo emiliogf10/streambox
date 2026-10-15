@@ -4,6 +4,7 @@
  * Usa los 25 títulos sembrados (ver `support/catalog.ts`): con páginas de 20 son
  * exactamente dos páginas, así que la segunda solo aparece si el botón funciona.
  */
+import type { Page } from '@playwright/test';
 import { HERO_TITLE, MOVIES, PAGE_SIZE } from './support/catalog';
 import { expect, movieCard, test } from './support/fixtures';
 import { expectCovers, expectWholePoster } from './support/images';
@@ -115,5 +116,98 @@ test.describe('Catálogo', () => {
         `Falta «${movie.title}» tras cargar la segunda página`,
       ).toBe(true);
     }
+  });
+});
+
+/**
+ * Flechas «Ver anteriores/siguientes» de las filas de la portada: solo cuando
+ * la fila desborda. Origen: en una pantalla ultraancha (~3400 px) la fila
+ * «Novedades» (12 pósters) cabía entera y aun así enseñaba las flechas; lo
+ * mismo la fila «Series» (4 series sembradas). Se mide en el navegador real,
+ * porque jsdom no maqueta (los casos finos están en `PosterRow.test.tsx`).
+ */
+test.describe('Catálogo: flechas de las filas', () => {
+  test.beforeEach(async ({ user, signIn }) => {
+    await signIn(user);
+  });
+
+  /** Fila de la portada por su título y sus dos flechas. */
+  function row(page: Page, name: string) {
+    const region = page.getByRole('region', { name, exact: true });
+    return {
+      region,
+      list: region.getByRole('list'),
+      previous: region.getByRole('button', { name: `Ver anteriores en ${name}` }),
+      next: region.getByRole('button', { name: `Ver siguientes en ${name}` }),
+    };
+  }
+
+  /** Distancia entre el principio de la fila y sus tarjetas: no debe cambiar al ocultar las flechas. */
+  async function headerOffset(rowParts: ReturnType<typeof row>): Promise<number> {
+    const section = (await rowParts.region.boundingBox())!;
+    const list = (await rowParts.list.boundingBox())!;
+    return list.y - section.y;
+  }
+
+  test('pantalla ultraancha (3440 px): las filas que caben enteras no tienen flechas', async ({ page }) => {
+    await page.setViewportSize({ width: 3440, height: 1440 });
+    await page.goto('/');
+    const news = row(page, 'Novedades');
+    const series = row(page, 'Series');
+    await expect(news.list.getByRole('link', { name: CARD_NAME })).toHaveCount(12);
+    await expect(series.list.getByRole('listitem')).not.toHaveCount(0);
+
+    // La premisa: las 12 tarjetas caben (no hay nada que desplazar)...
+    const fits = await news.list.evaluate((list) => list.scrollWidth <= list.clientWidth);
+    expect(fits, 'a 3440 px «Novedades» debería caber entera').toBe(true);
+    // ...y por eso no hay flechas, ni en «Novedades» ni en «Series».
+    await expect(news.previous).toHaveCount(0);
+    await expect(news.next).toHaveCount(0);
+    await expect(series.next).toHaveCount(0);
+  });
+
+  test('escritorio (1280 px): «Novedades» desborda y tiene flechas que funcionan; «Series» (4) cabe y no las tiene', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    const news = row(page, 'Novedades');
+
+    await expect(news.next).toBeVisible();
+    await expect(news.previous).toHaveAttribute('aria-disabled', 'true');
+    await expect(news.next).toHaveAttribute('aria-disabled', 'false');
+    await news.next.click();
+    await expect(news.previous).toHaveAttribute('aria-disabled', 'false');
+
+    await expect(row(page, 'Series').list.getByRole('listitem')).not.toHaveCount(0);
+    await expect(row(page, 'Series').next).toHaveCount(0);
+  });
+
+  test('al ensanchar la ventana las flechas desaparecen sin mover las tarjetas, y al estrecharla vuelven', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    const news = row(page, 'Novedades');
+    await expect(news.next).toBeVisible();
+    const withArrows = await headerOffset(news);
+
+    await page.setViewportSize({ width: 3440, height: 1440 });
+    await expect(news.next).toHaveCount(0);
+    // La cabecera reserva el alto de las flechas: las tarjetas quedan a la misma distancia del título.
+    expect(await headerOffset(news)).toBeCloseTo(withArrows, 0);
+
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await expect(news.next).toBeVisible();
+  });
+
+  test('móvil (375 px): sin flechas, la fila se desplaza con el dedo', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/');
+    const news = row(page, 'Novedades');
+    await expect(news.list.getByRole('link', { name: CARD_NAME })).toHaveCount(12);
+
+    // Desborda, pero las flechas solo se muestran desde `md` (en táctil se arrastra).
+    const overflows = await news.list.evaluate((list) => list.scrollWidth > list.clientWidth);
+    expect(overflows).toBe(true);
+    await expect(news.next).toBeHidden();
   });
 });

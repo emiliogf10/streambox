@@ -1,4 +1,6 @@
 import { NEWS_ROW_SIZE } from '../lib/catalog';
+import { catalogFiltersToQuery, hasActiveFilters } from '../lib/catalogFilters';
+import type { CatalogFilters } from '../lib/catalogFilters';
 import type { Series } from '../lib/types';
 import { usePagedCatalog } from './usePagedCatalog';
 
@@ -9,15 +11,33 @@ const PAGE_SIZE = 20;
 const LOAD_MORE_ERROR = 'No se pudieron cargar más series.';
 
 /**
- * Catálogo de SERIES paginado para la página `/series`, de la más reciente a la
- * más antigua (`GET /series?page=N&size=20&sort=createdAt&direction=desc`).
+ * Series de la página `/series` según sus filtros (ver `lib/catalogFilters.ts`),
+ * el gemelo de `useMovieResults`.
  *
- * Misma lógica que las películas ({@link usePagedCatalog}); el servidor ya
- * excluye las series sin episodios, así que aquí no hay que filtrar nada.
+ * - **Sin filtros:** el catálogo de la más reciente a la más antigua
+ *   (`GET /series?page=N&size=20&sort=createdAt&direction=desc`), para el banner
+ *   y las filas.
+ * - **Con algún filtro** (género, año u otro orden):
+ *   `GET /series/search?page=N&size=20&sort=…&direction=…&genreId=…&releaseYear=…`.
+ *   No se manda `title`: buscar por texto ya lo hace el buscador de la barra.
+ *
+ * Es UNA sola llamada a {@link usePagedCatalog} cuyo endpoint y consulta
+ * cambian con los filtros: al cambiarlos, la lista se reinicia y la petición
+ * anterior se cancela. El servidor excluye las series sin episodios en los dos
+ * endpoints, así que aquí no hay que filtrar nada.
+ *
+ * @param filters filtros aplicados (los de la URL, ya validados)
+ * @returns el catálogo paginado con los títulos como `series` y, además, `filtered` (si hay filtros activos)
  */
-export function useSeriesCatalog() {
-  const { items, ...rest } = usePagedCatalog<Series>('/series', PAGE_SIZE, LOAD_MORE_ERROR);
-  return { series: items, ...rest };
+export function useSeriesResults(filters: CatalogFilters) {
+  const filtered = hasActiveFilters(filters);
+  const { items, ...rest } = usePagedCatalog<Series>(
+    filtered ? '/series/search' : '/series',
+    PAGE_SIZE,
+    LOAD_MORE_ERROR,
+    filtered ? catalogFiltersToQuery(filters, 'series') : undefined,
+  );
+  return { series: items, filtered, ...rest };
 }
 
 /**

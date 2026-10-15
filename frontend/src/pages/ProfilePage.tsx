@@ -136,6 +136,13 @@ interface GenresCardProps {
  *   uno, pero la tarjeta no debe romperse ni quedar en blanco si pasa).
  * - Con datos: etiquetas con nombre y recuento; si hay más de {@link TOP_GENRES},
  *   se avisa de cuántos se muestran.
+ *
+ * **Lectura de las etiquetas.** A la vista, «Drama 3»; al lector de pantalla,
+ * «Drama, 3 títulos» (un «3» suelto no dice qué cuenta). Lo visible va con
+ * `aria-hidden` y la frase entera en un único `sr-only`: si el `sr-only` solo
+ * llevara «, 3 títulos» tras el nombre visible, Chromium leería «Drama , 3
+ * títulos», porque el `position: absolute` del `sr-only` lo vuelve bloque y el
+ * navegador separa con un espacio el texto de los hijos que no son en línea.
  */
 function GenresCard({ status, errorMessage, onRetry, genres, totalTitles }: GenresCardProps) {
   if (status === 'error') {
@@ -175,11 +182,12 @@ function GenresCard({ status, errorMessage, onRetry, genres, totalTitles }: Genr
               key={genre.id}
               className="inline-flex min-h-9 items-center gap-2 rounded-full border border-line bg-surface-raised px-3.5 text-sm text-white"
             >
-              {genre.name}
+              {/* Se ve «Drama 3» y se lee «Drama, 3 títulos»: ver «Lectura de las etiquetas» arriba. */}
+              <span aria-hidden="true">{genre.name}</span>
               <span aria-hidden="true" className="text-muted tabular-nums">
                 {genre.count}
               </span>
-              <span className="sr-only">, {pluralize(genre.count, 'título', 'títulos')}</span>
+              <span className="sr-only">{`${genre.name}, ${pluralize(genre.count, 'título', 'títulos')}`}</span>
             </li>
           ))}
         </ul>

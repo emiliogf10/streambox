@@ -16,7 +16,7 @@
 import type { QueryKey } from '@tanstack/react-query';
 
 /** Listados paginados del catálogo que conoce la aplicación (relativos a `/api`). */
-export type CatalogPath = '/movies' | '/movies/search' | '/series';
+export type CatalogPath = '/movies' | '/movies/search' | '/series' | '/series/search';
 
 /** Orden, tamaño de página y filtros de un listado paginado: forman parte de su clave. */
 export interface PagedCatalogParams {
@@ -27,9 +27,9 @@ export interface PagedCatalogParams {
   releaseYear?: number;
 }
 
-/** Raíz de la caché a la que pertenece un listado (`/movies/search` también es de películas). */
+/** Raíz de la caché a la que pertenece un listado (cada buscador, con su catálogo: `/series/search` es de series). */
 function catalogRoot(path: CatalogPath): 'movies' | 'series' {
-  return path === '/series' ? 'series' : 'movies';
+  return path.startsWith('/series') ? 'series' : 'movies';
 }
 
 export const queryKeys = {
@@ -67,7 +67,7 @@ export const queryKeys = {
   },
   /**
    * Un listado paginado del catálogo (`usePagedCatalog`): portada, `/peliculas`
-   * con o sin filtros, `/series`, la fila «Series» y las comprobaciones de
+   * y `/series` con o sin filtros, la fila «Series» y las comprobaciones de
    * presencia. El endpoint y los parámetros van en la clave, así que cada
    * combinación de filtros tiene su propia entrada (volver a un filtro ya visto
    * no repite la petición) y nunca se mezclan sus resultados.

@@ -290,12 +290,15 @@ describe('ProfilePage: con la lista llena', () => {
     await findName('ana');
 
     const genres = await screen.findByRole('region', { name: 'Tus géneros' });
-    // Drama 3; Ciencia ficción 2; Thriller 1.
-    expect(within(genres).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-      'Drama3, 3 títulos',
-      'Ciencia ficción2, 2 títulos',
-      'Thriller1, 1 título',
-    ]);
+    // Drama 3; Ciencia ficción 2; Thriller 1. A la vista, nombre y número (lo de `aria-hidden`)...
+    const items = within(genres).getAllByRole('listitem');
+    const visible = (item: HTMLElement) =>
+      Array.from(item.querySelectorAll('[aria-hidden="true"]'), (part) => part.textContent).join(' ');
+    expect(items.map(visible)).toEqual(['Drama 3', 'Ciencia ficción 2', 'Thriller 1']);
+    // ...y al lector de pantalla, la frase entera sin el número suelto (en Chromium real lo vigila profile.spec.ts).
+    const spoken = (item: HTMLElement) =>
+      Array.from(item.querySelectorAll(':scope > :not([aria-hidden="true"])'), (part) => part.textContent).join('');
+    expect(items.map(spoken)).toEqual(['Drama, 3 títulos', 'Ciencia ficción, 2 títulos', 'Thriller, 1 título']);
     expect(within(genres).getByText('El número indica cuántos títulos de tu lista tienen cada género.')).toBeInTheDocument();
     // Con la lista llena ya no se pinta el estado vacío.
     expect(within(genres).queryByText(/Tu lista está vacía/)).not.toBeInTheDocument();
@@ -535,12 +538,25 @@ describe('ProfilePage: cambiar la contraseña', () => {
   const PUT_PASSWORD = 'PUT /api/users/me/password';
   const NEW = 'tres palabras al azar 2026';
 
-  /** Abre el formulario y rellena los campos que no estén vacíos. */
+  /**
+   * Abre el formulario y rellena los campos que no estén vacíos.
+   *
+   * Pega el texto (tras hacer clic en el campo, como haría un usuario) en vez
+   * de teclearlo: `user.type` simula cada tecla y con contraseñas de 26
+   * caracteres en tres campos el test tardaba ~1,7 s y, con la máquina
+   * cargada, rozaba el límite de 5 s de Vitest. El formulario solo guarda el
+   * valor en cada `onChange` (no hace nada por tecla), así que el resultado
+   * (los valores y lo que se envía) es el mismo.
+   */
   async function fillPasswordForm(user: Events, current = 'la-de-siempre', next = NEW, repeat = next) {
     await user.click(screen.getByRole('button', { name: 'Cambiar contraseña' }));
-    if (current) await user.type(screen.getByLabelText('Contraseña actual'), current);
-    if (next) await user.type(screen.getByLabelText('Nueva contraseña'), next);
-    if (repeat) await user.type(screen.getByLabelText('Repite la nueva contraseña'), repeat);
+    const fill = async (label: string, value: string) => {
+      await user.click(screen.getByLabelText(label));
+      await user.paste(value);
+    };
+    if (current) await fill('Contraseña actual', current);
+    if (next) await fill('Nueva contraseña', next);
+    if (repeat) await fill('Repite la nueva contraseña', repeat);
   }
 
   /** El formulario (con nombre accesible) y su botón de enviar. */
@@ -592,7 +608,8 @@ describe('ProfilePage: cambiar la contraseña', () => {
     expect(screen.getByRole('button', { name: 'Cambiando contraseña...' })).toBeDisabled();
     answer(noContentResponse());
 
-    expect(await screen.findByText(PASSWORD_CHANGED)).toBeInTheDocument();
+    // Con la suite entera en paralelo, el aviso puede tardar más que el segundo por defecto de `findBy*`.
+    expect(await screen.findByText(PASSWORD_CHANGED, {}, { timeout: 3000 })).toBeInTheDocument();
     expect(bodyOf(callsTo('/api/users/me/password', 'PUT')[0])).toEqual({
       currentPassword: 'la-de-siempre',
       newPassword: NEW,

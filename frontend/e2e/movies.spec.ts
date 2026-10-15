@@ -10,7 +10,7 @@
  * el catálogo: el spec va en el proyecto `chromium`.
  *
  * **La espera de los filtros.** Los cambios en la barra pasan a la URL tras
- * 300 ms sin tocar nada (`useMovieFilters`). Los tests no esperan un tiempo
+ * 300 ms sin tocar nada (`useCatalogFilters`). Los tests no esperan un tiempo
  * fijo: esperan a la condición visible (la URL nueva o el recuento), que es lo
  * que haría una persona y no depende de lo cargada que esté la máquina.
  */
@@ -20,7 +20,7 @@ import { HERO_TITLE, MOVIES, PAGE_SIZE } from './support/catalog';
 import type { SeedMovie } from './support/catalog';
 import { expect, movieCard, test } from './support/fixtures';
 
-/** Mensaje del campo «Año» con un año que no se puede buscar (`YEAR_ERROR_MESSAGE` de `useMovieFilters`). */
+/** Mensaje del campo «Año» con un año que no se puede buscar (`YEAR_ERROR_MESSAGE` de `useCatalogFilters`). */
 const YEAR_ERROR = 'Escribe un año entre 1888 y 2100.';
 
 /**
@@ -334,6 +334,61 @@ test.describe('Página Películas', () => {
     await expect(page).toHaveURL(/\/peliculas\?anio=2014$/);
     await expect(filterBar(page).year).toHaveValue('2014');
     await expect(movieCard(results(page), 'Interstellar')).toBeVisible();
+  });
+
+  /**
+   * Revisión QA: los géneros de la ficha de una película son enlaces a
+   * `/peliculas?genero=<id>`. Los tests unitarios comprueban el `href`; este,
+   * que al seguirlo la página de verdad aplica ese filtro (el control lo
+   * refleja y la cuadrícula trae exactamente las películas de ese género) y que
+   * «Atrás» vuelve a la película.
+   */
+  test('un género de la ficha lleva a /peliculas con ese filtro aplicado; «Atrás» vuelve a la película', async ({
+    page,
+    request,
+    user,
+  }) => {
+    const dramaId = await genreIdByName(request, user.token, 'Drama');
+    await page.goto('/peliculas');
+    await movieCard(page.getByRole('region', { name: 'Novedades' }), 'Interstellar').click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+    const detailUrl = page.url();
+
+    // Por expresión: el nombre exacto (sin espacio ante la coma) lo vigila el test siguiente.
+    await page
+      .getByRole('region', { name: 'Ficha' })
+      .getByRole('link', { name: /^Drama\b.*ver todas las películas del género$/ })
+      .click();
+
+    await expect(page).toHaveURL(new RegExp(`/peliculas\\?genero=${dramaId}$`));
+    await expect(filterBar(page).genre).toHaveValue(String(dramaId));
+    await expectResultTitles(page, DRAMA_TITLES);
+
+    await page.goBack();
+    await expect(page).toHaveURL(detailUrl);
+    await expect(page.getByRole('heading', { level: 1, name: 'Interstellar' })).toBeVisible();
+  });
+
+  /**
+   * Revisión QA — regresión de un defecto ya corregido.
+   *
+   * El nombre accesible de un enlace de género debe ser «Drama, ver todas las
+   * películas del género» (es lo que afirma el test unitario, que pasa en
+   * jsdom). Con un `<span class="sr-only">` tras el texto visible, Chromium real
+   * daba «Drama , ver todas…», con un espacio antes de la coma: el span lleva
+   * `position: absolute`, que lo convierte en bloque, y el navegador separa con
+   * un espacio el texto de los hijos que no son en línea al calcular el nombre.
+   * jsdom no aplica CSS y no lo ve. Ahora el nombre va en `aria-label`.
+   */
+  test('el nombre accesible de un género de la ficha es «Drama, ver todas las películas del género» (sin espacio ante la coma)', async ({
+    page,
+  }) => {
+    await page.goto('/peliculas');
+    await movieCard(page.getByRole('region', { name: 'Novedades' }), 'Interstellar').click();
+    const facts = page.getByRole('region', { name: 'Ficha' });
+    await expect(facts.getByRole('link').last()).toHaveAccessibleName('Drama, ver todas las películas del género', {
+      timeout: 3000,
+    });
   });
 
   test('móvil: tras bajar por la cuadrícula, la película se abre ARRIBA (título a la vista y foco en el contenido); «Atrás» no vuelve arriba del todo', async ({

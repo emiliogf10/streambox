@@ -43,9 +43,18 @@ describe('recuentos', () => {
     expect(formatEpisodeCount(24)).toBe('24 episodios');
   });
 
-  it('isOnAir solo es true sin año de fin', () => {
-    expect(isOnAir({ endYear: null })).toBe(true);
-    expect(isOnAir({ endYear: 2022 })).toBe(false);
+  it('isOnAir: true sin año de fin o con uno futuro; false con el año actual o uno pasado', () => {
+    expect(isOnAir({ endYear: null }, 2026)).toBe(true);
+    expect(isOnAir({ endYear: 2027 }, 2026)).toBe(true);
+    expect(isOnAir({ endYear: 2100 }, 2026)).toBe(true);
+    expect(isOnAir({ endYear: 2026 }, 2026)).toBe(false);
+    expect(isOnAir({ endYear: 2022 }, 2026)).toBe(false);
+  });
+
+  it('isOnAir usa por defecto el año actual del reloj', () => {
+    const thisYear = new Date().getFullYear();
+    expect(isOnAir({ endYear: thisYear + 1 })).toBe(true);
+    expect(isOnAir({ endYear: thisYear })).toBe(false);
   });
 
   it('el dato de la tarjeta junta años y temporadas', () => {

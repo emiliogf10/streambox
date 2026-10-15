@@ -17,8 +17,8 @@ import { ToastProvider } from '../context/ToastContext';
 import { createTestQueryClient } from '../test/queryClient';
 import * as api from '../lib/api';
 import { makeMovie, makePage } from '../test/helpers';
-import { NO_MOVIE_FILTERS } from '../lib/movieFilters';
-import type { MovieFilters } from '../lib/movieFilters';
+import { NO_CATALOG_FILTERS } from '../lib/catalogFilters';
+import type { CatalogFilters } from '../lib/catalogFilters';
 import { useCatalog, useMovieResults } from './useCatalog';
 
 // Se simula SOLO `apiFetch`; `ApiError`, `isAbortError`... siguen siendo los reales.
@@ -250,12 +250,12 @@ describe('useCatalog: reload', () => {
 });
 
 describe('useMovieResults: la página /peliculas con y sin filtros', () => {
-  const drama: MovieFilters = { genreId: 4, year: null, sort: 'recientes' };
+  const drama: CatalogFilters = { genreId: 4, year: null, sort: 'recientes' };
 
   it('sin filtros pide lo mismo que la portada: /movies, lo más reciente primero', async () => {
     apiFetch.mockResolvedValueOnce(firstPage);
 
-    const { result } = renderHook(() => useMovieResults(NO_MOVIE_FILTERS), { wrapper });
+    const { result } = renderHook(() => useMovieResults(NO_CATALOG_FILTERS), { wrapper });
 
     expect(apiFetch).toHaveBeenCalledWith('/movies', {
       params: { page: 0, size: 20, sort: 'createdAt', direction: 'desc' },
@@ -282,7 +282,7 @@ describe('useMovieResults: la página /peliculas con y sin filtros', () => {
   it('solo cambiar el orden ya cuenta como filtro: /movies/search sin género ni año', () => {
     apiFetch.mockReturnValueOnce(new Promise(() => {}));
 
-    renderHook(() => useMovieResults({ ...NO_MOVIE_FILTERS, sort: 'duracion-asc' }), { wrapper });
+    renderHook(() => useMovieResults({ ...NO_CATALOG_FILTERS, sort: 'duracion-asc' }), { wrapper });
 
     expect(apiFetch.mock.calls[0][0]).toBe('/movies/search');
     expect(paramsOfCall(0)).toEqual({ page: 0, size: 20, sort: 'duration', direction: 'asc' });
@@ -291,7 +291,7 @@ describe('useMovieResults: la página /peliculas con y sin filtros', () => {
   it('al cambiar de filtro cancela la petición anterior, vuelve a "loading" y una respuesta tardía no se pinta', async () => {
     const old = deferred<unknown>();
     apiFetch.mockReturnValueOnce(old.promise);
-    const { result, rerender } = renderHook((filters: MovieFilters) => useMovieResults(filters), {
+    const { result, rerender } = renderHook((filters: CatalogFilters) => useMovieResults(filters), {
       wrapper,
       initialProps: drama,
     });
@@ -316,7 +316,7 @@ describe('useMovieResults: la página /peliculas con y sin filtros', () => {
 
   it('al cambiar de filtro olvida lo cargado y cancela un "cargar más" en vuelo: la página siguiente vuelve a ser la 1', async () => {
     apiFetch.mockResolvedValueOnce(firstPage);
-    const { result, rerender } = renderHook((filters: MovieFilters) => useMovieResults(filters), {
+    const { result, rerender } = renderHook((filters: CatalogFilters) => useMovieResults(filters), {
       wrapper,
       initialProps: drama,
     });

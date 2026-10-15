@@ -87,11 +87,13 @@ test.describe('Mi perfil', () => {
 
     // La serie sembrada es de Drama + Ciencia ficción: Acción 2, Ciencia ficción 3, Drama 2.
     const genres = page.getByRole('region', { name: 'Tus géneros' });
-    await expect(genres.getByRole('listitem')).toHaveText([
-      'Ciencia ficción3, 3 títulos',
-      'Acción2, 2 títulos',
-      'Drama2, 2 títulos',
-    ]);
+    // Lo que lee un lector de pantalla en Chromium real: sin el número suelto y sin espacio antes de la coma.
+    await expect(genres.getByRole('list')).toMatchAriaSnapshot(`
+      - list:
+        - listitem: Ciencia ficción, 3 títulos
+        - listitem: Acción, 2 títulos
+        - listitem: Drama, 2 títulos
+    `);
 
     const preview = page.getByRole('region', { name: 'De tu lista', exact: true });
     await expect(preview.getByRole('link', { name: /^Interstellar \d{4} ·/ })).toBeVisible();

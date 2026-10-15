@@ -1,7 +1,7 @@
 # Plan de acción — StreamBox
 
 > **Fuente de verdad** de lo hecho y lo pendiente. Nació de la auditoría técnica inicial del proyecto (los códigos como C1, I5, S4 o U1 remiten a sus hallazgos).
-> Última actualización: **2026-10-08** (auditoría 2 y lo que destapó su arreglo).
+> Última actualización: **2026-10-15** (páginas de película y de serie que aprovechan el ancho).
 
 **Contenido**
 
@@ -38,15 +38,21 @@
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
 | Backend (JUnit) | **2239** | 1887 con H2 y 352 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **1032** | |
-| E2E (Playwright) | **161** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
+| Frontend (Vitest) | **1099** | |
+| E2E (Playwright) | **173** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
 
 ### Orden sugerido para continuar
 
-1. **Revisión visual humana** del frontend ([2.3](#23-revisión-visual-humana-del-frontend)).
-2. **Prioridad media:** bloqueo de cuenta residual, en [2.5](#25-seguridad).
+Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que verse y usarse bien en móvil, tablet y escritorio** (y cualquier tamaño intermedio); toda pantalla nueva o rehecha se comprueba como mínimo a 375, 768 y 1280 px, y a 1920 px en escritorio ancho.
+
+1. ✅ ~~**Rehacer la maquetación de la página de película**~~ — **hecho el 2026-10-15** (también `/series/:id`; ver el [historial](#4-historial-de-trabajos)).
+2. **Escaneo de vulnerabilidades en el CI** (punto 20 de la lista de seguridad, [2.5](#25-seguridad)).
+3. **«Películas similares»** en cada página de película ([2.9](#29-funcionalidades-nuevas)).
+4. **«Me gusta» y recomendaciones en el inicio** ([2.9](#29-funcionalidades-nuevas)).
+5. **Revisión visual humana** del frontend ([2.3](#23-revisión-visual-humana-del-frontend)).
+6. **Antes de publicar la app:** HTTPS, HSTS, cookie `Secure` y CAPTCHA (puntos 9, 12, 18 y 19 de la lista de seguridad).
 
 ---
 
@@ -56,6 +62,9 @@ Todos en verde en la máquina del autor.
 
 | Tema | Prioridad | Dónde |
 | :--- | :--- | :--- |
+| Escaneo de vulnerabilidades en el CI | Media | [2.5](#25-seguridad) |
+| «Películas similares» | Media | [2.9](#29-funcionalidades-nuevas) |
+| «Me gusta» y recomendaciones | Media | [2.9](#29-funcionalidades-nuevas) |
 | Revisión visual humana | Media | [2.3](#23-revisión-visual-humana-del-frontend) |
 | Portadas locales y URLs antiguas en tu base | Media | [2.4](#24-acciones-tuyas-datos-y-decisiones) |
 | Bloqueo de cuenta como arma (residual) | Media | [2.5](#25-seguridad) |
@@ -198,6 +207,15 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 
 ### 2.8 Frontend y diseño
 
+- ✅ ~~**Página de película: rehacer la maquetación**~~ — **hecho el 2026-10-15** (y `/series/:id`; ver el [historial](#4-historial-de-trabajos)).
+- **Páginas de detalle: lo que queda (decisión tuya)** — *Opcional · BAJA* (`frontend`)
+  - **«Editar» en la página de una serie** (como en la de película), con «Volver a la serie» en `SeriesFormPage`.
+  - ✅ ~~**Géneros de la ficha de una serie como enlaces**~~ — **hecho el 2026-10-15**: enlazan a `/series?genero=<id>`.
+  - A 1920 px, con una sola banda de ficha, queda aire debajo hasta que exista «Películas similares».
+  - Año y duración salen en el banner y en la ficha (como el «Acerca de» de Netflix): ¿se queda la repetición y la línea separadora?
+  - El esqueleto de la serie pinta siempre el selector de temporadas, aunque luego solo haya una (pequeño salto).
+  - En la ficha de una serie, «Temporadas: 1» y «Episodios: 1» usan la etiqueta en plural (habitual en una ficha; el banner sí dice «1 temporada»).
+
 - ✅ ~~**Caché de datos del servidor (TanStack Query)**~~ — **hecho el 2026-10-09** (ver el [historial](#4-historial-de-trabajos) y el cap. 19.3 del manual).
 - **Diseño: propuestas de las revisiones (decisión tuya)** — *Opcional · BAJA*
   - **Fuente:** Geist Sans (licencia OFL, `woff2` alojado en `public/fonts`, compatible con la CSP). Hoy se usa la del sistema (Segoe UI en Windows), lo más genérico que queda; no se instaló porque es un recurso nuevo.
@@ -214,8 +232,10 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   5. «Explorar catálogo» (Mi lista) e «Ir al inicio» (`/series`, `/peliculas`) llevan al mismo sitio con nombres distintos.
 - **Películas: detalles abiertos** — *Opcional · BAJA*
   - ✅ ~~**Página propia por película**~~ — **hecho el 2026-10-14**: `/peliculas/:id` y el modal de detalle retirado (ver el [historial](#4-historial-de-trabajos)).
-  - Con `?anio=99` en la URL, el año inválido se ignora sin mostrar error en el campo (solo aparece al teclearlo); avisar también ahí es un cambio en `useMovieFilters`.
-  - Los mismos filtros (género, año, orden) podrían llevarse a `/series`.
+  - Con `?anio=99` en la URL, el año inválido se ignora sin mostrar error en el campo (solo aparece al teclearlo); avisar también ahí es un cambio en `useCatalogFilters` (afecta a películas y series).
+  - ✅ ~~Los mismos filtros (género, año, orden) podrían llevarse a `/series`~~ — **hecho el 2026-10-15** (ver el [historial](#4-historial-de-trabajos)).
+  - **«Año» en series = año de estreno** (decisión tuya): una serie de 2019 a 2023 no sale con `?anio=2021`. Si se quiere «en emisión ese año» es un cambio de backend (`SeriesSpecification.hasReleaseYear`); si no, quizá la etiqueta debería decir «Año de estreno».
+  - **Vacío con filtros para ADMIN en `/series`:** explica que las series sin episodios no aparecen, pero no ofrece «Gestionar series» como acción secundaria (opcional).
 - **Panel de administración: detalles de diseño** — *Opcional · BAJA*
   - Al cargar los géneros, el formulario de película salta ~128 px en móvil (reservar el hueco con esqueletos).
   - Durante una búsqueda, el título accesible de la tabla ya describe la búsqueda nueva mientras se ven las filas antiguas (atenuadas, `aria-busy`).
@@ -231,6 +251,14 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 - **Responsive: orden de tabulación en móvil** — *Opcional · BAJA*. El buscador baja a una segunda fila, pero el orden de `Tab` sigue el de escritorio (buscador antes que el menú de usuario). Aceptado.
 
 ### 2.9 Funcionalidades nuevas
+
+- **«Películas similares» en cada película** — *Media · BAJA-MEDIA* (`backend` + `frontend`). Para que el usuario siga navegando por títulos de su gusto. Primera versión sin IA: las que comparten más géneros con la película (y, de desempate, años cercanos y novedad), excluida ella misma, con un endpoint propio (p. ej. `GET /api/movies/{id}/similar?limit=…`) y una fila al final de `/peliculas/:id` (lo mismo para series si encaja). Sin N+1 y con índices adecuados (`database` si hace falta).
+- **«Me gusta» y recomendaciones personalizadas** — *Media · MEDIA-ALTA* (`database` + `backend` + `security` + `frontend`). Decisiones del autor (2026-10-14):
+  - **Un corazón** (sí/no), no estrellas ni pulgares.
+  - **Distinto de «Mi lista»:** «Mi lista» = *quiero verla*; «me gusta» = *la vi y me gustó*. La interfaz debe dejar clara la diferencia (iconos y textos distintos).
+  - **Recomendaciones en el inicio**, al principio **por géneros** de lo que te gusta (sin IA), y sin «me gusta» todavía, las novedades como hoy.
+  - **Dejar el camino hecho para que en el futuro recomiende una IA:** la recomendación detrás de una interfaz (p. ej. `Recommender` con una implementación `GenreBasedRecommender`) para poder sustituirla sin tocar controladores ni frontend; y guardar desde el principio los datos que una IA necesitaría (quién, qué título, cuándo).
+  - Pendiente de diseñar: tabla(s) de «me gusta» para películas y series (como los favoritos, con `INSERT`/`DELETE` directos), endpoints en `/api/users/me/...` (id del token, sin IDOR), cómo se muestran en el perfil, y qué pasa al borrar un título.
 
 - **Reproductor integrado** — *Media · MEDIA*
   - «Ver ahora» abre el vídeo en otra pestaña. Un reproductor en la app solo sirve para vídeos directos (`.mp4`, `.webm`, HLS): revisar antes qué `videoUrl` hay en la base de datos.
@@ -379,6 +407,22 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-10-15 · Filtros en `/series` y flechas de las filas solo cuando hacen falta
+
+- **Petición del autor:** filtros en `/series` como en `/peliculas`; y en su monitor ultraancho las filas del inicio no llegaban al borde y las flechas ‹ › salían igual.
+- **Filtros** (`frontend`; el backend ya los tenía en `GET /api/series/search`): el código de películas se **generalizó** en vez de copiarse: `lib/catalogFilters.ts` (`CatalogKind`), `hooks/useCatalogFilters.ts`, `components/CatalogFilterBar.tsx`, `FilteredCatalogResults.tsx` y `GenreLinks.tsx`. Mismos parámetros en la URL (`genero`, `anio`, `orden`); cada catálogo ofrece solo los órdenes de la lista blanca de su controlador (series no tiene duración). Vacío con filtros por rol (ADMIN: las series sin episodios no aparecen aunque coincidan). Los géneros de la ficha de una serie enlazan a `/series?genero=…`. Cap. 20.8 del manual.
+- **Flechas** (`components/PosterRow.tsx`): solo si la fila desborda, medido al montar, al desplazar y con `ResizeObserver`; la cabecera reserva su alto (el título no salta) y, si la flecha enfocada desaparece, el foco pasa a la primera tarjeta.
+- **Revisión de `qa`** (sin bugs; +12 tests: `useSeriesResults` con la caché real, fugas del `ResizeObserver`, filas que cambian de tamaño): el vacío con filtros prometía «quita los filtros para ver todas las series/películas» aunque el catálogo estuviera vacío; ahora dice «…o quita los filtros.» (corregido por el orquestador).
+- **Verificación** (orquestador): Vitest de 1057 a **1099**; E2E de 165 a **173** (+ 24 omitidos); build y lint limpios. Visual con agent-browser a 375, 768, 1280, 1920 y 3440 px contra la pila aislada con H2.
+
+### 2026-10-15 · Páginas de película y de serie que aprovechan el ancho
+
+- **Problema** (visto por el autor en su app): en escritorio, el contenido de `/peliculas/:id` quedaba en una franja a la izquierda y más de media pantalla vacía. Requisito del autor: la app sirve para móvil, tablet, PC y cualquier tamaño.
+- **Arreglo** (`frontend`): `FeaturedBanner` con `layout="page"` (fondo desenfocado a todo el ancho, contenido centrado en `max-w-6xl`, póster mayor; la portada y `/series` no cambian); **ficha** nueva (`components/FactSheet.tsx`, `<dl>` solo con datos de la API): en una película, estreno, duración, géneros enlazados a `/peliculas?genero=…` y «En el catálogo desde»; en una serie, emisión, estado, temporadas, episodios, géneros y fecha, en tarjeta lateral junto a los episodios desde 1024 px. Esqueleto de carga con la misma forma (`DetailSkeleton`; la serie ya no usa el indicador giratorio). Hueco previsto (invisible) para «Películas similares». Cap. 20.8 bis del manual.
+- **Revisión de `qa`** (sin incidencias graves; +9 tests y 2 E2E: casos límite, encabezados, husos horarios, el enlace de género aplica el filtro) y arreglos (`frontend`): el **nombre accesible** de los enlaces de género tenía un espacio antes de la coma en Chromium real («Drama , ver…»; jsdom no lo ve) y el mismo defecto había en «Tus géneros» del perfil y en la paginación (corregido en los tres, vigilado con Playwright); una serie con **año de fin futuro** salía «Finalizada» (ahora «En emisión», `isOnAir` en `lib/series.ts`); un JSDoc falso; y un test del perfil lento bajo carga (pega en vez de teclear, mismas aserciones).
+- **Verificación:** Vitest de 1032 a **1057**; E2E de 161 a **165** (+ 24 omitidos), comprobados por el orquestador; build y lint limpios. Visual con agent-browser y el Chromium de Playwright a 375, 768, 1024, 1280, 1440 y 1920 px, como USER y ADMIN, contra la pila aislada con H2.
+- **Visto de paso (backend, ya anotado en [2.6](#26-backend-y-api)):** `MovieRequest` responde «must not be blank» en inglés.
 
 ### 2026-10-14 · Búsqueda sin acentos y tolerante a erratas (ADR 0013)
 

@@ -79,11 +79,14 @@ async function expectNavbarFits(page: Page, withAdminLink: boolean): Promise<voi
 }
 
 /**
- * La barra de filtros de `/peliculas` cabe: sus tres controles se ven enteros y no se pisan entre sí.
- * En móvil es una rejilla de dos columnas (género y año arriba, orden debajo) y desde `sm` una fila.
+ * La barra de filtros de `/peliculas` (o la de `/series`, que es la misma) cabe: sus tres controles se ven
+ * enteros y no se pisan entre sí. En móvil es una rejilla de dos columnas (género y año arriba, orden debajo)
+ * y desde `sm` una fila.
+ *
+ * @param formName nombre accesible del formulario: «Filtrar películas» o «Filtrar series»
  */
-async function expectMovieFilterBarFits(page: Page): Promise<void> {
-  const form = page.getByRole('form', { name: 'Filtrar películas' });
+async function expectFilterBarFits(page: Page, formName = 'Filtrar películas'): Promise<void> {
+  const form = page.getByRole('form', { name: formName });
   const controls: [Locator, string][] = [
     [form.getByRole('combobox', { name: 'Género' }), 'filtro Género'],
     [form.getByRole('textbox', { name: 'Año' }), 'filtro Año'],
@@ -109,8 +112,8 @@ async function expectMovieFilterBarFits(page: Page): Promise<void> {
  * controles, 12 px). Antes, a 768 px, bajaba solo a otra línea con el margen
  * pensado para alinearse en fila y quedaba descolgado (~38 px de hueco).
  */
-async function expectClearFiltersNextToSort(page: Page): Promise<void> {
-  const form = page.getByRole('form', { name: 'Filtrar películas' });
+async function expectClearFiltersNextToSort(page: Page, formName = 'Filtrar películas'): Promise<void> {
+  const form = page.getByRole('form', { name: formName });
   const sort = (await form.getByRole('combobox', { name: 'Ordenar por' }).boundingBox())!;
   const clear = (await form.getByRole('button', { name: 'Quitar filtros' }).boundingBox())!;
   const sameLine = clear.y < sort.y + sort.height && sort.y < clear.y + clear.height;
@@ -207,7 +210,24 @@ for (const viewport of VIEWPORTS) {
       await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Ver episodios/ }), page, '«Ver episodios»');
       await expectFullyInsideViewportWidth(banner.getByRole('button', { name: /^Mi lista/ }), page, '«Mi lista» del banner');
       await expectWholePoster(banner.locator('img').last(), banner, 'póster del banner de series');
+      await expectFilterBarFits(page, 'Filtrar series');
       await expectNoHorizontalScroll(page);
+
+      // Con filtros: la cuadrícula de resultados, «Quitar filtros» junto al orden y las tarjetas enteras.
+      const dramaId = await genreIdByName(request, user.token, 'Drama');
+      await page.goto(`/series?genero=${dramaId}&orden=titulo-asc`);
+      const results = page.getByRole('region', { name: 'Resultados' });
+      await expect(results.getByRole('status').first()).toHaveText('4 series');
+      await expectFilterBarFits(page, 'Filtrar series');
+      await expectClearFiltersNextToSort(page, 'Filtrar series');
+      const cards = results.getByRole('listitem');
+      for (let index = 0; index < 4; index += 1) {
+        await expectFullyInsideViewportWidth(cards.nth(index), page, `tarjeta ${index + 1} de la cuadrícula de series`);
+      }
+      await expectNoHorizontalScroll(page);
+
+      // De vuelta al catálogo sin filtros para abrir la serie del banner.
+      await page.goto('/series');
 
       await banner.getByRole('link', { name: /^Ver episodios/ }).click();
       await expect(page.getByRole('heading', { level: 1, name: SERIES_HERO.title })).toBeVisible();
@@ -243,7 +263,7 @@ for (const viewport of VIEWPORTS) {
       await expect(banner).toBeVisible();
       await expectNavbarFits(page, false);
       await expectFullyInsideViewportWidth(page.getByRole('heading', { level: 1, name: 'Películas' }), page, 'título «Películas»');
-      await expectMovieFilterBarFits(page);
+      await expectFilterBarFits(page);
       await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Ver ahora/ }), page, '«Ver ahora»');
       await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Más información/ }), page, '«Más información»');
       await expectWholePoster(banner.locator('img').last(), banner, 'póster del banner de películas');
@@ -261,7 +281,7 @@ for (const viewport of VIEWPORTS) {
       const results = page.getByRole('region', { name: 'Resultados' });
       const cards = results.getByRole('listitem').getByRole('link');
       await expect(cards).toHaveCount(2);
-      await expectMovieFilterBarFits(page);
+      await expectFilterBarFits(page);
       await expectFullyInsideViewportWidth(form.getByRole('button', { name: 'Quitar filtros' }), page, '«Quitar filtros»');
       await expectClearFiltersNextToSort(page);
       for (let index = 0; index < 2; index += 1) {
@@ -275,7 +295,7 @@ for (const viewport of VIEWPORTS) {
       await year.press('Tab');
       const yearError = page.getByRole('alert').filter({ hasText: 'Escribe un año entre 1888 y 2100.' });
       await expectFullyInsideViewportWidth(yearError, page, 'error del año');
-      await expectMovieFilterBarFits(page);
+      await expectFilterBarFits(page);
       await expectClearFiltersNextToSort(page);
       await expectNoHorizontalScroll(page);
     });
@@ -287,7 +307,7 @@ for (const viewport of VIEWPORTS) {
       await page.goto(`/peliculas?genero=${actionId}&anio=1982`);
       const results = page.getByRole('region', { name: 'Resultados' });
       await expect(results.getByRole('heading', { name: 'No hay películas con estos filtros' })).toBeVisible();
-      await expectMovieFilterBarFits(page);
+      await expectFilterBarFits(page);
       await expectFullyInsideViewportWidth(
         page.getByRole('form', { name: 'Filtrar películas' }).getByRole('button', { name: 'Quitar filtros' }),
         page,
@@ -345,6 +365,14 @@ for (const viewport of VIEWPORTS) {
       await expectFullyInsideViewportWidth(header.getByRole('button', { name: /^En mi lista/ }), page, '«En mi lista»');
       // El póster de la cabecera se ve entero también en 375 px (más pequeño, a la izquierda del título).
       await expectWholePoster(header.locator('img').last(), header, 'póster de la cabecera');
+      // La ficha y sus enlaces de género caben (en 375 px es una rejilla de dos columnas).
+      const facts = page.getByRole('region', { name: 'Ficha' });
+      await expectFullyInsideViewportWidth(facts, page, 'ficha');
+      const genreLinks = facts.getByRole('link', { name: /ver todas las películas del género$/ });
+      await expect(genreLinks.first()).toBeVisible();
+      for (let index = 0; index < (await genreLinks.count()); index += 1) {
+        await expectFullyInsideViewportWidth(genreLinks.nth(index), page, `género ${index + 1} de la ficha`);
+      }
       await expectNoHorizontalScroll(page);
     });
 
@@ -416,7 +444,7 @@ for (const viewport of VIEWPORTS) {
         // «Películas» marcada como actual y «Administrar» a la vez: el momento más ancho de la barra.
         await expect(page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Administrar' })).toBeVisible();
         await expectNavbarFits(page, true);
-        await expectMovieFilterBarFits(page);
+        await expectFilterBarFits(page);
         await expectNoHorizontalScroll(page);
       });
 
@@ -478,6 +506,51 @@ for (const viewport of VIEWPORTS) {
         await expectNoHorizontalScroll(page);
         await page.keyboard.press('Escape');
       });
+    });
+  });
+}
+
+/**
+ * Pantallas anchas: la página de un título no se queda pegada a la izquierda.
+ *
+ * Protege contra el defecto que vio el autor (2026-10-14): a 1280 px y más, el
+ * póster y el texto ocupaban una franja a la izquierda y el resto de la
+ * pantalla quedaba vacío. Ahora la cabecera y el cuerpo comparten un contenedor
+ * centrado con ancho máximo, así que el hueco a la izquierda del póster (inicio
+ * del contenedor) es igual al que queda a la derecha de la ficha (su final).
+ */
+async function expectCenteredDetail(page: Page, header: Locator): Promise<void> {
+  // El banner va a sangre (de borde a borde del área de la página, sin la barra de desplazamiento): es la referencia.
+  const bleed = (await header.boundingBox())!;
+  const poster = (await header.locator('img').last().boundingBox())!;
+  const facts = (await page.getByRole('region', { name: 'Ficha' }).boundingBox())!;
+  const left = poster.x - bleed.x;
+  const right = bleed.x + bleed.width - (facts.x + facts.width);
+  expect(Math.abs(left - right), `contenido descentrado: ${left}px a la izquierda y ${right}px a la derecha`).toBeLessThanOrEqual(2);
+  // Y de verdad aprovecha el ancho: no es una columna estrecha centrada.
+  expect(facts.x + facts.width - poster.x, 'el contenido ocupa demasiado poco ancho').toBeGreaterThanOrEqual(1000);
+}
+
+for (const viewport of [
+  { name: '1440x900', width: 1440, height: 900 },
+  { name: '1920x1080', width: 1920, height: 1080 },
+] as const) {
+  test.describe(`Pantalla ancha ${viewport.name}`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('la página de una película y la de una serie van centradas y sin scroll horizontal', async ({ page, user, signIn }) => {
+      await signIn(user);
+      await page.goto('/');
+      await page.getByRole('region', { name: HERO_TITLE }).getByRole('link', { name: /^Más información/ }).click();
+      await expect(page.getByRole('heading', { level: 1, name: HERO_TITLE })).toBeVisible();
+      await expectCenteredDetail(page, page.getByRole('region', { name: HERO_TITLE }));
+      await expectNoHorizontalScroll(page);
+
+      await page.goto('/series');
+      await page.getByRole('region', { name: SERIES_HERO.title }).getByRole('link', { name: /^Ver episodios/ }).click();
+      await expect(page.getByRole('heading', { level: 1, name: SERIES_HERO.title })).toBeVisible();
+      await expectCenteredDetail(page, page.getByRole('region', { name: SERIES_HERO.title }));
+      await expectNoHorizontalScroll(page);
     });
   });
 }

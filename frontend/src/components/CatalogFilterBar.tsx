@@ -1,10 +1,10 @@
 import { useId } from 'react';
 import type { ComponentProps, FormEvent, ReactNode, Ref } from 'react';
 import { ChevronDown, X } from 'lucide-react';
-import type { MovieFilterDraft } from '../hooks/useMovieFilters';
+import type { CatalogFilterDraft } from '../hooks/useCatalogFilters';
 import type { GenresStatus } from '../hooks/useGenres';
-import { MOVIE_SORT_OPTIONS } from '../lib/movieFilters';
-import type { MovieSortKey } from '../lib/movieFilters';
+import { SORT_OPTIONS } from '../lib/catalogFilters';
+import type { CatalogKind, CatalogSortKey } from '../lib/catalogFilters';
 import type { Genre } from '../lib/types';
 import { Button } from './Button';
 import { FormField } from './FormField';
@@ -68,10 +68,15 @@ function SelectField({
   );
 }
 
-/** Propiedades de {@link MovieFilterBar}. */
-interface Props {
-  /** Valor actual de cada control (ver `useMovieFilters`). */
-  draft: MovieFilterDraft;
+/** Nombre accesible del formulario de cada catálogo. */
+const FORM_LABEL: Record<CatalogKind, string> = { movies: 'Filtrar películas', series: 'Filtrar series' };
+
+/** Propiedades de {@link CatalogFilterBar} (las prepara `useCatalogFilterBar`). */
+export interface CatalogFilterBarProps {
+  /** Catálogo que se filtra: decide el nombre del formulario y qué órdenes se ofrecen. */
+  kind: CatalogKind;
+  /** Valor actual de cada control (ver `useCatalogFilters`). */
+  draft: CatalogFilterDraft;
   /** Géneros de `GET /api/genres`, ya ordenados por nombre. */
   genres: Genre[];
   genresStatus: GenresStatus;
@@ -79,7 +84,7 @@ interface Props {
   onGenreChange: (value: string) => void;
   onYearChange: (value: string) => void;
   onYearBlur: () => void;
-  onSortChange: (value: MovieSortKey) => void;
+  onSortChange: (value: CatalogSortKey) => void;
   /** Intro dentro del formulario: aplica sin esperar. */
   onSubmit: () => void;
   /** Error del campo «Año» (o `null`). */
@@ -96,16 +101,20 @@ interface Props {
 }
 
 /**
- * Barra de filtros de `/peliculas`: género, año de estreno y orden.
+ * Barra de filtros de `/peliculas` y de `/series`: género, año de estreno y orden.
+ *
+ * **La misma barra para los dos catálogos** (`kind`): cambian solo el nombre
+ * del formulario («Filtrar películas» / «Filtrar series») y los órdenes, porque
+ * una serie no tiene duración (ver `SORT_OPTIONS` en `lib/catalogFilters.ts`).
  *
  * **Formulario sin botón «Aplicar».** Los cambios se aplican solos tras una
- * breve espera (`useMovieFilters`) y los resultados se anuncian en una región
+ * breve espera (`useCatalogFilters`) y los resultados se anuncian en una región
  * `role="status"` de la página, sin mover el foco. Aun así es un `<form>` con
- * nombre accesible («Filtrar películas»): los lectores de pantalla lo ofrecen
+ * nombre accesible («Filtrar películas» o «Filtrar series»): los lectores de pantalla lo ofrecen
  * como zona de la página, e Intro en el campo «Año» aplica al momento.
  *
  * **Año: campo de texto numérico, no un desplegable.** La lista tendría 213
- * años (1888–2100) y la API no ofrece "años con películas" para acortarla. El
+ * años (1888–2100) y la API no ofrece "años con títulos" para acortarla. El
  * campo es `inputmode="numeric"` (teclado numérico en el móvil) y no
  * `type="number"`: ese tipo cambia el valor con la rueda del ratón al
  * desplazar la página y acepta `e` o decimales. Se valida en el cliente con el
@@ -128,7 +137,8 @@ interface Props {
  * botón se centra siempre con su caja y, si falta sitio, baja con él, así que
  * ningún margen depende de cuántos elementos quepan en la línea.
  */
-export function MovieFilterBar({
+export function CatalogFilterBar({
+  kind,
   draft,
   genres,
   genresStatus,
@@ -142,7 +152,7 @@ export function MovieFilterBar({
   showClear,
   onClear,
   genreSelectRef,
-}: Props) {
+}: CatalogFilterBarProps) {
   const genreId = useId();
   const yearId = useId();
   const sortId = useId();
@@ -155,7 +165,7 @@ export function MovieFilterBar({
   return (
     <div className="w-full sm:w-auto">
       <form
-        aria-label="Filtrar películas"
+        aria-label={FORM_LABEL[kind]}
         onSubmit={handleSubmit}
         noValidate
         className="grid grid-cols-[minmax(0,1fr)_8rem] items-start gap-3 sm:flex sm:flex-wrap"
@@ -195,7 +205,7 @@ export function MovieFilterBar({
           id={sortId}
           label="Ordenar por"
           value={draft.sort}
-          onChange={(event) => onSortChange(event.target.value as MovieSortKey)}
+          onChange={(event) => onSortChange(event.target.value as CatalogSortKey)}
           className="col-span-2"
           controlClassName="sm:w-52 sm:flex-none"
           trailing={
@@ -207,7 +217,7 @@ export function MovieFilterBar({
             )
           }
         >
-          {MOVIE_SORT_OPTIONS.map((option) => (
+          {SORT_OPTIONS[kind].map((option) => (
             <option key={option.key} value={option.key}>
               {option.label}
             </option>

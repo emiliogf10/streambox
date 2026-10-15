@@ -11,40 +11,13 @@
 import { act, render } from '@testing-library/react';
 import { useRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { FakeResizeObserver, installFakeResizeObserver } from '../test/fakeResizeObserver';
 import { useHeightCssVariable } from './useHeightCssVariable';
 
 const VARIABLE = '--altura-de-prueba';
 
 /** Altura que "mide" el navegador simulado; cada test la cambia a su gusto. */
 let currentHeight = 0;
-
-/** `ResizeObserver` falso: recuerda qué observa, con qué opciones, y permite disparar el aviso. */
-class FakeResizeObserver {
-  static instances: FakeResizeObserver[] = [];
-  readonly callback: ResizeObserverCallback;
-  readonly observed: { target: Element; options?: ResizeObserverOptions }[] = [];
-  disconnected = false;
-
-  constructor(callback: ResizeObserverCallback) {
-    this.callback = callback;
-    FakeResizeObserver.instances.push(this);
-  }
-
-  observe(target: Element, options?: ResizeObserverOptions) {
-    this.observed.push({ target, options });
-  }
-
-  unobserve() {}
-
-  disconnect() {
-    this.disconnected = true;
-  }
-
-  /** Simula que el navegador avisa de un cambio de tamaño. */
-  trigger() {
-    this.callback([], this as unknown as ResizeObserver);
-  }
-}
 
 /** Componente mínimo que usa el hook sobre su propio `<div>`. */
 function Measured() {
@@ -57,8 +30,7 @@ function Measured() {
 const published = () => document.documentElement.style.getPropertyValue(VARIABLE);
 
 beforeEach(() => {
-  FakeResizeObserver.instances = [];
-  vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  installFakeResizeObserver();
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(() => ({ height: currentHeight }) as DOMRect);
 });
 

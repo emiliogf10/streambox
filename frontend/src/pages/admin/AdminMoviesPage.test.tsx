@@ -129,6 +129,8 @@ describe('AdminMoviesPage: listado', () => {
     const pagination = screen.getByRole('navigation', { name: 'Paginación de películas' });
     expect(within(pagination).getByText('Página 1 de 3')).toBeInTheDocument();
     expect(within(pagination).getByText('25 películas')).toBeInTheDocument();
+    // El lector de pantalla oye la frase entera con coma (el punto medio es solo visual).
+    expect(within(pagination).getByText('Página 1 de 3, 25 películas')).toHaveClass('sr-only');
     expect(screen.getByRole('link', { name: 'Nueva película' })).toHaveAttribute('href', '/admin/peliculas/nueva');
   });
 

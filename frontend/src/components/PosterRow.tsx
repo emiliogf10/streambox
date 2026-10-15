@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -13,6 +13,38 @@ interface Props<T extends { id: number }> {
    * la portada). Va en la cabecera, no al final: así se ve sin recorrer la fila.
    */
   action?: ReactNode;
+}
+
+/**
+ * Qué se sabe del desplazamiento de la fila: si su contenido desborda (hay algo
+ * que desplazar) y si está en el principio o en el final.
+ */
+interface ScrollState {
+  overflows: boolean;
+  atStart: boolean;
+  atEnd: boolean;
+}
+
+/**
+ * Margen de error de las medidas, en píxeles. Con zoom o pantallas de alta
+ * densidad, `scrollLeft` y los anchos pueden salir con decimales redondeados:
+ * sin él, una fila que cabe justa podría «desbordar» por medio píxel y enseñar
+ * unas flechas que no mueven nada.
+ */
+const TOLERANCE_PX = 1;
+
+/** Mide la fila. Sin desbordamiento, está a la vez en el principio y en el final. */
+function measure(scroller: HTMLElement): ScrollState {
+  return {
+    overflows: scroller.scrollWidth - scroller.clientWidth > TOLERANCE_PX,
+    atStart: scroller.scrollLeft <= TOLERANCE_PX,
+    atEnd: scroller.scrollLeft + scroller.clientWidth >= scroller.scrollWidth - TOLERANCE_PX,
+  };
+}
+
+/** `true` si las dos medidas son iguales (para no repintar en cada evento de `scroll`). */
+function sameScrollState(a: ScrollState, b: ScrollState): boolean {
+  return a.overflows === b.overflows && a.atStart === b.atStart && a.atEnd === b.atEnd;
 }
 
 /** Clases de los botones "anterior/siguiente" (solo se ven desde `md`, donde no hay gesto táctil). */
@@ -37,32 +69,53 @@ const arrowClass =
  *   con `aria-disabled` (y no `disabled`, para no perder el foco al llegar al final). El desplazamiento
  *   suave se sustituye por salto directo con `prefers-reduced-motion`.
  *
+ * **Flechas solo si hay algo que desplazar.** Si todas las tarjetas caben (12
+ * pósters en una pantalla ultraancha, o una fila de 4 series en un portátil),
+ * las flechas no se pintan: dos botones que no mueven nada son ruido y dan a
+ * entender que hay más títulos. Se mide al montar (antes de pintar, para que no
+ * aparezcan un instante), al desplazar y con un `ResizeObserver` sobre la fila
+ * y sobre cada tarjeta: avisa al cambiar el ancho de la ventana (la fila cambia
+ * de tamaño) y al cambiar el de las tarjetas, sin sondear con un temporizador.
+ * Si cambian los títulos se vuelve a medir y a observar.
+ * - **Sin salto de maquetación:** la cabecera reserva desde `md` la altura de
+ *   las flechas (`md:min-h-10`), así que el título no se mueve al ocultarlas.
+ * - **Sin perder el foco:** si una flecha tenía el foco al desaparecer (p. ej.
+ *   se ensancha la ventana con el foco en «Ver siguientes»), el foco pasa a la
+ *   primera tarjeta, lo siguiente en el orden de tabulación; si no, caería al
+ *   `<body>` y el teclado tendría que empezar de nuevo.
+ *
  * Es una sección con su título (`<h2>`) como nombre y una lista de tarjetas.
  * Sin elementos no pinta nada.
  */
 export function PosterRow<T extends { id: number }>({ title, items, renderItem, action }: Props<T>) {
   const headingId = useId();
   const scrollerRef = useRef<HTMLUListElement>(null);
-  const [edges, setEdges] = useState({ atStart: true, atEnd: true });
+  const arrowsRef = useRef<HTMLDivElement>(null);
+  const [scroll, setScroll] = useState<ScrollState>({ overflows: false, atStart: true, atEnd: true });
 
-  // Recalcula si hay más contenido a cada lado al desplazar y al cambiar el tamaño o las tarjetas.
-  useEffect(() => {
+  // Mide al montar y cada vez que cambian los títulos; después, al desplazar y al cambiar el tamaño de la fila
+  // o de una tarjeta. `useLayoutEffect`: la primera medida llega antes de pintar (las flechas no parpadean).
+  useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
-    const update = () =>
-      setEdges({
-        atStart: scroller.scrollLeft <= 1,
-        atEnd: scroller.scrollLeft + scroller.clientWidth >= scroller.scrollWidth - 1,
-      });
+    const update = () => {
+      const next = measure(scroller);
+      // Una flecha enfocada va a desaparecer: el foco pasa a la primera tarjeta (ver la documentación).
+      if (!next.overflows && arrowsRef.current?.contains(document.activeElement)) {
+        scroller.querySelector<HTMLElement>('a[href], button')?.focus();
+      }
+      setScroll((current) => (sameScrollState(current, next) ? current : next));
+    };
+    update();
     scroller.addEventListener('scroll', update, { passive: true });
-    // Observar el tamaño dispara también una medición inicial.
     const observer = new ResizeObserver(update);
     observer.observe(scroller);
+    for (const card of scroller.children) observer.observe(card);
     return () => {
       scroller.removeEventListener('scroll', update);
       observer.disconnect();
     };
-  }, [items.length]);
+  }, [items]);
 
   if (items.length === 0) return null;
 
@@ -70,7 +123,7 @@ export function PosterRow<T extends { id: number }>({ title, items, renderItem, 
   const scrollByPage = (direction: -1 | 1) => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
-    if (direction === -1 ? edges.atStart : edges.atEnd) return;
+    if (direction === -1 ? scroll.atStart : scroll.atEnd) return;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     scroller.scrollBy({ left: direction * scroller.clientWidth * 0.8, behavior: reduceMotion ? 'auto' : 'smooth' });
   };
@@ -79,32 +132,37 @@ export function PosterRow<T extends { id: number }>({ title, items, renderItem, 
     // Título de fila un paso por encima del texto de las tarjetas (text-lg frente a text-sm) y separación entre
     // filas mayor que la del título a sus tarjetas: así cada fila se lee como un grupo (ley de proximidad).
     <section aria-labelledby={headingId} className="mb-9 px-4 sm:mb-10 sm:px-6">
-      <div className="mb-3 flex items-center justify-between gap-4">
+      {/* `md:min-h-10`: la altura de las flechas queda reservada aunque no se pinten (el título no salta). */}
+      <div className="mb-3 flex items-center justify-between gap-4 md:min-h-10">
         <div className="flex min-w-0 items-center gap-3">
           <h2 id={headingId} className="text-lg font-bold tracking-tight text-white">
             {title}
           </h2>
           {action}
         </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => scrollByPage(-1)}
-            aria-disabled={edges.atStart}
-            aria-label={`Ver anteriores en ${title}`}
-            className={arrowClass}
-          >
-            <ChevronLeft aria-hidden="true" className="size-5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => scrollByPage(1)}
-            aria-disabled={edges.atEnd}
-            aria-label={`Ver siguientes en ${title}`}
-            className={arrowClass}
-          >
-            <ChevronRight aria-hidden="true" className="size-5" />
-          </button>
+        <div ref={arrowsRef} className="flex gap-2">
+          {scroll.overflows && (
+            <>
+              <button
+                type="button"
+                onClick={() => scrollByPage(-1)}
+                aria-disabled={scroll.atStart}
+                aria-label={`Ver anteriores en ${title}`}
+                className={arrowClass}
+              >
+                <ChevronLeft aria-hidden="true" className="size-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollByPage(1)}
+                aria-disabled={scroll.atEnd}
+                aria-label={`Ver siguientes en ${title}`}
+                className={arrowClass}
+              >
+                <ChevronRight aria-hidden="true" className="size-5" />
+              </button>
+            </>
+          )}
         </div>
       </div>
 

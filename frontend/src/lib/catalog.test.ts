@@ -5,8 +5,16 @@
  * y que las filas por género sigan las reglas de la portada (mínimo de 3,
  * orden por tamaño y luego por nombre).
  */
-import { describe, expect, it } from 'vitest';
-import { MIN_MOVIES_PER_GENRE_ROW, NEWS_ROW_SIZE, buildCatalogRows, mergeById, moviePath, seriesPath } from './catalog';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  MIN_MOVIES_PER_GENRE_ROW,
+  NEWS_ROW_SIZE,
+  buildCatalogRows,
+  formatAddedDate,
+  mergeById,
+  moviePath,
+  seriesPath,
+} from './catalog';
 import type { Genre } from './types';
 import { makeMovie } from '../test/helpers';
 
@@ -143,5 +151,43 @@ describe('moviePath y seriesPath', () => {
   it('cada tipo tiene su página: el mismo id no lleva al mismo sitio', () => {
     expect(moviePath(7)).toBe('/peliculas/7');
     expect(seriesPath(7)).toBe('/series/7');
+  });
+});
+
+describe('formatAddedDate', () => {
+  it('día, mes y año en español', () => {
+    expect(formatAddedDate('2026-10-14T09:15:00Z')).toBe('14 de octubre de 2026');
+  });
+
+  it('en UTC: a las 23:30 UTC sigue siendo ese día, sea cual sea el huso del navegador', () => {
+    expect(formatAddedDate('2026-12-31T23:30:00Z')).toBe('31 de diciembre de 2026');
+    expect(formatAddedDate('2027-01-01T00:10:00Z')).toBe('1 de enero de 2027');
+  });
+
+  it('con una fecha inválida devuelve null (nunca «Invalid Date»)', () => {
+    expect(formatAddedDate('no-es-una-fecha')).toBeNull();
+    expect(formatAddedDate('')).toBeNull();
+  });
+});
+
+/**
+ * Revisión QA: el test de arriba solo protege si la máquina NO está en UTC (en
+ * el CI de GitHub, que corre en UTC, pasaría igual sin `timeZone: 'UTC'`). Aquí
+ * se fuerza el huso del proceso: Node aplica un cambio de `TZ` en caliente (y
+ * Vitest ejecuta cada archivo en su propio proceso, así que no afecta a otros).
+ * Kiritimati (UTC+14) adelantaría el día y Los Ángeles (UTC−8) lo atrasaría.
+ */
+describe('formatAddedDate con el huso del navegador lejos de UTC', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each(['Pacific/Kiritimati', 'America/Los_Angeles'])('en %s da el mismo día que la API', (timeZone) => {
+    vi.stubEnv('TZ', timeZone);
+    // Comprobación de que el cambio de huso surte efecto (si no, el test no probaría nada).
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe(timeZone);
+
+    expect(formatAddedDate('2026-12-31T23:30:00Z')).toBe('31 de diciembre de 2026');
+    expect(formatAddedDate('2027-01-01T00:10:00Z')).toBe('1 de enero de 2027');
   });
 });

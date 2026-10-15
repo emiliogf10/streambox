@@ -25,6 +25,12 @@ interface PaginationProps {
  *   hace nada.
  * - "Página X de Y" está en una región `role="status"`: al cambiar de página se
  *   anuncia sin mover el foco.
+ * - **«Página X de Y · N elementos».** El punto medio es solo visual; el lector
+ *   de pantalla oye una coma (una pausa). Lo visible va con `aria-hidden` y la
+ *   frase entera en un único `sr-only`: con el punto oculto y un `sr-only` con
+ *   solo la coma entre medias, Chromium leía «Página 1 de 3 , 25 películas»,
+ *   porque el `position: absolute` del `sr-only` lo vuelve bloque y el navegador
+ *   separa con un espacio el texto de los hijos que no son en línea.
  * - En móvil el texto va arriba a todo el ancho y los dos botones debajo; desde
  *   `sm` todo cabe en una fila. El orden del DOM (texto, Anterior, Siguiente)
  *   es el de lectura y el de tabulación en todos los tamaños.
@@ -34,15 +40,17 @@ export function Pagination({ page, totalPages, totalElements, itemNames, label, 
   const hasPrevious = page > 1;
   const hasNext = page < pages;
   const [singular, plural] = itemNames;
+  const pageText = `Página ${page} de ${pages}`;
+  const countText = `${totalElements} ${totalElements === 1 ? singular : plural}`;
 
   return (
     <nav aria-label={label} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
       <p role="status" className="w-full text-center text-sm text-muted tabular-nums sm:order-2 sm:w-auto">
-        <span>{`Página ${page} de ${pages}`}</span>
-        {/* El punto medio es solo visual; el lector de pantalla oye una pausa (la coma). */}
-        <span aria-hidden="true"> · </span>
-        <span className="sr-only">, </span>
-        <span>{`${totalElements} ${totalElements === 1 ? singular : plural}`}</span>
+        {/* Se ve con punto medio y se lee con coma: ver «Página X de Y · N elementos» arriba. */}
+        <span aria-hidden="true">
+          <span>{pageText}</span> · <span>{countText}</span>
+        </span>
+        <span className="sr-only">{`${pageText}, ${countText}`}</span>
       </p>
       <Button
         variant="outline"
