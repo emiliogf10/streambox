@@ -38,7 +38,7 @@ describe('validateEpisodeForm', () => {
     expect(validateEpisodeForm(VALID)).toEqual({});
   });
 
-  it('vacío: cada obligatorio con el mensaje exacto del servidor; la sinopsis no es obligatoria', () => {
+  it('vacío: cada obligatorio con el mensaje exacto del servidor; la sinopsis y el vídeo no son obligatorios', () => {
     const empty: EpisodeFormValues = {
       seasonNumber: '',
       episodeNumber: ' ',
@@ -52,7 +52,6 @@ describe('validateEpisodeForm', () => {
       episodeNumber: 'El número de episodio es obligatorio',
       title: 'El título es obligatorio',
       duration: 'La duración es obligatoria',
-      videoUrl: 'La URL del vídeo es obligatoria',
     });
   });
 
@@ -123,6 +122,12 @@ describe('toEpisodeRequest / toEpisodeFormValues', () => {
   it('un episodio sin sinopsis se edita con el campo vacío', () => {
     const values = toEpisodeFormValues(makeEpisode({ seasonNumber: 2, episodeNumber: 7, description: null, duration: 50 }));
     expect(values).toMatchObject({ seasonNumber: '2', episodeNumber: '7', description: '', duration: '50' });
+  });
+
+  it('el vídeo es opcional: en blanco se envía como null, y un episodio sin vídeo se edita con el campo vacío', () => {
+    expect(validateEpisodeForm({ ...VALID, videoUrl: '   ' })).toEqual({});
+    expect(toEpisodeRequest({ ...VALID, videoUrl: '   ' }).videoUrl).toBeNull();
+    expect(toEpisodeFormValues(makeEpisode({ videoUrl: null })).videoUrl).toBe('');
   });
 });
 

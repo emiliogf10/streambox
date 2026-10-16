@@ -32,6 +32,12 @@ interface Props {
   /** Botones y enlaces de acción, de más a menos importante. */
   actions: ReactNode;
   /**
+   * Texto breve bajo las acciones (p. ej. `NothingToWatchNote` cuando no hay
+   * vídeo ni tráiler). Va fuera de la rejilla de acciones para no contar como
+   * una más (ver «Acciones» en {@link FeaturedBanner}).
+   */
+  actionsNote?: ReactNode;
+  /**
    * `banner` (por defecto): pieza de la portada o de `/series`, alineada a la
    * izquierda con las filas de tarjetas que tiene debajo. `page`: cabecera de
    * la página de un título, con el contenido centrado en un ancho máximo
@@ -91,8 +97,27 @@ interface Props {
  * desenfocado sigue de borde a borde. Encima del póster, en su propia fila,
  * va el enlace de vuelta a la sección (`backLink`).
  *
- * **Acciones.** En móvil las dos primeras comparten fila y el resto va debajo
- * (rejilla de dos columnas); desde `sm`, en línea.
+ * **Acciones.** Cuántas hay depende del título y del rol: «Ver ahora» y «Ver
+ * tráiler» solo existen si hay vídeo o tráiler, y «Editar» solo para un
+ * administrador, así que pueden ser de una a cuatro. Dos reglas:
+ * - **Ningún texto se parte en dos líneas** (`min-width: max-content` en cada
+ *   acción). Antes, a 375 px, «Más información» no cabía en media fila y se
+ *   partía (incidencia QA trailer-7), y su vecino se estiraba a la misma altura.
+ * - **En móvil, de dos en dos o a todo el ancho, nunca con un hueco.** Es una
+ *   fila flexible que se parte (`flex-wrap`): cada acción parte de media fila
+ *   (`basis`) y crece para llenar la suya (`grow`). Si dos caben, quedan a
+ *   partes iguales; si una no cabe en media fila (su texto es más largo) o se
+ *   queda sola al final, baja a su propia fila y la ocupa entera. Así lo
+ *   resuelve el CSS según lo que mide cada texto, y no cada página contando
+ *   botones (antes era una rejilla de dos columnas con
+ *   `:last-child:nth-child(odd)`, que no sabía de textos largos). A 375 px,
+ *   con las cuatro de la portada: «Ver ahora | Ver tráiler», «Mi lista» y
+ *   «Más información», cada una en su fila; desde ~400 px, de dos en dos.
+ * Desde `sm`, todas en línea con su ancho natural. Quien pasa las acciones no
+ * debe meter entre ellas elementos que no se ven (un `<dialog>`, un texto
+ * oculto): ocuparían sitio en la fila (el diálogo del tráiler va en un
+ * *portal*, ver `TrailerButton`).
+ * Para un texto que acompañe a las acciones está `actionsNote`, debajo y aparte.
  *
  * **Imágenes.** Fondo y póster usan la MISMA URL: el navegador la descarga una
  * sola vez. Las dos llevan `priority` porque es la imagen principal de la
@@ -109,6 +134,7 @@ export function FeaturedBanner({
   description,
   clampDescription = true,
   actions,
+  actionsNote,
   layout = 'banner',
   backLink,
 }: Props) {
@@ -169,7 +195,13 @@ export function FeaturedBanner({
             </p>
           )}
 
-          <div className="col-span-2 grid grid-cols-2 gap-3 sm:flex sm:flex-wrap md:mt-6">{actions}</div>
+          {/* Ver «Acciones»: nunca se parte un texto (`*:min-w-max`); en móvil, de dos en dos o a todo el ancho (`grow` + `basis` de media fila). */}
+          <div className="col-span-2 flex flex-wrap gap-3 *:min-w-max max-sm:*:grow max-sm:*:basis-[calc(50%-0.375rem)] md:mt-6">
+            {actions}
+          </div>
+
+          {/* En móvil la rejilla ya separa 1,25 rem: `-mt-2` lo acerca a los botones, de los que es una aclaración. */}
+          {actionsNote && <div className="col-span-2 -mt-2 md:mt-3">{actionsNote}</div>}
         </div>
       </div>
     </section>

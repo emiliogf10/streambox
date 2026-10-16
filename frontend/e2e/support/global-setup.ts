@@ -46,6 +46,7 @@ async function seedMovies(api: APIRequestContext, adminToken: string): Promise<v
       releaseYear: movie.releaseYear,
       imageUrl: coverUrl(movie),
       videoUrl: videoUrl(movie),
+      trailerUrl: movie.trailer ?? null,
       genreIds: toGenreIds(movie.genres, genreIds),
     });
   }
@@ -67,6 +68,7 @@ async function seedSeries(api: APIRequestContext, adminToken: string): Promise<v
       releaseYear: series.releaseYear,
       endYear: series.endYear,
       imageUrl: coverUrl(series),
+      trailerUrl: series.trailer ?? null,
       genreIds: toGenreIds(series.genres, genreIds),
     });
     for (const [seasonIndex, episodeCount] of series.seasons.entries()) {

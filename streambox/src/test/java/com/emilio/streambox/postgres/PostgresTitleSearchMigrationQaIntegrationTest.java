@@ -79,9 +79,10 @@ class PostgresTitleSearchMigrationQaIntegrationTest {
         assertEquals("4", jdbc.queryForObject(
                 "SELECT max(version::int)::text FROM flyway_schema_history WHERE success", String.class));
 
-        // Resuelta la causa, el siguiente arranque la aplica sin repair
+        // Resuelta la causa, el siguiente arranque la aplica sin repair (target 5: aquí solo
+        // interesa la V5; sin él también entrarían las migraciones posteriores)
         jdbc.execute("DROP INDEX idx_series_title_search");
-        assertEquals(1, flyway(db).load().migrate().migrationsExecuted);
+        assertEquals(1, flyway(db).target(MigrationVersion.fromVersion("5")).load().migrate().migrationsExecuted);
         assertEquals("Manana", jdbc.queryForObject("SELECT streambox_unaccent('Mañana')", String.class));
     }
 

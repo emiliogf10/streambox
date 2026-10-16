@@ -14,11 +14,16 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.emilio.streambox.migration.TrailerUrlMigrationScenario;
+
 /**
  * Comprueba el esquema que producen las migraciones de Flyway: índices,
  * claves foráneas con borrado en cascada y restricciones de integridad
  * (películas en {@code V1}/{@code V2}; series y episodios en {@code V3};
- * refresh tokens en {@code V4}).
+ * refresh tokens en {@code V4}; tráiler y vídeo opcional en {@code V6}).
+ * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
+ * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
+ * de PostgreSQL.
  *
  * <p>
  * Que las entidades coincidan con las tablas ya lo verifica Hibernate
@@ -426,6 +431,87 @@ class FlywaySchemaIntegrationTest {
         assertEquals(0.0, jdbc.queryForObject(
                 "SELECT streambox_word_similarity('interstelar', 'interstellar')", Double.class));
         assertEquals(null, jdbc.queryForObject("SELECT streambox_unaccent(NULL)", String.class));
+    }
+
+    // --- V6: tráiler (trailer_url) y vídeo del contenido opcional ---
+
+    /** Tráiler válido: la única forma que admite la base de datos (la normalizada). */
+    private static final String TRAILER = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+
+    @Test
+    void v6EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '6' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * Las columnas nuevas existen con el tamaño de la entidad y admiten
+     * {@code NULL}, y el vídeo de películas y episodios ha dejado de ser
+     * obligatorio. El resto de URLs siguen siendo obligatorias.
+     */
+    @Test
+    void lasColumnasDeTrailerYVideoTienenElTamanoYLaNulabilidadEsperados() {
+        java.util.Map<String, String> nullable = new java.util.HashMap<>();
+        java.util.Map<String, Integer> lengths = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT LOWER(TABLE_NAME) AS T, LOWER(COLUMN_NAME) AS C, IS_NULLABLE AS N,"
+                        + " CHARACTER_MAXIMUM_LENGTH AS L FROM INFORMATION_SCHEMA.COLUMNS"
+                        + " WHERE LOWER(COLUMN_NAME) IN ('trailer_url', 'video_url', 'image_url')")
+                .forEach(r -> {
+                    String key = r.get("T") + "." + r.get("C");
+                    nullable.put(key, (String) r.get("N"));
+                    lengths.put(key, ((Number) r.get("L")).intValue());
+                });
+
+        assertEquals("YES", nullable.get("movies.trailer_url"));
+        assertEquals("YES", nullable.get("series.trailer_url"));
+        assertEquals("YES", nullable.get("movies.video_url"));
+        assertEquals("YES", nullable.get("episodes.video_url"));
+        assertEquals("NO", nullable.get("movies.image_url"));
+        assertEquals("NO", nullable.get("series.image_url"));
+        assertEquals(null, nullable.get("episodes.trailer_url"), "los episodios no tienen tráiler propio");
+        for (String column : List.of("movies.trailer_url", "series.trailer_url", "movies.video_url", "episodes.video_url")) {
+            assertEquals(500, lengths.get(column), column);
+        }
+    }
+
+    @Test
+    void unaPeliculaYUnEpisodioPuedenGuardarseSinVideo() {
+        long seriesId = insertSeries("Sin video", 2010, null);
+
+        jdbc.update("INSERT INTO movies (title, description, duration, release_year, image_url, video_url, created_at)"
+                + " VALUES ('Sin video', 'd', 100, 2000, 'u', NULL, CURRENT_TIMESTAMP)");
+        jdbc.update("INSERT INTO episodes (series_id, season_number, episode_number, title, duration, video_url,"
+                + " created_at) VALUES (?, 1, 1, 't', 30, NULL, CURRENT_TIMESTAMP)", seriesId);
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM movies WHERE video_url IS NULL", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM episodes WHERE video_url IS NULL", Integer.class));
+    }
+
+    /**
+     * {@code ck_movies_trailer_url} y {@code ck_series_trailer_url}: el tráiler
+     * es {@code NULL} o un vídeo de YouTube en la forma normalizada, con un id
+     * de 11 caracteres de {@code [A-Za-z0-9_-]} (incluidos {@code -} y {@code _}).
+     */
+    @Test
+    void elTrailerSoloAdmiteNuloOUnEnlaceDeYoutubeNormalizado() {
+        long movieId = insertMovie("Trailer", 2000);
+        long seriesId = insertSeries("Trailer", 2010, null);
+
+        for (String valid : java.util.Arrays.asList(TRAILER, "https://www.youtube.com/watch?v=-PtU49Aol_0", null)) {
+            jdbc.update("UPDATE movies SET trailer_url = ? WHERE id = ?", valid, movieId);
+            jdbc.update("UPDATE series SET trailer_url = ? WHERE id = ?", valid, seriesId);
+            assertEquals(valid, jdbc.queryForObject("SELECT trailer_url FROM movies WHERE id = ?", String.class, movieId));
+            assertEquals(valid, jdbc.queryForObject("SELECT trailer_url FROM series WHERE id = ?", String.class, seriesId));
+        }
+        for (String invalid : TrailerUrlMigrationScenario.INVALID_TRAILERS) {
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> jdbc.update("UPDATE movies SET trailer_url = ? WHERE id = ?", invalid, movieId), invalid);
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> jdbc.update("UPDATE series SET trailer_url = ? WHERE id = ?", invalid, seriesId), invalid);
+        }
     }
 
     // --- Utilidades ---

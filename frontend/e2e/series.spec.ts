@@ -19,6 +19,16 @@ import {
 } from './support/catalog';
 import { escapeRegExp, expect, test } from './support/fixtures';
 
+/**
+ * Vídeo de un episodio de la serie del banner. Este spec comprueba «Ver» y «Empezar a ver», así que esa
+ * serie debe sembrarse CON vídeos; si alguien se los quita, que falle aquí con un mensaje claro.
+ */
+function heroEpisodeVideo(season: number, episode: number): string {
+  const url = episodeVideoUrl(SERIES_HERO, season, episode);
+  if (!url) throw new Error(`«${SERIES_HERO.title}» debe sembrarse con vídeos en sus episodios`);
+  return url;
+}
+
 /** Tarjeta (enlace) de una serie: «Título 2019–2022 · 2 temporadas». */
 function seriesCard(scope: Page | Locator, title: string) {
   return scope.getByRole('link', { name: new RegExp(`^${escapeRegExp(title)} \\d{4}`) });
@@ -102,14 +112,14 @@ test.describe('Series', () => {
 
     const list = page.getByRole('list', { name: 'Episodios de la temporada 1' });
     const watch = list.getByRole('link', { name: `Ver T1:E3 ${episodeTitle(1, 3)} (se abre en una pestaña nueva)` });
-    await expect(watch).toHaveAttribute('href', episodeVideoUrl(SERIES_HERO, 1, 3));
+    await expect(watch).toHaveAttribute('href', heroEpisodeVideo(1, 3));
     await expect(watch).toHaveAttribute('target', '_blank');
     await expect(watch).toHaveAttribute('rel', /noopener/);
 
     // «Empezar a ver» de la cabecera apunta al primer episodio de la primera temporada.
     await expect(page.getByRole('link', { name: /^Empezar a ver/ })).toHaveAttribute(
       'href',
-      episodeVideoUrl(SERIES_HERO, 1, 1),
+      heroEpisodeVideo(1, 1),
     );
   });
 

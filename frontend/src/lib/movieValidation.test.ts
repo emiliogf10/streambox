@@ -33,6 +33,7 @@ const valid: MovieFormValues = {
   releaseYear: '2014',
   imageUrl: '/covers/interstellar.webp',
   videoUrl: 'https://videos.example.com/interstellar',
+  trailerUrl: 'https://youtu.be/zSWdZVtXT7E',
   genreIds: [1],
 };
 
@@ -113,8 +114,11 @@ describe('validateVideoUrl', () => {
     expect(validateVideoUrl(url)).toBe(VIDEO_URL_FORMAT_MESSAGE);
   });
 
-  it('vacía y demasiado larga tienen su propio mensaje', () => {
-    expect(validateVideoUrl('')).toBe('La URL del vídeo es obligatoria');
+  it('vacía es válida (el vídeo es opcional: sin él no hay «Ver ahora»)', () => {
+    expect(validateVideoUrl('')).toBeUndefined();
+  });
+
+  it('demasiado larga tiene su propio mensaje', () => {
     expect(validateVideoUrl(`https://example.com/${'v'.repeat(500)}`)).toBe(VIDEO_URL_SIZE_MESSAGE);
     expect(VIDEO_URL_FORMAT_MESSAGE).toBe('La URL del vídeo debe empezar por https://');
     expect(VIDEO_URL_SIZE_MESSAGE).toBe('La URL del vídeo no puede superar los 500 caracteres');
@@ -136,10 +140,22 @@ describe('validateMovieForm', () => {
     expect(validateMovieForm(valid)).toEqual({});
   });
 
-  it('vacío: informa de TODOS los campos a la vez', () => {
+  it('vacío: informa de TODOS los campos obligatorios a la vez (vídeo y tráiler son opcionales)', () => {
     expect(Object.keys(validateMovieForm(EMPTY_MOVIE_FORM)).sort()).toEqual(
-      ['description', 'duration', 'genreIds', 'imageUrl', 'releaseYear', 'title', 'videoUrl'].sort(),
+      ['description', 'duration', 'genreIds', 'imageUrl', 'releaseYear', 'title'].sort(),
     );
+  });
+
+  it('sin vídeo ni tráiler (vacíos o solo espacios) la película es válida', () => {
+    expect(validateMovieForm({ ...valid, videoUrl: '', trailerUrl: '' })).toEqual({});
+    expect(validateMovieForm({ ...valid, videoUrl: '   ', trailerUrl: '  ' })).toEqual({});
+  });
+
+  it('el tráiler solo admite YouTube, con el mensaje del contrato', () => {
+    expect(validateMovieForm({ ...valid, trailerUrl: 'https://vimeo.com/123' }).trailerUrl).toBe(
+      'El tráiler debe ser un enlace de un vídeo de YouTube',
+    );
+    expect(validateMovieForm({ ...valid, trailerUrl: ' https://www.youtube.com/watch?v=zSWdZVtXT7E ' })).toEqual({});
   });
 
   it('título y sinopsis: obligatorios (no valen solo espacios) y con límite de 150 / 1000', () => {
@@ -210,8 +226,21 @@ describe('toMovieRequest', () => {
       releaseYear: 2014,
       imageUrl: '/covers/interstellar.webp',
       videoUrl: valid.videoUrl,
+      trailerUrl: valid.trailerUrl,
       genreIds: [3, 1],
     });
+  });
+
+  it('vídeo y tráiler vacíos (o solo espacios) se envían como null: «no tiene»', () => {
+    const body = toMovieRequest({ ...valid, videoUrl: '  ', trailerUrl: '' });
+    expect(body.videoUrl).toBeNull();
+    expect(body.trailerUrl).toBeNull();
+  });
+
+  it('el tráiler se envía recortado, tal como se escribió (lo normaliza el servidor)', () => {
+    expect(toMovieRequest({ ...valid, trailerUrl: ' https://youtu.be/zSWdZVtXT7E?si=x ' }).trailerUrl).toBe(
+      'https://youtu.be/zSWdZVtXT7E?si=x',
+    );
   });
 });
 

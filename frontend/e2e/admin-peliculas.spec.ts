@@ -1,6 +1,7 @@
 /**
  * E2E del ciclo completo de una película desde el panel: alta (con portada
- * propia `/covers/...` y vista previa), edición y borrado con confirmación. De
+ * propia `/covers/...` y vista previa, y un tráiler de YouTube corto que el
+ * servidor guarda normalizado), edición y borrado con confirmación. De
  * paso comprueba la caché de datos (TanStack Query): tras editar, `/peliculas`
  * enseña el título nuevo sin recargar la página, la página de la película
  * (`/peliculas/:id`) ofrece «Editar» al administrador y, tras borrarla, volver a
@@ -53,7 +54,14 @@ test('crea una película con portada propia, la edita y la borra con confirmaci�
   await page.getByLabel('Sinopsis').fill('Una película creada por la suite E2E para probar el panel de administración.');
   await page.getByLabel('Duración (minutos)').fill('111');
   await page.getByLabel('Año de estreno').fill('2023');
-  await page.getByLabel('URL del vídeo').fill('https://videos.streambox.example/watch/e2e');
+  await page.getByLabel('URL del vídeo (opcional)').fill('https://videos.streambox.example/watch/e2e');
+  // Tráiler: un enlace que no es de YouTube se rechaza en el cliente con el mensaje del contrato...
+  const trailer = page.getByLabel('Tráiler de YouTube (opcional)');
+  await trailer.fill('https://vimeo.com/123456');
+  await page.getByRole('button', { name: 'Crear película' }).click();
+  await expect(trailer).toHaveAccessibleDescription('El tráiler debe ser un enlace de un vídeo de YouTube');
+  // ...y uno corto de YouTube vale: el servidor lo guarda normalizado (se comprueba en la edición).
+  await trailer.fill('https://youtu.be/zSWdZVtXT7E?si=e2e');
   await page.getByRole('group', { name: 'Géneros' }).getByRole('checkbox', { name: 'Drama' }).check();
 
   // Una portada http:// no se acepta ni se carga en la vista previa (se ve el respaldo).
@@ -100,6 +108,7 @@ test('crea una película con portada propia, la edita y la borra con confirmaci�
   await expect(page.getByRole('heading', { level: 2, name: `Editar «${title}»` })).toBeVisible();
   await expect(page.getByLabel('Título', { exact: true })).toHaveValue(title);
   await expect(page.getByLabel('URL de la portada')).toHaveValue('/covers/interstellar.webp');
+  await expect(page.getByLabel('Tráiler de YouTube (opcional)')).toHaveValue('https://www.youtube.com/watch?v=zSWdZVtXT7E');
   await expect(page.getByRole('checkbox', { name: 'Drama' })).toBeChecked();
   await page.getByLabel('Título', { exact: true }).fill(editedTitle);
   await page.getByLabel('Duración (minutos)').fill('112');

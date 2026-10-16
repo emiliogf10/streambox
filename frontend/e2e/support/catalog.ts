@@ -10,6 +10,10 @@
  *    inexistente en otras, para provocar el hueco de respaldo con el título (`MoviePoster`).
  *  - Títulos largos y una sinopsis larga para ver cómo se comporta el diseño.
  *
+ *  - Vídeo y tráiler (los dos opcionales) en todas sus combinaciones: el banner
+ *    tiene los dos, «Tenet» solo tráiler (forma corta `youtu.be`, que el
+ *    servidor normaliza) y «Noches de Invierno» ninguno; el resto, solo vídeo.
+ *
  * Nota: el backend exige AL MENOS UN género por película (`@NotEmpty` en
  * `MovieRequest.genreIds`), así que no se puede sembrar una película sin género.
  *
@@ -25,6 +29,13 @@ export interface SeedMovie {
   cover: string | null;
   /** Nombres de los géneros (deben estar en {@link GENRES}). */
   genres: string[];
+  /** `false` = sin vídeo (`videoUrl: null`): la película no tiene «Ver ahora». Por defecto, con vídeo. */
+  video?: false;
+  /**
+   * Tráiler de YouTube tal como lo escribiría un administrador (puede ser una
+   * forma corta: el servidor lo guarda normalizado). Sin él, `trailerUrl: null`.
+   */
+  trailer?: string;
 }
 
 /** Géneros que se crean antes que las películas. */
@@ -43,6 +54,23 @@ const LONG =
   'entre cumplir el plan original o salvar a quienes quedaron atrás. Una película sobre la soledad, la ciencia y el precio ' +
   'de la curiosidad, rodada con un cuidado especial por el detalle y la luz.';
 
+/** Id de YouTube del tráiler de la película del banner (ids inventados: el E2E nunca carga YouTube). */
+export const HERO_TRAILER_ID = 'e2eHeroTr01';
+/** Id de YouTube del tráiler de «Tenet» (sin vídeo). */
+export const TENET_TRAILER_ID = 'e2eTenetT02';
+/** Id de YouTube del tráiler de la serie del banner de `/series`. */
+export const SERIES_TRAILER_ID = 'e2eSerieT03';
+
+/** Forma normalizada con la que la API devuelve un tráiler. */
+export function normalizedTrailer(id: string): string {
+  return `https://www.youtube.com/watch?v=${id}`;
+}
+
+/** Dirección exacta del reproductor que debe cargar el diálogo del tráiler. */
+export function trailerEmbedUrl(id: string): string {
+  return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+}
+
 /** Películas en orden de creación; la última es la más reciente (banner de la portada). */
 export const MOVIES: readonly SeedMovie[] = [
   // --- Página 2 del catálogo (las 5 más antiguas) ---
@@ -52,7 +80,17 @@ export const MOVIES: readonly SeedMovie[] = [
   { title: 'Origen', description: SHORT, duration: 148, releaseYear: 2010, cover: 'cover_origen_1790886992960.jpg', genres: [SCI_FI, DRAMA] },
   { title: 'Prometheus', description: SHORT, duration: 124, releaseYear: 2012, cover: 'cover_prometheus_1790887003569.jpg', genres: [SCI_FI] },
   // --- Página 1 (las 20 más recientes; la última creada es el banner) ---
-  { title: 'Tenet', description: SHORT, duration: 150, releaseYear: 2020, cover: 'cover_tenet_1790887077146.jpg', genres: [SCI_FI, ACTION] },
+  // Sin vídeo y con tráiler (forma corta): «Ver tráiler» es su acción principal y no hay «Ver ahora».
+  {
+    title: 'Tenet',
+    description: SHORT,
+    duration: 150,
+    releaseYear: 2020,
+    cover: 'cover_tenet_1790887077146.jpg',
+    genres: [SCI_FI, ACTION],
+    video: false,
+    trailer: `https://youtu.be/${TENET_TRAILER_ID}?si=e2e`,
+  },
   { title: 'Cielo de Ceniza', description: SHORT, duration: 102, releaseYear: 2015, cover: null, genres: [DRAMA] },
   { title: 'La Última Frontera', description: SHORT, duration: 118, releaseYear: 2016, cover: null, genres: [ACTION] },
   { title: 'Eco de Medianoche', description: SHORT, duration: 95, releaseYear: 2017, cover: null, genres: [DRAMA] },
@@ -73,13 +111,23 @@ export const MOVIES: readonly SeedMovie[] = [
   { title: 'Rutas de Hierro', description: SHORT, duration: 110, releaseYear: 2021, cover: null, genres: [ACTION] },
   { title: 'Blade Runner', description: SHORT, duration: 117, releaseYear: 1982, cover: 'blade-runner.webp', genres: [SCI_FI] },
   { title: 'El marciano', description: SHORT, duration: 144, releaseYear: 2015, cover: 'el-marciano.webp', genres: [SCI_FI, DRAMA] },
-  { title: 'Noches de Invierno', description: SHORT, duration: 105, releaseYear: 2013, cover: null, genres: [DRAMA] },
+  // Sin vídeo ni tráiler: ningún botón promete «ver» nada.
+  { title: 'Noches de Invierno', description: SHORT, duration: 105, releaseYear: 2013, cover: null, genres: [DRAMA], video: false },
   { title: 'Interstellar', description: LONG, duration: 169, releaseYear: 2014, cover: 'interstellar.webp', genres: [SCI_FI, DRAMA] },
   { title: 'Fuego Cruzado', description: SHORT, duration: 101, releaseYear: 2022, cover: null, genres: [ACTION] },
   { title: 'Blade Runner 2049', description: SHORT, duration: 164, releaseYear: 2017, cover: 'blade-runner-2049.webp', genres: [SCI_FI, DRAMA] },
   { title: 'La Casa del Lago', description: SHORT, duration: 97, releaseYear: 2020, cover: null, genres: [DRAMA] },
   // --- La más reciente: protagoniza el banner. Tiene portada para ver el degradado sobre una imagen real. ---
-  { title: 'Dune: Parte Dos', description: LONG, duration: 166, releaseYear: 2024, cover: 'dune-parte-dos.webp', genres: [SCI_FI, ACTION, DRAMA] },
+  // Con vídeo y tráiler: el banner enseña «Ver ahora» (principal) y «Ver tráiler» (secundaria).
+  {
+    title: 'Dune: Parte Dos',
+    description: LONG,
+    duration: 166,
+    releaseYear: 2024,
+    cover: 'dune-parte-dos.webp',
+    genres: [SCI_FI, ACTION, DRAMA],
+    trailer: `https://www.youtube.com/watch?v=${HERO_TRAILER_ID}&t=5s`,
+  },
 ];
 
 /** Título de la película más reciente: la del banner de la portada. */
@@ -118,9 +166,12 @@ export function coverUrl(movie: Pick<SeedMovie, 'title' | 'cover'>): string {
   return movie.cover ? `/covers/${movie.cover}` : `/covers/no-existe-${slug(movie.title)}.webp`;
 }
 
-/** Enlace de vídeo de ejemplo (`https`). El test nunca lo abre: solo comprueba el `href`. */
-export function videoUrl(movie: SeedMovie): string {
-  return `https://videos.streambox.example/watch/${encodeURIComponent(movie.title)}`;
+/**
+ * Enlace de vídeo de ejemplo (`https`). El test nunca lo abre: solo comprueba el `href`.
+ * Para las películas sembradas sin vídeo (`video: false`) es `null`.
+ */
+export function videoUrl(movie: SeedMovie): string | null {
+  return movie.video === false ? null : `https://videos.streambox.example/watch/${encodeURIComponent(movie.title)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +193,10 @@ export interface SeedSeries {
    * temporada 2 con 2). Vacío = serie SIN episodios, que los usuarios no deben ver.
    */
   seasons: number[];
+  /** `false` = ningún episodio tiene vídeo: ni «Empezar a ver» ni «Ver». Por defecto, todos con vídeo. */
+  episodeVideos?: false;
+  /** Tráiler de YouTube tal como lo escribiría un administrador. Sin él, `trailerUrl: null`. */
+  trailer?: string;
 }
 
 /**
@@ -156,6 +211,8 @@ export interface SeedSeries {
  *    `buildCatalogRows`) y una fila de género exige ≥ 3 títulos
  *    (`MIN_MOVIES_PER_GENRE_ROW`): con tres, bajo el banner solo quedaban dos y
  *    la fila «Drama» no existía (así falló la primera ejecución de `series.spec.ts`).
+ *  - **Tráiler** en la del banner («Crónicas del Faro», con vídeos) y una
+ *    serie cuyos episodios NO tienen vídeo («Estación Polar»).
  *  - **Una serie sin episodios**, creada la ÚLTIMA: si se colara en el listado
  *    sería la más reciente (el banner de `/series` y la primera de la fila de la
  *    portada), así que su ausencia se nota. Tampoco debe salir en el buscador
@@ -177,6 +234,8 @@ export const SERIES: readonly SeedSeries[] = [
     cover: null,
     genres: [DRAMA, SCI_FI],
     seasons: [2],
+    // Sus episodios no tienen vídeo: la página de la serie no ofrece «Empezar a ver» ni «Ver».
+    episodeVideos: false,
   },
   {
     title: 'Los Archivos de Niebla',
@@ -205,6 +264,7 @@ export const SERIES: readonly SeedSeries[] = [
     cover: 'ex-machina.webp',
     genres: [DRAMA, ACTION],
     seasons: [3, 2],
+    trailer: `https://www.youtube.com/watch?v=${SERIES_TRAILER_ID}`,
   },
   {
     title: 'Serie Fantasma Sin Episodios',
@@ -231,7 +291,11 @@ export function episodeTitle(season: number, episode: number): string {
   return `Capítulo ${season}.${episode}`;
 }
 
-/** Enlace de vídeo de un episodio (`https`); los tests solo comprueban el `href`. */
-export function episodeVideoUrl(series: SeedSeries, season: number, episode: number): string {
+/**
+ * Enlace de vídeo de un episodio (`https`); los tests solo comprueban el `href`.
+ * `null` en las series sembradas sin vídeos (`episodeVideos: false`).
+ */
+export function episodeVideoUrl(series: SeedSeries, season: number, episode: number): string | null {
+  if (series.episodeVideos === false) return null;
   return `https://videos.streambox.example/series/${slug(series.title)}/t${season}e${episode}`;
 }

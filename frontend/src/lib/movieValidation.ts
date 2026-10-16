@@ -2,21 +2,22 @@
  * Validación en el cliente de los formularios del panel de administración
  * (películas y géneros).
  *
- * Replica `MovieRequest`, `GenreRequest` y `HttpsUrlValidator` del backend, con
- * sus mismos mensajes, para avisar al momento sin ir al servidor. Es solo
- * comodidad: **la validación que manda es la del servidor**, y si responde con
+ * Replica `MovieRequest`, `GenreRequest` y `HttpsUrlValidator` del backend (y,
+ * para el tráiler, `@YouTubeUrl` a través de `youtube.ts`), con sus mismos
+ * mensajes, para avisar al momento sin ir al servidor. Es solo comodidad: **la validación que manda es la del servidor**, y si responde con
  * `validationErrors` la pantalla los pinta igualmente junto a cada campo.
  *
  * Son funciones puras (sin React) para poder probar cada regla por separado.
  */
 import type { MovieRequest } from './types';
+import { validateTrailerUrl } from './youtube';
 
 /** Límites de `MovieRequest` (`@Size`, `@Min`, `@Max`). */
 export const MOVIE_TITLE_MAX = 150;
 export const MOVIE_DESCRIPTION_MAX = 1000;
 export const MOVIE_YEAR_MIN = 1888;
 export const MOVIE_YEAR_MAX = 2100;
-/** Longitud máxima de `imageUrl` y `videoUrl` (columnas `VARCHAR(500)`). */
+/** Longitud máxima de `imageUrl` y `videoUrl` (columnas `VARCHAR(500)`; la del tráiler, en `youtube.ts`). */
 export const URL_MAX = 500;
 /**
  * Mayor entero que cabe en un `Integer` de Java (`duration` y `releaseYear`).
@@ -61,7 +62,10 @@ export interface MovieFormValues {
   /** Texto del campo; se convierte a número al enviar. */
   releaseYear: string;
   imageUrl: string;
+  /** Opcional: vacío (o solo espacios) = sin vídeo (`null`). */
   videoUrl: string;
+  /** Opcional: enlace de YouTube; vacío = sin tráiler (`null`). */
+  trailerUrl: string;
   genreIds: number[];
 }
 
@@ -76,6 +80,7 @@ export const EMPTY_MOVIE_FORM: MovieFormValues = {
   releaseYear: '',
   imageUrl: '',
   videoUrl: '',
+  trailerUrl: '',
   genreIds: [],
 };
 
@@ -142,14 +147,18 @@ export function validateImageUrl(value: string): string | undefined {
 }
 
 /**
- * Valida la URL del vídeo: como la de la portada, pero SIN portadas propias
- * (solo `https://`).
+ * Valida la URL del vídeo (de una película o de un episodio): como la de la
+ * portada, pero SIN portadas propias (solo `https://`).
+ *
+ * Es **opcional**: StreamBox no aloja vídeos, así que un título puede no
+ * tenerlo (entonces no hay «Ver ahora» ni «Ver»). Vacío = sin vídeo, igual que
+ * el backend, que guarda `null` con una cadena vacía o en blanco.
  *
  * @param value URL ya recortada (`trim`)
- * @returns el mensaje de error, o `undefined` si es válida
+ * @returns el mensaje de error, o `undefined` si es válida o está vacía
  */
 export function validateVideoUrl(value: string): string | undefined {
-  if (!value) return 'La URL del vídeo es obligatoria';
+  if (!value) return undefined;
   if (value.length > URL_MAX) return VIDEO_URL_SIZE_MESSAGE;
   if (!isPrintableAscii(value) || !isAbsoluteHttpsUrl(value)) return VIDEO_URL_FORMAT_MESSAGE;
   return undefined;
@@ -222,14 +231,28 @@ export function validateMovieForm(values: MovieFormValues): MovieFormErrors {
   const videoError = validateVideoUrl(values.videoUrl.trim());
   if (videoError) errors.videoUrl = videoError;
 
+  const trailerError = validateTrailerUrl(values.trailerUrl.trim());
+  if (trailerError) errors.trailerUrl = trailerError;
+
   if (values.genreIds.length === 0) errors.genreIds = 'Elige al menos un género';
 
   return errors;
 }
 
 /**
+ * Convierte un campo de URL opcional en su valor para la API: recortado, o
+ * `null` si queda vacío («no tiene»). Exportada para episodios y series.
+ */
+export function optionalUrl(raw: string): string | null {
+  return raw.trim() || null;
+}
+
+/**
  * Convierte el formulario (ya validado) en el cuerpo de la petición: recorta
- * los textos de los extremos y pasa los números a `number`.
+ * los textos de los extremos, pasa los números a `number` y el vídeo y el
+ * tráiler vacíos a `null` (el servidor haría lo mismo con una cadena vacía;
+ * mandarlo ya así deja claro en la petición que «no tiene»). El tráiler se
+ * envía tal como se escribió: lo normaliza el servidor.
  *
  * Recortar las URL en el cliente es deliberado: un espacio pegado sin querer
  * al copiar una dirección haría que el servidor la rechazara (solo admite
@@ -242,7 +265,8 @@ export function toMovieRequest(values: MovieFormValues): MovieRequest {
     duration: Number(values.duration.trim()),
     releaseYear: Number(values.releaseYear.trim()),
     imageUrl: values.imageUrl.trim(),
-    videoUrl: values.videoUrl.trim(),
+    videoUrl: optionalUrl(values.videoUrl),
+    trailerUrl: optionalUrl(values.trailerUrl),
     genreIds: [...values.genreIds],
   };
 }

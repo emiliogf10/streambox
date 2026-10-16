@@ -11,12 +11,15 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FavoritesProvider } from '../context/FavoritesContext';
-import { jsonResponse, makeMovie, renderWithProviders, routeFetch } from '../test/helpers';
+import { CURRENT_USER, jsonResponse, makeMovie, makeUser, renderWithProviders, routeFetch } from '../test/helpers';
 import type { Movie } from '../lib/types';
 import { BANNER_GRID_CLASS } from './bannerGridStyles';
 import { HeroBanner } from './HeroBanner';
 
 const fetchMock = vi.fn<typeof fetch>();
+
+/** Tráiler con la forma normalizada que devuelve la API. */
+const TRAILER = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -104,6 +107,67 @@ describe('HeroBanner', () => {
     expect(within(banner).getByRole('link', { name: /^Ver ahora Tenet/ })).toHaveClass('bg-white');
     expect(within(banner).getByRole('button', { name: /^Mi lista/ })).toHaveClass('border');
     expect(within(banner).getByRole('link', { name: /^Más información/ })).not.toHaveClass('border');
+  });
+
+  it('con vídeo y tráiler: «Ver ahora» principal, «Ver tráiler» secundaria (borde), en ese orden', () => {
+    const banner = renderBanner(makeMovie({ id: 8, title: 'Tenet', trailerUrl: TRAILER }));
+
+    const watch = within(banner).getByRole('link', { name: /^Ver ahora Tenet/ });
+    const trailer = within(banner).getByRole('button', { name: 'Ver tráiler de Tenet' });
+    expect(watch).toHaveClass('bg-white');
+    expect(trailer).toHaveClass('border');
+    expect(trailer).not.toHaveClass('bg-white');
+    expect(watch.compareDocumentPosition(trailer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('sin vídeo y con tráiler: no hay «Ver ahora» y «Ver tráiler» pasa a ser la acción principal', () => {
+    const banner = renderBanner(makeMovie({ id: 8, title: 'Tenet', videoUrl: null, trailerUrl: TRAILER }));
+
+    expect(within(banner).queryByText(/Ver ahora/)).not.toBeInTheDocument();
+    expect(within(banner).getByRole('button', { name: 'Ver tráiler de Tenet' })).toHaveClass('bg-white');
+    expect(within(banner).getByRole('link', { name: /^Más información/ })).not.toHaveClass('bg-white');
+  });
+
+  it('sin vídeo ni tráiler: nada promete «ver»; «Más información» es la principal y va primero', () => {
+    const banner = renderBanner(makeMovie({ id: 8, title: 'Tenet', videoUrl: null, trailerUrl: null }));
+
+    expect(within(banner).queryByText(/Ver ahora|Ver tráiler/)).not.toBeInTheDocument();
+    const more = within(banner).getByRole('link', { name: /^Más información/ });
+    expect(more).toHaveClass('bg-white');
+    const favorite = within(banner).getByRole('button', { name: /^Mi lista/ });
+    expect(more.compareDocumentPosition(favorite) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // Incidencia QA trailer-5: algo debe explicar por qué no hay nada que ver.
+  it('sin vídeo ni tráiler: un USER lee «Todavía no está disponible para ver.», fuera de la rejilla de acciones', () => {
+    const banner = renderBanner(makeMovie({ id: 8, title: 'Tenet', videoUrl: null, trailerUrl: null }));
+
+    const note = within(banner).getByText('Todavía no está disponible para ver.');
+    expect(within(banner).getByRole('button', { name: /^Mi lista/ }).parentElement!.contains(note)).toBe(false);
+  });
+
+  it('sin vídeo ni tráiler: un ADMIN lee que se añaden desde su página, con «Editar» (el banner no lo tiene)', async () => {
+    routeFetch(fetchMock, {
+      'GET /api/users/me/favorites': () => jsonResponse([]),
+      [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })),
+    });
+    const banner = renderBanner(makeMovie({ id: 8, title: 'Tenet', videoUrl: null, trailerUrl: null }));
+
+    expect(
+      await within(banner).findByText('No tiene vídeo ni tráiler: puedes añadirlos desde su página, con «Editar».'),
+    ).toBeInTheDocument();
+  });
+
+  it('con vídeo o con tráiler no hay aviso', () => {
+    const banner = renderBanner(makeMovie({ id: 8, title: 'Tenet', videoUrl: null, trailerUrl: TRAILER }));
+
+    expect(within(banner).queryByText(/disponible para ver|No tiene vídeo/)).not.toBeInTheDocument();
+  });
+
+  it('un tráiler que no es la forma normalizada de YouTube no pinta «Ver tráiler»', () => {
+    const banner = renderBanner(makeMovie({ id: 8, title: 'Tenet', trailerUrl: 'https://vimeo.com/123456' }));
+
+    expect(within(banner).queryByRole('button', { name: /Ver tráiler/ })).not.toBeInTheDocument();
   });
 
   it('«Más información» es un enlace a la página de la película (no abre un diálogo) y lleva a ella', async () => {

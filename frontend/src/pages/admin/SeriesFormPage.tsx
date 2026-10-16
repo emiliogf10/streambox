@@ -25,6 +25,7 @@ import {
 import type { SeriesFormErrors, SeriesFormValues } from '../../lib/seriesValidation';
 import { seriesPath } from '../../lib/catalog';
 import type { SeriesDetail } from '../../lib/types';
+import { validateTrailerUrl } from '../../lib/youtube';
 import { ADMIN_SERIES_PATH, adminEditSeriesPath, getReturnTo } from './adminPaths';
 import type { ReturnToState } from './adminPaths';
 import { CoverPreview } from './CoverPreview';
@@ -33,7 +34,15 @@ import { GenreCheckboxes } from './GenreCheckboxes';
 import { SeriesEpisodesSection } from './SeriesEpisodesSection';
 
 /** Orden de los campos en pantalla: el foco va al primero con error. */
-const FIELD_ORDER: (keyof SeriesFormValues)[] = ['title', 'description', 'releaseYear', 'endYear', 'imageUrl', 'genreIds'];
+const FIELD_ORDER: (keyof SeriesFormValues)[] = [
+  'title',
+  'description',
+  'releaseYear',
+  'endYear',
+  'imageUrl',
+  'trailerUrl',
+  'genreIds',
+];
 
 /** `id` de cada campo (etiquetas, mensajes y foco). Los géneros son un grupo: se enfoca su primer control. */
 const FIELD_IDS: Record<keyof SeriesFormValues, string> = {
@@ -42,13 +51,14 @@ const FIELD_IDS: Record<keyof SeriesFormValues, string> = {
   releaseYear: 'series-release-year',
   endYear: 'series-end-year',
   imageUrl: 'series-image-url',
+  trailerUrl: 'series-trailer-url',
   genreIds: 'series-genres',
 };
 
 /** Aviso tras crear una serie: nace vacía y, sin episodios, nadie más la ve. */
 const SERIES_CREATED_MESSAGE = 'Serie creada. Añade episodios para que sea visible.';
 
-/** Pasa una serie de la API a los valores del formulario (los años, como texto; sin año de fin, vacío). */
+/** Pasa una serie de la API a los valores del formulario (los años, como texto; sin año de fin o sin tráiler, vacío). */
 function toFormValues(series: SeriesDetail): SeriesFormValues {
   return {
     title: series.title,
@@ -56,18 +66,24 @@ function toFormValues(series: SeriesDetail): SeriesFormValues {
     releaseYear: String(series.releaseYear),
     endYear: series.endYear === null ? '' : String(series.endYear),
     imageUrl: series.imageUrl,
+    trailerUrl: series.trailerUrl ?? '',
     genreIds: series.genres.map((genre) => genre.id),
   };
 }
 
 /**
- * Error de portada de una serie recién cargada. Por coherencia con películas
- * (donde hay datos antiguos con `http://`): si la URL guardada ya no cumple las
- * reglas, se marca al abrir la edición y no al pulsar «Guardar».
+ * Errores de URL (portada y tráiler) de una serie recién cargada. Por
+ * coherencia con películas (donde hay datos antiguos con `http://`): si la URL
+ * guardada ya no cumple las reglas, se marca al abrir la edición y no al pulsar
+ * «Guardar». El tráiler es opcional: vacío no es un error.
  */
 function storedUrlErrors(values: SeriesFormValues): SeriesFormErrors {
+  const errors: SeriesFormErrors = {};
   const image = validateSeriesImageUrl(values.imageUrl.trim());
-  return image ? { imageUrl: image } : {};
+  const trailer = validateTrailerUrl(values.trailerUrl.trim());
+  if (image) errors.imageUrl = image;
+  if (trailer) errors.trailerUrl = trailer;
+  return errors;
 }
 
 /** Lleva el foco al primer campo con error (en el grupo de géneros, a su primer control). */
@@ -115,6 +131,9 @@ interface LoadResult {
  * casillas) con estas diferencias, propias de una serie:
  *
  * - **Año de fin opcional**: vacío = sigue en emisión (`endYear: null`).
+ * - **Tráiler de YouTube opcional** (vacío = `null`), con las mismas reglas y
+ *   mensajes que el de una película. La serie no tiene vídeo propio: los
+ *   vídeos son de cada episodio.
  * - **Al crear se aterriza en la edición** de la serie nueva (y no en el
  *   listado), con el aviso «Añade episodios para que sea visible»: una serie
  *   recién creada no tiene episodios y los usuarios no la ven, así que el
@@ -354,6 +373,18 @@ function SeriesEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string }
               error={errors.imageUrl}
               value={values.imageUrl}
               onChange={(event) => setField('imageUrl', event.target.value)}
+            />
+            <FormField
+              id={FIELD_IDS.trailerUrl}
+              label="Tráiler de YouTube (opcional)"
+              type="url"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="https://www.youtube.com/watch?v=…"
+              hint="Un enlace de un vídeo de YouTube (youtube.com/watch?v=… o youtu.be/…). Se ve con el botón «Ver tráiler»."
+              error={errors.trailerUrl}
+              value={values.trailerUrl}
+              onChange={(event) => setField('trailerUrl', event.target.value)}
             />
             <GenreCheckboxes
               id={FIELD_IDS.genreIds}

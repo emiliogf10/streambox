@@ -14,6 +14,9 @@ import { expectCovers, expectWholePoster } from './support/images';
 /** Una película con dos géneros y portada, que aparece en la fila "Novedades". */
 const FILM = MOVIES.find((movie) => movie.title === 'Interstellar');
 if (!FILM) throw new Error('El catálogo de ejemplo debe incluir «Interstellar»');
+/** Su vídeo: este spec comprueba «Ver ahora», así que la película debe sembrarse CON vídeo. */
+const FILM_VIDEO = videoUrl(FILM);
+if (!FILM_VIDEO) throw new Error('«Interstellar» debe sembrarse con vídeo (sin él no hay «Ver ahora»)');
 
 test.describe('Detalle y favoritos', () => {
   test('la página de una película muestra título, datos, sinopsis completa y un «Ver ahora» que abre en pestaña nueva', async ({
@@ -47,7 +50,7 @@ test.describe('Detalle y favoritos', () => {
     const watch = header.getByRole('link', { name: /^Ver ahora/ });
     await expect(watch).toHaveAttribute('target', '_blank');
     await expect(watch).toHaveAttribute('rel', /noopener/);
-    await expect(watch).toHaveAttribute('href', videoUrl(FILM));
+    await expect(watch).toHaveAttribute('href', FILM_VIDEO);
     // Un usuario normal no ve «Editar».
     await expect(page.getByRole('link', { name: /^Editar/ })).toHaveCount(0);
   });

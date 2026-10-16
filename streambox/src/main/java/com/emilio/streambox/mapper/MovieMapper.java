@@ -10,6 +10,7 @@ import com.emilio.streambox.dto.GenreResponse;
 import com.emilio.streambox.dto.MovieRequest;
 import com.emilio.streambox.dto.MovieResponse;
 import com.emilio.streambox.entity.Movie;
+import com.emilio.streambox.validation.YouTubeUrls;
 
 /**
  * Convierte entre la entidad {@link Movie} y los DTO de la API.
@@ -86,6 +87,7 @@ public final class MovieMapper {
                 movie.getReleaseYear(),
                 movie.getImageUrl(),
                 movie.getVideoUrl(),
+                movie.getTrailerUrl(),
                 movie.getCreatedAt(),
                 genres);
     }
@@ -103,6 +105,20 @@ public final class MovieMapper {
                 .toList();
     }
 
+    /**
+     * Copia los campos editables.
+     *
+     * <p>
+     * El vídeo y el tráiler son opcionales: un texto en blanco se guarda como
+     * {@code null}, para que "no tiene" tenga una sola representación (los
+     * validadores dejan pasar el texto en blanco precisamente para eso). El
+     * tráiler se guarda además normalizado
+     * ({@code https://www.youtube.com/watch?v=<id>}), la única forma que admite
+     * el {@code CHECK} {@code ck_movies_trailer_url}; si se guardara tal cual,
+     * un {@code youtu.be/<id>} válido para la API acabaría en un error de
+     * integridad.
+     * </p>
+     */
     private static void copyFields(MovieRequest request, Movie movie) {
 
         movie.setTitle(request.title());
@@ -110,6 +126,16 @@ public final class MovieMapper {
         movie.setDuration(request.duration());
         movie.setReleaseYear(request.releaseYear());
         movie.setImageUrl(request.imageUrl());
-        movie.setVideoUrl(request.videoUrl());
+        movie.setVideoUrl(blankToNull(request.videoUrl()));
+        movie.setTrailerUrl(YouTubeUrls.normalize(request.trailerUrl()));
+    }
+
+    /**
+     * Devuelve {@code null} si el texto es {@code null} o está en blanco
+     * ({@link String#isBlank()}, el mismo criterio que los validadores), o el
+     * texto sin cambios en otro caso.
+     */
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 }

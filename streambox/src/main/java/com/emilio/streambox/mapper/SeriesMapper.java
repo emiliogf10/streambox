@@ -14,6 +14,7 @@ import com.emilio.streambox.dto.SeriesRequest;
 import com.emilio.streambox.dto.SeriesResponse;
 import com.emilio.streambox.entity.Episode;
 import com.emilio.streambox.entity.Series;
+import com.emilio.streambox.validation.YouTubeUrls;
 
 /**
  * Convierte entre la entidad {@link Series} y los DTO de la API.
@@ -88,6 +89,7 @@ public final class SeriesMapper {
                 series.getReleaseYear(),
                 series.getEndYear(),
                 series.getImageUrl(),
+                series.getTrailerUrl(),
                 series.getCreatedAt(),
                 sortedGenres(series),
                 seasonCount,
@@ -130,6 +132,7 @@ public final class SeriesMapper {
                 series.getReleaseYear(),
                 series.getEndYear(),
                 series.getImageUrl(),
+                series.getTrailerUrl(),
                 series.getCreatedAt(),
                 sortedGenres(series),
                 seasons.size(),
@@ -149,6 +152,12 @@ public final class SeriesMapper {
                 .toList();
     }
 
+    /**
+     * Copia los campos editables. El tráiler se guarda normalizado
+     * ({@code null} si viene en blanco), por el mismo motivo que en
+     * {@link MovieMapper}: el {@code CHECK} {@code ck_series_trailer_url} solo
+     * admite la forma {@code https://www.youtube.com/watch?v=<id>}.
+     */
     private static void copyFields(SeriesRequest request, Series series) {
 
         series.setTitle(request.title());
@@ -156,5 +165,6 @@ public final class SeriesMapper {
         series.setReleaseYear(request.releaseYear());
         series.setEndYear(request.endYear());
         series.setImageUrl(request.imageUrl());
+        series.setTrailerUrl(YouTubeUrls.normalize(request.trailerUrl()));
     }
 }

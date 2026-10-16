@@ -1,0 +1,450 @@
+{
+  "descripcion": "Contrato del enlace del tráiler, compartido por frontend/src/lib/youtube.parity.test.ts y streambox/src/test/java/com/emilio/streambox/validation/YouTubeUrlParityContractTest.java. «esperado» es la forma normalizada, «formato» (El tráiler debe ser un enlace de un vídeo de YouTube) o «longitud» (más de 500 caracteres). La referencia es el servidor (java.net.URI). Los dos lados deben dar exactamente «esperado» en todos los casos.",
+  "casos": [
+    {
+      "nota": "forma normalizada",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "watch sin subdominio",
+      "url": "https://youtube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "watch en m.",
+      "url": "https://m.youtube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "enlace corto",
+      "url": "https://youtu.be/aB3_-eFgHiJ",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "enlace corto con si=",
+      "url": "https://youtu.be/aB3_-eFgHiJ?si=AbC-12_x",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "embed",
+      "url": "https://www.youtube.com/embed/aB3_-eFgHiJ",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "embed nocookie con parámetros",
+      "url": "https://www.youtube-nocookie.com/embed/aB3_-eFgHiJ?autoplay=1&rel=0",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "&v= después de otro parámetro",
+      "url": "https://www.youtube.com/watch?feature=share&v=aB3_-eFgHiJ",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "parámetro vacío antes de v",
+      "url": "https://www.youtube.com/watch?&v=aB3_-eFgHiJ",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "& final",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ&",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "otros parámetros tras v",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ&t=1m30s&list=PLx_y-z",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "vv no es v",
+      "url": "https://www.youtube.com/watch?vv=1&v=aB3_-eFgHiJ",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "V mayúscula se ignora",
+      "url": "https://www.youtube.com/watch?V=1&v=aB3_-eFgHiJ",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "id en mayúsculas",
+      "url": "https://www.youtube.com/watch?v=ABCDEFGHIJK",
+      "esperado": "https://www.youtube.com/watch?v=ABCDEFGHIJK"
+    },
+    {
+      "nota": "id en minúsculas",
+      "url": "https://www.youtube.com/watch?v=abcdefghijk",
+      "esperado": "https://www.youtube.com/watch?v=abcdefghijk"
+    },
+    {
+      "nota": "id solo guiones",
+      "url": "https://www.youtube.com/watch?v=-----------",
+      "esperado": "https://www.youtube.com/watch?v=-----------"
+    },
+    {
+      "nota": "? vacío",
+      "url": "https://youtu.be/aB3_-eFgHiJ?",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "parámetro con puntuación que URI admite",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ&x=!$'()*,;=~:@/?",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "escape % correcto en un parámetro",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ&x=%41%7e",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "+ en un parámetro",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=+",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "% sin dos dígitos hexadecimales: URI lo rechaza",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ&x=%",
+      "esperado": "formato"
+    },
+    {
+      "nota": "% con dígito no hexadecimal",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ&x=%G0",
+      "esperado": "formato"
+    },
+    {
+      "nota": "% con un solo dígito",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=%4",
+      "esperado": "formato"
+    },
+    {
+      "nota": "% con letras no hexadecimales",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=%zz",
+      "esperado": "formato"
+    },
+    {
+      "nota": "% suelto antes de v",
+      "url": "https://www.youtube.com/watch?x=%&v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "corchetes en un parámetro: URI los admite (RFC 2732)",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ&a[]=1",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "corchetes en la query del enlace corto",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=[]",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "corchete al principio de la query",
+      "url": "https://www.youtube.com/watch?[=1&v=aB3_-eFgHiJ",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "id con %-encoding (%4A = J)",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHi%4A",
+      "esperado": "formato"
+    },
+    {
+      "nota": "id seguido de %20",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ%20",
+      "esperado": "formato"
+    },
+    {
+      "nota": "enlace corto con id %-encoding",
+      "url": "https://youtu.be/aB3_-eFgHi%4A",
+      "esperado": "formato"
+    },
+    {
+      "nota": "nombre del parámetro %-encoding (%76 = v)",
+      "url": "https://www.youtube.com/watch?%76=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "= codificado",
+      "url": "https://www.youtube.com/watch?v%3DaB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "host en mayúsculas",
+      "url": "https://WWW.youtube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "host con mayúsculas mezcladas",
+      "url": "https://www.YouTube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "esquema en mayúsculas",
+      "url": "HTTPS://www.youtube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "ruta en mayúsculas",
+      "url": "https://www.youtube.com/WATCH?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "embed en m.",
+      "url": "https://m.youtube.com/embed/aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "m.youtu.be",
+      "url": "https://m.youtu.be/aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "www.youtu.be",
+      "url": "https://www.youtu.be/aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "IDN en punycode",
+      "url": "https://xn--youtube-6ya.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "IDN con o cirílica (no ASCII)",
+      "url": "https://www.y\u043Eutube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "host con punto final",
+      "url": "https://youtube.com./watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "www con punto final",
+      "url": "https://www.youtube.com./watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "youtu.be con punto final",
+      "url": "https://youtu.be./aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "?v= vacío",
+      "url": "https://www.youtube.com/watch?v=",
+      "esperado": "formato"
+    },
+    {
+      "nota": "v vacío y otro v",
+      "url": "https://www.youtube.com/watch?v=&v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "?V= en mayúscula",
+      "url": "https://www.youtube.com/watch?V=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "dos v iguales",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ&v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "; como separador",
+      "url": "https://www.youtube.com/watch?x=1;v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "; tras el id",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ;t=1",
+      "esperado": "formato"
+    },
+    {
+      "nota": "+ tras el id",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ+",
+      "esperado": "formato"
+    },
+    {
+      "nota": "+ antes de v",
+      "url": "https://www.youtube.com/watch?+v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "tabulador final",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ\t",
+      "esperado": "formato"
+    },
+    {
+      "nota": "tabulador inicial",
+      "url": "\thttps://www.youtube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "tabulador en medio",
+      "url": "https://www.youtube.com/watch?v=aB3_-\teFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "U+2028 final",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ\u2028",
+      "esperado": "formato"
+    },
+    {
+      "nota": "BOM inicial",
+      "url": "\uFEFFhttps://www.youtube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "BOM final",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ\uFEFF",
+      "esperado": "formato"
+    },
+    {
+      "nota": "espacio duro final",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ\u00A0",
+      "esperado": "formato"
+    },
+    {
+      "nota": "NUL final",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ\u0000",
+      "esperado": "formato"
+    },
+    {
+      "nota": "signo Kelvin en el id",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHi\u212A",
+      "esperado": "formato"
+    },
+    {
+      "nota": "fragmento",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ#t=30",
+      "esperado": "formato"
+    },
+    {
+      "nota": "fragmento vacío",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ#",
+      "esperado": "formato"
+    },
+    {
+      "nota": "puerto 443",
+      "url": "https://www.youtube.com:443/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "puerto vacío",
+      "url": "https://www.youtube.com:/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "credenciales",
+      "url": "https://u@www.youtube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "host disfrazado",
+      "url": "https://www.youtube.com@evil.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "barra tras watch",
+      "url": "https://www.youtube.com/watch/?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "barra tras el id",
+      "url": "https://www.youtube.com/embed/aB3_-eFgHiJ/",
+      "esperado": "formato"
+    },
+    {
+      "nota": "doble barra",
+      "url": "https://youtu.be//aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "segmento punto",
+      "url": "https://youtu.be/./aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "< y > en la query",
+      "url": "https://www.youtube.com/watch?x=<script>&v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "comillas en la query",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=\"",
+      "esperado": "formato"
+    },
+    {
+      "nota": "barra invertida en la query",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=\\",
+      "esperado": "formato"
+    },
+    {
+      "nota": "llaves en la query",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x={}",
+      "esperado": "formato"
+    },
+    {
+      "nota": "barra vertical en la query",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=|",
+      "esperado": "formato"
+    },
+    {
+      "nota": "circunflejo en la query",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=^",
+      "esperado": "formato"
+    },
+    {
+      "nota": "acento grave en la query",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=`",
+      "esperado": "formato"
+    },
+    {
+      "nota": "http",
+      "url": "http://www.youtube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "sin esquema",
+      "url": "//www.youtube.com/watch?v=aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "shorts",
+      "url": "https://www.youtube.com/shorts/aB3_-eFgHiJ",
+      "esperado": "formato"
+    },
+    {
+      "nota": "id de 10",
+      "url": "https://youtu.be/aB3_-eFgHi",
+      "esperado": "formato"
+    },
+    {
+      "nota": "id de 12",
+      "url": "https://youtu.be/aB3_-eFgHiJK",
+      "esperado": "formato"
+    },
+    {
+      "nota": "watch de 500 caracteres (máximo)",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ&x=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "enlace corto de 500 caracteres (máximo)",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "esperado": "https://www.youtube.com/watch?v=aB3_-eFgHiJ"
+    },
+    {
+      "nota": "watch de 501 caracteres",
+      "url": "https://www.youtube.com/watch?v=aB3_-eFgHiJ&x=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "esperado": "longitud"
+    },
+    {
+      "nota": "enlace corto de 501 caracteres",
+      "url": "https://youtu.be/aB3_-eFgHiJ?x=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "esperado": "longitud"
+    },
+    {
+      "nota": "501 caracteres que ni siquiera son URL: manda la longitud",
+      "url": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "esperado": "longitud"
+    }
+  ]
+}

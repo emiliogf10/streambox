@@ -98,6 +98,19 @@ public class Series {
     private String imageUrl;
 
     /**
+     * Tráiler de YouTube de la serie, o {@code null} si no tiene.
+     *
+     * <p>
+     * Llegó con la migración {@code V6}, que lo rellenó con el enlace de
+     * YouTube que hasta entonces llevaban sus episodios como vídeo. Mismo
+     * formato normalizado y misma restricción que {@link Movie#getTrailerUrl()}
+     * ({@code ck_series_trailer_url}).
+     * </p>
+     */
+    @Column(name = "trailer_url", length = 500)
+    private String trailerUrl;
+
+    /**
      * Instante en el que se creó el registro.
      *
      * <p>

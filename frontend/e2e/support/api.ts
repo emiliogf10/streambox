@@ -149,7 +149,10 @@ export interface NewMovie {
   duration: number;
   releaseYear: number;
   imageUrl: string;
-  videoUrl: string;
+  /** Opcional en la API: `null` = sin vídeo (sin «Ver ahora»). */
+  videoUrl: string | null;
+  /** Opcional: enlace de YouTube (el servidor lo guarda normalizado) o `null`. */
+  trailerUrl: string | null;
   genreIds: number[];
 }
 
@@ -244,6 +247,8 @@ export interface NewSeries {
   releaseYear: number;
   endYear: number | null;
   imageUrl: string;
+  /** Opcional: enlace de YouTube (el servidor lo guarda normalizado) o `null`. */
+  trailerUrl: string | null;
   genreIds: number[];
 }
 
@@ -254,7 +259,8 @@ export interface NewEpisode {
   title: string;
   description: string | null;
   duration: number;
-  videoUrl: string;
+  /** Opcional en la API: `null` = sin vídeo (sin «Ver»). */
+  videoUrl: string | null;
 }
 
 /** Crea una serie (administrador) y devuelve su id. Nace sin episodios. */

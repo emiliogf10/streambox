@@ -29,9 +29,10 @@ import lombok.Setter;
  * </p>
  *
  * <p>
- * Las propiedades {@code imageUrl} y {@code videoUrl} almacenan
- * las direcciones donde se encuentran, respectivamente, la imagen
- * asociada a la película y el contenido de vídeo.
+ * Las propiedades {@code imageUrl}, {@code videoUrl} y {@code trailerUrl}
+ * almacenan las direcciones de, respectivamente, la imagen asociada a la
+ * película, el contenido de vídeo (opcional: StreamBox no aloja vídeos) y su
+ * tráiler de YouTube (también opcional; migración {@code V6}).
  * </p>
  */
 @Entity
@@ -82,10 +83,32 @@ public class Movie {
     private String imageUrl;
 
     /**
-     * URL desde la que se puede acceder al vídeo de la película.
+     * URL desde la que se puede ver la película, o {@code null} si no hay
+     * vídeo del contenido.
+     *
+     * <p>
+     * Es opcional desde la migración {@code V6}: StreamBox no aloja vídeos y
+     * un título puede tener solo tráiler ({@link #trailerUrl}). Antes de esa
+     * migración esta columna guardaba a veces el tráiler; la {@code V6} lo
+     * movió a {@code trailer_url}.
+     * </p>
      */
-    @Column(nullable = false, length = 500)
+    @Column(nullable = true, length = 500)
     private String videoUrl;
+
+    /**
+     * Tráiler de YouTube de la película, o {@code null} si no tiene.
+     *
+     * <p>
+     * Se guarda siempre normalizado como
+     * {@code https://www.youtube.com/watch?v=<id>} (id de 11 caracteres de
+     * {@code [A-Za-z0-9_-]}). La base de datos lo exige con el {@code CHECK}
+     * {@code ck_movies_trailer_url}: guardar cualquier otra forma lanza una
+     * violación de integridad, así que el servicio debe normalizarlo antes.
+     * </p>
+     */
+    @Column(name = "trailer_url", length = 500)
+    private String trailerUrl;
 
     /**
      * Instante en el que se creó el registro.

@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -157,7 +158,9 @@ class AuthOpenApiDocumentationIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath(SCHEMAS + ".MovieRequest.properties.imageUrl.maxLength").value(500))
                 .andExpect(jsonPath(SCHEMAS + ".MovieRequest.properties.videoUrl.maxLength").value(500))
+                .andExpect(jsonPath(SCHEMAS + ".MovieRequest.properties.trailerUrl.maxLength").value(500))
+                // La portada es obligatoria; el vídeo y el tráiler, opcionales desde la V6
                 .andExpect(jsonPath(SCHEMAS + ".MovieRequest.required").value(allOf(
-                        hasItem("imageUrl"), hasItem("videoUrl"))));
+                        hasItem("imageUrl"), not(hasItem("videoUrl")), not(hasItem("trailerUrl")))));
     }
 }

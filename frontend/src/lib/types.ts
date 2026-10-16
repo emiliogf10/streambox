@@ -37,7 +37,16 @@ export interface CatalogItem {
 export interface Movie extends CatalogItem {
   /** Duración en minutos. */
   duration: number;
-  videoUrl: string;
+  /**
+   * Vídeo de la película; `null` si StreamBox no lo tiene (es opcional: sin él
+   * no hay «Ver ahora»). Sin validar: antes de enlazarlo, `getSafeVideoUrl`.
+   */
+  videoUrl: string | null;
+  /**
+   * Tráiler de YouTube, siempre normalizado por el servidor
+   * (`https://www.youtube.com/watch?v=<id>`), o `null`. Para mostrarlo, `getTrailer`.
+   */
+  trailerUrl: string | null;
 }
 
 /** Episodio de una serie (`EpisodeResponse`). No tiene imagen propia: usa la de la serie. */
@@ -51,8 +60,11 @@ export interface Episode {
   description: string | null;
   /** Duración en minutos. */
   duration: number;
-  /** Sin validar: antes de enlazarla hay que pasarla por `getSafeVideoUrl`. */
-  videoUrl: string;
+  /**
+   * Vídeo del episodio; `null` si no lo hay (es opcional: sin él no hay «Ver»).
+   * Sin validar: antes de enlazarla hay que pasarla por `getSafeVideoUrl`.
+   */
+  videoUrl: string | null;
 }
 
 /** Temporada de una serie (`SeasonResponse`), con sus episodios ordenados por número. */
@@ -72,6 +84,8 @@ export interface Series extends CatalogItem {
   endYear: number | null;
   seasonCount: number;
   episodeCount: number;
+  /** Tráiler de YouTube de la serie (normalizado por el servidor) o `null`. Para mostrarlo, `getTrailer`. */
+  trailerUrl: string | null;
 }
 
 /** Detalle de una serie (`SeriesDetailResponse`): la serie con sus temporadas, ordenadas por número. */
@@ -142,8 +156,13 @@ export interface MovieRequest {
   releaseYear: number;
   /** `https://...` o una portada propia `/covers/<archivo>`. */
   imageUrl: string;
-  /** Solo `https://...`. */
-  videoUrl: string;
+  /** Opcional: solo `https://...`, o `null` = sin vídeo. */
+  videoUrl: string | null;
+  /**
+   * Opcional: enlace de YouTube (el servidor lo guarda normalizado), o `null` =
+   * sin tráiler. Se valida con `validateTrailerUrl` (`lib/youtube.ts`).
+   */
+  trailerUrl: string | null;
   /** Al menos un género. */
   genreIds: number[];
 }
@@ -161,6 +180,8 @@ export interface SeriesRequest {
   endYear: number | null;
   /** `https://...` o una portada propia `/covers/<archivo>`. */
   imageUrl: string;
+  /** Opcional: enlace de YouTube (el servidor lo guarda normalizado), o `null` = sin tráiler. */
+  trailerUrl: string | null;
   /** Entre 1 y 20 géneros. */
   genreIds: number[];
 }
@@ -179,8 +200,8 @@ export interface EpisodeRequest {
   description: string | null;
   /** Minutos, 1 a 600. */
   duration: number;
-  /** Solo `https://...`. */
-  videoUrl: string;
+  /** Opcional: solo `https://...`, o `null` = sin vídeo. */
+  videoUrl: string | null;
 }
 
 /** Cuerpo de `POST /api/genres` y `PUT /api/genres/{id}` (`GenreRequest`, solo administradores). */

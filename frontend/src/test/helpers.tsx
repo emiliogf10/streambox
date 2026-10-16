@@ -60,6 +60,7 @@ export function makeMovie(overrides: Partial<Movie> = {}): Movie {
     releaseYear: 2020,
     imageUrl: `https://img.example/${id}.webp`,
     videoUrl: `https://video.example/${id}`,
+    trailerUrl: null,
     createdAt: '2026-01-01T10:00:00Z',
     genres: [],
     ...overrides,
@@ -80,6 +81,7 @@ export function makeSeries(overrides: Partial<Series> = {}): Series {
     genres: [],
     seasonCount: 2,
     episodeCount: 5,
+    trailerUrl: null,
     ...overrides,
   };
 }

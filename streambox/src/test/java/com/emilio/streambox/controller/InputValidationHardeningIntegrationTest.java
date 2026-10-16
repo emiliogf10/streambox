@@ -325,7 +325,9 @@ class InputValidationHardeningIntegrationTest {
                 .andExpect(jsonPath("$.validationErrors.duration").value("Indica la duración en minutos"))
                 .andExpect(jsonPath("$.validationErrors.releaseYear").value("Indica el año de estreno"))
                 .andExpect(jsonPath("$.validationErrors.imageUrl").value("La URL de la portada es obligatoria"))
-                .andExpect(jsonPath("$.validationErrors.videoUrl").value("La URL del vídeo es obligatoria"))
+                // Opcionales desde la V6: un cuerpo vacío no se queja de ellos
+                .andExpect(jsonPath("$.validationErrors.videoUrl").doesNotExist())
+                .andExpect(jsonPath("$.validationErrors.trailerUrl").doesNotExist())
                 .andExpect(jsonPath("$.validationErrors.genreIds").value("Elige al menos un género"));
     }
 

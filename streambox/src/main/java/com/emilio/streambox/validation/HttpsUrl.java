@@ -51,8 +51,10 @@ import jakarta.validation.Payload;
  *
  * <p>
  * <b>Valores que no evalúa</b> (devuelve válido para que solo se queje una
- * restricción por campo): {@code null} y textos en blanco (los rechaza
- * {@code @NotBlank}) y textos más largos que {@link #maxLength()} (los rechaza
+ * restricción por campo): {@code null} y textos en blanco (en un campo
+ * obligatorio los rechaza {@code @NotBlank}; en uno opcional, como
+ * {@code videoUrl}, significan "sin valor" y el mapper los guarda como
+ * {@code null}) y textos más largos que {@link #maxLength()} (los rechaza
  * {@code @Size}). El motivo está en {@link #maxLength()}.
  * </p>
  */

@@ -68,6 +68,7 @@ const field = {
   releaseYear: () => screen.getByLabelText('Año de estreno'),
   endYear: () => screen.getByLabelText('Año de fin (opcional)'),
   image: () => screen.getByLabelText('URL de la portada'),
+  trailer: () => screen.getByLabelText('Tráiler de YouTube (opcional)'),
 };
 /** user-event sin pausas entre acciones (formulario grande; ver `MovieFormPage.test.tsx`). */
 const setupUser = () => userEvent.setup({ delay: null });
@@ -109,6 +110,7 @@ describe('SeriesFormPage: alta', () => {
     expect(document.title).toBe('Nueva serie · Administración — StreamBox');
     for (const input of Object.values(field)) expect(input()).toBeInTheDocument();
     expect(field.endYear()).toHaveAccessibleDescription('Déjalo vacío si sigue en emisión.');
+    expect(field.trailer()).toHaveAccessibleDescription(/YouTube.*«Ver tráiler»/);
 
     const checkboxes = await within(genresGroup()).findAllByRole('checkbox');
     expect(checkboxes.map((box) => box.closest('label')?.textContent)).toEqual(['Acción', 'Ciencia ficción', 'Drama']);
@@ -143,6 +145,8 @@ describe('SeriesFormPage: alta', () => {
     expect(field.releaseYear()).toHaveAccessibleDescription('El año de estreno es obligatorio');
     // El año de fin vacío es válido: conserva su ayuda.
     expect(field.endYear()).not.toHaveAttribute('aria-invalid');
+    // El tráiler también es opcional.
+    expect(field.trailer()).not.toHaveAttribute('aria-invalid');
     expect(field.image()).toHaveAccessibleDescription('La URL de la imagen es obligatoria');
     expect(genresGroup()).toHaveAccessibleDescription('Indica al menos un género');
     expect(field.title()).toHaveFocus();
@@ -181,6 +185,43 @@ describe('SeriesFormPage: alta', () => {
     expect(field.image()).toHaveFocus();
   });
 
+  it('un tráiler que no es de YouTube se rechaza junto al campo con el mensaje del contrato y no se envía', async () => {
+    routeFetch(fetchMock, GENRES_ROUTE);
+    const user = setupUser();
+    renderForm('/admin/series/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+
+    await fill(user, field.trailer(), 'https://youtu.be/corto');
+    await user.click(submitNew());
+
+    expect(field.trailer()).toHaveAttribute('aria-invalid', 'true');
+    expect(field.trailer()).toHaveAccessibleDescription('El tráiler debe ser un enlace de un vídeo de YouTube');
+    expect(field.trailer()).toHaveFocus();
+    expect(sentAny('POST')).toBe(false);
+  });
+
+  it('con tráiler, lo envía recortado (lo normaliza el servidor)', async () => {
+    const created = makeSeriesDetail({ id: 9, title: 'Severance', seasons: [] });
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'POST /api/series': () => jsonResponse(created, 201),
+      'GET /api/admin/series/9': () => jsonResponse(created),
+    });
+    const user = setupUser();
+    renderForm('/admin/series/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+
+    await fill(user, field.trailer(), ' https://www.youtube.com/watch?v=zSWdZVtXT7E&t=5s ');
+    await user.click(submitNew());
+
+    expect(sentBody('POST', '/api/series')).toMatchObject({
+      trailerUrl: 'https://www.youtube.com/watch?v=zSWdZVtXT7E&t=5s',
+    });
+    expect(await screen.findByText('ruta:/admin/series/9/editar')).toBeInTheDocument();
+  });
+
   it('crea la serie con los datos limpios (sin año de fin = null) y aterriza en su edición con el aviso', async () => {
     const created = makeSeriesDetail({
       id: 9,
@@ -212,6 +253,7 @@ describe('SeriesFormPage: alta', () => {
       releaseYear: 2022,
       endYear: null,
       imageUrl: 'https://img.example.com/severance.webp',
+      trailerUrl: null,
       genreIds: [2],
     });
 
@@ -250,6 +292,33 @@ describe('SeriesFormPage: alta', () => {
     expect(field.endYear()).toHaveAccessibleDescription('El año de finalización no puede ser anterior al año de estreno');
     expect(field.endYear()).toHaveFocus();
     expect(screen.getByText('ruta:/admin/series/nueva')).toBeInTheDocument();
+  });
+
+  /**
+   * Revisión de QA del tráiler: un 400 del servidor sobre el tráiler (lo que
+   * pasa cuando cliente y servidor discrepan, incidencia QA trailer-1) se
+   * muestra junto al campo «Tráiler de YouTube», con el foco en él.
+   */
+  it('400 del servidor en el tráiler: el mensaje del contrato junto a «Tráiler de YouTube» y el foco en él', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'POST /api/series': () =>
+        errorResponse(400, 'VALIDATION_ERROR', 'Datos no válidos', {
+          validationErrors: { trailerUrl: 'El tráiler debe ser un enlace de un vídeo de YouTube' },
+        }),
+    });
+    const user = setupUser();
+    renderForm('/admin/series/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+    await fill(user, field.trailer(), 'https://youtu.be/zSWdZVtXT7E');
+
+    await user.click(submitNew());
+
+    expect(await screen.findByText('Revisa los campos marcados.')).toHaveAttribute('role', 'alert');
+    expect(field.trailer()).toHaveAttribute('aria-invalid', 'true');
+    expect(field.trailer()).toHaveAccessibleDescription('El tráiler debe ser un enlace de un vídeo de YouTube');
+    expect(field.trailer()).toHaveFocus();
   });
 
   it('sin géneros: explica que cada serie necesita uno y enlaza a la pestaña Géneros', async () => {
@@ -304,6 +373,9 @@ describe('SeriesFormPage: edición', () => {
     expect(field.releaseYear()).toHaveValue('2017');
     expect(field.endYear()).toHaveValue('2020');
     expect(field.image()).toHaveValue('/covers/dark.webp');
+    // Sin tráiler (`null`): campo vacío y sin error.
+    expect(field.trailer()).toHaveValue('');
+    expect(field.trailer()).not.toHaveAttribute('aria-invalid');
     expect(await within(genresGroup()).findByRole('checkbox', { name: 'Ciencia ficción' })).toBeChecked();
     expect(within(genresGroup()).getByRole('checkbox', { name: 'Acción' })).not.toBeChecked();
 
@@ -314,6 +386,26 @@ describe('SeriesFormPage: edición', () => {
       'Temporada 1 · 3 episodios',
       'Temporada 2 · 2 episodios',
     ]);
+  });
+
+  it('con tráiler guardado, la edición lo muestra; vaciarlo lo quita (se envía null)', async () => {
+    const withTrailer = { ...dark, trailerUrl: 'https://www.youtube.com/watch?v=zSWdZVtXT7E' };
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/admin/series/4': () => jsonResponse(withTrailer),
+      'PUT /api/series/4': () => jsonResponse(dark),
+    });
+    const user = setupUser();
+    renderForm('/admin/series/4/editar');
+    await screen.findByRole('heading', { name: 'Editar «Dark»' });
+    await within(genresGroup()).findAllByRole('checkbox');
+    expect(field.trailer()).toHaveValue('https://www.youtube.com/watch?v=zSWdZVtXT7E');
+
+    await user.clear(field.trailer());
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    expect(await screen.findByText('Se han guardado los cambios de «Dark».')).toBeInTheDocument();
+    expect(sentBody('PUT', '/api/series/4')).toMatchObject({ trailerUrl: null });
   });
 
   it('guarda con PUT (año de fin vaciado = null) y se queda en la página con el título nuevo', async () => {

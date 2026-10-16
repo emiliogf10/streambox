@@ -361,7 +361,9 @@ jobs:
 
       # Cuatro comprobaciones con curl contra nginx, la única puerta de
       # entrada, igual que un navegador:
-      #   1. "/" sirve la SPA (200) con la cabecera Content-Security-Policy.
+      #   1. "/" sirve la SPA (200) con la cabecera Content-Security-Policy,
+      #      cuyo frame-src solo admite el reproductor de tráileres
+      #      (https://www.youtube-nocookie.com).
       #   2. "/api/movies" sin token: 401 con el error en JSON (el proxy
       #      llega al backend y la seguridad funciona).
       #   3. Login del administrador: responde 204 con las dos cookies de sesión
@@ -396,8 +398,13 @@ jobs:
           echo "1/4 Portada"
           status="$(curl -sS -o /dev/null -D "$tmp/home.headers" -w '%{http_code}' "$base_url/")"
           [ "$status" = "200" ] || fail "GET / devolvió $status (se esperaba 200)"
-          grep -qi '^content-security-policy:' "$tmp/home.headers" \
-            || fail "GET / no lleva la cabecera Content-Security-Policy"
+          csp="$(grep -i '^content-security-policy:' "$tmp/home.headers" | tr -d '\r' || true)"
+          [ -n "$csp" ] || fail "GET / no lleva la cabecera Content-Security-Policy"
+          # El tráiler de YouTube necesita frame-src con ESE host y ninguno más
+          # (ni youtube.com ni comodines): el ";" o el fin de línea tras el
+          # host impide que pase una lista más larga.
+          echo "$csp" | grep -qE "; *frame-src https://www\.youtube-nocookie\.com *(;|$)" \
+            || fail "La CSP no permite solo https://www.youtube-nocookie.com en frame-src"
 
           echo "2/4 API sin token"
           status="$(curl -sS -o "$tmp/movies.json" -D "$tmp/movies.headers" -w '%{http_code}' "$base_url/api/movies")"

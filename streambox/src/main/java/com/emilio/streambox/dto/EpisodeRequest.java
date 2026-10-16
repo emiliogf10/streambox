@@ -27,12 +27,21 @@ import jakarta.validation.constraints.Size;
  * constantes y mensajes que {@link MovieRequest}.
  * </p>
  *
+ * <p>
+ * <b>Vídeo opcional</b> (desde la migración {@code V6}): StreamBox no aloja
+ * vídeos. Omitido, {@code null}, vacío o en blanco = sin vídeo, y el mapper lo
+ * guarda como {@code null} (como la sinopsis). El tráiler no va en el episodio
+ * sino en la serie ({@link SeriesRequest#trailerUrl()}). Un {@code PUT} sin
+ * {@code videoUrl} lo borra.
+ * </p>
+ *
  * @param seasonNumber  número de temporada (obligatorio, 1 a 100)
  * @param episodeNumber número del episodio en su temporada (obligatorio, 1 a 1000)
  * @param title         título (obligatorio, máximo 150 caracteres)
  * @param description   sinopsis (opcional, máximo 1000 caracteres; en blanco se guarda como {@code null})
  * @param duration      duración en minutos (obligatoria, 1 a 600)
- * @param videoUrl      URL del vídeo (obligatoria, máximo 500 caracteres, {@code https://})
+ * @param videoUrl      URL del vídeo (opcional; si viene, máximo 500 caracteres y
+ *                      {@code https://}; en blanco = sin vídeo)
  */
 public record EpisodeRequest(
 
@@ -60,11 +69,11 @@ public record EpisodeRequest(
         @Max(value = 600, message = EpisodeRequest.DURATION_RANGE_MESSAGE)
         Integer duration,
 
-        @Schema(description = "URL del vídeo. Debe ser una URL https:// absoluta, con host y sin "
-                + "credenciales (usuario:clave@). Solo caracteres ASCII visibles (sin espacios); "
-                + "máximo 500 caracteres.",
+        @Schema(description = "URL del vídeo del episodio. Opcional: si se omite, es null o va en "
+                + "blanco, el episodio queda sin vídeo (null en la respuesta). Si se indica, debe ser una "
+                + "URL https:// absoluta, con host y sin credenciales (usuario:clave@). Solo caracteres "
+                + "ASCII visibles (sin espacios); máximo 500 caracteres. En un PUT, omitirlo borra el vídeo.",
                 example = "https://videos.streambox.example/watch/serie-1x01")
-        @NotBlank(message = "La URL del vídeo es obligatoria")
         @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.VIDEO_URL_SIZE_MESSAGE)
         @HttpsUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.VIDEO_URL_FORMAT_MESSAGE)
         String videoUrl) {

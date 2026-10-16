@@ -4,8 +4,9 @@
  * Protegen: la cabecera (h1, datos, sinopsis completa, «Empezar a ver», «Mi
  * lista»), la temporada en la URL (por defecto la primera; un valor inválido no
  * rompe nada), el selector de temporada (enlaces con `aria-current`, el foco se
- * queda), la lista de episodios con su «Ver» seguro (URL validada; insegura →
- * desactivado), la ficha (emisión y estado con palabras, géneros en texto
+ * queda), la lista de episodios con su «Ver» seguro (URL validada; sin vídeo o
+ * insegura → no aparece), «Empezar a ver» (primer episodio CON vídeo; sin
+ * ninguno, no aparece), «Ver tráiler» (solo con tráiler), la ficha (emisión y estado con palabras, géneros en texto
  * porque `/series` aún no se filtra) y los estados: cargando, 404 «Serie no
  * encontrada» y error con reintento. También «Volver a series» y «Editar»
  * SOLO para un administrador, con la vuelta a esta página desde el formulario.
@@ -35,6 +36,23 @@ const fetchMock = vi.fn<typeof fetch>();
 const FAVORITES = { 'GET /api/users/me/favorites': () => jsonResponse([]) };
 const DETAIL = 'GET /api/series/7';
 const AS_ADMIN = { [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })) };
+/** Tráiler con la forma normalizada que devuelve la API. */
+const TRAILER = 'https://www.youtube.com/watch?v=zSWdZVtXT7E';
+
+/** Serie de una temporada cuyos episodios tienen los vídeos indicados (`null` = sin vídeo). */
+function seriesWithVideos(videos: (string | null)[], overrides: Partial<SeriesDetail> = {}): SeriesDetail {
+  return makeSeriesDetail({
+    id: 7,
+    title: 'Serie',
+    seasons: [
+      {
+        seasonNumber: 1,
+        episodes: videos.map((videoUrl, index) => makeEpisode({ episodeNumber: index + 1, videoUrl })),
+      },
+    ],
+    ...overrides,
+  });
+}
 
 /** Serie de dos temporadas (3 + 2 episodios) con una sinopsis larga. */
 const series = makeSeriesDetail({
@@ -108,6 +126,89 @@ describe('SeriesDetailPage: cabecera', () => {
     expect(start).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
+  // Incidencia QA trailer-3: si el principio de la serie no tiene vídeo, el
+  // botón no dice «Empezar a ver» (no empieza): dice qué episodio abre.
+  it('si el primer episodio no tiene vídeo, el botón dice «Ver T1:E2» (no «Empezar a ver») y abre ese', async () => {
+    renderDetail('/series/7', () => jsonResponse(seriesWithVideos([null, 'https://video.example/s1e2'])));
+
+    const start = await screen.findByRole('link', {
+      name: 'Ver T1:E2 de Serie: Episodio 2 (se abre en una pestaña nueva)',
+    });
+    expect(start).toHaveTextContent(/^Ver T1:E2$/);
+    expect(start).toHaveAttribute('href', 'https://video.example/s1e2');
+    expect(screen.queryByText(/Empezar a ver/)).not.toBeInTheDocument();
+  });
+
+  it('si el primer episodio con vídeo está en otra temporada, «Ver T2:E3»', async () => {
+    const dark = makeSeriesDetail({
+      id: 7,
+      title: 'Dark',
+      seasons: [
+        { seasonNumber: 1, episodes: [makeEpisode({ id: 11, episodeNumber: 1, videoUrl: null })] },
+        {
+          seasonNumber: 2,
+          episodes: [
+            makeEpisode({ id: 21, seasonNumber: 2, episodeNumber: 1, videoUrl: null }),
+            makeEpisode({ id: 22, seasonNumber: 2, episodeNumber: 3, title: 'El regreso', videoUrl: 'https://video.example/s2e3' }),
+          ],
+        },
+      ],
+    });
+    renderDetail('/series/7', () => jsonResponse(dark));
+
+    const start = await screen.findByRole('link', { name: /^Ver T2:E3 de Dark: El regreso/ });
+    expect(start).toHaveTextContent(/^Ver T2:E3$/);
+    expect(start).toHaveAttribute('href', 'https://video.example/s2e3');
+    expect(start).toHaveClass('bg-white');
+  });
+
+  it('si ningún episodio tiene vídeo, no hay «Empezar a ver» ni ningún «Ver», pero sí los episodios', async () => {
+    renderDetail('/series/7', () => jsonResponse(seriesWithVideos([null, null])));
+
+    await screen.findByRole('heading', { level: 1, name: 'Serie' });
+    expect(screen.queryByText(/Empezar a ver/)).not.toBeInTheDocument();
+    expect(within(episodeList()).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(episodeList()).queryByRole('link')).not.toBeInTheDocument();
+    expect(within(episodeList()).queryByRole('button')).not.toBeInTheDocument();
+    // «Mi lista» sigue, y es la única acción: no queda ningún botón que prometa ver algo.
+    expect(screen.getByRole('button', { name: /^Mi lista/ })).toBeInTheDocument();
+  });
+
+  it('con tráiler y sin vídeos: «Ver tráiler» es la acción principal y abre el diálogo', async () => {
+    const user = renderDetail('/series/7', () =>
+      jsonResponse(seriesWithVideos([null], { title: 'Dark', trailerUrl: TRAILER })),
+    );
+
+    const trailer = await screen.findByRole('button', { name: 'Ver tráiler de Dark' });
+    expect(trailer).toHaveClass('bg-white');
+    await user.click(trailer);
+
+    const dialog = screen.getByRole('dialog', { name: 'Tráiler de Dark' });
+    expect(dialog.querySelector('iframe')).toHaveAttribute(
+      'src',
+      'https://www.youtube-nocookie.com/embed/zSWdZVtXT7E?autoplay=1&rel=0',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Cerrar el tráiler' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trailer).toHaveFocus();
+  });
+
+  it('con tráiler y con vídeos: «Empezar a ver» principal y «Ver tráiler» secundaria', async () => {
+    renderDetail('/series/7', () => jsonResponse({ ...series, trailerUrl: TRAILER }));
+
+    const start = await screen.findByRole('link', { name: /^Empezar a ver/ });
+    const trailer = screen.getByRole('button', { name: 'Ver tráiler de La casa de cristal' });
+    expect(start).toHaveClass('bg-white');
+    expect(trailer).toHaveClass('border');
+  });
+
+  it('sin tráiler no hay «Ver tráiler»', async () => {
+    renderDetail();
+
+    await screen.findByRole('heading', { level: 1, name: 'La casa de cristal' });
+    expect(screen.queryByRole('button', { name: /Ver tráiler/ })).not.toBeInTheDocument();
+  });
+
   it('tiene «Mi lista» para la serie', async () => {
     renderDetail();
 
@@ -121,6 +222,59 @@ describe('SeriesDetailPage: cabecera', () => {
     const back = screen.getByRole('link', { name: 'Volver a series' });
     expect(back).toHaveAttribute('href', '/series');
     expect(back.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+/**
+ * Incidencia QA trailer-5: sin tráiler y sin ningún episodio con vídeo, la
+ * cabecera se quedaba solo con «Mi lista» y nada explicaba por qué. Ahora un
+ * aviso breve lo dice, con el texto según el rol (usuario, también mientras
+ * carga el rol; administrador, qué falta y dónde añadirlo).
+ */
+describe('SeriesDetailPage: aviso «sin vídeo ni tráiler» según el rol', () => {
+  const USER_NOTE = 'Todavía no está disponible para ver.';
+  const ADMIN_NOTE = 'No tiene vídeo ni tráiler: añade el tráiler o el vídeo de los episodios desde «Editar».';
+
+  it('USER: «Todavía no está disponible para ver.»', async () => {
+    renderDetail('/series/7', () => jsonResponse(seriesWithVideos([null, null])));
+
+    expect(await screen.findByText(USER_NOTE)).toBeInTheDocument();
+    expect(await screen.findByText('estado:ready')).toBeInTheDocument();
+    expect(screen.queryByText(ADMIN_NOTE)).not.toBeInTheDocument();
+  });
+
+  it('ADMIN: dice qué falta y que se añade desde «Editar»', async () => {
+    renderDetail('/series/7', () => jsonResponse(seriesWithVideos([null, null])), AS_ADMIN);
+
+    expect(await screen.findByText(ADMIN_NOTE)).toBeInTheDocument();
+    expect(screen.queryByText(USER_NOTE)).not.toBeInTheDocument();
+  });
+
+  it('mientras carga el rol, el texto de usuario (falla cerrado)', async () => {
+    renderDetail('/series/7', () => jsonResponse(seriesWithVideos([null, null])), {
+      [CURRENT_USER]: () => new Promise<Response>(() => {}),
+    });
+
+    expect(await screen.findByText(USER_NOTE)).toBeInTheDocument();
+    expect(screen.getByText('estado:loading')).toBeInTheDocument();
+  });
+
+  it('el aviso va FUERA de la rejilla de acciones (no cuenta como una acción más)', async () => {
+    renderDetail('/series/7', () => jsonResponse(seriesWithVideos([null, null])));
+
+    const note = await screen.findByText(USER_NOTE);
+    const actions = screen.getByRole('button', { name: /^Mi lista/ }).parentElement!;
+    expect(actions.contains(note)).toBe(false);
+  });
+
+  it.each([
+    ['con tráiler', seriesWithVideos([null], { trailerUrl: TRAILER })],
+    ['con un episodio con vídeo', seriesWithVideos([null, 'https://video.example/s1e2'])],
+  ])('%s no hay aviso', async (_caso, detail) => {
+    renderDetail('/series/7', () => jsonResponse(detail));
+
+    await screen.findByRole('heading', { level: 1, name: 'Serie' });
+    expect(screen.queryByText(USER_NOTE)).not.toBeInTheDocument();
   });
 });
 
@@ -278,7 +432,7 @@ describe('SeriesDetailPage: temporada y episodios', () => {
     expect(screen.getByText('Temporada 1 · 1 episodio')).toHaveAttribute('role', 'status');
   });
 
-  it('un episodio con URL insegura no es un enlace: «Ver» desactivado con su nombre y el motivo', async () => {
+  it('un episodio con URL insegura no tiene «Ver» (ni enlace ni botón desactivado); «Empezar a ver» lo salta', async () => {
     const unsafe = makeSeriesDetail({
       id: 7,
       title: 'Serie',
@@ -295,15 +449,18 @@ describe('SeriesDetailPage: temporada y episodios', () => {
     renderDetail('/series/7', () => jsonResponse(unsafe));
 
     const list = await screen.findByRole('list', { name: 'Episodios de la temporada 1' });
-    const [first] = within(list).getAllByRole('listitem');
+    const [first, second] = within(list).getAllByRole('listitem');
     expect(within(first).queryByRole('link')).not.toBeInTheDocument();
-    const disabled = within(first).getByRole('button', { name: 'Ver T1:E1 Episodio 1' });
-    expect(disabled).toHaveAttribute('aria-disabled', 'true');
-    expect(disabled).toHaveAccessibleDescription(/No disponible: este episodio no tiene un vídeo/);
+    expect(within(first).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(first).getByRole('heading', { level: 3, name: '1. Episodio 1' })).toBeInTheDocument();
     // Sin sinopsis no se pinta un párrafo vacío (solo título y duración).
     expect(first.querySelectorAll('p')).toHaveLength(0);
-    // «Empezar a ver» apunta al mismo episodio, así que también queda desactivado.
-    expect(screen.getByRole('button', { name: /^Empezar a ver Serie: T1:E1/ })).toHaveAttribute('aria-disabled', 'true');
+    expect(within(second).getByRole('link', { name: /^Ver T1:E2 Episodio 2/ })).toBeInTheDocument();
+    // La cabecera no lleva a un `javascript:`: salta al primer episodio con vídeo seguro (y dice cuál).
+    expect(screen.getByRole('link', { name: /^Ver T1:E2 de Serie: Episodio 2/ })).toHaveAttribute(
+      'href',
+      'https://video.example/s1e2',
+    );
   });
 });
 

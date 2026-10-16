@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **2337** | 1971 con H2 y 366 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **1137** | |
-| E2E (Playwright) | **177** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
+| Backend (JUnit) | **2965** | 2576 con H2 y 389 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
+| Frontend (Vitest) | **1384** | |
+| E2E (Playwright) | **190** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
 
@@ -97,6 +97,9 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   3. **Settings → Actions → General → «Fork pull request workflows»**: *Require approval for all external contributors* (un PR de un desconocido no ejecuta nada hasta que lo apruebes).
   4. Opcional: un **ruleset** sobre `main` con *Require code scanning results* (CodeQL y OSV-Scanner, umbral *High or higher*) y un **CODEOWNERS** para `.github/` y `osv-scanner.toml` (un PR puede editar el propio escaneo o sus excepciones; así siempre lo revisas tú).
   5. Comprobar en la pestaña **Actions** que `Seguridad` sale en verde y en **Security → Code scanning** que aparecen CodeQL y OSV-Scanner. Los workflows programados se desactivan tras 60 días sin actividad en el repositorio (se reactivan desde Actions).
+- **Portadas del catálogo ampliado (2026-10-16)** — *Media · BAJA*. Las 30 películas y series añadidas apuntan a estos archivos, que hay que poner en `frontend/public/covers/` (en `.webp`); hasta entonces se ve el respaldo con el título.
+  - Películas: `el-caballero-oscuro`, `gladiator`, `el-senor-de-los-anillos-la-comunidad-del-anillo`, `parasitos`, `pulp-fiction`, `el-silencio-de-los-corderos`, `alien-el-octavo-pasajero`, `hereditary`, `el-gran-lebowski`, `regreso-al-futuro`, `jurassic-park`, `joker`, `top-gun-maverick`, `oppenheimer`, `el-gran-hotel-budapest`.
+  - Series: `peaky-blinders`, `narcos`, `true-detective`, `fargo`, `black-mirror`, `the-office`, `friends`, `la-casa-de-papel`, `the-mandalorian`, `arcane`, `the-witcher`, `mindhunter`, `westworld`, `ted-lasso`, `shogun`.
 - **Si algún día se publica la app** — *Alta (antes de publicar) · BAJA*: `STREAMBOX_BIND_ADDRESS=0.0.0.0` solo con TLS delante, y `set_real_ip_from`/`real_ip_header` en nginx. Hoy no aplica (solo se publica en `127.0.0.1`).
 - ✅ ~~**Portadas locales: ejecutar el SQL**~~ — **hecho por el autor el 2026-10-15**
   - Desde la tarea 21 la UI usa solo `imageUrl`: las películas cuyo `image_url` no apunte a una imagen alcanzable muestran un hueco con el título.
@@ -267,6 +270,11 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - **Dejar el camino hecho para que en el futuro recomiende una IA:** la recomendación detrás de una interfaz (p. ej. `Recommender` con una implementación `GenreBasedRecommender`) para poder sustituirla sin tocar controladores ni frontend; y guardar desde el principio los datos que una IA necesitaría (quién, qué título, cuándo).
   - Pendiente de diseñar: tabla(s) de «me gusta» para películas y series (como los favoritos, con `INSERT`/`DELETE` directos), endpoints en `/api/users/me/...` (id del token, sin IDOR), cómo se muestran en el perfil, y qué pasa al borrar un título.
 
+- ✅ ~~**Botón «Ver tráiler» en cada película y serie**~~ — **hecho el 2026-10-16** (ver el [historial](#4-historial-de-trabajos)). Diseño original, para referencia: (`database` + `backend` + `frontend` + `security`). Petición del autor (2026-10-16). Contexto: con el catálogo ampliado del 2026-10-16, el `video_url` de todas las películas y de los episodios pasa a ser el **tráiler oficial de YouTube**, así que hoy «Ver ahora» / «Empezar a ver» abren un tráiler: **ese texto deja de ser verdad** (regla de los textos de la interfaz). Propuesta:
+  - Un campo propio **`trailerUrl`** (opcional) en `movies` y en `series` (migración `V6`, `@HttpsUrl`, DTOs, panel de administración), separado de `videoUrl` (el contenido en sí), y mover ahí los enlaces de YouTube.
+  - En `/peliculas/:id` y `/series/:id`, un botón **«Ver tráiler»** que lo abra en un **modal** (`components/Modal`) con el reproductor incrustado de `https://www.youtube-nocookie.com/embed/<id>` (privacidad: sin cookies hasta reproducir), con su título accesible, cierre con Esc y foco devuelto al botón; o, si se prefiere no incrustar, que abra YouTube en otra pestaña.
+  - Incrustarlo exige abrir la CSP de nginx solo para eso (`frame-src https://www.youtube-nocookie.com`) y validar en el backend que la URL es de YouTube (lista blanca de hosts) y extraer el id en el frontend sin construir HTML a mano.
+  - Mientras no exista, revisar el texto de «Ver ahora» si los `video_url` son tráileres.
 - **Reproductor integrado** — *Media · MEDIA*
   - «Ver ahora» abre el vídeo en otra pestaña. Un reproductor en la app solo sirve para vídeos directos (`.mp4`, `.webm`, HLS): revisar antes qué `videoUrl` hay en la base de datos.
   - Para HLS (`.m3u8`, que propone el informe de Gemini) bastaría `hls.js` con URLs HLS ya publicadas. Transcodificar con FFmpeg, guardar en S3/MinIO y servir por CDN es otro proyecto (subidas, colas de trabajo, almacenamiento) y hoy no hay vídeos propios. Una subida de archivos exigiría reactivar multipart solo para su ruta (capítulo 13 del manual).
@@ -415,6 +423,24 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-10-16 · «Ver tráiler» y «Ver ahora» solo con vídeo de verdad
+
+- **Problema:** tras ampliar el catálogo (ver la entrada siguiente), el vídeo de todas las películas y episodios era el tráiler de YouTube: «Ver ahora», «Empezar a ver» y «Ver» abrían un tráiler y su texto mentía.
+- **Base de datos** (`database`): migración **V6** (`V6__trailer_url_and_optional_video.sql`, portable): `trailer_url` en `movies` y `series`, `video_url` opcional en películas y episodios (StreamBox no aloja vídeos), mueve a `trailer_url` solo los enlaces con la forma normalizada `https://www.youtube.com/watch?v=<id>` y un **CHECK** que solo admite esa forma. Probada sobre datos en H2 y PostgreSQL (incluida una base adoptada y un fallo a mitad).
+- **Backend** (`backend`): `validation/YouTubeUrls` + `@YouTubeUrl` (analiza con `java.net.URI` y compara el host exacto: `youtube.com/watch?v=`, `youtu.be/`, `/embed/` y `youtube-nocookie.com/embed/`; nada de `http:`, otros hosts, credenciales, puertos ni fragmentos) y normalización antes de guardar; blanco → `null`; un `PUT` sin el campo lo borra; OpenAPI con nulos.
+- **Seguridad** (`security`): CSP `frame-src https://www.youtube-nocookie.com` (lo único que se abre) y `Permissions-Policy` de reproducción automática, contenido protegido, pantalla completa e imagen en imagen delegadas **solo** en ese origen (antes `autoplay=()` lo habría impedido); la prueba de humo del CI lo comprueba.
+- **Frontend** (`frontend`): botón «Ver tráiler» en portada, película y serie; modal con el reproductor sin cookies (`iframe` construido solo desde el id revalidado, `sandbox` mínimo, `referrerpolicy="strict-origin-when-cross-origin"` porque YouTube rechaza los embebidos sin Referer, desmontado al cerrar); «Ver ahora» / «Empezar a ver» / «Ver» **solo si hay vídeo**; panel con tráiler y vídeo opcional.
+- **Revisión de `qa`** (+197 tests de backend, entre ellos un **catálogo de 89 casos en JSON que leen a la vez JUnit y Vitest** para que cliente y servidor acepten exactamente lo mismo, y que todo lo aceptado cumple el CHECK por la API real; +E2E de teclado y maquetación). Arreglado después (`frontend`): paridad de `%` y `[ ]` en los parámetros; pista «Pulsa Esc para cerrar. Si estás dentro del vídeo, sal antes con Mayús+Tab.» (desde la página no se pueden capturar las teclas de un iframe de otro origen); «Ver T2:E3» cuando el primer episodio con vídeo no es el primero; aviso por rol cuando no hay vídeo ni tráiler («Todavía no está disponible para ver.» / «No tiene vídeo ni tráiler: puedes añadirlos desde «Editar».»); acciones del banner sin partirse en móvil.
+- **Verificación** (orquestador): backend **2965** (389 contra PostgreSQL), Vitest **1384**, E2E **190** + 24 omitidos; build y lint limpios.
+- **Pendiente:** decidir «Ver episodios» en el banner de `/series` (ningún episodio tiene vídeo); comprobar en Supabase, tras el primer arranque con la V6, que no queda ningún `video_url` de YouTube sin mover (`SELECT id, title, video_url FROM movies WHERE video_url ILIKE '%youtu%'`, y lo mismo en `episodes`); probar la reproducción con la CSP completa de nginx (`docker compose`); a 1280 px las 4 acciones de la portada caben justas y con «En mi lista» podrían pasar a dos filas.
+
+### 2026-10-16 · Catálogo ampliado (script de datos de un solo uso)
+
+- **Petición del autor:** revisar el catálogo de su base y añadir 15 películas y 15 series, con el tráiler de YouTube como vídeo de todas.
+- **Script** (`database`; lo ejecutó el autor en Supabase, nunca los agentes; retirado del repositorio después, ya no hace falta): una transacción idempotente con comprobaciones internas. Añade los géneros Crimen, Thriller, Fantasía y Aventura; corrige «Mad max» → «Mad Max», Matrix Reloaded + Acción y los géneros de las 15 series (Breaking Bad, The Sopranos o The Wire estaban como «Ciencia ficción»); inserta 15 películas y 15 series (temporada 1, 3 episodios con títulos comprobados en Wikipedia; duraciones aproximadas) y pone el tráiler oficial de YouTube (61 vídeos verificados con oEmbed; 3 son promos o de otra temporada porque no hay tráiler oficial) en todas las películas y episodios. Probado dos veces contra un PostgreSQL temporal con un snapshot de los datos del autor y leído por la API.
+- **Ejecutado por el autor en Supabase el 2026-10-16** (comprobación: 31 películas, 30 series, 0 series sin episodios, 0 vídeos fuera de YouTube; la app se ve bien). **Te toca:** añadir las 30 portadas `.webp` a `frontend/public/covers/` (lista en 2.4). Correcciones propuestas y no aplicadas (decisión tuya; se pueden hacer desde el panel): «El marciano» → «Marte» (título en España), `end_year` de Stranger Things (2025) y The Boys, títulos de España de 4 series (Separación, Los Soprano, Juego de tronos, La casa del dragón) y géneros extra en 3 películas.
+- **Consecuencia:** «Ver ahora» abrirá un tráiler → ver «Botón «Ver tráiler»» en 2.9.
 
 ### 2026-10-15 · «Películas similares» (punto 3 del orden)
 

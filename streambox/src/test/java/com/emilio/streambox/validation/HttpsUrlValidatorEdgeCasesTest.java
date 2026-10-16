@@ -145,7 +145,7 @@ class HttpsUrlValidatorEdgeCasesTest {
     // ------------------------------------------------------------------
 
     private static MovieRequest request(String imageUrl, String videoUrl) {
-        return new MovieRequest("Dune", "Sinopsis", 155, 2021, imageUrl, videoUrl, Set.of(1L));
+        return new MovieRequest("Dune", "Sinopsis", 155, 2021, imageUrl, videoUrl, null, Set.of(1L));
     }
 
     private static void assertNoErrors(MovieRequest request) {

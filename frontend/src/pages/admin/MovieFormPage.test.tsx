@@ -39,6 +39,7 @@ const interstellar = makeMovie({
   releaseYear: 2014,
   imageUrl: '/covers/interstellar.webp',
   videoUrl: 'https://videos.example.com/interstellar',
+  trailerUrl: 'https://www.youtube.com/watch?v=zSWdZVtXT7E',
   genres: [
     { id: 1, name: 'Ciencia ficción' },
     { id: 2, name: 'Drama' },
@@ -72,7 +73,8 @@ const field = {
   duration: () => screen.getByLabelText('Duración (minutos)'),
   year: () => screen.getByLabelText('Año de estreno'),
   image: () => screen.getByLabelText('URL de la portada'),
-  video: () => screen.getByLabelText('URL del vídeo'),
+  video: () => screen.getByLabelText('URL del vídeo (opcional)'),
+  trailer: () => screen.getByLabelText('Tráiler de YouTube (opcional)'),
 };
 /**
  * `user-event` sin la pausa que mete por defecto entre acción y acción (`delay: null`). Este formulario es
@@ -103,6 +105,7 @@ async function fillValid(user: ReturnType<typeof setupUser>) {
   await fill(user, field.year(), '2014');
   await fill(user, field.image(), ' /covers/interstellar.webp ');
   await fill(user, field.video(), 'https://videos.example.com/interstellar');
+  await fill(user, field.trailer(), ' https://youtu.be/zSWdZVtXT7E ');
   await user.click(within(genresGroup()).getByRole('checkbox', { name: 'Ciencia ficción' }));
   await user.click(within(genresGroup()).getByRole('checkbox', { name: 'Drama' }));
 }
@@ -123,6 +126,9 @@ describe('MovieFormPage: alta', () => {
     expect(document.title).toBe('Nueva película · Administración — StreamBox');
     for (const input of Object.values(field)) expect(input()).toBeInTheDocument();
     expect(field.image()).toHaveAccessibleDescription(/https:\/\/ o una portada propia de la carpeta \/covers/);
+    // Vídeo y tráiler dicen qué son y qué pasa si se dejan vacíos / dónde se ven.
+    expect(field.video()).toHaveAccessibleDescription(/sin vídeo no se muestra «Ver ahora»/);
+    expect(field.trailer()).toHaveAccessibleDescription(/YouTube.*«Ver tráiler»/);
 
     const checkboxes = await within(genresGroup()).findAllByRole('checkbox');
     expect(checkboxes.map((box) => box.closest('label')?.textContent)).toEqual(['Acción', 'Ciencia ficción', 'Drama']);
@@ -142,7 +148,9 @@ describe('MovieFormPage: alta', () => {
     expect(field.duration()).toHaveAccessibleDescription('Indica la duración en minutos');
     expect(field.year()).toHaveAccessibleDescription('Indica el año de estreno');
     expect(field.image()).toHaveAccessibleDescription('La URL de la portada es obligatoria');
-    expect(field.video()).toHaveAccessibleDescription('La URL del vídeo es obligatoria');
+    // Vídeo y tráiler son opcionales: vacíos no son un error.
+    expect(field.video()).not.toHaveAttribute('aria-invalid');
+    expect(field.trailer()).not.toHaveAttribute('aria-invalid');
     expect(genresGroup()).toHaveAccessibleDescription('Elige al menos un género');
     expect(screen.getByText('Elige al menos un género')).toHaveAttribute('role', 'alert');
     expect(field.title()).toHaveFocus();
@@ -178,6 +186,9 @@ describe('MovieFormPage: alta', () => {
     ['portada fuera de /covers', 'image', '/covers/../x', 'La URL de la imagen debe empezar por https:// o ser una portada propia (/covers/archivo)'],
     ['vídeo ftp:', 'video', 'ftp://videos.example.com/x', 'La URL del vídeo debe empezar por https://'],
     ['vídeo http://', 'video', 'http://videos.example.com/x', 'La URL del vídeo debe empezar por https://'],
+    ['tráiler de otra web', 'trailer', 'https://vimeo.com/123456', 'El tráiler debe ser un enlace de un vídeo de YouTube'],
+    ['tráiler http://', 'trailer', 'http://www.youtube.com/watch?v=zSWdZVtXT7E', 'El tráiler debe ser un enlace de un vídeo de YouTube'],
+    ['tráiler con host falso', 'trailer', 'https://www.youtube.com.evil.com/watch?v=zSWdZVtXT7E', 'El tráiler debe ser un enlace de un vídeo de YouTube'],
   ] as const)('rechaza %s junto al campo y enfoca ese campo', async (_caso, which, url, message) => {
     routeFetch(fetchMock, GENRES_ROUTE);
     const user = setupUser();
@@ -185,7 +196,7 @@ describe('MovieFormPage: alta', () => {
     await within(genresGroup()).findAllByRole('checkbox');
     await fillValid(user);
 
-    const input = which === 'image' ? field.image() : field.video();
+    const input = field[which === 'image' ? 'image' : which === 'video' ? 'video' : 'trailer']();
     await fill(user, input, url);
     await user.click(submitNew());
 
@@ -228,6 +239,7 @@ describe('MovieFormPage: alta', () => {
       releaseYear: 2014,
       imageUrl: '/covers/interstellar.webp',
       videoUrl: 'https://videos.example.com/interstellar',
+      trailerUrl: 'https://youtu.be/zSWdZVtXT7E',
       genreIds: [1, 2],
     });
 
@@ -260,6 +272,34 @@ describe('MovieFormPage: alta', () => {
     expect(field.video()).toHaveAccessibleDescription('La URL del vídeo debe empezar por https://');
     expect(field.title()).toHaveFocus();
     expect(screen.queryByText('Listado de películas')).not.toBeInTheDocument();
+  });
+
+  /**
+   * Revisión de QA del tráiler: si el servidor rechaza el tráiler que el
+   * cliente dio por bueno (hoy pasa con un `%` mal formado en los parámetros,
+   * incidencia QA trailer-1), su mensaje tiene que aparecer junto al campo
+   * «Tráiler de YouTube» y llevarle el foco, no quedarse en un aviso genérico.
+   */
+  it('400 del servidor en el tráiler: el mensaje del contrato junto a «Tráiler de YouTube» y el foco en él', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'POST /api/movies': () =>
+        errorResponse(400, 'VALIDATION_ERROR', 'Datos no válidos', {
+          validationErrors: { trailerUrl: 'El tráiler debe ser un enlace de un vídeo de YouTube' },
+        }),
+    });
+    const user = setupUser();
+    renderForm('/admin/peliculas/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+
+    await user.click(submitNew());
+
+    expect(await screen.findByText('Revisa los campos marcados.')).toHaveAttribute('role', 'alert');
+    expect(field.trailer()).toHaveAttribute('aria-invalid', 'true');
+    expect(field.trailer()).toHaveAccessibleDescription('El tráiler debe ser un enlace de un vídeo de YouTube');
+    expect(field.trailer()).toHaveFocus();
+    expect(field.video()).not.toHaveAttribute('aria-invalid');
   });
 
   it('un 403 (ya no es administrador) se explica en el formulario sin perder lo escrito', async () => {
@@ -384,6 +424,7 @@ describe('MovieFormPage: edición', () => {
     expect(field.year()).toHaveValue('2014');
     expect(field.image()).toHaveValue('/covers/interstellar.webp');
     expect(field.video()).toHaveValue('https://videos.example.com/interstellar');
+    expect(field.trailer()).toHaveValue('https://www.youtube.com/watch?v=zSWdZVtXT7E');
     expect(await within(genresGroup()).findByRole('checkbox', { name: 'Ciencia ficción' })).toBeChecked();
     expect(within(genresGroup()).getByRole('checkbox', { name: 'Drama' })).toBeChecked();
     expect(within(genresGroup()).getByRole('checkbox', { name: 'Acción' })).not.toBeChecked();
@@ -442,6 +483,39 @@ describe('MovieFormPage: edición', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
     expect(field.image()).toHaveFocus();
+  });
+
+  it('una película sin vídeo ni tráiler se edita con los dos campos vacíos y sin errores, y se guarda con null', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/movies/7': () => jsonResponse({ ...interstellar, videoUrl: null, trailerUrl: null }),
+      'PUT /api/movies/7': () => jsonResponse({ ...interstellar, videoUrl: null, trailerUrl: null }),
+    });
+    const user = setupUser();
+    renderForm('/admin/peliculas/7/editar');
+    await screen.findByRole('heading', { name: 'Editar «Interstellar»' });
+    await within(genresGroup()).findAllByRole('checkbox');
+
+    expect(field.video()).toHaveValue('');
+    expect(field.trailer()).toHaveValue('');
+    expect(field.video()).not.toHaveAttribute('aria-invalid');
+    expect(field.trailer()).not.toHaveAttribute('aria-invalid');
+
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    expect(await screen.findByText('Listado de películas')).toBeInTheDocument();
+    expect(sentBody('PUT', '/api/movies/7')).toMatchObject({ videoUrl: null, trailerUrl: null });
+  });
+
+  it('un tráiler guardado que ya no se admite se marca nada más abrir la edición', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/movies/7': () => jsonResponse({ ...interstellar, trailerUrl: 'https://vimeo.com/1' }),
+    });
+    renderForm('/admin/peliculas/7/editar');
+
+    await screen.findByRole('heading', { name: 'Editar «Interstellar»' });
+    expect(field.trailer()).toHaveAccessibleDescription('El tráiler debe ser un enlace de un vídeo de YouTube');
   });
 
   it('404 al cargar: explica que no existe y enlaza al listado', async () => {

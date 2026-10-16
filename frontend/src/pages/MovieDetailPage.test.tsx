@@ -3,7 +3,8 @@
  *
  * Protegen: la cabecera (h1 único, datos, sinopsis completa, título de la
  * pestaña), la ficha (datos con nombre y géneros que enlazan a `/peliculas`
- * filtrada), «Ver ahora» seguro (URL validada; insegura → desactivado), «Mi
+ * filtrada), «Ver ahora» seguro (URL validada; sin vídeo o insegura → no
+ * aparece), «Ver tráiler» (solo con tráiler; principal si no hay vídeo), «Mi
  * lista» de verdad (petición y aviso), «Editar» SOLO para un administrador, y
  * los estados: cargando (silueta del banner), 404 «Película no encontrada» con
  * el mismo texto para los dos roles, id mal formado sin petición y error con
@@ -37,6 +38,8 @@ const DETAIL = 'GET /api/movies/7';
 const SIMILAR = 'GET /api/movies/7/similar?limit=12';
 const NO_SIMILAR = { [SIMILAR]: () => jsonResponse([]) };
 const AS_ADMIN = { [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })) };
+/** Tráiler con la forma normalizada que devuelve la API. */
+const TRAILER = 'https://www.youtube.com/watch?v=zSWdZVtXT7E';
 
 /** Película con una sinopsis larga (la página no la recorta). */
 const movie = makeMovie({
@@ -111,13 +114,50 @@ describe('MovieDetailPage: contenido', () => {
     expect(watch).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  it('con una URL de vídeo insegura, «Ver ahora» no es un enlace: botón desactivado con el motivo', async () => {
-    renderDetail('/peliculas/7', () => jsonResponse({ ...movie, videoUrl: 'javascript:alert(1)' }));
+  it.each([
+    ['sin vídeo (null)', null],
+    ['con una URL insegura', 'javascript:alert(1)'],
+  ])('%s no hay «Ver ahora» de ningún tipo (ni enlace ni botón desactivado)', async (_caso, videoUrl) => {
+    renderDetail('/peliculas/7', () => jsonResponse({ ...movie, videoUrl }));
 
-    const watch = await screen.findByRole('button', { name: /^Ver ahora/ });
-    expect(watch).toHaveAttribute('aria-disabled', 'true');
-    expect(watch).toHaveAccessibleDescription(/No disponible: esta película no tiene un vídeo/);
+    await screen.findByRole('heading', { level: 1, name: 'Interstellar' });
     expect(screen.queryByRole('link', { name: /^Ver ahora/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Ver ahora/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('Ver ahora')).not.toBeInTheDocument();
+  });
+
+  it('con vídeo y tráiler: «Ver ahora» es la principal y «Ver tráiler» la secundaria, en ese orden', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse({ ...movie, trailerUrl: TRAILER }));
+
+    const watch = await screen.findByRole('link', { name: /^Ver ahora Interstellar/ });
+    const trailer = screen.getByRole('button', { name: 'Ver tráiler de Interstellar' });
+    expect(watch).toHaveClass('bg-white');
+    expect(trailer).toHaveClass('border');
+    expect(watch.compareDocumentPosition(trailer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('sin vídeo y con tráiler: «Ver tráiler» pasa a ser la principal y abre el diálogo con el reproductor', async () => {
+    const user = renderDetail('/peliculas/7', () => jsonResponse({ ...movie, videoUrl: null, trailerUrl: TRAILER }));
+
+    const trailer = await screen.findByRole('button', { name: 'Ver tráiler de Interstellar' });
+    expect(trailer).toHaveClass('bg-white');
+    await user.click(trailer);
+
+    const dialog = screen.getByRole('dialog', { name: 'Tráiler de Interstellar' });
+    expect(dialog.querySelector('iframe')).toHaveAttribute(
+      'src',
+      'https://www.youtube-nocookie.com/embed/zSWdZVtXT7E?autoplay=1&rel=0',
+    );
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trailer).toHaveFocus();
+  });
+
+  it('sin tráiler no hay «Ver tráiler»', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse({ ...movie, trailerUrl: null }));
+
+    await screen.findByRole('heading', { level: 1, name: 'Interstellar' });
+    expect(screen.queryByRole('button', { name: /Ver tráiler/ })).not.toBeInTheDocument();
   });
 
   it('«Mi lista» la añade de verdad (POST) y lo confirma con un aviso', async () => {
@@ -231,6 +271,59 @@ describe('MovieDetailPage: «Volver a películas»', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Película no encontrada' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Volver a películas' })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Incidencia QA trailer-5: sin vídeo ni tráiler no hay «Ver ahora» ni «Ver
+ * tráiler», y nada explicaba por qué. Un aviso breve lo dice, según el rol.
+ */
+describe('MovieDetailPage: aviso «sin vídeo ni tráiler» según el rol', () => {
+  const USER_NOTE = 'Todavía no está disponible para ver.';
+  const ADMIN_NOTE = 'No tiene vídeo ni tráiler: puedes añadirlos desde «Editar».';
+  const nothing = makeMovie({ id: 7, title: 'Interstellar', videoUrl: null, trailerUrl: null });
+
+  it('USER: «Todavía no está disponible para ver.», fuera de la rejilla de acciones', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse(nothing));
+
+    const note = await screen.findByText(USER_NOTE);
+    expect(await screen.findByText('estado:ready')).toBeInTheDocument();
+    expect(screen.queryByText(ADMIN_NOTE)).not.toBeInTheDocument();
+    // Fuera de la rejilla: dentro contaría como una acción más (y «Mi lista», sola, dejaría de ocupar la fila).
+    expect(screen.getByRole('button', { name: /^Mi lista/ }).parentElement!.contains(note)).toBe(false);
+  });
+
+  it('ADMIN: dice qué falta y que se añade desde «Editar» (que está al lado)', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse(nothing), AS_ADMIN);
+
+    expect(await screen.findByText(ADMIN_NOTE)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Editar Interstellar' })).toBeInTheDocument();
+    expect(screen.queryByText(USER_NOTE)).not.toBeInTheDocument();
+  });
+
+  it('mientras carga el rol, el texto de usuario (falla cerrado)', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse(nothing), {
+      [CURRENT_USER]: () => new Promise<Response>(() => {}),
+    });
+
+    expect(await screen.findByText(USER_NOTE)).toBeInTheDocument();
+    expect(screen.getByText('estado:loading')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['con vídeo', { videoUrl: 'https://video.example/x', trailerUrl: null }],
+    ['con tráiler', { videoUrl: null, trailerUrl: TRAILER }],
+  ])('%s no hay aviso', async (_caso, overrides) => {
+    renderDetail('/peliculas/7', () => jsonResponse({ ...nothing, ...overrides }));
+
+    await screen.findByRole('heading', { level: 1, name: 'Interstellar' });
+    expect(screen.queryByText(USER_NOTE)).not.toBeInTheDocument();
+  });
+
+  it('un vídeo con URL insegura cuenta como «sin vídeo»: hay aviso', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse({ ...nothing, videoUrl: 'javascript:alert(1)' }));
+
+    expect(await screen.findByText(USER_NOTE)).toBeInTheDocument();
   });
 });
 

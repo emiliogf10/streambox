@@ -12,19 +12,28 @@ import { FavoriteButton } from '../components/FavoriteButton';
 import { FeaturedBanner } from '../components/FeaturedBanner';
 import { GenreLinks } from '../components/GenreLinks';
 import { MovieMetaTags } from '../components/MovieMetaTags';
+import { NothingToWatchNote } from '../components/NothingToWatchNote';
 import { SimilarMoviesRow } from '../components/SimilarMoviesRow';
+import { TrailerButton } from '../components/TrailerButton';
 import { WatchButton } from '../components/WatchButton';
 import { useAuth } from '../context/AuthContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useMovieDetail } from '../hooks/useMovieDetail';
 import { formatAddedDate, moviePath } from '../lib/catalog';
 import type { Movie } from '../lib/types';
-import { formatDuration } from '../lib/utils';
+import { formatDuration, getSafeVideoUrl } from '../lib/utils';
+import { getTrailer } from '../lib/youtube';
 import { adminEditMoviePath } from './admin/adminPaths';
 import type { ReturnToState } from './admin/adminPaths';
 
 /** Texto de la sinopsis cuando la película no tiene (la página no deja el hueco en blanco). */
 const NO_DESCRIPTION = 'Sin descripción disponible.';
+
+/**
+ * Aviso para un administrador cuando la película no tiene vídeo ni tráiler
+ * (ver `NothingToWatchNote`): «Editar» está en la misma fila de acciones.
+ */
+const ADMIN_NOTHING_TO_WATCH = 'No tiene vídeo ni tráiler: puedes añadirlos desde «Editar».';
 
 /**
  * Página de una película (`/peliculas/:id`).
@@ -115,10 +124,18 @@ export function MovieDetailPage() {
  * desde la portada). Es lo primero que alcanza el tabulador en el contenido; la
  * serie tiene su gemelo «Volver a series».
  *
- * Acciones, de más a menos importante:
+ * Acciones, de más a menos importante (en móvil, de dos en dos; la última, si
+ * queda sola, a todo el ancho: ver «Acciones» en `FeaturedBanner`):
  * - **«Ver ahora»** ({@link WatchButton}): enlace al vídeo validado con
- *   `getSafeVideoUrl`; sin URL segura, botón desactivado con el motivo.
+ *   `getSafeVideoUrl`. **Solo si hay vídeo** (es opcional): sin él no aparece,
+ *   ni desactivado, porque prometería algo que no existe.
+ * - **«Ver tráiler»** ({@link TrailerButton}), solo si hay tráiler de YouTube:
+ *   abre un diálogo con el reproductor. Secundaria (borde) si hay «Ver ahora»;
+ *   si no, es lo único que se puede ver y pasa a ser la principal (blanca).
  * - **«Mi lista»** ({@link FavoriteButton}): la lista compartida de `FavoritesContext`.
+ * - **Sin vídeo ni tráiler**, bajo las acciones, {@link NothingToWatchNote}:
+ *   «Todavía no está disponible para ver.» (usuario, y mientras carga el rol) o
+ *   «No tiene vídeo ni tráiler: puedes añadirlos desde «Editar».» (administrador).
  * - **«Editar»**, solo para un administrador (rol confirmado por el servidor;
  *   mientras carga el usuario no aparece): lleva al formulario del panel. Es
  *   interfaz, no seguridad: el backend responde 403 a un `USER` que llegue a
@@ -129,6 +146,9 @@ export function MovieDetailPage() {
  */
 function MovieDetailView({ movie, confirmed }: { movie: Movie; confirmed: boolean }) {
   const { isAdmin } = useAuth();
+  // La misma condición con la que `WatchButton` decide si se pinta: sin vídeo, el tráiler es la acción principal.
+  const hasVideo = getSafeVideoUrl(movie.videoUrl) !== null;
+  const nothingToWatch = !hasVideo && getTrailer(movie.trailerUrl) === null;
 
   return (
     <div className="pb-12">
@@ -141,16 +161,18 @@ function MovieDetailView({ movie, confirmed }: { movie: Movie; confirmed: boolea
         clampDescription={false}
         layout="page"
         backLink={<BackLink to="/peliculas">Volver a películas</BackLink>}
+        actionsNote={nothingToWatch && <NothingToWatchNote adminText={ADMIN_NOTHING_TO_WATCH} />}
         actions={
           <>
             <WatchButton videoUrl={movie.videoUrl} title={movie.title} />
+            <TrailerButton trailerUrl={movie.trailerUrl} title={movie.title} variant={hasVideo ? 'outline' : 'light'} />
             <FavoriteButton movie={movie} />
             {isAdmin && (
               <Link
                 to={adminEditMoviePath(movie.id)}
                 state={{ returnTo: moviePath(movie.id) } satisfies ReturnToState}
                 aria-label={`Editar ${movie.title}`}
-                className={buttonClasses('ghost', 'col-span-2 sm:col-span-1')}
+                className={buttonClasses('ghost')}
               >
                 <Pencil aria-hidden="true" className="size-4" />
                 Editar

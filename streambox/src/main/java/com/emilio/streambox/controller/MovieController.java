@@ -65,7 +65,9 @@ public class MovieController {
      */
     private static final String WRITE_BAD_REQUEST_DESCRIPTION = "Los datos proporcionados no son válidos. "
             + "VALIDATION_ERROR: un mensaje en español por campo en validationErrors (los mismos textos "
-            + "que el formulario del panel), también si genreIds contiene un null. MALFORMED_REQUEST: JSON "
+            + "que el formulario del panel), también si genreIds contiene un null o si trailerUrl no es "
+            + "un enlace de YouTube aceptado («" + MovieRequest.TRAILER_URL_FORMAT_MESSAGE + "»). "
+            + "videoUrl y trailerUrl son opcionales. MALFORMED_REQUEST: JSON "
             + "mal formado o un valor de otro tipo (un número en un texto, un texto o un decimal en un "
             + "número): no se convierte";
 

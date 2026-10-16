@@ -393,7 +393,7 @@ for (const viewport of VIEWPORTS) {
       await episodeDialog.getByRole('button', { name: 'Añadir episodio' }).click();
       await expect(episodeDialog.getByLabel('Título', { exact: true })).toHaveAccessibleDescription('El título es obligatorio');
       await expectFullyInsideViewportWidth(episodeDialog.getByLabel('Número', { exact: true }), page, 'campo Número del episodio');
-      await expectFullyInsideViewportWidth(episodeDialog.getByLabel('URL del vídeo'), page, 'campo URL del vídeo');
+      await expectFullyInsideViewportWidth(episodeDialog.getByLabel('URL del vídeo (opcional)'), page, 'campo URL del vídeo');
       await expectFullyInsideViewportWidth(episodeDialog.getByRole('button', { name: 'Cancelar' }), page, '«Cancelar» del episodio');
       await expectNoHorizontalScroll(page);
       await page.keyboard.press('Escape');

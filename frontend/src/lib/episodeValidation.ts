@@ -6,7 +6,8 @@
  * letra (igual que `seriesValidation.ts` con `SeriesRequest`), para que el
  * administrador lea lo mismo lo detecte el cliente o el servidor. La URL del
  * vídeo usa exactamente las reglas y mensajes de las películas
- * (`validateVideoUrl`), que es lo que hace también el servidor.
+ * (`validateVideoUrl`), que es lo que hace también el servidor; como allí, es
+ * **opcional** (vacío = el episodio no tiene vídeo y no muestra «Ver»).
  *
  * Es solo comodidad: **manda la validación del servidor**. Sus
  * `validationErrors` se pintan igualmente junto a cada campo, y lo que el
@@ -15,7 +16,7 @@
  *
  * Funciones puras (sin React) para poder probar cada regla por separado.
  */
-import { MOVIE_DESCRIPTION_MAX, MOVIE_TITLE_MAX, parseWholeNumber, validateVideoUrl } from './movieValidation';
+import { MOVIE_DESCRIPTION_MAX, MOVIE_TITLE_MAX, optionalUrl, parseWholeNumber, validateVideoUrl } from './movieValidation';
 import type { Episode, EpisodeRequest, Season } from './types';
 
 /** Límites de `EpisodeRequest` (`@Min`, `@Max`, `@Size`). */
@@ -49,6 +50,7 @@ export interface EpisodeFormValues {
   /** Opcional: vacío (o solo espacios) = sin sinopsis (`null`). */
   description: string;
   duration: string;
+  /** Opcional: vacío (o solo espacios) = sin vídeo (`null`). */
   videoUrl: string;
 }
 
@@ -132,9 +134,9 @@ export function validateEpisodeForm(values: EpisodeFormValues): EpisodeFormError
 
 /**
  * Convierte el formulario (ya validado) en el cuerpo de la petición: recorta
- * los textos, pasa los números a `number` y una sinopsis vacía a `null`. El
- * servidor también guardaría `null` con una en blanco; mandarlo ya así deja
- * claro en la petición que "no tiene sinopsis".
+ * los textos, pasa los números a `number` y una sinopsis o un vídeo vacíos a
+ * `null`. El servidor también guardaría `null` con uno en blanco; mandarlo ya
+ * así deja claro en la petición que "no tiene".
  */
 export function toEpisodeRequest(values: EpisodeFormValues): EpisodeRequest {
   const description = values.description.trim();
@@ -144,11 +146,11 @@ export function toEpisodeRequest(values: EpisodeFormValues): EpisodeRequest {
     title: values.title.trim(),
     description: description || null,
     duration: Number(values.duration.trim()),
-    videoUrl: values.videoUrl.trim(),
+    videoUrl: optionalUrl(values.videoUrl),
   };
 }
 
-/** Pasa un episodio de la API a los valores del formulario (edición). Sin sinopsis = campo vacío. */
+/** Pasa un episodio de la API a los valores del formulario (edición). Sin sinopsis o sin vídeo = campo vacío. */
 export function toEpisodeFormValues(episode: Episode): EpisodeFormValues {
   return {
     seasonNumber: String(episode.seasonNumber),
@@ -156,7 +158,7 @@ export function toEpisodeFormValues(episode: Episode): EpisodeFormValues {
     title: episode.title,
     description: episode.description ?? '',
     duration: String(episode.duration),
-    videoUrl: episode.videoUrl,
+    videoUrl: episode.videoUrl ?? '',
   };
 }
 

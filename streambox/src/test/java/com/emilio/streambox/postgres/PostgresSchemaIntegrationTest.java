@@ -78,7 +78,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4 y la V5 de PostgreSQL (sin
+     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL y V6 (sin
      * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
      * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
@@ -88,7 +88,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2", "3", "4", "5"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3", "4", "5", "6"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -128,7 +128,11 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         }
     }
 
-    /** Longitudes de los {@code VARCHAR} y obligatoriedad de cada columna. */
+    /**
+     * Longitudes de los {@code VARCHAR} y obligatoriedad de cada columna: solo
+     * admiten {@code NULL} el vídeo y el tráiler de la película (opcionales
+     * desde la {@code V6}).
+     */
     @Test
     void lasLongitudesYLaObligatoriedadDeLasColumnasSonLasDeLasEntidades() {
         Map<String, Integer> expectedLengths = Map.ofEntries(
@@ -136,7 +140,8 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                 Map.entry("users.password", 255), Map.entry("users.role", 20),
                 Map.entry("genres.name", 50),
                 Map.entry("movies.title", 150), Map.entry("movies.description", 1000),
-                Map.entry("movies.image_url", 500), Map.entry("movies.video_url", 500));
+                Map.entry("movies.image_url", 500), Map.entry("movies.video_url", 500),
+                Map.entry("movies.trailer_url", 500));
 
         List<Map<String, Object>> columns = jdbc.queryForList(
                 "SELECT table_name, column_name, character_maximum_length, is_nullable"
@@ -149,10 +154,11 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                     .findFirst().orElseThrow(() -> new AssertionError("falta la columna " + expected.getKey()));
             assertEquals(expected.getValue(), column.get("character_maximum_length"), expected.getKey());
         }
-        // Ninguna columna admite NULL
-        assertTrue(columns.stream().allMatch(c -> "NO".equals(c.get("is_nullable"))),
-                "hay columnas que admiten NULL: " + columns.stream()
-                        .filter(c -> !"NO".equals(c.get("is_nullable"))).toList());
+        // Solo el vídeo y el tráiler de la película admiten NULL
+        assertEquals(java.util.Set.of("movies.video_url", "movies.trailer_url"), java.util.Set.copyOf(columns.stream()
+                .filter(c -> !"NO".equals(c.get("is_nullable")))
+                .map(c -> c.get("table_name") + "." + c.get("column_name"))
+                .toList()));
     }
 
     /**

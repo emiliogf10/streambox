@@ -5,7 +5,9 @@ import { WatchButton } from './WatchButton';
 
 /**
  * Episodios de una temporada: número y título («3. El regreso»), duración,
- * sinopsis si la tiene y el enlace «Ver».
+ * sinopsis si la tiene y el enlace «Ver» **solo si el episodio tiene vídeo**
+ * (es opcional; sin él la fila es solo texto: ningún botón promete ver algo
+ * que no existe, y `WatchButton` no deja hueco porque no pinta nada).
  *
  * **Sin miniatura por episodio.** La API no tiene imagen propia de episodio
  * (está previsto añadirla más adelante). Repetir el póster de la serie en cada
@@ -52,7 +54,6 @@ export function EpisodeList({ season }: { season: Season }) {
               title={episode.title}
               label="Ver"
               accessibleName={`Ver ${code} ${episode.title}`}
-              unavailableSubject="este episodio"
               variant="outline"
               className="shrink-0 self-start"
             />

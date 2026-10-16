@@ -21,7 +21,7 @@ class MovieMapperTest {
 
     private static MovieRequest request(String title) {
         return new MovieRequest(title, "Sinopsis", 120, 2001,
-                "https://example.com/i.jpg", "https://example.com/v.mp4", Set.of(1L));
+                "https://example.com/i.jpg", "https://example.com/v.mp4", null, Set.of(1L));
     }
 
     private static Genre genre(Long id, String name) {
@@ -44,6 +44,44 @@ class MovieMapperTest {
         assertNull(movie.getId());
         assertNull(movie.getCreatedAt());
         assertEquals(0, movie.getGenres().size());
+    }
+
+    /**
+     * El tráiler se guarda normalizado (la única forma que admite el
+     * {@code CHECK} de la base de datos) y la respuesta lo devuelve así.
+     */
+    @Test
+    void elTrailerSeGuardaNormalizadoYSaleEnLaRespuesta() {
+        Movie movie = MovieMapper.toEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
+                "https://example.com/i.jpg", null, "https://youtu.be/aB3_-eFgHiJ?si=x", Set.of(1L)));
+
+        assertEquals("https://www.youtube.com/watch?v=aB3_-eFgHiJ", movie.getTrailerUrl());
+        assertEquals("https://www.youtube.com/watch?v=aB3_-eFgHiJ", MovieMapper.toResponse(movie).trailerUrl());
+        assertNull(MovieMapper.toResponse(movie).videoUrl());
+    }
+
+    /** Vacío o en blanco = "no tiene": {@code null}, nunca la cadena vacía. */
+    @Test
+    void unVideoOUnTrailerEnBlancoSeGuardanComoNull() {
+        Movie blank = MovieMapper.toEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
+                "https://example.com/i.jpg", " \t ", "", Set.of(1L)));
+
+        assertNull(blank.getVideoUrl());
+        assertNull(blank.getTrailerUrl());
+    }
+
+    /** Como en todo {@code PUT}, lo que no llega se borra: también el tráiler y el vídeo. */
+    @Test
+    void updateEntitySinTrailerNiVideoLosDejaANull() {
+        Movie movie = new Movie();
+        movie.setVideoUrl("https://example.com/v.mp4");
+        movie.setTrailerUrl("https://www.youtube.com/watch?v=aB3_-eFgHiJ");
+
+        MovieMapper.updateEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
+                "https://example.com/i.jpg", null, null, Set.of(1L)), movie);
+
+        assertNull(movie.getVideoUrl());
+        assertNull(movie.getTrailerUrl());
     }
 
     @Test

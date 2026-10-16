@@ -12,6 +12,7 @@ import com.emilio.streambox.dto.EpisodeRequest;
 import com.emilio.streambox.dto.GenreResponse;
 import com.emilio.streambox.dto.SeasonResponse;
 import com.emilio.streambox.dto.SeriesDetailResponse;
+import com.emilio.streambox.dto.SeriesRequest;
 import com.emilio.streambox.entity.Episode;
 import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Series;
@@ -63,6 +64,33 @@ class SeriesMapperTest {
 
         assertNull(blank.getDescription());
         assertEquals(" Texto ", kept.getDescription());
+    }
+
+    /** El vídeo del episodio es opcional desde la V6: en blanco se guarda como {@code null}. */
+    @Test
+    void unVideoDeEpisodioEnBlancoSeGuardaComoNull() {
+        Episode blank = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, "   "), series());
+        Episode none = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, null), series());
+
+        assertNull(blank.getVideoUrl());
+        assertNull(none.getVideoUrl());
+        assertNull(EpisodeMapper.toResponse(none).videoUrl());
+    }
+
+    /** El tráiler de la serie se guarda normalizado y sale igual en el resumen y en el detalle. */
+    @Test
+    void elTrailerDeLaSerieSeGuardaNormalizadoYSaleEnResumenYDetalle() {
+        Series series = SeriesMapper.toEntity(new SeriesRequest("Serie", "Sinopsis", 2020, null,
+                "https://e.com/i.jpg", "https://www.youtube-nocookie.com/embed/aB3_-eFgHiJ", Set.of(1L)));
+        String normalized = "https://www.youtube.com/watch?v=aB3_-eFgHiJ";
+
+        assertEquals(normalized, series.getTrailerUrl());
+        assertEquals(normalized, SeriesMapper.toResponse(series, 0, 0).trailerUrl());
+        assertEquals(normalized, SeriesMapper.toDetailResponse(series, List.of()).trailerUrl());
+
+        SeriesMapper.updateEntity(new SeriesRequest("Serie", "Sinopsis", 2020, null,
+                "https://e.com/i.jpg", "  ", Set.of(1L)), series);
+        assertNull(series.getTrailerUrl());
     }
 
     private static List<Integer> numbers(SeasonResponse season) {

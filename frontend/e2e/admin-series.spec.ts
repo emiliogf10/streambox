@@ -164,7 +164,7 @@ async function fillEpisode(dialog: Locator, episode: EpisodeInput): Promise<void
   await dialog.getByLabel('Título', { exact: true }).fill(episode.title);
   await dialog.getByLabel('Duración (minutos)').fill(episode.duration);
   if (episode.description !== undefined) await dialog.getByLabel('Sinopsis (opcional)').fill(episode.description);
-  await dialog.getByLabel('URL del vídeo').fill(episode.videoUrl);
+  await dialog.getByLabel('URL del vídeo (opcional)').fill(episode.videoUrl);
 }
 
 /** Episodios que se siembran por la API en los tests que no prueban el alta. */
@@ -207,6 +207,7 @@ async function seedSeries(
     releaseYear: 2024,
     endYear: null,
     imageUrl: '/covers/ex-machina.webp',
+    trailerUrl: null,
     genreIds: [drama.id],
   });
   for (const episode of episodes) await createEpisode(request, adminToken, id, episode);

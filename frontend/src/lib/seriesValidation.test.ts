@@ -18,6 +18,7 @@ function valid(overrides: Partial<SeriesFormValues> = {}): SeriesFormValues {
     releaseYear: '2017',
     endYear: '2020',
     imageUrl: '/covers/dark.webp',
+    trailerUrl: '',
     genreIds: [1],
     ...overrides,
   };
@@ -131,11 +132,32 @@ describe('toSeriesRequest', () => {
       releaseYear: 2017,
       endYear: 2020,
       imageUrl: '/covers/dark.webp',
+      trailerUrl: null,
       genreIds: [3, 1],
     });
   });
 
   it('un año de fin vacío se envía como null (sigue en emisión)', () => {
     expect(toSeriesRequest(valid({ endYear: '  ' })).endYear).toBeNull();
+  });
+
+  it('el tráiler: vacío → null («sin tráiler»); con valor, recortado tal como se escribió', () => {
+    expect(toSeriesRequest(valid({ trailerUrl: '   ' })).trailerUrl).toBeNull();
+    expect(toSeriesRequest(valid({ trailerUrl: ' https://youtu.be/zSWdZVtXT7E ' })).trailerUrl).toBe(
+      'https://youtu.be/zSWdZVtXT7E',
+    );
+  });
+});
+
+describe('validateSeriesForm: tráiler', () => {
+  it('es opcional y, si se escribe, solo admite YouTube con el mensaje del contrato', () => {
+    expect(validateSeriesForm(valid({ trailerUrl: '' }))).toEqual({});
+    expect(validateSeriesForm(valid({ trailerUrl: 'https://www.youtube.com/watch?v=zSWdZVtXT7E&t=10s' }))).toEqual({});
+    expect(validateSeriesForm(valid({ trailerUrl: 'http://www.youtube.com/watch?v=zSWdZVtXT7E' }))).toEqual({
+      trailerUrl: 'El tráiler debe ser un enlace de un vídeo de YouTube',
+    });
+    expect(validateSeriesForm(valid({ trailerUrl: `https://youtu.be/zSWdZVtXT7E?si=${'a'.repeat(480)}` }))).toEqual({
+      trailerUrl: 'La URL del tráiler no puede superar los 500 caracteres',
+    });
   });
 });

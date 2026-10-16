@@ -107,9 +107,14 @@ public class Episode {
     private Integer duration;
 
     /**
-     * URL desde la que se reproduce el episodio.
+     * URL desde la que se ve el episodio, o {@code null} si no hay vídeo.
+     *
+     * <p>
+     * Opcional desde la migración {@code V6} (StreamBox no aloja vídeos). El
+     * tráiler no va aquí sino en la serie ({@link Series#getTrailerUrl()}).
+     * </p>
      */
-    @Column(nullable = false, length = 500)
+    @Column(nullable = true, length = 500)
     private String videoUrl;
 
     /**

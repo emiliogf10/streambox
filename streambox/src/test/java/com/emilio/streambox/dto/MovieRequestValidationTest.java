@@ -25,9 +25,14 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 
 /**
- * Tests unitarios de las reglas de {@code imageUrl} y {@code videoUrl} (y del
- * tope de {@code genreIds}) de {@link MovieRequest} tal como están anotadas
- * (sin Spring).
+ * Tests unitarios de las reglas de {@code imageUrl}, {@code videoUrl} y
+ * {@code trailerUrl} (y del tope de {@code genreIds}) de {@link MovieRequest}
+ * tal como están anotadas (sin Spring).
+ *
+ * <p>
+ * Desde la migración {@code V6} el vídeo y el tráiler son <b>opcionales</b>:
+ * nulos o en blanco no dan error, pero si traen algo tiene que ser válido.
+ * </p>
  *
  * <p>
  * Comprueban lo que no se ve probando {@code @HttpsUrl} por separado: que cada
@@ -45,9 +50,12 @@ class MovieRequestValidationTest {
     private static final String VIDEO_FORMAT = "La URL del vídeo debe empezar por https://";
     private static final String VIDEO_SIZE = "La URL del vídeo no puede superar los 500 caracteres";
     private static final String GENRES_SIZE = "Una película puede tener como máximo 20 géneros";
+    private static final String TRAILER_FORMAT = "El tráiler debe ser un enlace de un vídeo de YouTube";
+    private static final String TRAILER_SIZE = "La URL del tráiler no puede superar los 500 caracteres";
 
     private static final String VALID_IMAGE = "https://image.tmdb.org/t/p/w500/x.jpg";
     private static final String VALID_VIDEO = "https://videos.streambox.example/watch/dune";
+    private static final String VALID_TRAILER = "https://youtu.be/aBcDeFgHiJk";
 
     private static ValidatorFactory factory;
     private static Validator validator;
@@ -67,6 +75,7 @@ class MovieRequestValidationTest {
     void unaPeticionConUrlsValidasNoTieneErrores() {
         assertTrue(validator.validate(request(VALID_IMAGE, VALID_VIDEO)).isEmpty());
         assertTrue(validator.validate(request("/covers/dune-parte-dos.webp", VALID_VIDEO)).isEmpty());
+        assertTrue(validator.validate(request(VALID_IMAGE, VALID_VIDEO, VALID_TRAILER)).isEmpty());
     }
 
     @Test
@@ -76,6 +85,8 @@ class MovieRequestValidationTest {
         assertEquals(IMAGE_SIZE, MovieRequest.IMAGE_URL_SIZE_MESSAGE);
         assertEquals(VIDEO_FORMAT, MovieRequest.VIDEO_URL_FORMAT_MESSAGE);
         assertEquals(VIDEO_SIZE, MovieRequest.VIDEO_URL_SIZE_MESSAGE);
+        assertEquals(TRAILER_FORMAT, MovieRequest.TRAILER_URL_FORMAT_MESSAGE);
+        assertEquals(TRAILER_SIZE, MovieRequest.TRAILER_URL_SIZE_MESSAGE);
     }
 
     // ------------------------------------------------------------------
@@ -102,6 +113,30 @@ class MovieRequestValidationTest {
         assertEquals(List.of(VIDEO_FORMAT), messagesFor(request(VALID_IMAGE, url), "videoUrl"));
     }
 
+    /**
+     * Un tráiler que no es de YouTube (o lo es, pero en una forma no aceptada)
+     * da un único error con el mensaje del contrato. Las formas en detalle
+     * están en {@code YouTubeUrlsTest}; aquí se comprueba el cableado del DTO.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://youtu.be/aBcDeFgHiJk", "https://vimeo.com/123456", "javascript:alert(1)",
+            "https://youtube.com.evil.com/watch?v=aBcDeFgHiJk", "https://youtu.be/aBcDeFgHiJ",
+            "https://videos.streambox.example/watch/dune", "\u0001"
+    })
+    void unTrailerQueNoEsDeYouTubeDaSoloElMensajeDeFormato(String url) {
+        assertEquals(List.of(TRAILER_FORMAT), messagesFor(request(VALID_IMAGE, VALID_VIDEO, url), "trailerUrl"));
+    }
+
+    /** El tráiler no se valida como {@code @HttpsUrl}: una URL https cualquiera no vale. */
+    @Test
+    void elTrailerYElVideoTienenReglasDistintas() {
+        MovieRequest request = request(VALID_IMAGE, VALID_TRAILER, VALID_VIDEO);
+
+        assertEquals(List.of(), messagesFor(request, "videoUrl"), "Un enlace de YouTube es un vídeo https válido");
+        assertEquals(List.of(TRAILER_FORMAT), messagesFor(request, "trailerUrl"));
+    }
+
     // ------------------------------------------------------------------
     // Longitud (y prioridad sobre el formato)
     // ------------------------------------------------------------------
@@ -110,17 +145,18 @@ class MovieRequestValidationTest {
     void quinientosCaracteresEsElMaximoAdmitido() {
         String url = httpsUrlOfLength(500);
 
-        assertTrue(validator.validate(request(url, url)).isEmpty());
+        assertTrue(validator.validate(request(url, url, youTubeUrlOfLength(500))).isEmpty());
     }
 
     @Test
     void unaUrlCorrectaDe501CaracteresDaElMensajeDeLongitud() {
         String url = httpsUrlOfLength(501);
 
-        MovieRequest request = request(url, url);
+        MovieRequest request = request(url, url, youTubeUrlOfLength(501));
 
         assertEquals(List.of(IMAGE_SIZE), messagesFor(request, "imageUrl"));
         assertEquals(List.of(VIDEO_SIZE), messagesFor(request, "videoUrl"));
+        assertEquals(List.of(TRAILER_SIZE), messagesFor(request, "trailerUrl"));
     }
 
     /**
@@ -133,30 +169,41 @@ class MovieRequestValidationTest {
     void siFallanLongitudYFormatoSoloSeInformaDeLaLongitud(String prefix) {
         String url = prefix + "a".repeat(501 - prefix.length());
 
-        MovieRequest request = request(url, url);
+        MovieRequest request = request(url, url, url);
 
         assertEquals(List.of(IMAGE_SIZE), messagesFor(request, "imageUrl"));
         assertEquals(List.of(VIDEO_SIZE), messagesFor(request, "videoUrl"));
+        assertEquals(List.of(TRAILER_SIZE), messagesFor(request, "trailerUrl"));
     }
 
     // ------------------------------------------------------------------
-    // Obligatoriedad
+    // Obligatoriedad (portada) y campos opcionales (vídeo y tráiler)
     // ------------------------------------------------------------------
 
     /**
-     * Un valor nulo o en blanco solo lo rechaza {@code @NotBlank}. Incluye un
-     * espacio Unicode (U+2003, "espacio eme"): comprueba que {@code @HttpsUrl} usa el
-     * mismo criterio de "en blanco" que {@code @NotBlank}, de modo que no hay
-     * dos errores ni ningún valor que no rechace nadie.
+     * En la portada, un valor nulo o en blanco solo lo rechaza
+     * {@code @NotBlank}. Incluye un espacio Unicode (U+2003, "espacio eme"):
+     * comprueba que {@code @HttpsUrl} usa el mismo criterio de "en blanco" que
+     * {@code @NotBlank}, de modo que no hay dos errores ni ningún valor que no
+     * rechace nadie.
      */
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = { "   ", "\t", " " })
-    void unaUrlNulaOEnBlancoSoloLaRechazaNotBlank(String url) {
-        MovieRequest request = request(url, url);
+    void unaPortadaNulaOEnBlancoSoloLaRechazaNotBlank(String url) {
+        assertOnlyNotBlank(request(url, VALID_VIDEO), "imageUrl");
+    }
 
-        assertOnlyNotBlank(request, "imageUrl");
-        assertOnlyNotBlank(request, "videoUrl");
+    /**
+     * El vídeo y el tráiler son opcionales: nulos o en blanco ("no tiene") no
+     * dan ningún error; el mapper los guarda como {@code null}. Antes de la
+     * {@code V6} el vídeo era obligatorio.
+     */
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = { "   ", "\t", " " })
+    void unVideoOUnTrailerNuloOEnBlancoNoEsUnError(String url) {
+        assertTrue(validator.validate(request(VALID_IMAGE, url, url)).isEmpty());
     }
 
     /**
@@ -166,10 +213,11 @@ class MovieRequestValidationTest {
      */
     @Test
     void unCaracterDeControlNoEnBlancoLoRechazaElFormato() {
-        MovieRequest request = request("\u0001", "\u0001");
+        MovieRequest request = request("\u0001", "\u0001", "\u0001");
 
         assertEquals(List.of(IMAGE_FORMAT), messagesFor(request, "imageUrl"));
         assertEquals(List.of(VIDEO_FORMAT), messagesFor(request, "videoUrl"));
+        assertEquals(List.of(TRAILER_FORMAT), messagesFor(request, "trailerUrl"));
     }
 
     // ------------------------------------------------------------------
@@ -204,7 +252,7 @@ class MovieRequestValidationTest {
     @Test
     void unIdDeGeneroNuloSeRechaza() {
         Set<Long> genreIds = new HashSet<>(Arrays.asList(1L, null));
-        MovieRequest request = new MovieRequest("Dune", "Sinopsis", 155, 2021, VALID_IMAGE, VALID_VIDEO, genreIds);
+        MovieRequest request = new MovieRequest("Dune", "Sinopsis", 155, 2021, VALID_IMAGE, VALID_VIDEO, null, genreIds);
 
         List<String> messages = validator.validate(request).stream().map(ConstraintViolation::getMessage).toList();
 
@@ -219,18 +267,19 @@ class MovieRequestValidationTest {
      * Sin ningún dato, cada campo da exactamente un error y con el texto del
      * formulario del frontend ({@code movieValidation.ts}). Antes estas
      * restricciones no tenían mensaje y salía el de Hibernate Validator, en el
-     * idioma de la JVM.
+     * idioma de la JVM. El vídeo y el tráiler son opcionales: sin error.
      */
     @Test
     void cadaCampoObligatorioTieneUnUnicoMensajeEnEspanol() {
-        MovieRequest empty = new MovieRequest(null, null, null, null, null, null, null);
+        MovieRequest empty = new MovieRequest(null, null, null, null, null, null, null, null);
 
         assertEquals(List.of("El título es obligatorio"), messagesFor(empty, "title"));
         assertEquals(List.of("La sinopsis es obligatoria"), messagesFor(empty, "description"));
         assertEquals(List.of("Indica la duración en minutos"), messagesFor(empty, "duration"));
         assertEquals(List.of("Indica el año de estreno"), messagesFor(empty, "releaseYear"));
         assertEquals(List.of("La URL de la portada es obligatoria"), messagesFor(empty, "imageUrl"));
-        assertEquals(List.of("La URL del vídeo es obligatoria"), messagesFor(empty, "videoUrl"));
+        assertEquals(List.of(), messagesFor(empty, "videoUrl"));
+        assertEquals(List.of(), messagesFor(empty, "trailerUrl"));
         assertEquals(List.of("Elige al menos un género"), messagesFor(empty, "genreIds"));
     }
 
@@ -251,17 +300,27 @@ class MovieRequestValidationTest {
     // ------------------------------------------------------------------
 
     private static MovieRequest movie(int duration, int releaseYear) {
-        return new MovieRequest("Dune", "Sinopsis", duration, releaseYear, VALID_IMAGE, VALID_VIDEO, Set.of(1L));
+        return new MovieRequest("Dune", "Sinopsis", duration, releaseYear, VALID_IMAGE, VALID_VIDEO, null, Set.of(1L));
     }
 
     private static MovieRequest request(String imageUrl, String videoUrl) {
-        return new MovieRequest("Dune", "Sinopsis", 155, 2021, imageUrl, videoUrl, Set.of(1L));
+        return request(imageUrl, videoUrl, null);
+    }
+
+    private static MovieRequest request(String imageUrl, String videoUrl, String trailerUrl) {
+        return new MovieRequest("Dune", "Sinopsis", 155, 2021, imageUrl, videoUrl, trailerUrl, Set.of(1L));
     }
 
     /** Petición válida con {@code count} ids de género distintos (1..count). */
     private static MovieRequest withGenres(int count) {
         Set<Long> genreIds = LongStream.rangeClosed(1, count).boxed().collect(Collectors.toSet());
-        return new MovieRequest("Dune", "Sinopsis", 155, 2021, VALID_IMAGE, VALID_VIDEO, genreIds);
+        return new MovieRequest("Dune", "Sinopsis", 155, 2021, VALID_IMAGE, VALID_VIDEO, null, genreIds);
+    }
+
+    /** Enlace de YouTube válido (forma {@code watch} con un parámetro de relleno) de la longitud indicada. */
+    private static String youTubeUrlOfLength(int length) {
+        String prefix = "https://www.youtube.com/watch?v=aBcDeFgHiJk&x=";
+        return prefix + "a".repeat(length - prefix.length());
     }
 
     private static String httpsUrlOfLength(int length) {

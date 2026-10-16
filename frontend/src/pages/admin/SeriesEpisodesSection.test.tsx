@@ -170,7 +170,7 @@ describe('SeriesEpisodesSection: añadir', () => {
     expect(field(form, 'Número')).toHaveValue('1');
     await user.type(field(form, 'Título'), 'Comienzo');
     await user.type(field(form, 'Duración (minutos)'), '50');
-    await user.type(field(form, 'URL del vídeo'), 'https://v.example.com/1');
+    await user.type(field(form, 'URL del vídeo (opcional)'), 'https://v.example.com/1');
     await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
 
     expect(
@@ -195,7 +195,7 @@ describe('SeriesEpisodesSection: añadir', () => {
     await user.type(field(form, 'Título'), '  Nuevo ');
     await user.type(field(form, 'Duración (minutos)'), '48');
     await user.type(field(form, 'Sinopsis (opcional)'), '   ');
-    await user.type(field(form, 'URL del vídeo'), ' https://v.example.com/t2e3 ');
+    await user.type(field(form, 'URL del vídeo (opcional)'), ' https://v.example.com/t2e3 ');
     await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
 
     expect(within(form).getByRole('button', { name: 'Guardando...' })).toBeDisabled();
@@ -218,6 +218,26 @@ describe('SeriesEpisodesSection: añadir', () => {
     await waitFor(() => expect(addButton()).toHaveFocus());
   });
 
+  it('el vídeo es opcional: sin él el episodio se crea igual y se envía videoUrl null', async () => {
+    const created = makeEpisode({ id: 99, seasonNumber: 2, episodeNumber: 3, title: 'Sin vídeo', videoUrl: null });
+    routeFetch(fetchMock, {
+      [`POST ${EPISODES_ROUTE}`]: () => jsonResponse(created, 201),
+      [DETAIL_ROUTE]: () => jsonResponse(detail([season(1, [1, 2, 3]), { ...season(2, [1, 2]), episodes: [...season(2, [1, 2]).episodes, created] }])),
+    });
+    const user = setupUser();
+    renderSection(detail());
+
+    await user.click(addButton());
+    const form = dialog('Añadir episodio');
+    expect(field(form, 'URL del vídeo (opcional)')).toHaveAccessibleDescription(/Sin vídeo, el episodio no muestra «Ver»/);
+    await user.type(field(form, 'Título'), 'Sin vídeo');
+    await user.type(field(form, 'Duración (minutos)'), '40');
+    await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
+
+    expect(await screen.findByText('Se ha añadido el episodio T2:E3 «Sin vídeo».')).toBeInTheDocument();
+    expect(sentBody('POST', EPISODES_ROUTE)).toMatchObject({ videoUrl: null });
+  });
+
   it('valida en el cliente con los mensajes del servidor, enfoca el primer error y no envía', async () => {
     routeFetch(fetchMock, {});
     const user = setupUser();
@@ -227,14 +247,14 @@ describe('SeriesEpisodesSection: añadir', () => {
     const form = dialog('Añadir episodio');
     await fill(user, field(form, 'Número'), '0');
     await user.type(field(form, 'Duración (minutos)'), '601');
-    await user.type(field(form, 'URL del vídeo'), 'http://v.example.com/x');
+    await user.type(field(form, 'URL del vídeo (opcional)'), 'http://v.example.com/x');
     await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
 
     expect(field(form, 'Título')).toHaveFocus(); // el primero en pantalla
     expect(field(form, 'Número')).toHaveAccessibleDescription('El número de episodio debe estar entre 1 y 1000');
     expect(field(form, 'Título')).toHaveAccessibleDescription('El título es obligatorio');
     expect(field(form, 'Duración (minutos)')).toHaveAccessibleDescription('La duración debe estar entre 1 y 600 minutos');
-    expect(field(form, 'URL del vídeo')).toHaveAccessibleDescription('La URL del vídeo debe empezar por https://');
+    expect(field(form, 'URL del vídeo (opcional)')).toHaveAccessibleDescription('La URL del vídeo debe empezar por https://');
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 
     // Al corregir un campo, su error desaparece.
@@ -255,7 +275,7 @@ describe('SeriesEpisodesSection: añadir', () => {
     await fill(user, field(form, 'Número'), '2');
     await user.type(field(form, 'Título'), 'Repetido');
     await user.type(field(form, 'Duración (minutos)'), '40');
-    await user.type(field(form, 'URL del vídeo'), 'https://v.example.com/r');
+    await user.type(field(form, 'URL del vídeo (opcional)'), 'https://v.example.com/r');
     await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
 
     const number = field(form, 'Número');
@@ -287,12 +307,12 @@ describe('SeriesEpisodesSection: añadir', () => {
     const form = dialog('Añadir episodio');
     await user.type(field(form, 'Título'), 'Algo');
     await user.type(field(form, 'Duración (minutos)'), '40');
-    await user.type(field(form, 'URL del vídeo'), 'https://v.example.com/a');
+    await user.type(field(form, 'URL del vídeo (opcional)'), 'https://v.example.com/a');
     await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
 
     await waitFor(() => expect(field(form, 'Duración (minutos)')).toHaveFocus());
     expect(field(form, 'Duración (minutos)')).toHaveAccessibleDescription('La duración debe estar entre 1 y 600 minutos');
-    expect(field(form, 'URL del vídeo')).toHaveAccessibleDescription('La URL del vídeo debe empezar por https://');
+    expect(field(form, 'URL del vídeo (opcional)')).toHaveAccessibleDescription('La URL del vídeo debe empezar por https://');
     expect(within(form).getByText('Revisa los campos marcados.')).toBeInTheDocument();
   });
 
@@ -330,7 +350,7 @@ describe('SeriesEpisodesSection: editar', () => {
     expect(field(form, 'Título')).toHaveValue('Episodio 2');
     expect(field(form, 'Sinopsis (opcional)')).toHaveValue('Sinopsis del episodio 2.');
     expect(field(form, 'Duración (minutos)')).toHaveValue('45');
-    expect(field(form, 'URL del vídeo')).toHaveValue('https://video.example/s1e2');
+    expect(field(form, 'URL del vídeo (opcional)')).toHaveValue('https://video.example/s1e2');
 
     // En la edición el número es el del episodio: cambiar de temporada no lo toca.
     await fill(user, field(form, 'Temporada'), '3');
@@ -479,7 +499,7 @@ describe('SeriesEpisodesSection: refresco fallido', () => {
     const form = dialog('Añadir episodio');
     await user.type(field(form, 'Título'), 'Tres');
     await user.type(field(form, 'Duración (minutos)'), '45');
-    await user.type(field(form, 'URL del vídeo'), 'https://v.example.com/3');
+    await user.type(field(form, 'URL del vídeo (opcional)'), 'https://v.example.com/3');
     await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
 
     expect(await screen.findByText('Se ha añadido el episodio T2:E3 «Tres».')).toBeInTheDocument();

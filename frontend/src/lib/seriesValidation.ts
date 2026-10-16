@@ -21,10 +21,12 @@ import {
   MOVIE_TITLE_MAX,
   MOVIE_YEAR_MAX,
   MOVIE_YEAR_MIN,
+  optionalUrl,
   parseWholeNumber,
   validateImageUrl,
 } from './movieValidation';
 import type { SeriesRequest } from './types';
+import { validateTrailerUrl } from './youtube';
 
 /** Límites de `SeriesRequest`: los mismos que los de una película. */
 export const SERIES_TITLE_MAX = MOVIE_TITLE_MAX;
@@ -58,6 +60,8 @@ export interface SeriesFormValues {
   /** Texto del campo; vacío = sigue en emisión (`endYear: null`). */
   endYear: string;
   imageUrl: string;
+  /** Opcional: enlace de YouTube; vacío = sin tráiler (`null`). */
+  trailerUrl: string;
   genreIds: number[];
 }
 
@@ -71,6 +75,7 @@ export const EMPTY_SERIES_FORM: SeriesFormValues = {
   releaseYear: '',
   endYear: '',
   imageUrl: '',
+  trailerUrl: '',
   genreIds: [],
 };
 
@@ -130,6 +135,10 @@ export function validateSeriesForm(values: SeriesFormValues): SeriesFormErrors {
   const imageError = validateSeriesImageUrl(values.imageUrl.trim());
   if (imageError) errors.imageUrl = imageError;
 
+  // Mismas reglas y mensajes que el tráiler de una película (`@YouTubeUrl` en los dos DTO).
+  const trailerError = validateTrailerUrl(values.trailerUrl.trim());
+  if (trailerError) errors.trailerUrl = trailerError;
+
   if (values.genreIds.length === 0) errors.genreIds = SERIES_MESSAGES.genresRequired;
   else if (values.genreIds.length > SERIES_MAX_GENRES) errors.genreIds = SERIES_MESSAGES.genresSize;
 
@@ -138,8 +147,9 @@ export function validateSeriesForm(values: SeriesFormValues): SeriesFormErrors {
 
 /**
  * Convierte el formulario (ya validado) en el cuerpo de la petición: recorta
- * los textos, pasa los años a número y un año de fin vacío a `null` ("en
- * emisión"; el servidor distingue `null` de un año).
+ * los textos, pasa los años a número, un año de fin vacío a `null` ("en
+ * emisión"; el servidor distingue `null` de un año) y un tráiler vacío a
+ * `null` ("sin tráiler"; si lo hay, lo normaliza el servidor).
  */
 export function toSeriesRequest(values: SeriesFormValues): SeriesRequest {
   const endYear = values.endYear.trim();
@@ -149,6 +159,7 @@ export function toSeriesRequest(values: SeriesFormValues): SeriesRequest {
     releaseYear: Number(values.releaseYear.trim()),
     endYear: endYear ? Number(endYear) : null,
     imageUrl: values.imageUrl.trim(),
+    trailerUrl: optionalUrl(values.trailerUrl),
     genreIds: [...values.genreIds],
   };
 }

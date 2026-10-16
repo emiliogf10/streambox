@@ -6,6 +6,7 @@ import { buttonClasses } from './buttonStyles';
 import { FavoriteButton } from './FavoriteButton';
 import { FeaturedBanner } from './FeaturedBanner';
 import { SeriesMetaTags } from './SeriesMetaTags';
+import { TrailerButton } from './TrailerButton';
 
 /**
  * Banner de la página `/series`: la serie más reciente del catálogo.
@@ -16,6 +17,9 @@ import { SeriesMetaTags } from './SeriesMetaTags';
  * - **«Ver episodios»** (principal) es un ENLACE a la página de la serie, no un
  *   botón que abre un vídeo: una serie no tiene un único vídeo, hay que elegir
  *   temporada y episodio.
+ * - **«Ver tráiler»** ({@link TrailerButton}), secundaria y solo si la serie
+ *   tiene tráiler: abre el tráiler de YouTube en un diálogo, sin salir de aquí.
+ *   «Ver episodios» sigue siendo la principal: lleva a la serie entera.
  * - **«Mi lista»** ({@link FavoriteButton}) guarda la serie en su sección de la lista.
  */
 export function SeriesHeroBanner({ series }: { series: Series }) {
@@ -32,6 +36,7 @@ export function SeriesHeroBanner({ series }: { series: Series }) {
             Ver episodios
             <span className="sr-only"> de {series.title}</span>
           </Link>
+          <TrailerButton trailerUrl={series.trailerUrl} title={series.title} />
           <FavoriteButton series={series} />
         </>
       }

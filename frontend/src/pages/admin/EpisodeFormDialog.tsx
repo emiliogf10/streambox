@@ -88,6 +88,8 @@ interface EpisodeFormDialogProps {
  * - Los tres números (temporada, número y duración) comparten fila y el pie
  *   con los botones es pegajoso: el diálogo cabe en una pantalla de portátil y,
  *   si no cabe, los botones siguen a la vista.
+ * - **Vídeo opcional** (vacío = `null`): sin él, el episodio se ve en la lista
+ *   pero sin «Ver». Los tráileres no van aquí, sino en la serie.
  * - **Validación** con los mensajes exactos del servidor (`episodeValidation.ts`),
  *   errores del servidor (`validationErrors`) junto a cada campo y foco al primero.
  * - **409 `EPISODE_ALREADY_EXISTS`** (ese número ya existe en esa temporada):
@@ -283,11 +285,12 @@ export function EpisodeFormDialog({
           />
           <FormField
             id={FIELD_IDS.videoUrl}
-            label="URL del vídeo"
+            label="URL del vídeo (opcional)"
             type="url"
             autoComplete="off"
             spellCheck={false}
             placeholder="https://…"
+            hint="Debe empezar por https://. Sin vídeo, el episodio no muestra «Ver»."
             error={errors.videoUrl}
             value={values.videoUrl}
             onChange={(event) => setField('videoUrl', event.target.value)}

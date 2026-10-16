@@ -3,6 +3,7 @@ package com.emilio.streambox.dto;
 import java.util.Set;
 
 import com.emilio.streambox.validation.HttpsUrl;
+import com.emilio.streambox.validation.YouTubeUrl;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
@@ -42,13 +43,35 @@ import jakarta.validation.constraints.Size;
  * el mismo texto, que es parte del contrato con el frontend.
  * </p>
  *
+ * <p>
+ * <b>Vídeo y tráiler, ambos opcionales.</b> StreamBox no aloja vídeos, así que
+ * una película puede tener vídeo del contenido ({@code videoUrl}), tráiler de
+ * YouTube ({@code trailerUrl}), los dos o ninguno. Omitir el campo, mandarlo a
+ * {@code null}, vacío o solo con espacios significa "no tiene": los
+ * validadores no se quejan de un texto en blanco y el mapper
+ * ({@code MovieMapper}) lo guarda como {@code null}, para que "no tiene" tenga
+ * una sola representación y el cliente solo compruebe {@code null}. El
+ * tráiler solo admite enlaces de YouTube ({@link YouTubeUrl}) y se guarda
+ * normalizado como {@code https://www.youtube.com/watch?v=<id>}.
+ * </p>
+ *
+ * <p>
+ * Como el {@code PUT} sustituye la película completa, un {@code PUT} sin
+ * {@code videoUrl} o sin {@code trailerUrl} los <b>borra</b> (quedan a
+ * {@code null}), igual que pasaría con cualquier otro campo: el cliente debe
+ * reenviar los valores que quiera conservar.
+ * </p>
+ *
  * @param title       título de la película (obligatorio, máximo 150 caracteres)
  * @param description sinopsis (obligatoria, máximo 1000 caracteres)
  * @param duration    duración en minutos (obligatoria, al menos 1)
  * @param releaseYear año de estreno (obligatorio, entre 1888 y 2100)
  * @param imageUrl    URL de la portada (obligatoria, máximo 500 caracteres,
  *                    {@code https://} o {@code /covers/<archivo>})
- * @param videoUrl    URL del vídeo (obligatoria, máximo 500 caracteres, {@code https://})
+ * @param videoUrl    URL del vídeo (opcional; si viene, máximo 500 caracteres y
+ *                    {@code https://}; en blanco = sin vídeo)
+ * @param trailerUrl  enlace del tráiler (opcional; si viene, máximo 500
+ *                    caracteres y de YouTube; en blanco = sin tráiler)
  * @param genreIds    identificadores de los géneros de la película (entre 1 y
  *                    {@value #MAX_GENRES})
  */
@@ -83,14 +106,20 @@ public record MovieRequest(
                 message = MovieRequest.IMAGE_URL_FORMAT_MESSAGE)
         String imageUrl,
 
-        @Schema(description = "URL del vídeo. Debe ser una URL https:// absoluta, con host y sin "
-                + "credenciales (usuario:clave@). Solo caracteres ASCII visibles (sin espacios); "
-                + "máximo 500 caracteres.",
+        @Schema(description = "URL del vídeo de la película. Opcional: si se omite, es null o va en "
+                + "blanco, la película queda sin vídeo (null en la respuesta). Si se indica, debe ser una "
+                + "URL https:// absoluta, con host y sin credenciales (usuario:clave@). Solo caracteres "
+                + "ASCII visibles (sin espacios); máximo 500 caracteres. En un PUT, omitirlo borra el vídeo.",
                 example = "https://videos.streambox.example/watch/dune")
-        @NotBlank(message = MovieRequest.VIDEO_URL_REQUIRED_MESSAGE)
         @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.VIDEO_URL_SIZE_MESSAGE)
         @HttpsUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.VIDEO_URL_FORMAT_MESSAGE)
         String videoUrl,
+
+        @Schema(description = MovieRequest.TRAILER_URL_DESCRIPTION,
+                example = "https://youtu.be/aBcDeFgHiJk")
+        @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.TRAILER_URL_SIZE_MESSAGE)
+        @YouTubeUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.TRAILER_URL_FORMAT_MESSAGE)
+        String trailerUrl,
 
         @NotEmpty(message = MovieRequest.GENRES_REQUIRED_MESSAGE)
         @Size(max = MovieRequest.MAX_GENRES, message = MovieRequest.GENRES_SIZE_MESSAGE)
@@ -134,9 +163,6 @@ public record MovieRequest(
     /** Error cuando falta {@code imageUrl}. */
     public static final String IMAGE_URL_REQUIRED_MESSAGE = "La URL de la portada es obligatoria";
 
-    /** Error cuando falta {@code videoUrl}. */
-    public static final String VIDEO_URL_REQUIRED_MESSAGE = "La URL del vídeo es obligatoria";
-
     /** Error cuando {@code genreIds} falta o está vacía. */
     public static final String GENRES_REQUIRED_MESSAGE = "Elige al menos un género";
 
@@ -166,9 +192,12 @@ public record MovieRequest(
             "Una película puede tener como máximo " + MAX_GENRES + " géneros";
 
     /**
-     * Longitud máxima de {@code imageUrl} y {@code videoUrl}. Coincide con las
-     * columnas {@code movies.image_url} y {@code movies.video_url}
-     * ({@code VARCHAR(500)}).
+     * Longitud máxima de {@code imageUrl}, {@code videoUrl} y
+     * {@code trailerUrl}. Coincide con las columnas {@code image_url},
+     * {@code video_url} y {@code trailer_url} ({@code VARCHAR(500)}). El
+     * tráiler normalizado mide siempre 43 caracteres, pero el enlace recibido
+     * puede ser más largo (parámetros como {@code &list=...}), y sin tope un
+     * texto enorme se analizaría entero antes de rechazarse.
      */
     public static final int URL_MAX_LENGTH = 500;
 
@@ -186,4 +215,26 @@ public record MovieRequest(
     /** Error de longitud de {@code videoUrl} (contrato con el frontend). */
     public static final String VIDEO_URL_SIZE_MESSAGE =
             "La URL del vídeo no puede superar los " + URL_MAX_LENGTH + " caracteres";
+
+    /** Error de formato de {@code trailerUrl} (contrato con el frontend; compartido con las series). */
+    public static final String TRAILER_URL_FORMAT_MESSAGE = "El tráiler debe ser un enlace de un vídeo de YouTube";
+
+    /** Error de longitud de {@code trailerUrl} (contrato con el frontend; compartido con las series). */
+    public static final String TRAILER_URL_SIZE_MESSAGE =
+            "La URL del tráiler no puede superar los " + URL_MAX_LENGTH + " caracteres";
+
+    /**
+     * Texto OpenAPI de {@code trailerUrl}, compartido con {@link SeriesRequest}
+     * para que las dos documenten exactamente las mismas formas aceptadas.
+     */
+    public static final String TRAILER_URL_DESCRIPTION = "Enlace del tráiler en YouTube. Opcional: si se "
+            + "omite, es null o va en blanco, el título queda sin tráiler (null en la respuesta). Si se "
+            + "indica, solo se aceptan estas formas, siempre con https:// en minúsculas, sin credenciales, "
+            + "sin puerto y sin fragmento (#): https://www.youtube.com/watch?v=<id> (también con m. o sin "
+            + "subdominio; el resto de parámetros se ignora, pero debe haber un único v), "
+            + "https://youtu.be/<id>, https://www.youtube.com/embed/<id> y "
+            + "https://www.youtube-nocookie.com/embed/<id>, donde <id> son 11 caracteres de letras, "
+            + "números, guion o guion bajo. Se guarda y se devuelve normalizado como "
+            + "https://www.youtube.com/watch?v=<id>. Máximo 500 caracteres. En un PUT, omitirlo borra el "
+            + "tráiler. Errores: «" + TRAILER_URL_FORMAT_MESSAGE + "» y «" + TRAILER_URL_SIZE_MESSAGE + "».";
 }

@@ -69,10 +69,11 @@ public final class EpisodeMapper {
      * Copia los campos editables.
      *
      * <p>
-     * La sinopsis es opcional: una cadena en blanco se guarda como
-     * {@code null}, para que "sin sinopsis" tenga una sola representación y el
-     * cliente solo tenga que comprobar {@code null} (el contrato dice
-     * "{@code description} null si no hay").
+     * La sinopsis y el vídeo son opcionales: una cadena en blanco se guarda
+     * como {@code null}, para que "no tiene" tenga una sola representación y
+     * el cliente solo tenga que comprobar {@code null} (el contrato dice
+     * "{@code description} null si no hay"; lo mismo para {@code videoUrl}
+     * desde la migración {@code V6}).
      * </p>
      */
     private static void copyFields(EpisodeRequest request, Episode episode) {
@@ -80,10 +81,16 @@ public final class EpisodeMapper {
         episode.setSeasonNumber(request.seasonNumber());
         episode.setEpisodeNumber(request.episodeNumber());
         episode.setTitle(request.title());
-        episode.setDescription(request.description() == null || request.description().isBlank()
-                ? null
-                : request.description());
+        episode.setDescription(blankToNull(request.description()));
         episode.setDuration(request.duration());
-        episode.setVideoUrl(request.videoUrl());
+        episode.setVideoUrl(blankToNull(request.videoUrl()));
+    }
+
+    /**
+     * Devuelve {@code null} si el texto es {@code null} o está en blanco
+     * ({@link String#isBlank()}), o el texto sin cambios en otro caso.
+     */
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 }

@@ -4,6 +4,7 @@ import java.util.Set;
 
 import com.emilio.streambox.validation.HttpsUrl;
 import com.emilio.streambox.validation.ValidSeriesYears;
+import com.emilio.streambox.validation.YouTubeUrl;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
@@ -38,6 +39,13 @@ import jakarta.validation.constraints.Size;
  * error llega al cliente en {@code validationErrors.endYear}).
  * </p>
  *
+ * <p>
+ * <b>Tráiler.</b> Opcional y con las mismas reglas, mensajes y normalización
+ * que el de {@link MovieRequest} (solo YouTube; en blanco = sin tráiler, se
+ * guarda {@code null}). Como el {@code PUT} sustituye la serie completa, un
+ * {@code PUT} sin {@code trailerUrl} lo borra.
+ * </p>
+ *
  * @param title       título (obligatorio, máximo 150 caracteres)
  * @param description sinopsis (obligatoria, máximo 1000 caracteres)
  * @param releaseYear año de estreno (obligatorio, entre 1888 y 2100)
@@ -45,6 +53,8 @@ import jakarta.validation.constraints.Size;
  *                    entre 1888 y 2100 y no anterior a {@code releaseYear})
  * @param imageUrl    URL de la portada (obligatoria, máximo 500 caracteres,
  *                    {@code https://} o {@code /covers/<archivo>})
+ * @param trailerUrl  enlace del tráiler (opcional; si viene, máximo 500
+ *                    caracteres y de YouTube; en blanco = sin tráiler)
  * @param genreIds    identificadores de los géneros (entre 1 y
  *                    {@value MovieRequest#MAX_GENRES})
  */
@@ -81,6 +91,12 @@ public record SeriesRequest(
         @HttpsUrl(allowLocalCovers = true, maxLength = MovieRequest.URL_MAX_LENGTH,
                 message = MovieRequest.IMAGE_URL_FORMAT_MESSAGE)
         String imageUrl,
+
+        @Schema(description = MovieRequest.TRAILER_URL_DESCRIPTION,
+                example = "https://youtu.be/aBcDeFgHiJk")
+        @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.TRAILER_URL_SIZE_MESSAGE)
+        @YouTubeUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.TRAILER_URL_FORMAT_MESSAGE)
+        String trailerUrl,
 
         @NotEmpty(message = "Indica al menos un género")
         @Size(max = MovieRequest.MAX_GENRES, message = SeriesRequest.GENRES_SIZE_MESSAGE)

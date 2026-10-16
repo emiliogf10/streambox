@@ -504,7 +504,8 @@ class SeriesAdminIntegrationTest {
                 .andExpect(jsonPath("$.validationErrors.episodeNumber").value("El número de episodio es obligatorio"))
                 .andExpect(jsonPath("$.validationErrors.title").value("El título es obligatorio"))
                 .andExpect(jsonPath("$.validationErrors.duration").value("La duración es obligatoria"))
-                .andExpect(jsonPath("$.validationErrors.videoUrl").value("La URL del vídeo es obligatoria"))
+                // El vídeo es opcional desde la V6: sin él no hay error (pero si viene, se valida; abajo)
+                .andExpect(jsonPath("$.validationErrors.videoUrl").doesNotExist())
                 .andExpect(jsonPath("$.validationErrors.description").doesNotExist());
 
         Map<String, Object> tooBig = episodeBody(101, 1001);

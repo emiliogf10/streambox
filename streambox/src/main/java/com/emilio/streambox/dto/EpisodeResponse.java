@@ -1,5 +1,7 @@
 package com.emilio.streambox.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * DTO con los datos de un episodio que se devuelven al cliente.
  *
@@ -16,7 +18,8 @@ package com.emilio.streambox.dto;
  * @param title         título del episodio
  * @param description   sinopsis, o {@code null} si no tiene
  * @param duration      duración en minutos
- * @param videoUrl      URL del vídeo
+ * @param videoUrl      URL del vídeo, o {@code null} si el episodio no tiene
+ *                      (el tráiler está en la serie)
  */
 public record EpisodeResponse(
         Long id,
@@ -25,5 +28,7 @@ public record EpisodeResponse(
         String title,
         String description,
         Integer duration,
+        @Schema(types = { "string", "null" },
+                description = "URL del vídeo del episodio, o null si no tiene (el tráiler va en la serie).")
         String videoUrl) {
 }

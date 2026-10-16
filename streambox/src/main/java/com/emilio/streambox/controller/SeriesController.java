@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.emilio.streambox.dto.MovieRequest;
 import com.emilio.streambox.dto.SeriesDetailResponse;
 import com.emilio.streambox.dto.SeriesPageResponse;
 import com.emilio.streambox.dto.SeriesRequest;
@@ -66,6 +67,12 @@ public class SeriesController {
             "Dirección de ordenación: asc (ascendente, por defecto) o desc (descendente), sin distinguir "
                     + "mayúsculas. El desempate por id sigue la misma dirección. Por ejemplo, "
                     + "sort=createdAt&direction=desc devuelve primero las series más recientes";
+
+    /** Texto OpenAPI del 400 del alta y la edición (lo comparten los dos endpoints). */
+    static final String WRITE_BAD_REQUEST_DESCRIPTION = "Los datos proporcionados no son válidos "
+            + "(VALIDATION_ERROR, con un mensaje en español por campo en validationErrors), por ejemplo "
+            + "si trailerUrl no es un enlace de YouTube aceptado («" + MovieRequest.TRAILER_URL_FORMAT_MESSAGE
+            + "»). trailerUrl es opcional";
 
     private final SeriesService seriesService;
 
@@ -181,7 +188,7 @@ public class SeriesController {
             + "Requiere rol ADMIN.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Serie creada correctamente"),
-            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
+            @ApiResponse(responseCode = "400", description = WRITE_BAD_REQUEST_DESCRIPTION),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
             @ApiResponse(responseCode = "404", description = "Uno o más géneros no existen")
@@ -204,7 +211,7 @@ public class SeriesController {
             + "Los episodios no se tocan. Requiere rol ADMIN.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Serie modificada correctamente"),
-            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
+            @ApiResponse(responseCode = "400", description = WRITE_BAD_REQUEST_DESCRIPTION),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
             @ApiResponse(responseCode = "404", description = "Serie o género no encontrado")

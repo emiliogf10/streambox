@@ -18,8 +18,10 @@ import type { Fact } from '../components/FactSheet';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { FeaturedBanner } from '../components/FeaturedBanner';
 import { GenreLinks } from '../components/GenreLinks';
+import { NothingToWatchNote } from '../components/NothingToWatchNote';
 import { SeasonPicker } from '../components/SeasonPicker';
 import { SeriesMetaTags } from '../components/SeriesMetaTags';
+import { TrailerButton } from '../components/TrailerButton';
 import { WatchButton } from '../components/WatchButton';
 import { useAuth } from '../context/AuthContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -33,9 +35,18 @@ import {
   resolveSeasonNumber,
   SEASON_PARAM,
 } from '../lib/series';
-import type { SeriesDetail } from '../lib/types';
+import type { Episode, SeriesDetail } from '../lib/types';
+import { getSafeVideoUrl } from '../lib/utils';
+import { getTrailer } from '../lib/youtube';
 import { ADMIN_SERIES_PATH, adminEditSeriesPath } from './admin/adminPaths';
 import type { ReturnToState } from './admin/adminPaths';
+
+/**
+ * Aviso para un administrador cuando la serie no tiene tráiler ni ningún
+ * episodio con vídeo (ver `NothingToWatchNote`). En el formulario de «Editar»
+ * están los dos: el tráiler de la serie y, debajo, sus episodios.
+ */
+const ADMIN_NOTHING_TO_WATCH = 'No tiene vídeo ni tráiler: añade el tráiler o el vídeo de los episodios desde «Editar».';
 
 /**
  * Página de una serie (`/series/:id`), con la temporada elegida en la URL (`?temporada=2`).
@@ -120,14 +131,18 @@ export function SeriesDetailPage() {
  *   con el título como `<h1>`, la sinopsis entera (no hay otro sitio donde
  *   leerla) y el contenido centrado (`layout="page"`), igual que la página de
  *   una película. Encima, «Volver a series» ({@link BackLink}), gemelo de
- *   «Volver a películas». Acciones: «Empezar a ver» (primer episodio de la
- *   primera temporada), «Mi lista» y, solo para un administrador (rol
+ *   «Volver a películas». Acciones: «Empezar a ver» o «Ver T2:E3» (el primer
+ *   episodio con vídeo, ver {@link StartWatchingButton}; si ningún episodio
+ *   tiene vídeo, no aparece), «Ver tráiler» ({@link TrailerButton}, solo si la
+ *   serie tiene tráiler; principal si no hay episodio que ver, secundaria si
+ *   lo hay), «Mi lista» y, solo para un administrador (rol
  *   confirmado por el servidor; mientras carga el usuario no aparece),
  *   **«Editar»**: lleva al formulario del panel, con el nombre accesible
  *   «Editar Dark» como en el listado del panel, y pasa esta página como vuelta
  *   (`returnTo`), así que el formulario ofrece «Volver a la serie» en lugar de
  *   «Volver al listado». Es interfaz, no seguridad: el backend responde 403 a
- *   un `USER` que intente editar.
+ *   un `USER` que intente editar. Sin tráiler ni episodio con vídeo, bajo las
+ *   acciones va {@link NothingToWatchNote} (texto según el rol).
  * - **Cuerpo** (`SERIES_BODY_GRID_CLASS`), en el mismo contenedor centrado: los
  *   episodios y la {@link FactSheet ficha}; desde `lg`, la ficha va en una
  *   columna lateral, y en móvil y tableta, debajo de los episodios (que son lo
@@ -145,7 +160,8 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
   const episodesHeadingId = useId();
   const seasonNumber = resolveSeasonNumber(searchParams.get(SEASON_PARAM), series.seasons);
   const season = series.seasons.find((item) => item.seasonNumber === seasonNumber);
-  const firstEpisode = series.seasons[0]?.episodes[0];
+  const firstEpisode = firstWatchableEpisode(series);
+  const nothingToWatch = !firstEpisode && getTrailer(series.trailerUrl) === null;
 
   return (
     <div className="pb-12">
@@ -158,24 +174,22 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
         clampDescription={false}
         layout="page"
         backLink={<BackLink to="/series">Volver a series</BackLink>}
+        actionsNote={nothingToWatch && <NothingToWatchNote adminText={ADMIN_NOTHING_TO_WATCH} />}
         actions={
           <>
-            {firstEpisode && (
-              <WatchButton
-                videoUrl={firstEpisode.videoUrl}
-                title={firstEpisode.title}
-                label="Empezar a ver"
-                accessibleName={`Empezar a ver ${series.title}: ${episodeCode(firstEpisode.seasonNumber, firstEpisode.episodeNumber)} ${firstEpisode.title}`}
-                unavailableSubject="este episodio"
-              />
-            )}
+            {firstEpisode && <StartWatchingButton series={series} episode={firstEpisode} />}
+            <TrailerButton
+              trailerUrl={series.trailerUrl}
+              title={series.title}
+              variant={firstEpisode ? 'outline' : 'light'}
+            />
             <FavoriteButton series={series} />
             {isAdmin && (
               <Link
                 to={adminEditSeriesPath(series.id)}
                 state={{ returnTo: seriesPath(series.id) } satisfies ReturnToState}
                 aria-label={`Editar ${series.title}`}
-                className={buttonClasses('ghost', 'col-span-2 sm:col-span-1')}
+                className={buttonClasses('ghost')}
               >
                 <Pencil aria-hidden="true" className="size-4" />
                 Editar
@@ -213,6 +227,49 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Acción principal de la cabecera de una serie: abrir el primer episodio con
+ * vídeo ({@link firstWatchableEpisode}).
+ *
+ * **El texto dice la verdad sobre dónde se empieza** (incidencia QA trailer-3):
+ * - Si ese episodio es el primero de la serie (el primero de la primera
+ *   temporada; normalmente T1:E1), «Empezar a ver»: es empezar de verdad.
+ * - Si no (el principio no tiene vídeo), «Ver T2:E3», con el mismo código de
+ *   episodio que la lista ({@link episodeCode}). Un «Empezar a ver» que abre la
+ *   segunda temporada engañaría a quien no ha visto la primera.
+ *
+ * El nombre accesible empieza por el texto visible (WCAG 2.5.3) y añade la
+ * serie y el título del episodio: «Ver T2:E3 de Dark: El regreso». Así no se
+ * confunde con el «Ver T2:E3 El regreso» de la lista de episodios.
+ */
+function StartWatchingButton({ series, episode }: { series: SeriesDetail; episode: Episode }) {
+  const code = episodeCode(episode.seasonNumber, episode.episodeNumber);
+  const isStart = series.seasons[0]?.episodes[0]?.id === episode.id;
+  const label = isStart ? 'Empezar a ver' : `Ver ${code}`;
+  const accessibleName = isStart
+    ? `Empezar a ver ${series.title}: ${code} ${episode.title}`
+    : `Ver ${code} de ${series.title}: ${episode.title}`;
+  return <WatchButton videoUrl={episode.videoUrl} title={episode.title} label={label} accessibleName={accessibleName} />;
+}
+
+/**
+ * Primer episodio, en el orden de la serie (temporadas y números ya vienen
+ * ordenados), que tiene un vídeo que se pueda abrir; `undefined` si ninguno.
+ *
+ * El vídeo de un episodio es opcional: si el primero no lo tiene, el botón de
+ * la cabecera lleva al primero que sí (y lo dice: «Ver T1:E2», ver
+ * {@link StartWatchingButton}), y si no lo tiene ninguno, no aparece. Se valida
+ * con la misma función que usa `WatchButton`, así que «hay episodio» significa
+ * «hay botón».
+ */
+function firstWatchableEpisode(series: SeriesDetail): Episode | undefined {
+  for (const season of series.seasons) {
+    const episode = season.episodes.find((item) => getSafeVideoUrl(item.videoUrl) !== null);
+    if (episode) return episode;
+  }
+  return undefined;
 }
 
 /**

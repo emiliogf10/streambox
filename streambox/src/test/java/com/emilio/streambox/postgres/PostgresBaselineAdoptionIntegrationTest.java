@@ -114,7 +114,7 @@ class PostgresBaselineAdoptionIntegrationTest {
 
     /**
      * La historia queda registrada: baseline en la versión 0 (por eso V1 SÍ se
-     * ejecuta), luego V1, V2, V3, V4 y la V5 de PostgreSQL (db/vendor/postgresql), todas correctas. Una segunda ejecución no
+     * ejecuta), luego V1, V2, V3, V4, la V5 de PostgreSQL (db/vendor/postgresql) y V6, todas correctas. Una segunda ejecución no
      * hace nada y {@code validate} pasa (los checksums coinciden).
      */
     @Test
@@ -123,10 +123,10 @@ class PostgresBaselineAdoptionIntegrationTest {
 
         MigrateResult first = flyway(db).migrate();
 
-        assertEquals(5, first.migrationsExecuted, "deben ejecutarse V1, V2, V3, V4 y V5");
+        assertEquals(6, first.migrationsExecuted, "deben ejecutarse V1, V2, V3, V4, V5 y V6");
         List<Map<String, Object>> history = jdbc(db).queryForList(
                 "SELECT version, description, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertEquals(List.of("0", "1", "2", "3", "4", "5"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
+        assertEquals(List.of("0", "1", "2", "3", "4", "5", "6"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
         assertEquals("BASELINE", history.get(0).get("type"));
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
 
@@ -357,7 +357,33 @@ class PostgresBaselineAdoptionIntegrationTest {
     }
 
     /**
-     * Contraste: una base vacía NO recibe fila de baseline (solo V1 a V5) y
+     * La V6 sobre una base heredada: su {@code video_url} tenía un NOT NULL sin
+     * nombre que {@code DROP NOT NULL} quita igual; los vídeos heredados que no
+     * son de YouTube ({@code v1}, {@code v2}) siguen donde estaban y uno de
+     * YouTube normalizado pasa a {@code trailer_url}. Recibe además el
+     * {@code CHECK} del tráiler, como una base nueva.
+     */
+    @Test
+    void laV6SobreUnaBaseAdoptadaHaceElVideoOpcionalYMueveSoloLosTrailers() throws Exception {
+        String db = createDatabase(true);
+        JdbcTemplate jdbc = jdbc(db);
+        jdbc.update("INSERT INTO movies (title, description, duration, release_year, image_url, video_url, created_at)"
+                + " VALUES ('Tráiler', 'd3', 90, 2001, 'i3', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', now())");
+
+        flyway(db).migrate();
+
+        assertEquals(List.of("Alien|v2|null", "Mañana|v1|null", "Tráiler|null|https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+                jdbc.queryForList("SELECT title || '|' || COALESCE(video_url, 'null') || '|' || COALESCE(trailer_url, 'null')"
+                        + " FROM movies ORDER BY id", String.class).stream().sorted().toList());
+        assertEquals("YES", jdbc.queryForObject("SELECT is_nullable FROM information_schema.columns"
+                + " WHERE table_schema = 'public' AND table_name = 'movies' AND column_name = 'video_url'", String.class));
+        DataIntegrityViolationException error = assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("UPDATE movies SET trailer_url = 'https://evil.example/x' WHERE title = 'Alien'"));
+        assertEquals("23514", PostgresIntegrationTestSupport.sqlState(error));
+    }
+
+    /**
+     * Contraste: una base vacía NO recibe fila de baseline (solo V1 a V6) y
      * sí tiene cascadas y CHECK. Garantiza que los dos caminos de arranque
      * producen lo que describe cada test.
      */
@@ -368,7 +394,7 @@ class PostgresBaselineAdoptionIntegrationTest {
         flyway(db).migrate();
 
         JdbcTemplate jdbc = jdbc(db);
-        assertEquals(List.of("1", "2", "3", "4", "5"), jdbc.queryForList(
+        assertEquals(List.of("1", "2", "3", "4", "5", "6"), jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history ORDER BY installed_rank", String.class));
         // Ocho claves foráneas en cascada. V1: géneros->película, favoritos->usuario y
         // favoritos->película. V3: géneros->serie, episodios->serie, favoritos de

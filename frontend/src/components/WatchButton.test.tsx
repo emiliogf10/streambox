@@ -3,10 +3,10 @@
  *
  * `videoUrl` viene de la base de datos: un `javascript:` guardado ahí no debe
  * convertirse nunca en un enlace pulsable. También se comprueba que el enlace
- * válido se abre en pestaña nueva sin dar acceso a `window.opener` (`rel`).
+ * válido se abre en pestaña nueva sin dar acceso a `window.opener` (`rel`) y
+ * que, sin vídeo (es opcional), no queda ningún botón que prometa verlo.
  */
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { WatchButton } from './WatchButton';
 
@@ -29,7 +29,7 @@ describe('WatchButton: URL válida', () => {
   });
 });
 
-describe('WatchButton: URL no utilizable', () => {
+describe('WatchButton: sin vídeo utilizable', () => {
   it.each([
     ['javascript:alert(document.cookie)'],
     ['JaVaScRiPt:alert(1)'],
@@ -39,26 +39,14 @@ describe('WatchButton: URL no utilizable', () => {
     [''],
     [null],
     [undefined],
-  ])('con %j no hay enlace: solo un botón aria-disabled sin href', (videoUrl) => {
-    render(<WatchButton videoUrl={videoUrl} title="Matrix" />);
+  ])('con %j no pinta nada: ni enlace ni un «Ver ahora» que no lleva a ningún vídeo', (videoUrl) => {
+    const { container } = render(<WatchButton videoUrl={videoUrl} title="Matrix" />);
 
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
-    const button = screen.getByRole('button', { name: /Ver ahora/ });
-    expect(button).toHaveAttribute('aria-disabled', 'true');
-    expect(button).not.toHaveAttribute('href');
-  });
-
-  it('explica el motivo a los lectores de pantalla y sigue siendo enfocable con el teclado', async () => {
-    const user = userEvent.setup();
-    render(<WatchButton videoUrl={null} title="Matrix" />);
-
-    const button = screen.getByRole('button', { name: /Ver ahora/ });
-    expect(button).toHaveAccessibleDescription(/No disponible: esta película no tiene un vídeo/);
-
-    // `aria-disabled` (a diferencia de `disabled`) no lo saca del orden de tabulación.
-    expect(button).toBeEnabled();
-    await user.tab();
-    expect(button).toHaveFocus();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ver ahora/)).not.toBeInTheDocument();
+    // Ni siquiera un texto oculto para lectores de pantalla: no queda nada en el DOM.
+    expect(container).toBeEmptyDOMElement();
   });
 });
 
@@ -67,7 +55,6 @@ describe('WatchButton: variante de episodio («Ver»)', () => {
     title: 'El regreso',
     label: 'Ver',
     accessibleName: 'Ver T1:E3 El regreso',
-    unavailableSubject: 'este episodio',
     variant: 'outline' as const,
   };
 
@@ -84,13 +71,11 @@ describe('WatchButton: variante de episodio («Ver»)', () => {
     expect(link).not.toHaveClass('bg-white');
   });
 
-  it('con URL insegura: botón desactivado con el nombre del episodio y el motivo referido al episodio', () => {
-    render(<WatchButton videoUrl="javascript:alert(1)" {...episodeProps} />);
+  it('con URL insegura o sin vídeo, el episodio no tiene «Ver»', () => {
+    const { container, rerender } = render(<WatchButton videoUrl="javascript:alert(1)" {...episodeProps} />);
+    expect(container).toBeEmptyDOMElement();
 
-    expect(screen.queryByRole('link')).not.toBeInTheDocument();
-    const button = screen.getByRole('button', { name: 'Ver T1:E3 El regreso' });
-    expect(button).toHaveAttribute('aria-disabled', 'true');
-    expect(button).toHaveAccessibleDescription('No disponible: este episodio no tiene un vídeo al que se pueda acceder.');
-    expect(button).toHaveAttribute('title', 'Este episodio no tiene un vídeo disponible');
+    rerender(<WatchButton videoUrl={null} {...episodeProps} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });
