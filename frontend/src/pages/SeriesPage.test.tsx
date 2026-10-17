@@ -208,7 +208,7 @@ describe('SeriesPage: contenido', () => {
     routeFetch(fetchMock, { ...FAVORITES, [PAGE_0]: () => jsonResponse(makePage([hero, ...others])) });
   });
 
-  it('la serie más reciente es el banner: «Novedad», sus datos, «Ver episodios» a su página y «Mi lista»', async () => {
+  it('la serie más reciente es el banner: «Novedad», sus datos, «Más información» a su página y «Mi lista»', async () => {
     renderPage();
 
     const banner = await screen.findByRole('region', { name: 'Estreno serie' });
@@ -216,7 +216,7 @@ describe('SeriesPage: contenido', () => {
     expect(within(banner).getByRole('list', { name: 'Datos de la serie' })).toHaveTextContent(
       /2019–\s*En emisión\s*3 temporadas\s*24 episodios\s*Drama/,
     );
-    expect(within(banner).getByRole('link', { name: /^Ver episodios\s*de Estreno serie$/ })).toHaveAttribute(
+    expect(within(banner).getByRole('link', { name: /^Más información\s*sobre Estreno serie$/ })).toHaveAttribute(
       'href',
       '/series/1',
     );

@@ -15,12 +15,14 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.emilio.streambox.migration.TrailerUrlMigrationScenario;
+import com.emilio.streambox.migration.UserAvatarSchemaCases;
 
 /**
  * Comprueba el esquema que producen las migraciones de Flyway: índices,
  * claves foráneas con borrado en cascada y restricciones de integridad
  * (películas en {@code V1}/{@code V2}; series y episodios en {@code V3};
- * refresh tokens en {@code V4}; tráiler y vídeo opcional en {@code V6}).
+ * refresh tokens en {@code V4}; tráiler y vídeo opcional en {@code V6};
+ * icono de perfil en {@code V7}).
  * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
  * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
  * de PostgreSQL.
@@ -512,6 +514,58 @@ class FlywaySchemaIntegrationTest {
             assertThrows(DataIntegrityViolationException.class,
                     () -> jdbc.update("UPDATE series SET trailer_url = ? WHERE id = ?", invalid, seriesId), invalid);
         }
+    }
+
+    // --- V7: icono de perfil (users.avatar) ---
+
+    @Test
+    void v7EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '7' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * {@code users.avatar} es un {@code VARCHAR(32)} opcional: un usuario
+     * creado sin avatar (como todos los anteriores a la {@code V7}) lo tiene a
+     * {@code NULL} y la interfaz muestra su inicial.
+     */
+    @Test
+    void elAvatarEsOpcionalYTieneLaLongitudDeLaEntidad() {
+        java.util.Map<String, Object> column = jdbc.queryForMap("SELECT IS_NULLABLE AS N, CHARACTER_MAXIMUM_LENGTH AS L"
+                + " FROM INFORMATION_SCHEMA.COLUMNS"
+                + " WHERE LOWER(TABLE_NAME) = 'users' AND LOWER(COLUMN_NAME) = 'avatar'");
+        long userId = insertUser("sinavatar");
+
+        assertEquals("YES", column.get("N"));
+        assertEquals(32, ((Number) column.get("L")).intValue());
+        assertEquals(null, jdbc.queryForObject("SELECT avatar FROM users WHERE id = ?", String.class, userId));
+    }
+
+    /**
+     * {@code ck_users_avatar}: el avatar es {@code NULL} o una clave de 1 a 32
+     * caracteres de {@code [a-z0-9-]}. No comprueba la lista de avatares (eso
+     * lo hace el backend), solo el formato. Un texto de más de 32 caracteres
+     * lo rechaza el propio {@code VARCHAR(32)}.
+     */
+    @Test
+    void elAvatarSoloAdmiteNuloOUnaClaveDeMinusculasDigitosYGuiones() {
+        long userId = insertUser("avatar");
+
+        for (String valid : UserAvatarSchemaCases.VALID) {
+            jdbc.update("UPDATE users SET avatar = ? WHERE id = ?", valid, userId);
+            assertEquals(valid, jdbc.queryForObject("SELECT avatar FROM users WHERE id = ?", String.class, userId));
+        }
+        jdbc.update("UPDATE users SET avatar = NULL WHERE id = ?", userId);
+        for (String invalid : UserAvatarSchemaCases.INVALID_FORMAT) {
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> jdbc.update("UPDATE users SET avatar = ? WHERE id = ?", invalid, userId), invalid);
+        }
+        assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("UPDATE users SET avatar = ? WHERE id = ?", "a".repeat(33), userId));
+        assertEquals(null, jdbc.queryForObject("SELECT avatar FROM users WHERE id = ?", String.class, userId));
     }
 
     // --- Utilidades ---

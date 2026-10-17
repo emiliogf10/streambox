@@ -2,6 +2,7 @@ package com.emilio.streambox.service;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -35,6 +36,17 @@ public class UserService {
 
     /** Mensaje del 409 cuando el nombre de usuario pertenece a otra cuenta. */
     static final String USERNAME_TAKEN_MESSAGE = "El nombre de usuario ya está en uso";
+
+    /** Mensaje del 409 cuando el email pertenece a otra cuenta. */
+    static final String EMAIL_TAKEN_MESSAGE = "El correo electrónico ya está en uso";
+
+    /**
+     * Mensaje del 409 de una carrera en el registro cuando la base de datos no
+     * dice qué restricción falló (no debería pasar con PostgreSQL ni con H2,
+     * pero el mensaje sigue siendo cierto).
+     */
+    static final String USERNAME_OR_EMAIL_TAKEN_MESSAGE =
+            "El nombre de usuario o el correo electrónico ya están en uso";
 
     /**
      * Caracteres invisibles en los extremos del nombre: separadores Unicode
@@ -118,7 +130,7 @@ public class UserService {
             throw new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
         }
         if (userRepository.existsByEmail(email)) {
-            throw new UserAlreadyExistsException("El correo electrónico ya está en uso");
+            throw new UserAlreadyExistsException(EMAIL_TAKEN_MESSAGE);
         }
 
         User user = new User();
@@ -127,18 +139,79 @@ public class UserService {
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setRole(Role.USER);
 
-        return UserMapper.toResponse(userRepository.save(user));
+        try {
+            return UserMapper.toResponse(userRepository.saveAndFlush(user));
+        } catch (DataIntegrityViolationException e) {
+            throw translateRegistrationViolation(e);
+        }
     }
 
     /**
-     * Cambia el nombre de usuario de la cuenta autenticada.
+     * Traduce la violación de integridad del {@code INSERT} del registro.
      *
      * <p>
-     * Solo se lee {@link UpdateProfileRequest#username()}: el email, el rol y
-     * la contraseña nunca cambian aquí (el DTO ya rechaza que se envíen). El
-     * nombre se normaliza igual que en el registro. Si coincide con el actual
-     * se responde sin escribir nada; un cambio solo de mayúsculas
-     * ({@code bob} a {@code Bob}) sí es un cambio.
+     * <strong>Comprobación previa + restricción como respaldo</strong>, como en
+     * {@link #updateProfile}: dos registros simultáneos con el mismo nombre o
+     * email pasan los dos {@code existsBy...} y solo el {@code UNIQUE} de la
+     * base de datos frena al segundo. Antes esa violación llegaba sin traducir
+     * a {@code GlobalExceptionHandler}, que respondía un 409 genérico; hoy allí
+     * sería un 500, así que se traduce aquí a la misma
+     * {@link UserAlreadyExistsException} que la comprobación previa, gane quien
+     * gane la carrera.
+     * </p>
+     *
+     * <p>
+     * <strong>Cuál de las dos.</strong> Aquí se insertan las dos columnas
+     * únicas a la vez y, tras el error, la transacción ya no admite más
+     * consultas (en PostgreSQL queda abortada), así que no se puede volver a
+     * preguntar: se mira el nombre de la restricción ({@code uk_users_email} o
+     * {@code uk_users_username}, de la migración {@code V1}). Cualquier otra
+     * violación se relanza tal cual (500 y registro en el log): disfrazarla de
+     * "ya está en uso" ocultaría un fallo.
+     * </p>
+     *
+     * @param error excepción lanzada por el repositorio
+     * @return la excepción de dominio a lanzar; si no es de unicidad, el propio {@code error}
+     */
+    private static RuntimeException translateRegistrationViolation(DataIntegrityViolationException error) {
+
+        if (!(error instanceof DuplicateKeyException)
+                && !SqlStates.UNIQUE_VIOLATION.equals(SqlStates.find(error))) {
+            return error;
+        }
+        String constraint = SqlStates.constraintName(error);
+        if (constraint != null && constraint.contains("uk_users_email")) {
+            return new UserAlreadyExistsException(EMAIL_TAKEN_MESSAGE);
+        }
+        if (constraint != null && constraint.contains("uk_users_username")) {
+            return new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
+        }
+        return new UserAlreadyExistsException(USERNAME_OR_EMAIL_TAKEN_MESSAGE);
+    }
+
+    /**
+     * Cambia el nombre de usuario y/o el icono de perfil (avatar) de la cuenta
+     * autenticada.
+     *
+     * <p>
+     * Solo se leen {@link UpdateProfileRequest#username()} y el avatar
+     * ({@link UpdateProfileRequest#avatarSent()} /
+     * {@link UpdateProfileRequest#avatarKey()}): el email, el rol y la
+     * contraseña nunca cambian aquí (el DTO ya rechaza que se envíen). Cada
+     * campo ausente se deja como está; si no viene ninguno de los dos, 400 (ver
+     * {@link UpdateProfileRequest}).
+     * </p>
+     *
+     * <ul>
+     * <li><b>Nombre</b>: se normaliza igual que en el registro. Un cambio solo
+     * de mayúsculas ({@code bob} a {@code Bob}) sí es un cambio.</li>
+     * <li><b>Avatar</b>: ya viene validado contra la lista blanca
+     * ({@code Avatar}); {@code null} lo quita (la interfaz vuelve a la
+     * inicial).</li>
+     * </ul>
+     * <p>
+     * Si nada cambia de verdad (mismo nombre y mismo avatar), se responde sin
+     * escribir.
      * </p>
      *
      * <p>
@@ -149,8 +222,10 @@ public class UserService {
      * {@code users.username} y su violación se traduce a la misma
      * {@link UserAlreadyExistsException}, gane quien gane la carrera. Por eso se
      * usa {@code saveAndFlush}: sin el {@code flush}, la violación aparecería al
-     * confirmar la transacción, ya fuera de este método, como un 409
-     * {@code DATA_INTEGRITY_VIOLATION} genérico.
+     * confirmar la transacción, ya fuera de este método, como una violación
+     * no traducida (500 {@code INTERNAL_ERROR}). El avatar no tiene
+     * restricción de unicidad, así que una violación de unicidad solo puede
+     * ser la del nombre.
      * </p>
      *
      * <p>
@@ -161,6 +236,15 @@ public class UserService {
      * </p>
      *
      * <p>
+     * <strong>Sin bloqueo, pero sin pisar la contraseña.</strong> La fila se
+     * lee sin bloquearla, así que un cambio de contraseña puede confirmarse
+     * entre esa lectura y el {@code UPDATE}. No pasa nada porque {@link User}
+     * lleva {@code @DynamicUpdate}: el {@code UPDATE} solo escribe
+     * {@code username} y {@code avatar}, nunca el hash leído al principio. Aquí
+     * no hace falta bloquear porque nada se decide a partir de la contraseña.
+     * </p>
+     *
+     * <p>
      * La sesión no se ve afectada: el JWT identifica al usuario por su email y
      * el filtro de autenticación vuelve a leer la cuenta de la base de datos en
      * cada petición.
@@ -168,32 +252,48 @@ public class UserService {
      *
      * @param userId  id del usuario autenticado (sale del token, nunca de la URL)
      * @param request cambios pedidos (ya validados)
-     * @return los datos de la cuenta tras el cambio
-     * @throws InvalidParameterException  si el nombre normalizado no tiene una longitud válida
+     * @return los datos de la cuenta tras el cambio (completos, como {@code GET /api/users/me})
+     * @throws InvalidParameterException  si no se pide ningún cambio o el nombre
+     *                                    normalizado no tiene una longitud válida
      * @throws UserAlreadyExistsException si el nombre lo usa otra cuenta
      * @throws UserNotFoundException      si la cuenta ya no existe
      */
     @Transactional
     public UserResponse updateProfile(Long userId, UpdateProfileRequest request) {
 
-        String username = normalizeUsername(request.username());
+        boolean usernameSent = request.username() != null;
+        if (!usernameSent && !request.avatarSent()) {
+            throw new InvalidParameterException("username", UpdateProfileRequest.NO_CHANGES_MESSAGE);
+        }
+        // Se valida antes de ir a la base de datos: un nombre no válido no
+        // necesita consultar nada.
+        String username = usernameSent ? normalizeUsername(request.username()) : null;
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado"));
 
-        if (username.equals(user.getUsername())) {
+        boolean changed = false;
+        if (usernameSent && !username.equals(user.getUsername())) {
+            if (userRepository.existsByUsername(username)) {
+                throw new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
+            }
+            user.setUsername(username);
+            changed = true;
+        }
+        if (request.avatarSent() && !Objects.equals(request.avatarKey(), user.getAvatar())) {
+            user.setAvatar(request.avatarKey());
+            changed = true;
+        }
+        if (!changed) {
             return UserMapper.toResponse(user);
         }
-        if (userRepository.existsByUsername(username)) {
-            throw new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
-        }
 
-        user.setUsername(username);
         try {
             return UserMapper.toResponse(userRepository.saveAndFlush(user));
         } catch (DataIntegrityViolationException e) {
-            // Aquí solo cambia el nombre, así que una violación de unicidad
-            // solo puede ser la de users.username. Cualquier otra se relanza
+            // La única restricción de unicidad que puede tocar este UPDATE es
+            // la de users.username. Cualquier otra violación (por ejemplo, el
+            // CHECK de formato del avatar si el validador fallara) se relanza
             // tal cual: disfrazarla de "nombre en uso" ocultaría el problema.
             if (e instanceof DuplicateKeyException
                     || SqlStates.UNIQUE_VIOLATION.equals(SqlStates.find(e))) {
@@ -213,7 +313,7 @@ public class UserService {
      * no ASCII en la parte local y, por ejemplo, la {@code İ} (I con punto,
      * U+0130) se convierte en dos caracteres ({@code i} + punto combinante).
      * Un email de 100 caracteres válido para la anotación podía acabar con más
-     * de 100 y fallar en la base de datos con un 409 genérico; aquí recibe el
+     * de 100 y fallar en la base de datos (antes un 409 genérico, hoy un 500); aquí recibe el
      * mismo 400 y el mismo mensaje que si fuera largo desde el principio.
      * </p>
      *

@@ -4,7 +4,7 @@
  *
  * Protegen la muestra visible del rol: el enlace «Administrar» y la etiqueta
  * «Administrador» del menú aparecen SOLO a quien el servidor confirma como
- * `ADMIN`, y el menú enseña el nombre del usuario de la sesión. Mientras se comprueba la sesión la barra solo tiene el logo; si tras
+ * `ADMIN`, y el menú enseña el nombre del usuario de la sesión (y su botón, su avatar o su inicial). Mientras se comprueba la sesión la barra solo tiene el logo; si tras
  * iniciar sesión el usuario no carga, el menú es el de siempre (sin huecos) y cerrar sesión sigue funcionando. «Cerrar
  * sesión» espera al servidor: dice «Cerrando sesión...» sin perder el foco, no se repite con un doble clic y, si falla,
  * la sesión sigue abierta con un aviso y el botón listo para reintentar. `fetch` está
@@ -13,7 +13,7 @@
  * Además comprueban que la barra publica su altura en `--navbar-height`, el dato
  * con el que `index.css` evita que el foco quede tapado por ella.
  */
-import { act, screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuth } from '../context/AuthContext';
@@ -240,6 +240,22 @@ describe('Navbar: menú de usuario', () => {
     expect(screen.getByRole('button', { name: 'Cerrar sesión' })).toBeInTheDocument();
   });
 
+  it.each([
+    ['con un avatar elegido, su icono', 'crown', 'crown'],
+    ['sin avatar, su inicial', null, 'initial'],
+    ['con una clave que no conoce, su inicial', 'dragon', 'initial'],
+  ] as const)('el botón del menú enseña %s, decorativo (el botón se sigue llamando «Menú de usuario»)', async (_, avatar, shown) => {
+    await renderNavbar(() => jsonResponse(makeUser({ username: 'ana', avatar })));
+    await screen.findByText('estado:ready');
+
+    const button = screen.getByRole('button', { name: 'Menú de usuario' });
+    const drawn = button.querySelector('[data-avatar]');
+    expect(drawn).toHaveAttribute('data-avatar', shown);
+    expect(drawn).toHaveAttribute('aria-hidden', 'true');
+    if (shown === 'initial') expect(drawn).toHaveTextContent('A');
+    expect(button).toHaveAccessibleName('Menú de usuario');
+  });
+
   it('a un administrador le muestra su nombre y la etiqueta «Administrador» como texto', async () => {
     const user = await renderNavbar(() => jsonResponse(makeUser({ username: 'jefa', role: 'ADMIN' })));
 
@@ -321,6 +337,10 @@ describe('Navbar: menú de usuario', () => {
     );
     await user.click(await screen.findByRole('button', { name: 'Entrar de prueba' }));
     await screen.findByText('estado:error');
+    // Sin usuario no hay avatar que enseñar: el botón lleva el icono genérico, no una inicial inventada.
+    const menuButton = screen.getByRole('button', { name: 'Menú de usuario' });
+    expect(menuButton.querySelector('[data-avatar]')).toBeNull();
+    expect(menuButton.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
 
     await openMenu(user);
 
@@ -330,6 +350,66 @@ describe('Navbar: menú de usuario', () => {
     await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
     expect(await screen.findByRole('link', { name: 'Iniciar sesión' })).toBeInTheDocument();
     expect(localStorage.getItem('token')).toBeNull();
+  });
+});
+
+describe('Navbar: el avatar es siempre el de la sesión actual', () => {
+  /**
+   * El avatar vive en el usuario de `AuthContext`, no en la caché de TanStack
+   * (que ya se vacía en cada cambio de sesión): este test protege que tampoco
+   * ahí quede el de la cuenta anterior. Mientras se pregunta quién ha entrado,
+   * no se dibuja el icono de nadie; al contestar, el de la cuenta nueva.
+   */
+  it('al cerrar sesión y entrar con OTRA cuenta no se ve nunca el avatar de la anterior, tampoco mientras carga', async () => {
+    let phase: 'ana' | 'out' | 'beto' = 'ana';
+    let answerBeto!: (response: Response) => void;
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [CURRENT_USER]: () => {
+        if (phase === 'ana') return jsonResponse(makeUser({ username: 'ana', avatar: 'crown' }));
+        if (phase === 'out') return errorResponse(401, 'UNAUTHORIZED', 'No autenticado.');
+        return new Promise<Response>((resolve) => (answerBeto = resolve));
+      },
+      'POST /api/auth/logout': () => {
+        phase = 'out';
+        return noContentResponse();
+      },
+      'POST /api/auth/login': () => {
+        phase = 'beto';
+        return noContentResponse();
+      },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <FavoritesProvider>
+        <Navbar />
+        <SignInButton />
+        <UserStatusProbe />
+      </FavoritesProvider>,
+      { session: true },
+    );
+    await screen.findByText('estado:ready');
+    expect(screen.getByRole('button', { name: 'Menú de usuario' }).querySelector('[data-avatar]')).toHaveAttribute(
+      'data-avatar',
+      'crown',
+    );
+
+    await openMenu(user);
+    await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+    await screen.findByRole('link', { name: 'Iniciar sesión' });
+    expect(document.querySelector('[data-avatar]')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Entrar de prueba' }));
+    // El login ha ido bien y `/users/me` de la cuenta nueva aún no contesta.
+    await waitFor(() => expect(answerBeto).toBeTypeOf('function'));
+    expect(document.querySelector('[data-avatar="crown"]')).toBeNull();
+
+    await act(async () => answerBeto(jsonResponse(makeUser({ id: 2, username: 'beto', avatar: null }))));
+    await screen.findByText('estado:ready');
+    const drawn = screen.getByRole('button', { name: 'Menú de usuario' }).querySelector('[data-avatar]');
+    expect(drawn).toHaveAttribute('data-avatar', 'initial');
+    expect(drawn).toHaveTextContent('B');
+    expect(document.querySelector('[data-avatar="crown"]')).toBeNull();
   });
 });
 

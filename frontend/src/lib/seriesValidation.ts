@@ -21,6 +21,9 @@ import {
   MOVIE_TITLE_MAX,
   MOVIE_YEAR_MAX,
   MOVIE_YEAR_MIN,
+  TITLE_CONTROL_CHARACTERS_MESSAGE,
+  hasControlCharacters,
+  hasDisallowedMultilineControlCharacters,
   optionalUrl,
   parseWholeNumber,
   validateImageUrl,
@@ -40,8 +43,12 @@ export const SERIES_MAX_GENRES = 20;
 export const SERIES_MESSAGES = {
   titleRequired: 'El título es obligatorio',
   titleSize: `El título no puede superar los ${SERIES_TITLE_MAX} caracteres`,
+  /** Compartido con películas y episodios (`MovieRequest.TITLE_CONTROL_CHARACTERS_MESSAGE`). */
+  titleControlCharacters: TITLE_CONTROL_CHARACTERS_MESSAGE,
   descriptionRequired: 'La descripción es obligatoria',
   descriptionSize: `La descripción no puede superar los ${SERIES_DESCRIPTION_MAX} caracteres`,
+  /** `SeriesRequest.DESCRIPTION_CONTROL_CHARACTERS_MESSAGE` (lo comparte `EpisodeRequest`). */
+  descriptionControlCharacters: 'La descripción contiene caracteres de control no permitidos',
   releaseYearRequired: 'El año de estreno es obligatorio',
   releaseYearRange: `El año de estreno debe estar entre ${SERIES_YEAR_MIN} y ${SERIES_YEAR_MAX}`,
   endYearRange: `El año de finalización debe estar entre ${SERIES_YEAR_MIN} y ${SERIES_YEAR_MAX}`,
@@ -116,11 +123,16 @@ export function validateSeriesImageUrl(value: string): string | undefined {
 export function validateSeriesForm(values: SeriesFormValues): SeriesFormErrors {
   const errors: SeriesFormErrors = {};
 
+  // Caracteres de control: en el texto recortado, el que se envía (ver `validateMovieForm`).
   if (!values.title.trim()) errors.title = SERIES_MESSAGES.titleRequired;
   else if (values.title.length > SERIES_TITLE_MAX) errors.title = SERIES_MESSAGES.titleSize;
+  else if (hasControlCharacters(values.title.trim())) errors.title = SERIES_MESSAGES.titleControlCharacters;
 
   if (!values.description.trim()) errors.description = SERIES_MESSAGES.descriptionRequired;
   else if (values.description.length > SERIES_DESCRIPTION_MAX) errors.description = SERIES_MESSAGES.descriptionSize;
+  else if (hasDisallowedMultilineControlCharacters(values.description.trim())) {
+    errors.description = SERIES_MESSAGES.descriptionControlCharacters;
+  }
 
   const releaseYear = parseYear(values.releaseYear);
   if (!values.releaseYear.trim()) errors.releaseYear = SERIES_MESSAGES.releaseYearRequired;

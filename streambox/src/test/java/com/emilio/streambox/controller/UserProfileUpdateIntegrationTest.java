@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -64,6 +65,7 @@ class UserProfileUpdateIntegrationTest {
     @Autowired private JwtService jwtService;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private EntityManager entityManager;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     private User user;
     private String userJwt;
@@ -129,6 +131,40 @@ class UserProfileUpdateIntegrationTest {
                 .andExpect(jsonPath("$.role").value("ADMIN"));
     }
 
+    // --- Escrituras simultáneas: el UPDATE solo toca lo que cambia ---
+
+    /**
+     * Cambiar el perfil no vuelve a escribir la contraseña que se leyó al
+     * principio (actualización perdida).
+     *
+     * <p>
+     * La cuenta ya está en el contexto de persistencia (la guardó
+     * {@code setUp}) con su hash original. El {@code UPDATE} por JDBC hace en la
+     * base lo que haría un cambio de contraseña confirmado por otra petición
+     * después de esa lectura: la entidad en memoria no se entera. Sin
+     * {@code @DynamicUpdate} en {@code User}, Hibernate escribía todas las
+     * columnas con los valores en memoria y devolvía el hash antiguo. Mismo
+     * escenario con hilos de verdad y PostgreSQL en
+     * {@code PostgresIntegrityRaceTranslationQaIntegrationTest}.
+     * </p>
+     *
+     * @param body cambio de perfil pedido (avatar, nombre o los dos)
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"avatar\":\"cat\"}",
+            "{\"username\":\"nuevo_nombre\"}",
+            "{\"username\":\"nuevo_nombre\",\"avatar\":null}" })
+    void cambiarElPerfilNoReescribeUnaContrasenaCambiadaEntretanto(String body) throws Exception {
+        String hashOfTheOtherRequest = "$2a$10$hashEscritoPorOtraPeticionEntreLecturaYEscritura";
+        jdbcTemplate.update("UPDATE users SET password = ? WHERE id = ?", hashOfTheOtherRequest, user.getId());
+
+        patchAsUser(body).andExpect(status().isOk());
+
+        assertEquals(hashOfTheOtherRequest, jdbcTemplate.queryForObject(
+                "SELECT password FROM users WHERE id = ?", String.class, user.getId()));
+    }
+
     // --- Validación ---
 
     @ParameterizedTest
@@ -150,11 +186,11 @@ class UserProfileUpdateIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = { "{}", "{\"username\":null}" })
-    void sinNombreDa400ConElMensajeDeObligatorio(String body) throws Exception {
+    void sinNombreNiAvatarDa400PidiendoAlMenosUnCambio(String body) throws Exception {
         patchAsUser(body)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.validationErrors.username")
-                        .value(UpdateProfileRequest.USERNAME_REQUIRED_MESSAGE));
+                        .value(UpdateProfileRequest.NO_CHANGES_MESSAGE));
     }
 
     // --- Nombre ocupado ---

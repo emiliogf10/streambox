@@ -34,6 +34,14 @@
       "value": ""
     },
     {
+      "key": "secondMovieId",
+      "value": ""
+    },
+    {
+      "key": "thirdMovieId",
+      "value": ""
+    },
+    {
       "key": "seriesId",
       "value": ""
     },
@@ -629,6 +637,11 @@
                   "  const u = pm.response.json();",
                   "  pm.expect(u.email).to.eql(pm.environment.get(\"userEmail\"));",
                   "  pm.expect(u.role).to.eql(\"USER\");",
+                  "});",
+                  "pm.test(\"Trae siempre la propiedad avatar (una clave o null)\", function () {",
+                  "  const u = pm.response.json();",
+                  "  pm.expect(u).to.have.property(\"avatar\");",
+                  "  pm.expect(u.avatar === null || typeof u.avatar === \"string\").to.be.true;",
                   "});"
                 ]
               }
@@ -825,6 +838,195 @@
                   "pm.test(\"Responde 200 con el nombre original\", function () {",
                   "  pm.response.to.have.status(200);",
                   "  pm.expect(pm.response.json().username).to.eql(pm.environment.get(\"userUsername\"));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Elegir avatar (PATCH /api/users/me)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "Solo `avatar`: el nombre no se envía y no cambia (cada campo es opcional; ausente = no cambia). El avatar es una de las 12 claves predefinidas (`rocket`, `ghost`, `cat`, `dog`, `star`, `flame`, `leaf`, `moon`, `sun`, `zap`, `music`, `crown`). La respuesta es el usuario completo, como `GET /api/users/me`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"avatar\": \"rocket\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Devuelve el usuario completo con el avatar nuevo y el mismo nombre\", function () {",
+                  "  const u = pm.response.json();",
+                  "  pm.expect(u.avatar).to.eql(\"rocket\");",
+                  "  pm.expect(u.username).to.eql(pm.environment.get(\"userUsername\"));",
+                  "  pm.expect(u.email).to.eql(pm.environment.get(\"userEmail\"));",
+                  "  pm.expect(u).to.include.all.keys(\"id\", \"username\", \"email\", \"role\", \"createdAt\", \"avatar\");",
+                  "  pm.expect(u).to.not.have.property(\"password\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mi usuario devuelve el avatar (GET /api/users/me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "El avatar elegido se guarda: `GET /api/users/me` lo devuelve."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200 con avatar rocket\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().avatar).to.eql(\"rocket\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Avatar fuera de la lista (400)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "`unicornio` tiene forma de clave (la base de datos solo exige 1-32 caracteres `[a-z0-9-]` y la aceptaría), pero no es uno de los avatares predefinidos: la lista blanca la valida la API. Lo mismo con mayúsculas, espacios, un número o un objeto. No se cambia nada.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"avatar\": \"unicornio\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR solo en avatar, con el mensaje exacto\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(Object.keys(b.validationErrors)).to.eql([\"avatar\"]);",
+                  "  pm.expect(b.validationErrors.avatar).to.eql(\"Elige uno de los avatares disponibles\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quitar el avatar (avatar: null)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": "`\"avatar\": null` (distinto de omitirlo) quita el avatar: la interfaz vuelve a mostrar la inicial. Deja la cuenta como estaba para que la colección se pueda repetir.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"avatar\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"avatar vuelve a null (presente en el JSON) y el nombre no cambia\", function () {",
+                  "  const u = pm.response.json();",
+                  "  pm.expect(u).to.have.property(\"avatar\");",
+                  "  pm.expect(u.avatar).to.be.null;",
+                  "  pm.expect(u.username).to.eql(pm.environment.get(\"userUsername\"));",
                   "});"
                 ]
               }
@@ -1111,6 +1313,11 @@
                   "  pm.expect(m.title).to.eql(\"Película de Postman\");",
                   "  pm.expect(m.genres.map(g => g.id)).to.include(Number(pm.collectionVariables.get(\"genreId\")));",
                   "  pm.collectionVariables.set(\"movieId\", m.id);",
+                  "});",
+                  "pm.test(\"Sin trailerUrl en la petición, la respuesta lo trae a null\", function () {",
+                  "  const m = pm.response.json();",
+                  "  pm.expect(m).to.have.property(\"trailerUrl\");",
+                  "  pm.expect(m.trailerUrl).to.be.null;",
                   "});"
                 ]
               }
@@ -1170,6 +1377,260 @@
                 "exec": [
                   "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
                   "pm.test(\"VALIDATION_ERROR con detalle\", function () { const b = pm.response.json(); pm.expect(b.code).to.eql(\"VALIDATION_ERROR\"); pm.expect(Object.keys(b.validationErrors).length).to.be.above(0); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Crear película con tráiler que no es de YouTube (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies"
+              ]
+            },
+            "description": "El tráiler solo admite enlaces de YouTube (watch?v=, youtu.be, /embed/ y youtube-nocookie). Cualquier otro host da 400 y no se crea nada.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Película de Postman con tráiler inválido\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 2021,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"trailerUrl\": \"https://vimeo.com/76979871\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR solo en trailerUrl, con el mensaje exacto\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(Object.keys(b.validationErrors)).to.eql([\"trailerUrl\"]);",
+                  "  pm.expect(b.validationErrors.trailerUrl).to.eql(\"El tráiler debe ser un enlace de un vídeo de YouTube\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Crear película con un carácter de control en el título (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies"
+              ]
+            },
+            "description": "El título lleva un carácter nulo (`\\u0000`). Antes acababa en un 409 falso (la base de datos rechazaba el texto); ahora es un 400 con el error en `validationErrors.title`. Los títulos no admiten ningún carácter de control; la sinopsis sí admite tabuladores y saltos de línea. No se crea nada.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Película de Postman\\u0000con nulo\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 2021,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR solo en title, con el mensaje exacto\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(Object.keys(b.validationErrors)).to.eql([\"title\"]);",
+                  "  pm.expect(b.validationErrors.title).to.eql(\"El título no puede contener caracteres de control\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Crear película sin vídeo, con tráiler de youtu.be (ADMIN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies"
+              ]
+            },
+            "description": "videoUrl es opcional: una película puede tener solo tráiler. Se crea con el mismo género que la primera y un año de diferencia, para las películas similares.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Segunda película de Postman\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 2020,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"trailerUrl\": \"https://youtu.be/aBcDeFgHiJk?si=postman\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.test(\"Sin videoUrl en la petición, la respuesta lo trae a null\", function () {",
+                  "  const m = pm.response.json();",
+                  "  pm.expect(m).to.have.property(\"videoUrl\");",
+                  "  pm.expect(m.videoUrl).to.be.null;",
+                  "  pm.collectionVariables.set(\"secondMovieId\", m.id);",
+                  "});",
+                  "pm.test(\"El tráiler (youtu.be) se devuelve normalizado como watch?v=\", function () {",
+                  "  pm.expect(pm.response.json().trailerUrl).to.eql(\"https://www.youtube.com/watch?v=aBcDeFgHiJk\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Crear tercera película (ADMIN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies"
+              ]
+            },
+            "description": "Mismo género que las otras dos pero estrenada en 1990: en las similares de la primera (2021) va detrás de la segunda (2020), más cercana en año.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Tercera película de Postman\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 1990,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"videoUrl\": \"https://videos.streambox.example/watch/postman-3\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.test(\"Guarda su id\", function () {",
+                  "  const m = pm.response.json();",
+                  "  pm.expect(m.title).to.eql(\"Tercera película de Postman\");",
+                  "  pm.collectionVariables.set(\"thirdMovieId\", m.id);",
+                  "});"
                 ]
               }
             }
@@ -1408,10 +1869,10 @@
                 "{{movieId}}"
               ]
             },
-            "description": "",
+            "description": "PUT sustituye la película completa: un campo opcional que se omite (videoUrl, trailerUrl) se borra. El tráiler se manda en la forma /embed/ y el servidor lo devuelve normalizado.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Película de Postman (editada)\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 2021,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"videoUrl\": \"https://videos.streambox.example/watch/postman\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "raw": "{\n  \"title\": \"Película de Postman (editada)\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 2021,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"videoUrl\": \"https://videos.streambox.example/watch/postman\",\n  \"trailerUrl\": \"https://www.youtube.com/embed/aBcDeFgHiJk?start=10\",\n  \"genreIds\": [{{genreId}}]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1437,7 +1898,13 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"Título actualizado\", function () { pm.expect(pm.response.json().title).to.eql(\"Película de Postman (editada)\"); });"
+                  "pm.test(\"Título actualizado\", function () { pm.expect(pm.response.json().title).to.eql(\"Película de Postman (editada)\"); });",
+                  "pm.test(\"El tráiler (/embed/) se devuelve normalizado como watch?v=\", function () {",
+                  "  pm.expect(pm.response.json().trailerUrl).to.eql(\"https://www.youtube.com/watch?v=aBcDeFgHiJk\");",
+                  "});",
+                  "pm.test(\"Conserva el vídeo enviado\", function () {",
+                  "  pm.expect(pm.response.json().videoUrl).to.eql(\"https://videos.streambox.example/watch/postman\");",
+                  "});"
                 ]
               }
             }
@@ -1445,6 +1912,212 @@
           "protocolProfileBehavior": {
             "disableCookies": true
           }
+        },
+        {
+          "name": "Películas similares (ordenadas)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies/{{movieId}}/similar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies",
+                "{{movieId}}",
+                "similar"
+              ]
+            },
+            "description": "Películas que comparten al menos un género, ordenadas por el servidor: más géneros en común, año de estreno más cercano, más reciente y id. limit va de 1 a 24 (por defecto, 12). Las tres películas de la colección comparten su único género, así que el orden lo decide el año."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Es una lista (no una página) sin la propia película\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b).to.be.an(\"array\");",
+                  "  pm.expect(b.map(m => m.id)).to.not.include(Number(pm.collectionVariables.get(\"movieId\")));",
+                  "});",
+                  "pm.test(\"Ordenadas por parecido: la de año más cercano primero\", function () {",
+                  "  // El género lo creó la colección, así que solo lo comparten sus películas.",
+                  "  pm.expect(pm.response.json().map(m => m.id)).to.eql([",
+                  "    Number(pm.collectionVariables.get(\"secondMovieId\")),",
+                  "    Number(pm.collectionVariables.get(\"thirdMovieId\"))",
+                  "  ]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Películas similares con limit=1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies/{{movieId}}/similar?limit=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies",
+                "{{movieId}}",
+                "similar"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Devuelve solo la más parecida\", function () {",
+                  "  pm.expect(pm.response.json().map(m => m.id)).to.eql([Number(pm.collectionVariables.get(\"secondMovieId\"))]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Películas similares con limit=0 (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies/{{movieId}}/similar?limit=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies",
+                "{{movieId}}",
+                "similar"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR en limit\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(b.validationErrors.limit).to.eql(\"El límite mínimo es 1\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Películas similares con limit=25 (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies/{{movieId}}/similar?limit=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies",
+                "{{movieId}}",
+                "similar"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "25"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR en limit\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(b.validationErrors.limit).to.eql(\"El límite máximo es 24\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Películas similares de una película inexistente (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies/999999999/similar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies",
+                "999999999",
+                "similar"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 404\", function () { pm.response.to.have.status(404); });",
+                  "pm.test(\"Cuerpo de error con code RESOURCE_NOT_FOUND\", function () {",
+                  "  pm.expect(pm.response.json().code).to.eql(\"RESOURCE_NOT_FOUND\");",
+                  "});"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -1472,10 +2145,10 @@
                 "series"
               ]
             },
-            "description": "",
+            "description": "trailerUrl es opcional; aquí va en la forma de youtube-nocookie y el servidor lo devuelve normalizado.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Serie de Postman\",\n  \"description\": \"Serie creada por la colección de Postman.\",\n  \"releaseYear\": 2020,\n  \"endYear\": null,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "raw": "{\n  \"title\": \"Serie de Postman\",\n  \"description\": \"Serie creada por la colección de Postman.\",\n  \"releaseYear\": 2020,\n  \"endYear\": null,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"trailerUrl\": \"https://www.youtube-nocookie.com/embed/Zx9_Yw8-Vu7\",\n  \"genreIds\": [{{genreId}}]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1506,6 +2179,72 @@
                   "  pm.expect(s.title).to.eql(\"Serie de Postman\");",
                   "  pm.expect(s.episodeCount).to.eql(0);",
                   "  pm.collectionVariables.set(\"seriesId\", s.id);",
+                  "});",
+                  "pm.test(\"El tráiler (youtube-nocookie) se devuelve normalizado como watch?v=\", function () {",
+                  "  pm.expect(pm.response.json().trailerUrl).to.eql(\"https://www.youtube.com/watch?v=Zx9_Yw8-Vu7\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Crear serie con tráiler de un host parecido (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/series",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "series"
+              ]
+            },
+            "description": "El host se compara exacto: www.youtube.com.evil.example no es YouTube aunque lo parezca.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Serie de Postman con tráiler inválido\",\n  \"description\": \"Serie creada por la colección de Postman.\",\n  \"releaseYear\": 2020,\n  \"endYear\": null,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"trailerUrl\": \"https://www.youtube.com.evil.example/watch?v=Zx9_Yw8-Vu7\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR solo en trailerUrl, con el mensaje exacto\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(Object.keys(b.validationErrors)).to.eql([\"trailerUrl\"]);",
+                  "  pm.expect(b.validationErrors.trailerUrl).to.eql(\"El tráiler debe ser un enlace de un vídeo de YouTube\");",
                   "});"
                 ]
               }
@@ -1748,6 +2487,9 @@
                   "  pm.expect(s.seasonCount).to.eql(1);",
                   "  pm.expect(s.episodeCount).to.eql(1);",
                   "  pm.expect(s.seasons[0].episodes[0].title).to.eql(\"Piloto\");",
+                  "});",
+                  "pm.test(\"El detalle trae el tráiler normalizado\", function () {",
+                  "  pm.expect(pm.response.json().trailerUrl).to.eql(\"https://www.youtube.com/watch?v=Zx9_Yw8-Vu7\");",
                   "});"
                 ]
               }
@@ -1935,7 +2677,7 @@
                 "{{seriesId}}"
               ]
             },
-            "description": "",
+            "description": "PUT sustituye la serie completa: como el cuerpo no trae trailerUrl, el tráiler se borra.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"title\": \"Serie de Postman (editada)\",\n  \"description\": \"Serie creada por la colección de Postman.\",\n  \"releaseYear\": 2020,\n  \"endYear\": null,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"genreIds\": [{{genreId}}]\n}",
@@ -1964,7 +2706,10 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"Título actualizado\", function () { pm.expect(pm.response.json().title).to.eql(\"Serie de Postman (editada)\"); });"
+                  "pm.test(\"Título actualizado\", function () { pm.expect(pm.response.json().title).to.eql(\"Serie de Postman (editada)\"); });",
+                  "pm.test(\"Sin trailerUrl en el PUT, el tráiler queda a null\", function () {",
+                  "  pm.expect(pm.response.json().trailerUrl).to.be.null;",
+                  "});"
                 ]
               }
             }
@@ -1996,10 +2741,10 @@
                 "{{episodeId}}"
               ]
             },
-            "description": "",
+            "description": "videoUrl es opcional y PUT sustituye el episodio completo: sin videoUrl, el episodio queda sin vídeo.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"seasonNumber\": 1,\n  \"episodeNumber\": 1,\n  \"title\": \"Piloto (editado)\",\n  \"description\": \"Primer episodio.\",\n  \"duration\": 45,\n  \"videoUrl\": \"https://videos.streambox.example/watch/serie-1x01\"\n}",
+              "raw": "{\n  \"seasonNumber\": 1,\n  \"episodeNumber\": 1,\n  \"title\": \"Piloto (editado)\",\n  \"description\": \"Primer episodio.\",\n  \"duration\": 45\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2025,7 +2770,12 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"Título actualizado\", function () { pm.expect(pm.response.json().title).to.eql(\"Piloto (editado)\"); });"
+                  "pm.test(\"Título actualizado\", function () { pm.expect(pm.response.json().title).to.eql(\"Piloto (editado)\"); });",
+                  "pm.test(\"Sin videoUrl, el episodio queda sin vídeo (null)\", function () {",
+                  "  const e = pm.response.json();",
+                  "  pm.expect(e).to.have.property(\"videoUrl\");",
+                  "  pm.expect(e.videoUrl).to.be.null;",
+                  "});"
                 ]
               }
             }
@@ -2559,6 +3309,94 @@
                 "api",
                 "movies",
                 "{{movieId}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Borrar segunda película (ADMIN)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies/{{secondMovieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies",
+                "{{secondMovieId}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Borrar tercera película (ADMIN)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies/{{thirdMovieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies",
+                "{{thirdMovieId}}"
               ]
             },
             "description": "",

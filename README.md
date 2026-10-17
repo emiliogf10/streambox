@@ -105,8 +105,8 @@ La base de todos los endpoints es `/api`.
 | `POST` | `/api/auth/login` | Público | Autenticación mediante email y contraseña; 204 sin cuerpo con dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min) y `streambox_refresh` (refresh token, `Path=/api/auth`). Un fallo responde 401 con `remainingAttempts`; al 5.º, 429 `ACCOUNT_LOCKED` |
 | `POST` | `/api/auth/refresh` | Público (cookie `streambox_refresh`) | Renueva la sesión sin contraseña: 204 con un JWT nuevo y el refresh token rotado. Exige `X-Requested-With: StreamBox` (403 `CSRF_REJECTED`); 401 `SESSION_EXPIRED` si el refresh no sirve (reutilizar uno ya rotado revoca la sesión); 429 por IP |
 | `POST` | `/api/auth/logout` | Público | Revoca la sesión del refresh token de la cookie y borra las dos cookies; 204 (403 `CSRF_REJECTED` sin `X-Requested-With: StreamBox`) |
-| `GET` | `/api/users/me` | `USER`, `ADMIN` | Consulta los datos del usuario autenticado |
-| `PATCH` | `/api/users/me` | `USER`, `ADMIN` | Cambia el nombre de usuario (`{"username"}`); el email, el rol y la contraseña no se cambian aquí (400); 409 si el nombre está en uso |
+| `GET` | `/api/users/me` | `USER`, `ADMIN` | Consulta los datos del usuario autenticado (incluido `avatar`: la clave de su icono o `null`) |
+| `PATCH` | `/api/users/me` | `USER`, `ADMIN` | Cambia el nombre de usuario (`username`) y/o el icono de perfil (`avatar`: una de las 12 claves o `null` para volver a la inicial; si falta, no cambia); el email, el rol y la contraseña no se cambian aquí (400); 409 si el nombre está en uso |
 | `PUT` | `/api/users/me/password` | `USER`, `ADMIN` | Cambia la contraseña (`{"currentPassword","newPassword"}`): 204 con cookies nuevas; cierra todas las demás sesiones; 400 `CURRENT_PASSWORD_INCORRECT`; 429 tras 5 fallos en 15 min |
 | `POST` | `/api/auth/logout-all` | `USER`, `ADMIN` | Cierra la sesión en todos los dispositivos, incluido este (revoca todas las sesiones y borra las cookies); 204 |
 | `GET` | `/api/users` | `ADMIN` | Lista todos los usuarios registrados (la regla es por ruta: cualquier método salvo el `POST` de registro, `HEAD` incluido, exige `ADMIN`) |
@@ -375,7 +375,8 @@ El proyecto está preparado para trabajar con [Claude Code](https://claude.com/c
 | `backend` | Controladores, servicios, DTOs, mappers, excepciones y sus tests |
 | `database` | Entidades JPA, migraciones Flyway, índices, restricciones y rendimiento de consultas |
 | `security` | JWT, roles, rate limiting, ownership de recursos y configuración segura |
-| `qa` | Revisión independiente y tests; solo escribe en `streambox/src/test/` |
+| `qa` | Revisión independiente y tests del backend y del frontend (Vitest y Playwright); nunca código de producción |
 | `frontend` | React, Vite y Tailwind: UI/UX, accesibilidad y consumo de la API |
+| `graphify` | Solo para el grafo de conocimiento: extrae conceptos y relaciones de la documentación cuando se actualiza el grafo (`/graphify --update`); escribe únicamente en `graphify-out/` |
 
 Un subagente no puede lanzar a otros, por eso el orquestador se ejecuta como sesión principal y los demás son sus especialistas. Para trabajar sin delegar basta con pedirlo ("hazlo tú directamente") o quitar `agent` de `.claude/settings.json`.

@@ -384,7 +384,7 @@ test.describe('Estructura accesible (humo)', () => {
     await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
     expect(await auditPage(page)).toEqual([]);
 
-    await page.getByRole('link', { name: /^Ver episodios/ }).click();
+    await page.getByRole('region', { name: SERIES_HERO.title }).getByRole('link', { name: /^Más información/ }).click();
     await expect(page.getByRole('list', { name: 'Episodios de la temporada 1' })).toBeVisible();
     expect(await auditPage(page)).toEqual([]);
   });

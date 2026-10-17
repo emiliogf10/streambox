@@ -142,7 +142,7 @@ export function MyListPage() {
   if (status === 'loading') {
     content = <LoadingState label="Cargando tu lista..." />;
   } else if (status === 'error') {
-    content = <ErrorState title="No se pudo cargar tu lista" message={errorMessage} onRetry={reload} />;
+    content = <ErrorState title="No se pudo cargar tu lista" message={errorMessage} onRetry={reload} retryFocusRef={headingRef} />;
   } else if (totalCount === 0) {
     content = (
       <EmptyState

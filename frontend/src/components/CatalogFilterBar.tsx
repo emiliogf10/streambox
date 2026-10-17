@@ -6,6 +6,7 @@ import type { GenresStatus } from '../hooks/useGenres';
 import { SORT_OPTIONS } from '../lib/catalogFilters';
 import type { CatalogKind, CatalogSortKey } from '../lib/catalogFilters';
 import type { Genre } from '../lib/types';
+import { useRetryFocus } from '../hooks/useRetryFocus';
 import { Button } from './Button';
 import { FormField } from './FormField';
 
@@ -156,6 +157,8 @@ export function CatalogFilterBar({
   const genreId = useId();
   const yearId = useId();
   const sortId = useId();
+  // Al reintentar, el aviso de los géneros desaparece: el foco va al desplegable de género, que sigue ahí.
+  const { retryRef, handleRetry } = useRetryFocus(onRetryGenres, () => document.getElementById(genreId));
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -229,7 +232,7 @@ export function CatalogFilterBar({
       {genresStatus === 'error' && (
         <p className="mt-2 flex flex-wrap items-center gap-x-2 text-sm text-muted">
           No se pudieron cargar los géneros.
-          <Button variant="ghost" onClick={onRetryGenres} className="px-2">
+          <Button ref={retryRef} variant="ghost" onClick={handleRetry} className="px-2">
             Reintentar<span className="sr-only"> la carga de géneros</span>
           </Button>
         </p>

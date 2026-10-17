@@ -1,5 +1,7 @@
 package com.emilio.streambox.controller;
 
+import com.emilio.streambox.validation.ControlCharacters;
+
 /**
  * Reglas de validación del parámetro {@code title} de las tres búsquedas por
  * título ({@code /api/movies/search}, {@code /api/series/search} y
@@ -60,8 +62,14 @@ final class TitleSearchParameter {
      * no son de control y siguen permitidos: no rompen nada y simplemente no
      * encuentran títulos.
      * </p>
+     *
+     * <p>
+     * Es la misma expresión que exigen los títulos al guardarlos
+     * ({@link ControlCharacters#SINGLE_LINE_TEXT}): se toma de allí para que
+     * buscar y guardar no puedan discrepar.
+     * </p>
      */
-    static final String NO_CONTROL_CHARACTERS = "[^\\p{Cc}]*";
+    static final String NO_CONTROL_CHARACTERS = ControlCharacters.SINGLE_LINE_TEXT;
 
     /** Mensaje de los caracteres de control. */
     static final String NO_CONTROL_CHARACTERS_MESSAGE = "La búsqueda no puede contener caracteres de control";

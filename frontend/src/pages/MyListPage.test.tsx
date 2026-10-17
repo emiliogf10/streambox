@@ -209,6 +209,8 @@ describe('MyListPage: secciones', () => {
     await user.click(screen.getByRole('button', { name: 'Reintentar' }));
 
     expect(await screen.findByRole('link', { name: /^Dark/ })).toBeInTheDocument();
+    // El botón desapareció al pulsarlo: el foco quedó en el título de la página, no en <body>.
+    expect(screen.getByRole('heading', { level: 1, name: 'Mi lista' })).toHaveFocus();
   });
   it('al pulsar «Reintentar» vuelve al estado de carga (sin el error a la vista) hasta que llega la respuesta', async () => {
     let retry: ReturnType<typeof deferredResponse> | null = null;

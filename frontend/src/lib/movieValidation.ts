@@ -41,6 +41,57 @@ export const IMAGE_URL_SIZE_MESSAGE = `La URL de la imagen no puede superar los 
 export const VIDEO_URL_FORMAT_MESSAGE = 'La URL del vídeo debe empezar por https://';
 export const VIDEO_URL_SIZE_MESSAGE = `La URL del vídeo no puede superar los ${URL_MAX} caracteres`;
 export const GENRE_NAME_SIZE_MESSAGE = `El nombre del género debe tener entre ${GENRE_NAME_MIN} y ${GENRE_NAME_MAX} caracteres`;
+/**
+ * Título con caracteres de control (`MovieRequest.TITLE_CONTROL_CHARACTERS_MESSAGE`,
+ * el mismo para películas, series y episodios).
+ */
+export const TITLE_CONTROL_CHARACTERS_MESSAGE = 'El título no puede contener caracteres de control';
+/**
+ * Sinopsis de una película con caracteres de control no permitidos
+ * (`MovieRequest.DESCRIPTION_CONTROL_CHARACTERS_MESSAGE`). No dice «no puede
+ * contener caracteres de control» porque sería falso: los saltos de línea
+ * también lo son y se admiten.
+ */
+export const MOVIE_DESCRIPTION_CONTROL_CHARACTERS_MESSAGE = 'La sinopsis contiene caracteres de control no permitidos';
+
+/**
+ * Cualquier carácter de control (categoría Unicode `Cc`: U+0000 a U+001F,
+ * U+007F y U+0080 a U+009F), tabulador y saltos de línea incluidos. Es la
+ * regla `ControlCharacters.SINGLE_LINE_TEXT` del backend (`[^\p{Cc}]*`) vista
+ * al revés: aquí se busca el carácter que sobra.
+ */
+const CONTROL_CHARACTER = /\p{Cc}/u;
+
+/**
+ * Un carácter de control que NO es tabulador, `\n` ni `\r`: lo que rechaza
+ * `ControlCharacters.MULTILINE_TEXT` (`[\t\n\r[^\p{Cc}]]*`). Esos tres se
+ * admiten porque la sinopsis se escribe en un `<textarea>` (Intro mete un
+ * `\n`) y un texto pegado puede traer `\r\n` o tabuladores.
+ */
+const DISALLOWED_MULTILINE_CONTROL_CHARACTER = /(?![\t\n\r])\p{Cc}/u;
+
+/**
+ * Indica si un texto de UNA línea (un título) tiene algún carácter de control.
+ *
+ * Los caracteres de formato invisibles (`Cf`, como el espacio de ancho cero
+ * U+200B) no son de control: el servidor los acepta y aquí también.
+ *
+ * @param value el texto tal como se enviará (ya recortado)
+ */
+export function hasControlCharacters(value: string): boolean {
+  return CONTROL_CHARACTER.test(value);
+}
+
+/**
+ * Indica si un texto de VARIAS líneas (una sinopsis) tiene algún carácter de
+ * control distinto del tabulador y los saltos de línea (p. ej. el NUL U+0000,
+ * que PostgreSQL no admite, o el ESC).
+ *
+ * @param value el texto tal como se enviará (ya recortado)
+ */
+export function hasDisallowedMultilineControlCharacters(value: string): boolean {
+  return DISALLOWED_MULTILINE_CONTROL_CHARACTER.test(value);
+}
 
 /** Prefijo obligatorio de las URL absolutas, en minúsculas (el backend rechaza `HTTPS://`). */
 const HTTPS_PREFIX = 'https://';
@@ -193,6 +244,12 @@ export function parseWholeNumber(raw: string): number | null {
  * Los textos se miden tal como se ven en el campo (el contador de la sinopsis
  * cuenta lo mismo); al enviar se recortan los espacios de los extremos.
  *
+ * Los caracteres de control, en cambio, se buscan en el texto **recortado**,
+ * que es el que llega al servidor: un tabulador o un salto de línea en un
+ * extremo del título desaparece al enviar (`trim`) y el servidor nunca lo ve,
+ * así que marcarlo sería un error que el servidor no daría. Uno en medio del
+ * título sí se envía y sí es un error. El NUL (U+0000) no lo quita `trim`.
+ *
  * @param values valores del formulario
  * @returns los errores encontrados; objeto vacío si todo es válido
  */
@@ -202,11 +259,13 @@ export function validateMovieForm(values: MovieFormValues): MovieFormErrors {
   if (!values.title.trim()) errors.title = 'El título es obligatorio';
   else if (values.title.length > MOVIE_TITLE_MAX) {
     errors.title = `El título no puede superar los ${MOVIE_TITLE_MAX} caracteres`;
-  }
+  } else if (hasControlCharacters(values.title.trim())) errors.title = TITLE_CONTROL_CHARACTERS_MESSAGE;
 
   if (!values.description.trim()) errors.description = 'La sinopsis es obligatoria';
   else if (values.description.length > MOVIE_DESCRIPTION_MAX) {
     errors.description = `La sinopsis no puede superar los ${MOVIE_DESCRIPTION_MAX} caracteres`;
+  } else if (hasDisallowedMultilineControlCharacters(values.description.trim())) {
+    errors.description = MOVIE_DESCRIPTION_CONTROL_CHARACTERS_MESSAGE;
   }
 
   if (!values.duration.trim()) errors.duration = 'Indica la duración en minutos';

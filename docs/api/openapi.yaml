@@ -20,7 +20,8 @@ paths:
         de la cuenta (sus refresh tokens quedan revocados) y mantiene la actual: la respuesta trae en Set-Cookie un streambox_token
         y un streambox_refresh nuevos (una sesión nueva, así que tampoco sirve una copia anterior del refresh token de esta).
         Los JWT de acceso ya emitidos a otras sesiones no se pueden revocar: siguen valiendo hasta caducar (como mucho 15
-        minutos), pero ya no se pueden renovar. Si la contraseña actual es incorrecta no se cambia nada.'
+        minutos), pero ya no se pueden renovar. Si la contraseña actual es incorrecta no se cambia nada. Las IPs desde las
+        que se inició sesión dejan de librarse del bloqueo de la cuenta por intentos fallidos, salvo la de esta petición.'
       operationId: changePassword
       requestBody:
         content:
@@ -250,7 +251,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/SeriesDetailResponse'
         '400':
-          description: Los datos proporcionados no son válidos
+          description: Los datos proporcionados no son válidos (VALIDATION_ERROR, con un mensaje en español por campo en validationErrors),
+            por ejemplo si trailerUrl no es un enlace de YouTube aceptado («El tráiler debe ser un enlace de un vídeo de YouTube»).
+            trailerUrl es opcional
           content:
             application/json:
               schema:
@@ -380,7 +383,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/MovieResponse'
         '400':
-          description: Los datos proporcionados no son válidos
+          description: 'Los datos proporcionados no son válidos. VALIDATION_ERROR: un mensaje en español por campo en validationErrors
+            (los mismos textos que el formulario del panel), también si genreIds contiene un null o si trailerUrl no es un
+            enlace de YouTube aceptado («El tráiler debe ser un enlace de un vídeo de YouTube»). videoUrl y trailerUrl son
+            opcionales. MALFORMED_REQUEST: JSON mal formado o un valor de otro tipo (un número en un texto, un texto o un
+            decimal en un número): no se convierte'
           content:
             application/json:
               schema:
@@ -617,7 +624,9 @@ paths:
           description: 'Los datos proporcionados no son válidos (código VALIDATION_ERROR, un mensaje por campo en validationErrors).
             La contraseña debe tener entre 12 y 64 caracteres, ocupar como máximo 72 bytes en UTF-8, no ser común ni trivial
             y no contener el nombre de usuario ni la parte local del email. Si incumple varias reglas solo se informa de una,
-            por este orden: longitud, bytes, común, datos personales'
+            por este orden: longitud, bytes, común, datos personales. El email admite como máximo 100 caracteres (también
+            una vez pasado a minúsculas). Un campo con un valor de otro tipo (p. ej. la contraseña como número) no se convierte:
+            400 MALFORMED_REQUEST'
           content:
             application/json:
               schema:
@@ -821,12 +830,21 @@ paths:
       parameters:
       - name: title
         in: query
+        description: 'Título exacto de la película (sin distinguir mayúsculas). Sin caracteres de control: si los tiene, 400
+          VALIDATION_ERROR.'
         required: true
         schema:
           type: string
+          pattern: '[^\p{Cc}]*'
       responses:
         '204':
           description: Película añadida correctamente
+        '400':
+          description: Falta el parámetro title o contiene caracteres de control
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: El usuario no está autenticado
           content:
@@ -865,12 +883,21 @@ paths:
       parameters:
       - name: title
         in: query
+        description: 'Título exacto de la película (sin distinguir mayúsculas). Sin caracteres de control: si los tiene, 400
+          VALIDATION_ERROR.'
         required: true
         schema:
           type: string
+          pattern: '[^\p{Cc}]*'
       responses:
         '204':
           description: Película eliminada correctamente
+        '400':
+          description: Falta el parámetro title o contiene caracteres de control
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: El usuario no está autenticado
           content:
@@ -984,7 +1011,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/SeriesDetailResponse'
         '400':
-          description: Los datos proporcionados no son válidos
+          description: Los datos proporcionados no son válidos (VALIDATION_ERROR, con un mensaje en español por campo en validationErrors),
+            por ejemplo si trailerUrl no es un enlace de YouTube aceptado («El tráiler debe ser un enlace de un vídeo de YouTube»).
+            trailerUrl es opcional
           content:
             application/json:
               schema:
@@ -1159,7 +1188,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/MovieResponse'
         '400':
-          description: Los datos proporcionados no son válidos
+          description: 'Los datos proporcionados no son válidos. VALIDATION_ERROR: un mensaje en español por campo en validationErrors
+            (los mismos textos que el formulario del panel), también si genreIds contiene un null o si trailerUrl no es un
+            enlace de YouTube aceptado («El tráiler debe ser un enlace de un vídeo de YouTube»). videoUrl y trailerUrl son
+            opcionales. MALFORMED_REQUEST: JSON mal formado o un valor de otro tipo (un número en un texto, un texto o un
+            decimal en un número): no se convierte'
           content:
             application/json:
               schema:
@@ -1360,7 +1393,8 @@ paths:
       description: 'Revoca todas las sesiones de la cuenta autenticada, incluida la actual: ningún refresh token suyo vuelve
         a servir para renovar. Borra las cookies streambox_token y streambox_refresh de esta petición (Set-Cookie con Max-Age=0).
         Sin cuerpo. Los JWT de acceso ya emitidos son stateless y no se pueden revocar: siguen valiendo hasta caducar (como
-        mucho 15 minutos), pero ya no se pueden renovar.'
+        mucho 15 minutos), pero ya no se pueden renovar. Además, ninguna IP de la cuenta sigue librándose del bloqueo por
+        intentos fallidos del login.'
       operationId: logoutAll
       responses:
         '204':
@@ -1411,9 +1445,10 @@ paths:
         '204':
           description: Autenticación correcta; sin cuerpo, con las cookies streambox_token y streambox_refresh en Set-Cookie
         '400':
-          description: 'Los datos proporcionados no son válidos (email con formato incorrecto, contraseña vacía o de más de
-            1024 caracteres). No gasta intento de la cuenta. En el login no se aplica la política de longitud del registro:
-            las cuentas antiguas siguen pudiendo entrar'
+          description: 'Los datos proporcionados no son válidos (VALIDATION_ERROR: email vacío, con formato incorrecto o de
+            más de 100 caracteres, contraseña vacía o de más de 1024 caracteres; MALFORMED_REQUEST: un campo que no es texto,
+            p. ej. la contraseña como número). No gasta intento de la cuenta. En el login no se aplica la política de longitud
+            del registro: las cuentas antiguas siguen pudiendo entrar'
           content:
             application/json:
               schema:
@@ -1450,7 +1485,8 @@ paths:
       tags:
       - user-controller
       summary: Obtiene el usuario autenticado
-      description: Devuelve la información del usuario asociado al token JWT utilizado en la petición.
+      description: 'Devuelve la información del usuario asociado al token JWT utilizado en la petición, incluido su icono
+        de perfil (avatar: una clave o null).'
       operationId: getCurrentUser
       responses:
         '200':
@@ -1471,11 +1507,13 @@ paths:
     patch:
       tags:
       - user-controller
-      summary: Cambia mi nombre de usuario
-      description: 'Cambia el nombre de usuario de la cuenta autenticada. El nombre se normaliza (sin espacios ni caracteres
-        invisibles en los extremos y con los espacios interiores repetidos reducidos a uno) y debe tener entre 3 y 50 caracteres.
-        Si coincide con el actual se responde 200 sin cambios. El correo electrónico, el rol y la contraseña no se pueden
-        cambiar aquí: enviarlos da 400.'
+      summary: Cambia mi nombre de usuario o mi icono de perfil
+      description: 'Cambia el nombre de usuario y/o el avatar de la cuenta autenticada. Cada campo es opcional (ausente =
+        no cambia), pero debe venir al menos uno. El nombre se normaliza (sin espacios ni caracteres invisibles en los extremos
+        y con los espacios interiores repetidos reducidos a uno) y debe tener entre 3 y 50 caracteres. El avatar es una de
+        las claves predefinidas, o null para quitarlo y volver a la inicial. Si nada cambia se responde 200 sin escribir.
+        La respuesta es el usuario completo, igual que GET /api/users/me. El correo electrónico, el rol y la contraseña no
+        se pueden cambiar aquí: enviarlos da 400.'
       operationId: updateCurrentUser
       requestBody:
         content:
@@ -1485,14 +1523,16 @@ paths:
         required: true
       responses:
         '200':
-          description: Nombre cambiado (o sin cambios si era el mismo)
+          description: Perfil actualizado (o sin cambios si era el mismo)
           content:
             '*/*':
               schema:
                 $ref: '#/components/schemas/UserResponse'
         '400':
-          description: 'Datos no válidos (código VALIDATION_ERROR, un mensaje por campo en validationErrors): nombre ausente
-            o de longitud no válida tras normalizarlo, o se ha enviado email, role o password'
+          description: 'Datos no válidos (código VALIDATION_ERROR, un mensaje por campo en validationErrors): cuerpo sin username
+            ni avatar (validationErrors.username = "Indica al menos un cambio: el nombre de usuario o el icono de perfil"),
+            nombre de longitud no válida tras normalizarlo, avatar que no es una de las claves de la lista ni null (validationErrors.avatar
+            = "Elige uno de los avatares disponibles"), o se ha enviado email, role o password'
           content:
             application/json:
               schema:
@@ -1625,15 +1665,26 @@ paths:
       tags:
       - series-controller
       summary: Busca series
-      description: Busca series con episodios aplicando opcionalmente filtros por título (contiene, sin distinguir mayúsculas;
-        % y _ se tratan como texto), género y año de estreno. Los resultados se devuelven de forma paginada y ordenada.
+      description: 'Busca series con episodios aplicando opcionalmente filtros por título (contiene, sin distinguir mayúsculas
+        ni acentos; % y _ se tratan como texto), género y año de estreno. Los resultados se devuelven de forma paginada y
+        ordenada. Si ninguna serie contiene el título buscado y este tiene 5 letras o dígitos o más, se devuelven en su lugar
+        las series con un título parecido (tolerancia a erratas, con los mismos filtros y siempre solo series con episodios),
+        ordenadas por parecido en vez de por sort/direction y con approximate: true.'
       operationId: searchSeries
       parameters:
       - name: title
         in: query
+        description: 'Texto que debe contener el título: sin distinguir mayúsculas ni acentos (manana encuentra Mañana; %
+          y _ se tratan como texto). Si no hay ninguna coincidencia y la búsqueda tiene 5 letras o dígitos o más, devuelve
+          los títulos parecidos (tolerancia a erratas: interstelar encuentra Interstellar), ordenados por parecido sin tener
+          en cuenta sort/direction, y la respuesta lleva approximate: true. Como mucho 150 caracteres y sin caracteres de
+          control (si no, 400)'
         required: false
         schema:
           type: string
+          maxLength: 150
+          minLength: 0
+          pattern: '[^\p{Cc}]*'
       - name: genreId
         in: query
         required: false
@@ -1687,7 +1738,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/SeriesPageResponse'
         '400':
-          description: Parámetros de paginación u ordenación inválidos
+          description: Parámetros de paginación u ordenación inválidos, o texto de búsqueda (title) con más de 150 caracteres
+            o con caracteres de control
           content:
             application/json:
               schema:
@@ -1701,20 +1753,87 @@ paths:
       security:
       - cookieAuth: []
       - bearerAuth: []
+  /api/movies/{id}/similar:
+    get:
+      tags:
+      - movie-controller
+      summary: Obtiene películas similares
+      description: 'Devuelve, ya ordenadas de la más a la menos parecida, las películas que comparten al menos un género con
+        la indicada (sin incluirla): primero las que comparten más géneros; a igualdad, la de año de estreno más cercano;
+        después la añadida más recientemente y, por último, el id. Si la película existe pero no comparte géneros con ninguna,
+        devuelve una lista vacía.'
+      operationId: getSimilarMovies
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: limit
+        in: query
+        description: 'Número máximo de películas: de 1 a 24 (por defecto, 12)'
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 12
+          maximum: 24
+          minimum: 1
+      responses:
+        '200':
+          description: Películas similares obtenidas correctamente (puede ser una lista vacía)
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MovieResponse'
+        '400':
+          description: El límite no es un número entero entre 1 y 24, o el id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Película no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
   /api/movies/search:
     get:
       tags:
       - movie-controller
       summary: Busca películas
-      description: Busca películas aplicando opcionalmente filtros por título, género y año de lanzamiento. Los resultados
-        se devuelven de forma paginada y ordenada.
+      description: 'Busca películas aplicando opcionalmente filtros por título, género y año de lanzamiento. Los resultados
+        se devuelven de forma paginada y ordenada. Si ninguna película contiene el título buscado y este tiene 5 letras o
+        dígitos o más, se devuelven en su lugar las películas con un título parecido (tolerancia a erratas, con los mismos
+        filtros de género y año), ordenadas por parecido en vez de por sort/direction y con approximate: true.'
       operationId: searchMovies
       parameters:
       - name: title
         in: query
+        description: 'Texto que debe contener el título: sin distinguir mayúsculas ni acentos (manana encuentra Mañana; %
+          y _ se tratan como texto). Si no hay ninguna coincidencia y la búsqueda tiene 5 letras o dígitos o más, devuelve
+          los títulos parecidos (tolerancia a erratas: interstelar encuentra Interstellar), ordenados por parecido sin tener
+          en cuenta sort/direction, y la respuesta lleva approximate: true. Como mucho 150 caracteres y sin caracteres de
+          control (si no, 400)'
         required: false
         schema:
           type: string
+          maxLength: 150
+          minLength: 0
+          pattern: '[^\p{Cc}]*'
       - name: genreId
         in: query
         required: false
@@ -1768,7 +1887,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/MoviePageResponse'
         '400':
-          description: Parámetros de paginación u ordenación inválidos
+          description: Parámetros de paginación u ordenación inválidos, o texto de búsqueda (title) con más de 150 caracteres
+            o con caracteres de control
           content:
             application/json:
               schema:
@@ -1787,15 +1907,25 @@ paths:
       tags:
       - admin-series-controller
       summary: Lista las series para el panel
-      description: Devuelve de forma paginada todas las series, también las que aún no tienen episodios (episodeCount = 0,
-        ocultas para los usuarios). Filtro opcional por título. Requiere rol ADMIN.
+      description: 'Devuelve de forma paginada todas las series, también las que aún no tienen episodios (episodeCount = 0,
+        ocultas para los usuarios). Filtro opcional por título, con las mismas reglas que /api/series/search: si ninguna serie
+        lo contiene y tiene 5 letras o dígitos o más, devuelve las series con un título parecido, ordenadas por parecido y
+        con approximate: true. Requiere rol ADMIN.'
       operationId: getSeries_1
       parameters:
       - name: title
         in: query
+        description: 'Texto que debe contener el título: sin distinguir mayúsculas ni acentos (manana encuentra Mañana; %
+          y _ se tratan como texto). Si no hay ninguna coincidencia y la búsqueda tiene 5 letras o dígitos o más, devuelve
+          los títulos parecidos (tolerancia a erratas: interstelar encuentra Interstellar), ordenados por parecido sin tener
+          en cuenta sort/direction, y la respuesta lleva approximate: true. Como mucho 150 caracteres y sin caracteres de
+          control (si no, 400)'
         required: false
         schema:
           type: string
+          maxLength: 150
+          minLength: 0
+          pattern: '[^\p{Cc}]*'
       - name: page
         in: query
         required: false
@@ -1837,7 +1967,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/SeriesPageResponse'
         '400':
-          description: Parámetros de paginación u ordenación inválidos
+          description: Parámetros de paginación u ordenación inválidos, o texto de búsqueda (title) con más de 150 caracteres
+            o con caracteres de control
           content:
             application/json:
               schema:
@@ -1937,13 +2068,19 @@ components:
           minimum: 1
         title:
           type: string
+          description: 'Título. Sin caracteres de control (tampoco tabuladores ni saltos de línea): si los tiene, 400 VALIDATION_ERROR
+            con «El título no puede contener caracteres de control».'
           maxLength: 150
           minLength: 0
+          pattern: '[^\p{Cc}]*'
         description:
           type: string
-          description: Sinopsis opcional. Si se omite o va en blanco se guarda sin sinopsis (null en la respuesta).
+          description: Sinopsis opcional. Si se omite o va en blanco se guarda sin sinopsis (null en la respuesta). Admite
+            saltos de línea y tabuladores; cualquier otro carácter de control (de U+0000 a U+001F, U+007F y de U+0080 a U+009F)
+            da 400 VALIDATION_ERROR.
           maxLength: 1000
           minLength: 0
+          pattern: '[\t\n\r[^\p{Cc}]]*'
         duration:
           type: integer
           format: int32
@@ -1951,8 +2088,9 @@ components:
           minimum: 1
         videoUrl:
           type: string
-          description: URL del vídeo. Debe ser una URL https:// absoluta, con host y sin credenciales (usuario:clave@). Solo
-            caracteres ASCII visibles (sin espacios); máximo 500 caracteres.
+          description: 'URL del vídeo del episodio. Opcional: si se omite, es null o va en blanco, el episodio queda sin vídeo
+            (null en la respuesta). Si se indica, debe ser una URL https:// absoluta, con host y sin credenciales (usuario:clave@).
+            Solo caracteres ASCII visibles (sin espacios); máximo 500 caracteres. En un PUT, omitirlo borra el vídeo.'
           example: https://videos.streambox.example/watch/serie-1x01
           maxLength: 500
           minLength: 0
@@ -1961,7 +2099,6 @@ components:
       - episodeNumber
       - seasonNumber
       - title
-      - videoUrl
     EpisodeResponse:
       type: object
       properties:
@@ -1982,18 +2119,27 @@ components:
           type: integer
           format: int32
         videoUrl:
-          type: string
+          type:
+          - string
+          - 'null'
+          description: URL del vídeo del episodio, o null si no tiene (el tráiler va en la serie).
     SeriesRequest:
       type: object
       properties:
         title:
           type: string
+          description: 'Título. Sin caracteres de control (tampoco tabuladores ni saltos de línea): si los tiene, 400 VALIDATION_ERROR
+            con «El título no puede contener caracteres de control».'
           maxLength: 150
           minLength: 0
+          pattern: '[^\p{Cc}]*'
         description:
           type: string
+          description: Sinopsis. Admite saltos de línea y tabuladores; cualquier otro carácter de control (de U+0000 a U+001F,
+            U+007F y de U+0080 a U+009F) da 400 VALIDATION_ERROR.
           maxLength: 1000
           minLength: 0
+          pattern: '[\t\n\r[^\p{Cc}]]*'
         releaseYear:
           type: integer
           format: int32
@@ -2013,6 +2159,19 @@ components:
             y solo contiene letras, números, punto, guion y guion bajo. Solo caracteres ASCII visibles (sin espacios); máximo
             500 caracteres.
           example: https://image.tmdb.org/t/p/w500/portada.jpg
+          maxLength: 500
+          minLength: 0
+        trailerUrl:
+          type: string
+          description: 'Enlace del tráiler en YouTube. Opcional: si se omite, es null o va en blanco, el título queda sin
+            tráiler (null en la respuesta). Si se indica, solo se aceptan estas formas, siempre con https:// en minúsculas,
+            sin credenciales, sin puerto y sin fragmento (#): https://www.youtube.com/watch?v=<id> (también con m. o sin subdominio;
+            el resto de parámetros se ignora, pero debe haber un único v), https://youtu.be/<id>, https://www.youtube.com/embed/<id>
+            y https://www.youtube-nocookie.com/embed/<id>, donde <id> son 11 caracteres de letras, números, guion o guion
+            bajo. Se guarda y se devuelve normalizado como https://www.youtube.com/watch?v=<id>. Máximo 500 caracteres. En
+            un PUT, omitirlo borra el tráiler. Errores: «El tráiler debe ser un enlace de un vídeo de YouTube» y «La URL del
+            tráiler no puede superar los 500 caracteres».'
+          example: https://youtu.be/aBcDeFgHiJk
           maxLength: 500
           minLength: 0
         genreIds:
@@ -2065,6 +2224,13 @@ components:
           format: int32
         imageUrl:
           type: string
+        trailerUrl:
+          type:
+          - string
+          - 'null'
+          description: Tráiler en YouTube, siempre en la forma normalizada https://www.youtube.com/watch?v=<id> (id de 11
+            caracteres de letras, números, guion o guion bajo), o null si no tiene.
+          example: https://www.youtube.com/watch?v=aBcDeFgHiJk
         createdAt:
           type: string
           format: date-time
@@ -2087,12 +2253,18 @@ components:
       properties:
         title:
           type: string
+          description: 'Título. Sin caracteres de control (tampoco tabuladores ni saltos de línea): si los tiene, 400 VALIDATION_ERROR
+            con «El título no puede contener caracteres de control».'
           maxLength: 150
           minLength: 0
+          pattern: '[^\p{Cc}]*'
         description:
           type: string
+          description: Sinopsis. Admite saltos de línea y tabuladores; cualquier otro carácter de control (de U+0000 a U+001F,
+            U+007F y de U+0080 a U+009F) da 400 VALIDATION_ERROR.
           maxLength: 1000
           minLength: 0
+          pattern: '[\t\n\r[^\p{Cc}]]*'
         duration:
           type: integer
           format: int32
@@ -2113,9 +2285,23 @@ components:
           minLength: 0
         videoUrl:
           type: string
-          description: URL del vídeo. Debe ser una URL https:// absoluta, con host y sin credenciales (usuario:clave@). Solo
-            caracteres ASCII visibles (sin espacios); máximo 500 caracteres.
+          description: 'URL del vídeo de la película. Opcional: si se omite, es null o va en blanco, la película queda sin
+            vídeo (null en la respuesta). Si se indica, debe ser una URL https:// absoluta, con host y sin credenciales (usuario:clave@).
+            Solo caracteres ASCII visibles (sin espacios); máximo 500 caracteres. En un PUT, omitirlo borra el vídeo.'
           example: https://videos.streambox.example/watch/dune
+          maxLength: 500
+          minLength: 0
+        trailerUrl:
+          type: string
+          description: 'Enlace del tráiler en YouTube. Opcional: si se omite, es null o va en blanco, el título queda sin
+            tráiler (null en la respuesta). Si se indica, solo se aceptan estas formas, siempre con https:// en minúsculas,
+            sin credenciales, sin puerto y sin fragmento (#): https://www.youtube.com/watch?v=<id> (también con m. o sin subdominio;
+            el resto de parámetros se ignora, pero debe haber un único v), https://youtu.be/<id>, https://www.youtube.com/embed/<id>
+            y https://www.youtube-nocookie.com/embed/<id>, donde <id> son 11 caracteres de letras, números, guion o guion
+            bajo. Se guarda y se devuelve normalizado como https://www.youtube.com/watch?v=<id>. Máximo 500 caracteres. En
+            un PUT, omitirlo borra el tráiler. Errores: «El tráiler debe ser un enlace de un vídeo de YouTube» y «La URL del
+            tráiler no puede superar los 500 caracteres».'
+          example: https://youtu.be/aBcDeFgHiJk
           maxLength: 500
           minLength: 0
         genreIds:
@@ -2133,7 +2319,6 @@ components:
       - imageUrl
       - releaseYear
       - title
-      - videoUrl
     MovieResponse:
       type: object
       properties:
@@ -2153,7 +2338,17 @@ components:
         imageUrl:
           type: string
         videoUrl:
-          type: string
+          type:
+          - string
+          - 'null'
+          description: URL del vídeo de la película, o null si no tiene vídeo del contenido.
+        trailerUrl:
+          type:
+          - string
+          - 'null'
+          description: Tráiler en YouTube, siempre en la forma normalizada https://www.youtube.com/watch?v=<id> (id de 11
+            caracteres de letras, números, guion o guion bajo), o null si no tiene.
+          example: https://www.youtube.com/watch?v=aBcDeFgHiJk
         createdAt:
           type: string
           format: date-time
@@ -2181,7 +2376,8 @@ components:
         email:
           type: string
           format: email
-          minLength: 1
+          maxLength: 100
+          minLength: 0
         password:
           type: string
           description: 'Contraseña de la cuenta: entre 12 y 64 caracteres y como máximo 72 bytes en UTF-8 (las tildes y eñes
@@ -2212,13 +2408,22 @@ components:
         createdAt:
           type: string
           format: date-time
+        avatar:
+          type:
+          - string
+          - 'null'
+          description: 'Clave del icono de perfil elegido (una de las de UpdateProfileRequest.avatar), o null si no eligió
+            ninguno: entonces se muestra la inicial del nombre. Trátala como texto: si el cliente no conoce la clave, debe
+            mostrar también la inicial.'
+          example: rocket
     LoginRequest:
       type: object
       properties:
         email:
           type: string
           format: email
-          minLength: 1
+          maxLength: 100
+          minLength: 0
         password:
           type: string
           maxLength: 1024
@@ -2231,13 +2436,34 @@ components:
       properties:
         username:
           type: string
-          description: Nuevo nombre de usuario. Se quitan los espacios (y caracteres invisibles) de los extremos y los interiores
-            repetidos se reducen a uno; tras ello debe tener entre 3 y 50 caracteres y no estar en uso por otra cuenta.
+          description: 'Nuevo nombre de usuario (opcional: ausente o null = no cambia). Se quitan los espacios (y caracteres
+            invisibles) de los extremos y los interiores repetidos se reducen a uno; tras ello debe tener entre 3 y 50 caracteres
+            y no estar en uso por otra cuenta.'
           example: cinefila_88
           maxLength: 50
           minLength: 3
-      required:
-      - username
+        avatar:
+          type:
+          - string
+          - 'null'
+          description: Icono de perfil (opcional). Ausente = no cambia; null = quitar el avatar y volver a la inicial del
+            nombre; una de las claves de la lista = guardarla. Cualquier otro valor (otro texto, mayúsculas, espacios, un
+            número, un objeto) da 400 VALIDATION_ERROR con validationErrors.avatar = "Elige uno de los avatares disponibles".
+          enum:
+          - rocket
+          - ghost
+          - cat
+          - dog
+          - star
+          - flame
+          - leaf
+          - moon
+          - sun
+          - zap
+          - music
+          - crown
+          - null
+          example: rocket
     SeriesResponse:
       type: object
       properties:
@@ -2256,6 +2482,13 @@ components:
           format: int32
         imageUrl:
           type: string
+        trailerUrl:
+          type:
+          - string
+          - 'null'
+          description: Tráiler en YouTube, siempre en la forma normalizada https://www.youtube.com/watch?v=<id> (id de 11
+            caracteres de letras, números, guion o guion bajo), o null si no tiene.
+          example: https://www.youtube.com/watch?v=aBcDeFgHiJk
         createdAt:
           type: string
           format: date-time
@@ -2292,6 +2525,14 @@ components:
           type: boolean
         hasPrevious:
           type: boolean
+        approximate:
+          type: boolean
+          description: 'true solo cuando la búsqueda por título no encontró ningún título que contuviera el texto y se devuelven,
+            en su lugar, títulos parecidos (tolerancia a erratas: solo con 5 letras o dígitos o más). Entonces los resultados
+            van ordenados por parecido, del más parecido al menos, y no por el sort pedido. false en cualquier otro caso,
+            incluidos los listados sin búsqueda y las búsquedas sin resultados.'
+      required:
+      - approximate
     MoviePageResponse:
       type: object
       properties:
@@ -2315,6 +2556,14 @@ components:
           type: boolean
         hasPrevious:
           type: boolean
+        approximate:
+          type: boolean
+          description: 'true solo cuando la búsqueda por título no encontró ningún título que contuviera el texto y se devuelven,
+            en su lugar, títulos parecidos (tolerancia a erratas: solo con 5 letras o dígitos o más). Entonces los resultados
+            van ordenados por parecido, del más parecido al menos, y no por el sort pedido. false en cualquier otro caso,
+            incluidos los listados sin búsqueda y las búsquedas sin resultados.'
+      required:
+      - approximate
     ErrorResponse:
       type: object
       description: 'Formato común de todas las respuestas de error de la API (4xx y 5xx). El cliente debe decidir por status
@@ -2364,8 +2613,6 @@ components:
 
             - AMBIGUOUS_TITLE (409): varias películas tienen ese título; hay que usar el id.
 
-            - DATA_INTEGRITY_VIOLATION (409): la operación choca con una restricción de los datos.
-
             - VALIDATION_ERROR (400): datos o parámetros no válidos; el detalle por campo va en validationErrors.
 
             - CURRENT_PASSWORD_INCORRECT (400): al cambiar la contraseña, la actual no es correcta; el detalle va en validationErrors.currentPassword.
@@ -2394,7 +2641,8 @@ components:
 
             - ACCOUNT_LOCKED (429): la cuenta está bloqueada temporalmente por logins fallidos; ver la cabecera Retry-After.
 
-            - INTERNAL_ERROR (500 u otro 5xx): error no controlado en el servidor.'
+            - INTERNAL_ERROR (500 u otro 5xx): error no controlado en el servidor (también una violación de integridad de
+            la base de datos que la API no esperaba).'
           enum:
           - RESOURCE_NOT_FOUND
           - USER_ALREADY_EXISTS
@@ -2402,7 +2650,6 @@ components:
           - MOVIE_NOT_IN_FAVORITES
           - VALIDATION_ERROR
           - INVALID_CREDENTIALS
-          - DATA_INTEGRITY_VIOLATION
           - INTERNAL_ERROR
           - AMBIGUOUS_TITLE
           - ACCESS_DENIED

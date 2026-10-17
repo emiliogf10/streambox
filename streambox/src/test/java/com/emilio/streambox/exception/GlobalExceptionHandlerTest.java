@@ -8,7 +8,6 @@ import java.time.Duration;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -48,16 +47,6 @@ class GlobalExceptionHandlerTest {
 
         assertError(response, HttpStatus.CONFLICT, ErrorCode.USER_ALREADY_EXISTS,
                 "El correo electrónico ya está en uso");
-    }
-
-    @Test
-    void dataIntegrityViolationDoesNotExposeDatabaseDetails() {
-        ResponseEntity<ErrorResponse> response = handler.handleDataIntegrityViolation(
-                new DataIntegrityViolationException("duplicate key value violates unique constraint users_email_key"),
-                request);
-
-        assertError(response, HttpStatus.CONFLICT, ErrorCode.DATA_INTEGRITY_VIOLATION,
-                "No se puede completar la operación porque entra en conflicto con datos existentes");
     }
 
     @Test

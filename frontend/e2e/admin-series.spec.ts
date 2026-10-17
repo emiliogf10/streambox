@@ -346,7 +346,7 @@ test('episodios: editar uno cambia su página pública (la serie es el banner de
   // Se entra desde el banner (navegación dentro de la SPA, como un usuario).
   expect(await publicSeriesSearchCount(request, adminToken, SUFFIX)).toBe(1);
   await page.goto('/series');
-  await page.getByRole('region', { name: title }).getByRole('link', { name: /^Ver episodios/ }).click();
+  await page.getByRole('region', { name: title }).getByRole('link', { name: /^Más información/ }).click();
   await expect(page).toHaveURL(new RegExp(`/series/${id}$`));
   await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Temporadas' }).getByRole('link')).toHaveText(['Temporada 1', 'Temporada 2']);

@@ -14,9 +14,13 @@ import {
   GENRE_NAME_SIZE_MESSAGE,
   IMAGE_URL_FORMAT_MESSAGE,
   IMAGE_URL_SIZE_MESSAGE,
+  MOVIE_DESCRIPTION_CONTROL_CHARACTERS_MESSAGE,
+  TITLE_CONTROL_CHARACTERS_MESSAGE,
   VIDEO_URL_FORMAT_MESSAGE,
   VIDEO_URL_SIZE_MESSAGE,
   getPreviewImageUrl,
+  hasControlCharacters,
+  hasDisallowedMultilineControlCharacters,
   toMovieRequest,
   validateGenreName,
   validateImageUrl,
@@ -205,6 +209,83 @@ describe('validateMovieForm', () => {
 
   it('las URL se validan recortadas: un espacio pegado sin querer no es un error', () => {
     expect(validateMovieForm({ ...valid, imageUrl: ' /covers/ok.webp ', videoUrl: ' https://v.example/x ' })).toEqual({});
+  });
+});
+
+/**
+ * Caracteres de control: el contrato de `ControlCharacters` en el backend.
+ * Títulos sin ninguno (`[^\p{Cc}]*`); sinopsis, solo tabulador, `\n` y `\r`.
+ * Los casos se escriben con escapes (`\u0000`) porque esos caracteres no se
+ * ven: un literal invisible en el test sería imposible de revisar.
+ */
+describe('caracteres de control', () => {
+  it('los mensajes son los del contrato con el backend, literalmente', () => {
+    expect(TITLE_CONTROL_CHARACTERS_MESSAGE).toBe('El título no puede contener caracteres de control');
+    expect(MOVIE_DESCRIPTION_CONTROL_CHARACTERS_MESSAGE).toBe('La sinopsis contiene caracteres de control no permitidos');
+  });
+
+  it.each([
+    ['NUL (U+0000)', 'Inter\u0000stellar'],
+    ['campana (U+0007)', 'Inter\u0007stellar'],
+    ['tabulador', 'Inter\tstellar'],
+    ['salto de línea', 'Inter\nstellar'],
+    ['retorno de carro', 'Inter\rstellar'],
+    ['ESC (U+001B)', 'Inter\u001bstellar'],
+    ['DEL (U+007F)', 'Inter\u007fstellar'],
+    ['NEL (U+0085, control C1)', 'Inter\u0085stellar'],
+    ['U+009F (último control C1)', 'Inter\u009fstellar'],
+  ])('título con %s → error de caracteres de control', (_name, title) => {
+    expect(validateMovieForm({ ...valid, title }).title).toBe(TITLE_CONTROL_CHARACTERS_MESSAGE);
+  });
+
+  it('título: un NUL al final también es error (trim no lo quita y llegaría al servidor)', () => {
+    expect(validateMovieForm({ ...valid, title: 'Interstellar\u0000' }).title).toBe(TITLE_CONTROL_CHARACTERS_MESSAGE);
+  });
+
+  it('título: un tabulador o salto de línea en un extremo no es error (se recorta al enviar y el servidor no lo ve)', () => {
+    const values = { ...valid, title: '\tInterstellar\n' };
+    expect(validateMovieForm(values).title).toBeUndefined();
+    expect(toMovieRequest(values).title).toBe('Interstellar');
+  });
+
+  it('título: los caracteres de formato invisibles (U+200B, categoría Cf) no son de control y se aceptan, como en el servidor', () => {
+    expect(validateMovieForm({ ...valid, title: 'Inter​stellar' }).title).toBeUndefined();
+    expect(validateMovieForm({ ...valid, title: 'Amélie · 東京 🎬' }).title).toBeUndefined();
+    // U+00A0 (espacio duro) va justo detrás de los controles C1: no es de control.
+    expect(validateMovieForm({ ...valid, title: 'Inter stellar' }).title).toBeUndefined();
+  });
+
+  it('título: la longitud se comprueba antes (UN mensaje por campo)', () => {
+    expect(validateMovieForm({ ...valid, title: `${'t'.repeat(151)}\u0000` }).title).toBe(
+      'El título no puede superar los 150 caracteres',
+    );
+  });
+
+  it.each([
+    ['tabulador', 'Primera parte:\tel viaje.'],
+    ['salto de línea', 'Primer párrafo.\nSegundo párrafo.'],
+    ['retorno de carro y salto (texto pegado de Windows)', 'Primer párrafo.\r\nSegundo párrafo.'],
+    ['espacio de ancho cero (U+200B)', 'Un viaje​ por el espacio.'],
+  ])('sinopsis con %s → válida (se escribe en un <textarea>)', (_name, description) => {
+    expect(validateMovieForm({ ...valid, description }).description).toBeUndefined();
+  });
+
+  it.each([
+    ['NUL (U+0000)', 'Un viaje\u0000 por el espacio.'],
+    ['campana (U+0007)', 'Un viaje\u0007 por el espacio.'],
+    ['tabulador vertical (U+000B)', 'Un viaje\u000b por el espacio.'],
+    ['ESC (U+001B)', 'Un viaje\u001b por el espacio.'],
+    ['NEL (U+0085)', 'Un viaje\u0085 por el espacio.'],
+  ])('sinopsis con %s → error de caracteres de control', (_name, description) => {
+    expect(validateMovieForm({ ...valid, description }).description).toBe(MOVIE_DESCRIPTION_CONTROL_CHARACTERS_MESSAGE);
+  });
+
+  it('las funciones de detección siguen la regla de cada tipo de texto', () => {
+    expect(hasControlCharacters('Interstellar')).toBe(false);
+    expect(hasControlCharacters('a\tb')).toBe(true);
+    expect(hasDisallowedMultilineControlCharacters('a\tb\nc\r\nd')).toBe(false);
+    expect(hasDisallowedMultilineControlCharacters('a\u0000b')).toBe(true);
+    expect(hasDisallowedMultilineControlCharacters('a\u007fb')).toBe(true);
   });
 });
 

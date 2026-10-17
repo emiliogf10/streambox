@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../../components/Button';
+import { useRetryFocus } from '../../hooks/useRetryFocus';
 import type { GenresStatus } from '../../hooks/useGenres';
 import type { Genre } from '../../lib/types';
 import { ADMIN_GENRES_PATH } from './adminPaths';
@@ -32,6 +33,11 @@ interface GenreCheckboxesProps {
  *
  * Mientras cargan, si fallan (con «Reintentar») o si no hay ninguno (con un
  * enlace a la pestaña Géneros), el grupo lo explica en su lugar.
+ *
+ * Al pulsar «Reintentar», el botón deja paso a «Cargando géneros...»: el foco
+ * pasa al propio grupo (`fieldset` con `tabIndex={-1}`), que el lector anuncia
+ * como «Géneros», y si vuelve a fallar, al nuevo «Reintentar» (`useRetryFocus`).
+ * Sin esto caería en `<body>`, lejos de este punto de un formulario largo.
  */
 export function GenreCheckboxes({
   id,
@@ -46,6 +52,7 @@ export function GenreCheckboxes({
   error,
 }: GenreCheckboxesProps) {
   const hintId = `${id}-hint`;
+  const { retryRef, handleRetry } = useRetryFocus(onRetry, () => document.getElementById(id));
   const errorId = `${id}-error`;
 
   let body: ReactNode;
@@ -59,7 +66,7 @@ export function GenreCheckboxes({
     body = (
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-red-500/30 bg-red-950/30 p-3">
         <p className="text-sm text-red-300">{errorMessage}</p>
-        <Button variant="outline" onClick={onRetry}>
+        <Button ref={retryRef} variant="outline" onClick={handleRetry}>
           Reintentar
         </Button>
       </div>
@@ -96,7 +103,14 @@ export function GenreCheckboxes({
   }
 
   return (
-    <fieldset id={id} aria-describedby={error ? errorId : hintId} aria-invalid={error ? true : undefined} className="min-w-0">
+    // tabIndex -1: el grupo recibe el foco por código tras «Reintentar»; no es una parada de tabulador.
+    <fieldset
+      id={id}
+      tabIndex={-1}
+      aria-describedby={error ? errorId : hintId}
+      aria-invalid={error ? true : undefined}
+      className="focus-ring min-w-0 rounded-lg"
+    >
       <legend className="mb-1.5 text-sm font-medium text-gray-300">Géneros</legend>
       {body}
       {error ? (

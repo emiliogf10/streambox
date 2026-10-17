@@ -63,7 +63,7 @@ public class UserController {
     @GetMapping("/me")
     @SecurityRequirement(name = "bearerAuth")
     @Operation(summary = "Obtiene el usuario autenticado", description = "Devuelve la información del usuario asociado "
-            + "al token JWT utilizado en la petición.")
+            + "al token JWT utilizado en la petición, incluido su icono de perfil (avatar: una clave o null).")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Usuario obtenido correctamente"),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado")
@@ -74,7 +74,8 @@ public class UserController {
     }
 
     /**
-     * Cambia el nombre de usuario del usuario autenticado («Editar perfil»).
+     * Cambia el nombre de usuario y/o el icono de perfil (avatar) del usuario
+     * autenticado («Editar perfil»).
      *
      * <p>
      * La cuenta sale del token ({@link AuthenticatedUser}), nunca de la URL:
@@ -85,21 +86,26 @@ public class UserController {
      * </p>
      *
      * @param principal usuario autenticado de la petición actual
-     * @param request   nuevo nombre de usuario
+     * @param request   cambios pedidos: nombre, avatar o los dos
      * @return los datos del usuario tras el cambio (los mismos que {@code GET /api/users/me})
      */
     @PatchMapping("/me")
     @SecurityRequirement(name = "bearerAuth")
-    @Operation(summary = "Cambia mi nombre de usuario", description = "Cambia el nombre de usuario de la cuenta "
-            + "autenticada. El nombre se normaliza (sin espacios ni caracteres invisibles en los extremos y "
-            + "con los espacios interiores repetidos reducidos a uno) y debe tener entre 3 y 50 caracteres. "
-            + "Si coincide con el actual se responde 200 sin cambios. El correo electrónico, el rol y la "
-            + "contraseña no se pueden cambiar aquí: enviarlos da 400.")
+    @Operation(summary = "Cambia mi nombre de usuario o mi icono de perfil", description = "Cambia el nombre "
+            + "de usuario y/o el avatar de la cuenta autenticada. Cada campo es opcional (ausente = no cambia), "
+            + "pero debe venir al menos uno. El nombre se normaliza (sin espacios ni caracteres invisibles en los "
+            + "extremos y con los espacios interiores repetidos reducidos a uno) y debe tener entre 3 y 50 "
+            + "caracteres. El avatar es una de las claves predefinidas, o null para quitarlo y volver a la "
+            + "inicial. Si nada cambia se responde 200 sin escribir. La respuesta es el usuario completo, igual "
+            + "que GET /api/users/me. El correo electrónico, el rol y la contraseña no se pueden cambiar aquí: "
+            + "enviarlos da 400.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Nombre cambiado (o sin cambios si era el mismo)"),
+            @ApiResponse(responseCode = "200", description = "Perfil actualizado (o sin cambios si era el mismo)"),
             @ApiResponse(responseCode = "400", description = "Datos no válidos (código VALIDATION_ERROR, un "
-                    + "mensaje por campo en validationErrors): nombre ausente o de longitud no válida tras "
-                    + "normalizarlo, o se ha enviado email, role o password"),
+                    + "mensaje por campo en validationErrors): cuerpo sin username ni avatar "
+                    + "(validationErrors.username = \"" + UpdateProfileRequest.NO_CHANGES_MESSAGE + "\"), nombre de longitud no válida tras normalizarlo, avatar que no "
+                    + "es una de las claves de la lista ni null (validationErrors.avatar = \"Elige uno de los "
+                    + "avatares disponibles\"), o se ha enviado email, role o password"),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "409", description = "El nombre de usuario ya está en uso "
                     + "(código USER_ALREADY_EXISTS)")

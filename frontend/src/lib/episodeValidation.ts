@@ -16,7 +16,16 @@
  *
  * Funciones puras (sin React) para poder probar cada regla por separado.
  */
-import { MOVIE_DESCRIPTION_MAX, MOVIE_TITLE_MAX, optionalUrl, parseWholeNumber, validateVideoUrl } from './movieValidation';
+import {
+  MOVIE_DESCRIPTION_MAX,
+  MOVIE_TITLE_MAX,
+  hasControlCharacters,
+  hasDisallowedMultilineControlCharacters,
+  optionalUrl,
+  parseWholeNumber,
+  validateVideoUrl,
+} from './movieValidation';
+import { SERIES_MESSAGES } from './seriesValidation';
 import type { Episode, EpisodeRequest, Season } from './types';
 
 /** Límites de `EpisodeRequest` (`@Min`, `@Max`, `@Size`). */
@@ -37,7 +46,11 @@ export const EPISODE_MESSAGES = {
   numberRange: `El número de episodio debe estar entre ${EPISODE_NUMBER_MIN} y ${EPISODE_NUMBER_MAX}`,
   titleRequired: 'El título es obligatorio',
   titleSize: `El título no puede superar los ${EPISODE_TITLE_MAX} caracteres`,
+  /** El mismo de películas y series. */
+  titleControlCharacters: SERIES_MESSAGES.titleControlCharacters,
   descriptionSize: `La descripción no puede superar los ${EPISODE_DESCRIPTION_MAX} caracteres`,
+  /** `EpisodeRequest` usa la constante de `SeriesRequest`: el mismo texto que en series. */
+  descriptionControlCharacters: SERIES_MESSAGES.descriptionControlCharacters,
   durationRequired: 'La duración es obligatoria',
   durationRange: `La duración debe estar entre ${EPISODE_DURATION_MIN} y ${EPISODE_DURATION_MAX} minutos`,
 } as const;
@@ -111,11 +124,17 @@ export function validateEpisodeForm(values: EpisodeFormValues): EpisodeFormError
   );
   if (number) errors.episodeNumber = number;
 
+  // Caracteres de control: en el texto recortado, el que se envía (ver `validateMovieForm`).
   if (!values.title.trim()) errors.title = EPISODE_MESSAGES.titleRequired;
   else if (values.title.length > EPISODE_TITLE_MAX) errors.title = EPISODE_MESSAGES.titleSize;
+  else if (hasControlCharacters(values.title.trim())) errors.title = EPISODE_MESSAGES.titleControlCharacters;
 
-  // La sinopsis es opcional: solo se mira su longitud (lo que cuenta el contador del campo).
+  // La sinopsis es opcional: su longitud (lo que cuenta el contador del campo) y, como en series,
+  // solo tabulador y saltos de línea entre los caracteres de control.
   if (values.description.length > EPISODE_DESCRIPTION_MAX) errors.description = EPISODE_MESSAGES.descriptionSize;
+  else if (hasDisallowedMultilineControlCharacters(values.description.trim())) {
+    errors.description = EPISODE_MESSAGES.descriptionControlCharacters;
+  }
 
   const duration = validateRequiredRange(
     values.duration,

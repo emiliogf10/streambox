@@ -263,7 +263,7 @@ class PostgresPublicApiClosureIntegrationTest {
 
         var result = flyway(shared, db, shared.getUsername(), shared.getPassword(), true).migrate();
 
-        assertEquals(6, result.migrationsExecuted, "V1 a V4 y V6 comunes y la V5 de db/vendor/postgresql");
+        assertEquals(7, result.migrationsExecuted, "V1 a V4, V6 y V7 comunes y la V5 de db/vendor/postgresql");
         assertEquals(allTables(shared, db, shared.getUsername(), shared.getPassword()),
                 tablesWithoutRls(shared, db), "sin los roles no se activa RLS en ninguna tabla");
         assertEquals(0, flyway(shared, db, shared.getUsername(), shared.getPassword(), true).migrate().migrationsExecuted);

@@ -84,6 +84,34 @@ describe('validateEpisodeForm', () => {
     expect(EPISODE_MESSAGES.titleSize).toBe('El título no puede superar los 150 caracteres');
   });
 
+  /*
+   * Caracteres de control (`ControlCharacters` del backend; `EpisodeRequest`
+   * usa los mensajes de series). Escapes (`\u0000`) porque no se ven.
+   */
+  it.each([
+    ['NUL (U+0000)', 'El fa\u0000ro'],
+    ['campana (U+0007)', 'El fa\u0007ro'],
+    ['tabulador', 'El\tfaro'],
+    ['salto de línea', 'El\nfaro'],
+    ['retorno de carro', 'El\rfaro'],
+  ])('título con %s → error de caracteres de control', (_name, title) => {
+    expect(validateEpisodeForm({ ...VALID, title })).toEqual({ title: 'El título no puede contener caracteres de control' });
+    expect(EPISODE_MESSAGES.titleControlCharacters).toBe('El título no puede contener caracteres de control');
+  });
+
+  it('título con un espacio de ancho cero (U+200B, no es de control): válido, como en el servidor', () => {
+    expect(validateEpisodeForm({ ...VALID, title: 'El​faro' })).toEqual({});
+  });
+
+  it('sinopsis (opcional): tabulador y saltos de línea valen; el NUL y el resto de controles, no', () => {
+    expect(validateEpisodeForm({ ...VALID, description: 'Primero.\tLuego.\nDespués.\r\nAl final.' })).toEqual({});
+    for (const control of ['\u0000', '\u0007', '\u000b', '\u001b', '\u007f', '\u0085']) {
+      expect(validateEpisodeForm({ ...VALID, description: `La luz${control} se apaga.` })).toEqual({
+        description: 'La descripción contiene caracteres de control no permitidos',
+      });
+    }
+  });
+
   it('la URL del vídeo sigue las reglas de las películas: solo https:// (ni portadas propias)', () => {
     expect(validateEpisodeForm({ ...VALID, videoUrl: 'http://videos.example.com/x' })).toEqual({
       videoUrl: 'La URL del vídeo debe empezar por https://',

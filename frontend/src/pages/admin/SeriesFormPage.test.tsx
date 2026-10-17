@@ -488,6 +488,44 @@ describe('SeriesFormPage: edición', () => {
     expect(await screen.findByText('Serie no encontrada')).toHaveAttribute('role', 'alert');
     expect(field.title()).toHaveValue('Otro título');
   });
+
+  it('404 por un género borrado mientras se guardaba: lo dice el mensaje del servidor (no «Serie no encontrada») y se recargan los géneros', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'POST /api/series': () => errorResponse(404, 'RESOURCE_NOT_FOUND', 'Alguno de los géneros indicados ya no existe'),
+    });
+    const user = setupUser();
+    renderForm('/admin/series/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+    const genreRequests = () => fetchMock.mock.calls.filter(([input]) => String(input) === '/api/genres').length;
+    const before = genreRequests();
+
+    await user.click(submitNew());
+
+    expect(await screen.findByText('Alguno de los géneros indicados ya no existe')).toHaveAttribute('role', 'alert');
+    expect(screen.queryByText('Serie no encontrada')).not.toBeInTheDocument();
+    expect(field.title()).toHaveValue('  Severance ');
+    expect(screen.getByText('ruta:/admin/series/nueva')).toBeInTheDocument();
+    await waitFor(() => expect(genreRequests()).toBeGreaterThan(before));
+  });
+
+  it('una descripción con un carácter de control (NUL pegado) se marca con el mensaje de series y no se envía', async () => {
+    routeFetch(fetchMock, GENRES_ROUTE);
+    const user = setupUser();
+    renderForm('/admin/series/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+    await fill(user, field.description(), 'Empleados\u0000 con la memoria dividida.');
+
+    await user.click(submitNew());
+
+    expect(field.description()).toHaveAccessibleDescription(
+      expect.stringContaining('La descripción contiene caracteres de control no permitidos'),
+    );
+    expect(field.description()).toHaveFocus();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
 });
 
 describe('SeriesFormPage: vuelta a la página de la serie', () => {

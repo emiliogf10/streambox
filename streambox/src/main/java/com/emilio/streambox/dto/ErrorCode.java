@@ -26,10 +26,18 @@ public enum ErrorCode {
     /** Las credenciales de autenticación no son válidas. */
     INVALID_CREDENTIALS,
 
-    /** La operación entra en conflicto con una restricción de datos. */
-    DATA_INTEGRITY_VIOLATION,
+    /*
+     * Aquí estaba DATA_INTEGRITY_VIOLATION (409, "la operación entra en
+     * conflicto con una restricción de datos"). Se retiró: las violaciones
+     * esperadas ya tienen su código propio en cada servicio, y las que ningún
+     * servicio traduce son un fallo del servidor (INTERNAL_ERROR, ver
+     * GlobalExceptionHandler#handleDataIntegrityViolation).
+     */
 
-    /** Se produjo un error no controlado en el servidor. */
+    /**
+     * Se produjo un error no controlado en el servidor. Incluye las violaciones
+     * de integridad de la base de datos que ningún servicio esperaba.
+     */
     INTERNAL_ERROR,
 
     /** Existe más de una película con el mismo título; usar el ID para la operación. */

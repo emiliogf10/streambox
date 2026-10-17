@@ -2,6 +2,7 @@ package com.emilio.streambox.dto;
 
 import java.util.Set;
 
+import com.emilio.streambox.validation.ControlCharacters;
 import com.emilio.streambox.validation.HttpsUrl;
 import com.emilio.streambox.validation.YouTubeUrl;
 
@@ -11,6 +12,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -62,8 +64,18 @@ import jakarta.validation.constraints.Size;
  * reenviar los valores que quiera conservar.
  * </p>
  *
- * @param title       título de la película (obligatorio, máximo 150 caracteres)
- * @param description sinopsis (obligatoria, máximo 1000 caracteres)
+ * <p>
+ * <b>Caracteres de control.</b> El título no admite ninguno y la sinopsis solo
+ * el tabulador y los saltos de línea (ver {@link ControlCharacters}, donde se
+ * explica por qué). Antes un {@code U+0000} llegaba a PostgreSQL, que lo
+ * rechaza, y el cliente recibía un 409 «conflicto con datos existentes» falso.
+ * </p>
+ *
+ * @param title       título de la película (obligatorio, máximo 150 caracteres,
+ *                    sin caracteres de control)
+ * @param description sinopsis (obligatoria, máximo 1000 caracteres; de los
+ *                    caracteres de control solo admite tabulador y saltos de
+ *                    línea)
  * @param duration    duración en minutos (obligatoria, al menos 1)
  * @param releaseYear año de estreno (obligatorio, entre 1888 y 2100)
  * @param imageUrl    URL de la portada (obligatoria, máximo 500 caracteres,
@@ -77,12 +89,18 @@ import jakarta.validation.constraints.Size;
  */
 public record MovieRequest(
 
+        @Schema(description = MovieRequest.TITLE_DESCRIPTION)
         @NotBlank(message = MovieRequest.TITLE_REQUIRED_MESSAGE)
         @Size(max = 150, message = "El título no puede superar los 150 caracteres")
+        @Pattern(regexp = ControlCharacters.SINGLE_LINE_TEXT,
+                message = MovieRequest.TITLE_CONTROL_CHARACTERS_MESSAGE)
         String title,
 
+        @Schema(description = MovieRequest.DESCRIPTION_DESCRIPTION)
         @NotBlank(message = MovieRequest.DESCRIPTION_REQUIRED_MESSAGE)
         @Size(max = 1000, message = MovieRequest.DESCRIPTION_SIZE_MESSAGE)
+        @Pattern(regexp = ControlCharacters.MULTILINE_TEXT,
+                message = MovieRequest.DESCRIPTION_CONTROL_CHARACTERS_MESSAGE)
         String description,
 
         @NotNull(message = MovieRequest.DURATION_REQUIRED_MESSAGE)
@@ -147,6 +165,44 @@ public record MovieRequest(
      * series y los episodios sí dicen «descripción» en los dos lados).
      */
     public static final String DESCRIPTION_SIZE_MESSAGE = "La sinopsis no puede superar los 1000 caracteres";
+
+    /**
+     * Error de un título con caracteres de control (contrato con el frontend;
+     * compartido con series, episodios y {@code /api/users/me/favorites/by-title}).
+     */
+    public static final String TITLE_CONTROL_CHARACTERS_MESSAGE =
+            "El título no puede contener caracteres de control";
+
+    /**
+     * Error de una sinopsis con caracteres de control distintos del tabulador y
+     * los saltos de línea. No dice «no puede contener caracteres de control»
+     * porque sería falso: los saltos de línea también lo son y se admiten.
+     */
+    public static final String DESCRIPTION_CONTROL_CHARACTERS_MESSAGE =
+            "La sinopsis contiene caracteres de control no permitidos";
+
+    /**
+     * Texto OpenAPI de {@code description}, compartido con {@link SeriesRequest}
+     * y {@link EpisodeRequest} (las tres siguen la misma regla).
+     */
+    public static final String DESCRIPTION_DESCRIPTION = "Sinopsis. " + MovieRequest.DESCRIPTION_CONTROL_CHARACTERS_RULE;
+
+    /**
+     * Regla de caracteres de control de la sinopsis, para OpenAPI. Va aparte de
+     * {@link #DESCRIPTION_DESCRIPTION} para que {@link EpisodeRequest}, cuya
+     * descripción ya empieza por «Sinopsis opcional», no la repita.
+     */
+    public static final String DESCRIPTION_CONTROL_CHARACTERS_RULE = "Admite saltos de línea y tabuladores; "
+            + "cualquier otro carácter de control (de U+0000 a U+001F, U+007F y de U+0080 a U+009F) "
+            + "da 400 VALIDATION_ERROR.";
+
+    /**
+     * Texto OpenAPI de {@code title}, compartido con {@link SeriesRequest} y
+     * {@link EpisodeRequest}.
+     */
+    public static final String TITLE_DESCRIPTION = "Título. Sin caracteres de control (tampoco tabuladores "
+            + "ni saltos de línea): si los tiene, 400 VALIDATION_ERROR con «"
+            + TITLE_CONTROL_CHARACTERS_MESSAGE + "».";
 
     /** Error cuando falta {@code duration}. */
     public static final String DURATION_REQUIRED_MESSAGE = "Indica la duración en minutos";

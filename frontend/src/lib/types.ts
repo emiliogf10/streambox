@@ -4,6 +4,7 @@
  * Reflejan los DTO del backend (`MovieResponse`, `UserResponse`, `ErrorResponse`...).
  * Si cambia un DTO, se cambia aquí y el compilador señala todo lo que se rompe.
  */
+import type { AvatarKey } from './avatars';
 
 /** Género cinematográfico (`GenreResponse`). */
 export interface Genre {
@@ -123,6 +124,13 @@ export interface User {
   email: string;
   role: Role;
   createdAt: string;
+  /**
+   * Clave del icono de perfil (`"cat"`, `"rocket"`... ver `lib/avatars.ts`) o
+   * `null` si no eligió ninguno: entonces se enseña la inicial del nombre. Se
+   * trata como texto libre y no como `AvatarKey`: una clave que esta versión de
+   * la interfaz no conozca también se pinta con la inicial, sin romper nada.
+   */
+  avatar: string | null;
 }
 
 /** Cuerpo de `POST /api/users` (registro público; el servidor siempre crea rol `USER`). */
@@ -132,9 +140,14 @@ export interface RegisterRequest {
   password: string;
 }
 
-/** Cuerpo de `PATCH /api/users/me` (cambiar mi nombre). Solo `username`: enviar `email`, `role` o `password` da 400. */
+/**
+ * Cuerpo de `PATCH /api/users/me` (editar mi perfil). Cada campo es opcional:
+ * ausente = no cambia. `avatar: null` vuelve a la inicial. Enviar `email`,
+ * `role` o `password` da 400.
+ */
 export interface UpdateProfileRequest {
-  username: string;
+  username?: string;
+  avatar?: AvatarKey | null;
 }
 
 /** Cuerpo de `PUT /api/users/me/password` (cambiar mi contraseña; responde 204 con cookies nuevas). */

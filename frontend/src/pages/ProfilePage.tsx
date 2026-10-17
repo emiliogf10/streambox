@@ -9,13 +9,14 @@ import { ExploreLink } from '../components/ExploreLink';
 import { LoadingState } from '../components/LoadingState';
 import { MovieCard } from '../components/MovieCard';
 import { SeriesCard } from '../components/SeriesCard';
+import { UserAvatar } from '../components/UserAvatar';
 import { AccountCard } from '../components/profile/AccountCard';
 import { ProfileCard } from '../components/profile/ProfileCard';
 import { SessionsCard } from '../components/profile/SessionsCard';
 import { useAuth } from '../context/AuthContext';
 import { useFavorites } from '../context/FavoritesContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import { avatarInitial, countGenres, formatMemberSince, pickListPreview, roleLabel } from '../lib/profile';
+import { countGenres, formatMemberSince, pickListPreview, roleLabel } from '../lib/profile';
 import type { GenreCount } from '../lib/profile';
 import { pluralize } from '../lib/series';
 import type { Movie, Series, User } from '../lib/types';
@@ -33,14 +34,15 @@ interface ProfileHeaderProps {
 }
 
 /**
- * Cabecera: avatar con la inicial, rol, nombre (el `<h1>`), «Miembro desde» y
- * las acciones.
+ * Cabecera: avatar (el icono elegido o la inicial, {@link UserAvatar}), rol,
+ * nombre (el `<h1>`), «Miembro desde» y las acciones.
  *
  * - El rol sale de `user.role` y se escribe en mayúsculas con CSS (`uppercase`),
  *   no en el texto: un lector de pantalla lee «Administrador», no deletrea siglas.
  *   Lleva icono en el administrador y texto siempre: el rol no se distingue solo
  *   por el color.
- * - El avatar es decorativo (`aria-hidden`): su inicial repite el nombre del `<h1>`.
+ * - El avatar es decorativo (`aria-hidden`): acompaña al nombre del `<h1>`, y
+ *   su nombre («Gato», «Tu inicial») ya se lee en la fila «Icono de perfil» de «Cuenta».
  * - «Panel de administración» solo se pinta con `isAdmin` (confirmado por el
  *   servidor). Es interfaz, no seguridad: el backend responde 403 a un `USER`.
  * - «Editar perfil» no es un botón de la cabecera: cada dato se cambia en su
@@ -54,12 +56,7 @@ function ProfileHeader({ user, isAdmin, onLogout, isLoggingOut }: ProfileHeaderP
   return (
     <div className="mb-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-5">
       <div className="flex min-w-0 items-center gap-4 sm:gap-5">
-        <div
-          aria-hidden="true"
-          className="flex size-16 shrink-0 items-center justify-center rounded-full border-2 border-accent/60 bg-accent/10 text-2xl font-bold text-accent sm:size-20 sm:text-3xl"
-        >
-          {avatarInitial(user.username)}
-        </div>
+        <UserAvatar username={user.username} avatar={user.avatar} size="lg" />
         <div className="min-w-0">
           <p
             className={`mb-1 inline-flex items-center gap-1.5 text-xs font-semibold tracking-widest uppercase ${
@@ -257,7 +254,7 @@ function ListPreview({ movies, series }: ListPreviewProps) {
  * `GET /api/users/me` (`AuthContext`) y todo lo demás de la lista compartida de
  * favoritos (`FavoritesContext`, que `AppShell` ya cargó): para enseñarlo no
  * hace falta ninguna petición propia. Las únicas son las de «Editar perfil»
- * (nombre y contraseña en {@link AccountCard}; cerrar sesión en todos los
+ * (nombre, icono de perfil y contraseña en {@link AccountCard}; cerrar sesión en todos los
  * dispositivos en {@link SessionsCard}). Por eso no hay «títulos vistos», «horas», suscripción ni
  * preferencias de idioma: no existen ni historial de reproducción ni planes.
  *
@@ -275,7 +272,7 @@ function ListPreview({ movies, series }: ListPreviewProps) {
  *
  * **Contraste (WCAG AA).** Solo pares ya calculados en `index.css` (blanco y
  * `muted` sobre `surface`/`surface-raised`/`canvas`, `accent` sobre `canvas`) más
- * uno propio: el acento de la inicial sobre `accent/10` encima de `canvas`, 7,4:1.
+ * los del avatar, calculados en `lib/avatars.ts` (iconos ≥6,9:1; la inicial, 7,4:1 sobre `canvas`).
  */
 export function ProfilePage() {
   useDocumentTitle('Mi perfil');
@@ -327,13 +324,16 @@ export function ProfilePage() {
             <AccountCard user={user} />
             <SessionsCard />
           </div>
-          <GenresCard
-            status={status}
-            errorMessage={errorMessage}
-            onRetry={reload}
-            genres={genres}
-            totalTitles={totalTitles}
-          />
+          {/* tabIndex -1: si «Reintentar» de la tarjeta desaparece al pulsarlo, el foco se queda aquí (`useRetryFocus`). */}
+          <div tabIndex={-1} className="focus-ring rounded-xl">
+            <GenresCard
+              status={status}
+              errorMessage={errorMessage}
+              onRetry={reload}
+              genres={genres}
+              totalTitles={totalTitles}
+            />
+          </div>
         </div>
 
         {status === 'ready' && totalTitles > 0 && (

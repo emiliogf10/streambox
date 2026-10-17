@@ -44,7 +44,7 @@ async function openMovie(page: Page, title: string): Promise<void> {
 async function openSeries(page: Page, title: string): Promise<void> {
   await page.goto('/series');
   if (title === SERIES_HERO.title) {
-    await page.getByRole('region', { name: title }).getByRole('link', { name: /^Ver episodios/ }).click();
+    await page.getByRole('region', { name: title }).getByRole('link', { name: /^Más información/ }).click();
   } else {
     await page
       .getByRole('region', { name: 'Novedades' })

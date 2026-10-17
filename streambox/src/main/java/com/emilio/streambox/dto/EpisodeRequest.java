@@ -1,5 +1,6 @@
 package com.emilio.streambox.dto;
 
+import com.emilio.streambox.validation.ControlCharacters;
 import com.emilio.streambox.validation.HttpsUrl;
 
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -7,6 +8,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -35,6 +37,12 @@ import jakarta.validation.constraints.Size;
  * {@code videoUrl} lo borra.
  * </p>
  *
+ * <p>
+ * <b>Caracteres de control.</b> Las mismas reglas que en {@link MovieRequest}:
+ * ninguno en el título y solo tabulador y saltos de línea en la descripción
+ * (ver {@link ControlCharacters}).
+ * </p>
+ *
  * @param seasonNumber  número de temporada (obligatorio, 1 a 100)
  * @param episodeNumber número del episodio en su temporada (obligatorio, 1 a 1000)
  * @param title         título (obligatorio, máximo 150 caracteres)
@@ -55,13 +63,18 @@ public record EpisodeRequest(
         @Max(value = 1000, message = EpisodeRequest.EPISODE_RANGE_MESSAGE)
         Integer episodeNumber,
 
+        @Schema(description = MovieRequest.TITLE_DESCRIPTION)
         @NotBlank(message = "El título es obligatorio")
         @Size(max = 150, message = "El título no puede superar los 150 caracteres")
+        @Pattern(regexp = ControlCharacters.SINGLE_LINE_TEXT,
+                message = MovieRequest.TITLE_CONTROL_CHARACTERS_MESSAGE)
         String title,
 
         @Schema(description = "Sinopsis opcional. Si se omite o va en blanco se guarda sin sinopsis "
-                + "(null en la respuesta).")
+                + "(null en la respuesta). " + MovieRequest.DESCRIPTION_CONTROL_CHARACTERS_RULE)
         @Size(max = 1000, message = "La descripción no puede superar los 1000 caracteres")
+        @Pattern(regexp = ControlCharacters.MULTILINE_TEXT,
+                message = SeriesRequest.DESCRIPTION_CONTROL_CHARACTERS_MESSAGE)
         String description,
 
         @NotNull(message = "La duración es obligatoria")

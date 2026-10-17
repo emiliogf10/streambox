@@ -35,6 +35,12 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
  */
 class TrailerUrlMigrationH2Test {
 
+    /**
+     * Versión hasta la que se migra al probar la V6: así el test mide solo la
+     * V6 y no cambia cada vez que se añade una migración posterior.
+     */
+    private static final MigrationVersion V6 = MigrationVersion.fromVersion("6");
+
     private final String url = "jdbc:h2:mem:v6_" + UUID.randomUUID().toString().replace("-", "")
             + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1";
     private final JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource(url, "sa", ""));
@@ -50,18 +56,18 @@ class TrailerUrlMigrationH2Test {
         flyway().target(MigrationVersion.fromVersion("5")).load().migrate();
         TrailerUrlMigrationScenario.seedAtV5(jdbc);
 
-        var result = flyway().load().migrate();
+        var result = flyway().target(V6).load().migrate();
 
         assertEquals(1, result.migrationsExecuted, "solo debe quedar por aplicar la V6");
         TrailerUrlMigrationScenario.assertMovedByV6(jdbc);
-        assertEquals(0, flyway().load().migrate().migrationsExecuted, "una segunda ejecución no hace nada");
+        assertEquals(0, flyway().target(V6).load().migrate().migrationsExecuted, "una segunda ejecución no hace nada");
         TrailerUrlMigrationScenario.assertMovedByV6(jdbc);
     }
 
     /** Sobre una base vacía la V6 se aplica igual (es lo que hacen los tests y el E2E al arrancar). */
     @Test
     void laV6SeAplicaSobreUnaBaseSinDatos() throws IOException {
-        assertEquals(6, flyway().load().migrate().migrationsExecuted);
+        assertEquals(7, flyway().load().migrate().migrationsExecuted, "V1 a V7 (la V5, la de H2)");
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM movies", Integer.class));
     }
 

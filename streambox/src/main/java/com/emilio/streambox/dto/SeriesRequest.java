@@ -2,6 +2,7 @@ package com.emilio.streambox.dto;
 
 import java.util.Set;
 
+import com.emilio.streambox.validation.ControlCharacters;
 import com.emilio.streambox.validation.HttpsUrl;
 import com.emilio.streambox.validation.ValidSeriesYears;
 import com.emilio.streambox.validation.YouTubeUrl;
@@ -12,6 +13,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -46,8 +48,17 @@ import jakarta.validation.constraints.Size;
  * {@code PUT} sin {@code trailerUrl} lo borra.
  * </p>
  *
- * @param title       título (obligatorio, máximo 150 caracteres)
- * @param description sinopsis (obligatoria, máximo 1000 caracteres)
+ * <p>
+ * <b>Caracteres de control.</b> Las mismas reglas que en {@link MovieRequest}:
+ * ninguno en el título y solo tabulador y saltos de línea en la descripción
+ * (ver {@link ControlCharacters}).
+ * </p>
+ *
+ * @param title       título (obligatorio, máximo 150 caracteres, sin caracteres
+ *                    de control)
+ * @param description sinopsis (obligatoria, máximo 1000 caracteres; de los
+ *                    caracteres de control solo admite tabulador y saltos de
+ *                    línea)
  * @param releaseYear año de estreno (obligatorio, entre 1888 y 2100)
  * @param endYear     año de finalización (opcional: {@code null} = en emisión;
  *                    entre 1888 y 2100 y no anterior a {@code releaseYear})
@@ -61,12 +72,18 @@ import jakarta.validation.constraints.Size;
 @ValidSeriesYears
 public record SeriesRequest(
 
+        @Schema(description = MovieRequest.TITLE_DESCRIPTION)
         @NotBlank(message = "El título es obligatorio")
         @Size(max = 150, message = "El título no puede superar los 150 caracteres")
+        @Pattern(regexp = ControlCharacters.SINGLE_LINE_TEXT,
+                message = MovieRequest.TITLE_CONTROL_CHARACTERS_MESSAGE)
         String title,
 
+        @Schema(description = MovieRequest.DESCRIPTION_DESCRIPTION)
         @NotBlank(message = "La descripción es obligatoria")
         @Size(max = 1000, message = "La descripción no puede superar los 1000 caracteres")
+        @Pattern(regexp = ControlCharacters.MULTILINE_TEXT,
+                message = SeriesRequest.DESCRIPTION_CONTROL_CHARACTERS_MESSAGE)
         String description,
 
         @NotNull(message = "El año de estreno es obligatorio")
@@ -109,6 +126,15 @@ public record SeriesRequest(
      */
     public static final String GENRES_SIZE_MESSAGE =
             "Una serie puede tener como máximo " + MovieRequest.MAX_GENRES + " géneros";
+
+    /**
+     * Error de una descripción con caracteres de control distintos del
+     * tabulador y los saltos de línea (la misma regla que la sinopsis de
+     * {@link MovieRequest}; aquí dice «descripción», como el resto de mensajes
+     * de series y episodios). Lo comparte {@link EpisodeRequest}.
+     */
+    public static final String DESCRIPTION_CONTROL_CHARACTERS_MESSAGE =
+            "La descripción contiene caracteres de control no permitidos";
 
     /** Primer año válido (el mismo límite que las películas y que {@code ck_series_release_year}). */
     public static final int MIN_YEAR = 1888;

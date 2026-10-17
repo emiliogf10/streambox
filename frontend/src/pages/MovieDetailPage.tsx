@@ -190,7 +190,8 @@ function MovieDetailView({ movie, confirmed }: { movie: Movie; confirmed: boolea
           `key`: la ruta /peliculas/:id reutiliza este componente al pasar de una película a otra; si las dos
           están en caché nada pasa por «cargando» y React conservaría el mismo <ul>, con el desplazamiento
           horizontal de la película anterior. Con la clave, cada película empieza su fila por el principio. */}
-      <div className={`${DETAIL_CONTAINER_CLASS} mt-10 empty:hidden md:mt-12`}>
+      {/* tabIndex -1: si «Reintentar» de la fila falla y desaparece, el foco se queda aquí (`useRetryFocus`), no en <body>. */}
+      <div tabIndex={-1} className={`${DETAIL_CONTAINER_CLASS} focus-ring mt-10 rounded-xl empty:hidden md:mt-12`}>
         <SimilarMoviesRow key={movie.id} movieId={movie.id} enabled={confirmed} />
       </div>
     </div>

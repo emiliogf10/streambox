@@ -60,7 +60,6 @@ public class ErrorResponse {
                     + "- GENRE_IN_USE (409): el género no se puede borrar porque alguna película o serie lo "
                     + "tiene asignado.\n"
                     + "- AMBIGUOUS_TITLE (409): varias películas tienen ese título; hay que usar el id.\n"
-                    + "- DATA_INTEGRITY_VIOLATION (409): la operación choca con una restricción de los datos.\n"
                     + "- VALIDATION_ERROR (400): datos o parámetros no válidos; el detalle por campo va en "
                     + "validationErrors.\n"
                     + "- CURRENT_PASSWORD_INCORRECT (400): al cambiar la contraseña, la actual no es correcta; "
@@ -83,7 +82,8 @@ public class ErrorResponse {
                     + "minutos); ver la cabecera Retry-After.\n"
                     + "- ACCOUNT_LOCKED (429): la cuenta está bloqueada temporalmente por logins fallidos; "
                     + "ver la cabecera Retry-After.\n"
-                    + "- INTERNAL_ERROR (500 u otro 5xx): error no controlado en el servidor.";
+                    + "- INTERNAL_ERROR (500 u otro 5xx): error no controlado en el servidor (también una "
+                    + "violación de integridad de la base de datos que la API no esperaba).";
 
     @Schema(description = "Fecha y hora del error, en UTC y formato ISO-8601.",
             example = "2026-10-04T11:15:30.123Z", requiredMode = Schema.RequiredMode.REQUIRED)

@@ -130,4 +130,15 @@ public class OpenApiConfig {
     public CookieAuthOperationCustomizer cookieAuthOperationCustomizer() {
         return new CookieAuthOperationCustomizer();
     }
+
+    /**
+     * Publica la lista de avatares válidos de {@code PATCH /api/users/me} a
+     * partir de {@code Avatar}, sin copiarla en una anotación.
+     *
+     * @return customizer que springdoc aplica al generar {@code /v3/api-docs}
+     */
+    @Bean
+    public AvatarOpenApiCustomizer avatarOpenApiCustomizer() {
+        return new AvatarOpenApiCustomizer();
+    }
 }

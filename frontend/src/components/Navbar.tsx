@@ -5,6 +5,7 @@ import { LogOut, ShieldCheck, User, UserCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useHeightCssVariable } from '../hooks/useHeightCssVariable';
 import { SearchBar } from './SearchBar';
+import { UserAvatar } from './UserAvatar';
 
 /**
  * Variable CSS con la altura real de la barra (la publica {@link useHeightCssVariable}).
@@ -40,7 +41,8 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
  * Todos los objetivos táctiles miden al menos 44 px.
  *
  * **Usuario y rol.** Cuando `AuthContext` ya ha cargado el usuario
- * (`GET /api/users/me`), el menú muestra su nombre y, solo a los
+ * (`GET /api/users/me`), el botón del menú enseña su avatar ({@link UserAvatar}:
+ * el icono que eligió en «Mi perfil» o su inicial) y el menú muestra su nombre y, solo a los
  * administradores, la etiqueta «Administrador» (texto con icono, no solo un
  * color). Es contenido normal del desplegable, no un `role="menu"`, así que el
  * lector de pantalla lo lee en orden al recorrerlo. Es informativo: el rol en el
@@ -172,7 +174,13 @@ export function Navbar() {
               aria-controls={menuOpen ? menuId : undefined}
               className="focus-ring inline-flex size-11 items-center justify-center rounded-full bg-surface-raised text-gray-300 transition-colors hover:text-white"
             >
-              <UserCircle aria-hidden="true" className="size-6" />
+              {/* Con el usuario cargado, su avatar (decorativo: el botón ya se llama «Menú de usuario»);
+                  mientras carga o si falla, el icono genérico de siempre. */}
+              {user ? (
+                <UserAvatar username={user.username} avatar={user.avatar} size="sm" />
+              ) : (
+                <UserCircle aria-hidden="true" className="size-6" />
+              )}
             </button>
 
             {menuOpen && (

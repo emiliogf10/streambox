@@ -27,6 +27,7 @@ export function makeUser(overrides: Partial<User> = {}): User {
     email: 'ana@example.com',
     role: 'USER',
     createdAt: '2026-01-01T10:00:00Z',
+    avatar: null,
     ...overrides,
   };
 }

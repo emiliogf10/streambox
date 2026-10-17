@@ -154,6 +154,8 @@ describe('AdminMoviesPage: listado', () => {
     await user.click(screen.getByRole('button', { name: 'Reintentar' }));
 
     expect(await screen.findByRole('row', { name: /^Dredd/ })).toBeInTheDocument();
+    // El botón desapareció al pulsarlo: el foco quedó en el encabezado del listado, no en <body>.
+    expect(screen.getByRole('heading', { level: 2, name: 'Películas' })).toHaveFocus();
   });
 
   it('«Editar» pasa al formulario la URL del listado (búsqueda y página) para volver al mismo sitio', async () => {

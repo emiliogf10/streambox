@@ -21,6 +21,9 @@ El usuario es un **desarrollador junior** y el proyecto es de portfolio: explica
 | `security` | `security/`, `SecurityConfig`, `AuthenticationService`, DTOs de autenticación, rate limiting, auditorías de seguridad | lógica de negocio general, `frontend/` |
 | `frontend` | todo `frontend/` (React, Vite, Tailwind, TypeScript) | `streambox/` entero |
 | `qa` | **solo tests**: `streambox/src/test/` y, en el frontend, `*.test.ts(x)`, `frontend/src/test/` y `frontend/e2e/`; revisión independiente y reporte de incidencias | cualquier código de producción y la configuración (`package.json`, `playwright.config.ts`...) |
+| `graphify` | **solo** la extracción semántica del grafo (`graphify-out/`), modelo `sonnet` | todo lo demás: código, documentación, configuración |
+
+**Grafo de conocimiento (`/graphify --update` o `/graphify`):** el skill pide subagentes `general-purpose` para la extracción semántica de la documentación, y esta sesión no los tiene. Sigue el skill tal cual (detección, caché, trozos, fusión, informe), pero en el paso de lanzar subagentes usa **`subagent_type: "graphify"`** con el mismo encargo que el skill daría a cada trozo (especificación de `references/extraction-spec.md`, lista de archivos, ruta del JSON del trozo). Lánzalos en paralelo (no usan Maven). El código no necesita agentes: `PYTHONHASHSEED=0 graphify update .`. Al terminar, comprueba que `graph.json` no contiene credenciales.
 
 Docker y CI (desde la tarea 27): `streambox/Dockerfile`, `docker-compose.yml`, `.env.example` y `.github/` (CI y Dependabot) los mantiene `backend`; `frontend/Dockerfile` y `frontend/nginx/` (salvo las cabeceras), `frontend`; las cabeceras de seguridad de nginx y el endurecimiento de los contenedores, `security`.
 
@@ -46,6 +49,7 @@ Orden habitual cuando una funcionalidad cruza capas:
 5. `qa` al final: revisión independiente de lo hecho por los demás.
 
 **Paralelismo:** lanza varios agentes a la vez solo si trabajan en archivos distintos (típico: `frontend` en paralelo a `backend`). **Nunca** dos agentes que ejecuten `mvnw` a la vez (comparten `streambox/target/` y el resultado se corrompe) ni dos que editen los mismos archivos. Ante la duda, en serie.
+- **Cuenta como «Maven» todo lo que levanta un backend:** `npm run test:e2e` (8099/5199), la pila del navegador (8097/5197) y la regeneración del OpenAPI (`spring-boot:run` en el 8099). Si un agente con Maven va en paralelo, al otro **prohíbele** cualquiera de esas cosas; no le digas «espera a que no haya Maven», porque el otro puede arrancarlo después de que mire. Pasó el 2026-10-17: un agente regeneraba el OpenAPI en el 8099 mientras otro pasaba un E2E y se rompieron mutuamente. Vitest también se ralentiza con Maven en paralelo (fallos sueltos por el límite de 5 s): repite la suite tú al final con la máquina libre.
 
 ### 4. Delegar con contexto completo
 Cada subagente arranca **sin memoria** de esta conversación. Cada encargo debe incluir:

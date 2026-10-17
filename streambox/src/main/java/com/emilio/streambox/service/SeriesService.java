@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -224,8 +225,10 @@ public class SeriesService {
         Series series = SeriesMapper.toEntity(request);
         series.setGenres(resolveGenres(request.genreIds()));
 
+        Series saved = seriesRepository.save(series);
+        writeTranslatingGenreRace(seriesRepository::flush);
         // Recién creada no puede tener episodios: no hace falta consultarlos.
-        return SeriesMapper.toDetailResponse(seriesRepository.save(series), List.of());
+        return SeriesMapper.toDetailResponse(saved, List.of());
     }
 
     /**
@@ -246,7 +249,10 @@ public class SeriesService {
         SeriesMapper.updateEntity(request, series);
         series.setGenres(resolveGenres(request.genreIds()));
 
-        // Entidad gestionada: los cambios se guardan al confirmar la transacción.
+        // Entidad gestionada: los cambios se guardarían al confirmar la
+        // transacción, pero se escriben aquí para poder traducir la violación
+        // (ver writeTranslatingGenreRace).
+        writeTranslatingGenreRace(seriesRepository::flush);
         return toDetail(series);
     }
 
@@ -313,6 +319,28 @@ public class SeriesService {
 
         return seriesRepository.findById(id)
                 .orElseThrow(() -> new SeriesNotFoundException(SERIES_NOT_FOUND));
+    }
+
+    /**
+     * Ejecuta la escritura pendiente (el {@code flush}) y traduce la carrera
+     * con el borrado de un género (clave foránea {@code fk_series_genres_genre})
+     * al mismo 404 de género que la comprobación previa. Es el mismo caso, y el
+     * mismo razonamiento, que {@code MovieService.writeTranslatingGenreRace}:
+     * cualquier otra violación se relanza (500 y registro en el log).
+     *
+     * @param flush la escritura (el {@code flush} del repositorio)
+     * @throws GenreNotFoundException si un género se borró mientras se guardaba
+     */
+    private static void writeTranslatingGenreRace(Runnable flush) {
+
+        try {
+            flush.run();
+        } catch (DataIntegrityViolationException e) {
+            if (SqlStates.isForeignKeyViolation(e, "fk_series_genres_genre")) {
+                throw new GenreNotFoundException(MovieService.GENRE_REMOVED_MESSAGE);
+            }
+            throw e;
+        }
     }
 
     /**

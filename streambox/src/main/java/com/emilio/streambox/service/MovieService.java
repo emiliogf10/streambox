@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -54,6 +55,14 @@ public class MovieService {
 
     /** Número de películas similares si el cliente no indica {@code limit}. */
     public static final int DEFAULT_SIMILAR_LIMIT = 12;
+
+    /**
+     * Mensaje del 404 cuando un género se borra mientras se guarda una película
+     * o una serie (lo comparte {@link SeriesService}). No dice cuál: tras el
+     * error, la transacción ya no admite consultas para averiguarlo.
+     */
+    public static final String GENRE_REMOVED_MESSAGE =
+            "Alguno de los géneros indicados ya no existe";
 
     private final MovieRepository movieRepository;
     private final GenreRepository genreRepository;
@@ -110,7 +119,9 @@ public class MovieService {
         Movie movie = MovieMapper.toEntity(request);
         movie.setGenres(resolveGenres(request.genreIds()));
 
-        return MovieMapper.toResponse(movieRepository.save(movie));
+        Movie saved = movieRepository.save(movie);
+        writeTranslatingGenreRace(movieRepository::flush);
+        return MovieMapper.toResponse(saved);
     }
 
     /**
@@ -130,8 +141,11 @@ public class MovieService {
         MovieMapper.updateEntity(request, movie);
         movie.setGenres(resolveGenres(request.genreIds()));
 
-        // La entidad está gestionada: Hibernate guarda los cambios al
-        // confirmar la transacción, no hace falta llamar a save().
+        // La entidad está gestionada y Hibernate guardaría los cambios al
+        // confirmar la transacción, pero entonces una violación saltaría fuera
+        // de este método, donde ya no se puede traducir: se escriben aquí con
+        // un flush (sin save(), que haría un merge innecesario).
+        writeTranslatingGenreRace(movieRepository::flush);
         return MovieMapper.toResponse(movie);
     }
 
@@ -272,6 +286,45 @@ public class MovieService {
 
         return movieRepository.findById(id)
                 .orElseThrow(() -> new MovieNotFoundException("Película no encontrada"));
+    }
+
+    /**
+     * Ejecuta la escritura pendiente (el {@code flush}) y traduce la única
+     * violación de integridad que pueden provocar unos datos ya validados.
+     *
+     * <p>
+     * <strong>La carrera con el borrado de un género.</strong>
+     * {@link #resolveGenres} comprueba que los géneros existen, pero otro
+     * administrador puede borrar uno entre esa consulta y el {@code INSERT} en
+     * {@code movie_genres}; entonces salta la clave foránea
+     * {@code fk_movie_genres_genre}. El resultado debe ser el mismo 404 de
+     * género que da la comprobación previa (el otro lado de la carrera, el
+     * borrado, ya lo traduce {@code GenreService.deleteGenre}). Antes llegaba
+     * sin traducir a {@code GlobalExceptionHandler} como un 409 genérico; hoy
+     * allí sería un 500. Por eso el {@code flush}: sin él, el {@code INSERT}
+     * de los géneros se haría al confirmar la transacción, ya fuera de este
+     * método.
+     * </p>
+     *
+     * <p>
+     * Cualquier otra violación se relanza tal cual (500 y registro en el log):
+     * con la validación de {@code MovieRequest} ninguna debería ocurrir, y si
+     * ocurre es un fallo que no conviene disfrazar.
+     * </p>
+     *
+     * @param flush la escritura (el {@code flush} del repositorio)
+     * @throws GenreNotFoundException si un género se borró mientras se guardaba
+     */
+    private static void writeTranslatingGenreRace(Runnable flush) {
+
+        try {
+            flush.run();
+        } catch (DataIntegrityViolationException e) {
+            if (SqlStates.isForeignKeyViolation(e, "fk_movie_genres_genre")) {
+                throw new GenreNotFoundException(GENRE_REMOVED_MESSAGE);
+            }
+            throw e;
+        }
     }
 
     /**

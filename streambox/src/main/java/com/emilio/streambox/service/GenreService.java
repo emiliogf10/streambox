@@ -172,8 +172,8 @@ public class GenreService {
      * {@code movie_genres} o {@code series_genres} rechaza el {@code DELETE}.
      * Se fuerza el {@code flush} aquí dentro para que esa violación salte en
      * este método, donde se puede traducir, y no al confirmar la transacción
-     * después de salir de él (fuera de nuestro control, como un 409 genérico
-     * de integridad). Se traduce <em>cualquier</em>
+     * después de salir de él (fuera de nuestro control: un 500 de una
+     * violación de integridad no traducida). Se traduce <em>cualquier</em>
      * {@link DataIntegrityViolationException} porque un {@code DELETE} sobre
      * {@code genres} no puede violar otra cosa que una clave foránea que apunta
      * a él (no inserta valores, así que no hay unicidad, nulos ni longitudes
@@ -232,9 +232,9 @@ public class GenreService {
      * <li>La alarga al pasar a minúsculas: la «İ» (U+0130) se convierte en
      * «i» + punto combinante, así que {@code "A" + 49 × "İ"} (50) acaba con 99
      * caracteres. Sin esta comprobación lo rechazaría la columna
-     * {@code VARCHAR(50)} con un 409 {@code DATA_INTEGRITY_VIOLATION}
-     * ("conflicto con datos existentes"), que es falso: es un dato de entrada
-     * incorrecto.</li>
+     * {@code VARCHAR(50)}: antes con un 409 «conflicto con datos existentes»,
+     * que era falso, y hoy con un 500, igual de engañoso: es un dato de
+     * entrada incorrecto.</li>
      * </ul>
      *
      * <p>

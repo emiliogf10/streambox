@@ -2,7 +2,8 @@
  * E2E de «Mi perfil» (`/perfil`): se llega desde el menú de usuario, enseña los
  * datos reales de la cuenta y un resumen de «Mi lista», distingue al
  * administrador y cabe en móvil sin scroll horizontal. «Editar perfil»: cambiar
- * el nombre (se ve en la barra), cambiar la contraseña (esta sesión sigue, las
+ * el nombre (se ve en la barra), elegir el icono de perfil (con el teclado; se
+ * ve en la barra y persiste al recargar), cambiar la contraseña (esta sesión sigue, las
  * demás no se renuevan, solo vale la nueva) y cerrar sesión en todos los dispositivos.
  *
  * No modifica el catálogo (solo añade favoritos a cuentas propias de cada test),
@@ -44,7 +45,8 @@ test.describe('Mi perfil', () => {
     // La contraseña nunca se revela (ni con puntos, que parecían un campo); el correo no se puede cambiar.
     await expect(account.getByText('No se muestra por seguridad.')).toBeVisible();
     await expect(account.getByText('No se puede cambiar: es el dato con el que inicias sesión.')).toBeVisible();
-    await expect(account.getByRole('button')).toHaveCount(2);
+    // Tres datos editables: nombre, icono de perfil y contraseña.
+    await expect(account.getByRole('button')).toHaveCount(3);
 
     // Un usuario normal no ve el acceso al panel ni se presenta como administrador.
     await expect(page.getByRole('link', { name: 'Panel de administración' })).toHaveCount(0);
@@ -218,6 +220,72 @@ test.describe('Editar perfil', () => {
     // Lo ha guardado el servidor: sigue ahí al recargar.
     await page.reload();
     await expect(page.getByRole('heading', { level: 1, name: newName })).toBeVisible();
+  });
+
+  test('elegir un icono de perfil con el teclado lo enseña al instante en la barra y sigue al recargar', async ({
+    page,
+    user,
+    signIn,
+  }) => {
+    await signIn(user);
+    await page.goto('/perfil');
+    await expect(page.getByRole('heading', { level: 1, name: user.username })).toBeVisible();
+    // `data-avatar` dice qué dibuja el avatar (decorativo: el botón se llama «Menú de usuario»).
+    const menuAvatar = page.getByRole('button', { name: 'Menú de usuario' }).locator('[data-avatar]');
+    await expect(menuAvatar).toHaveAttribute('data-avatar', 'initial');
+
+    const account = page.getByRole('region', { name: 'Cuenta' });
+    await account.getByRole('button', { name: 'Cambiar icono de perfil' }).click();
+    const group = account.getByRole('group', { name: 'Elige tu icono' });
+    await expect(group.getByRole('radio')).toHaveCount(13);
+    await expect(group.getByRole('radio', { name: 'Tu inicial' })).toBeChecked();
+    await expect(group.getByRole('radio', { name: 'Tu inicial' })).toBeFocused();
+    // Tu inicial → Cohete → Fantasma → Gato.
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect(group.getByRole('radio', { name: 'Gato' })).toBeChecked();
+    await expect(group.getByRole('radio', { name: 'Gato' })).toBeFocused();
+    await account.getByRole('button', { name: 'Guardar icono' }).click();
+
+    await expect(page.getByText('Icono de perfil cambiado a «Gato».')).toBeVisible();
+    await expect(menuAvatar).toHaveAttribute('data-avatar', 'cat');
+    await expect(account.getByRole('button', { name: 'Cambiar icono de perfil' })).toBeFocused();
+    await expect(account.getByText('Gato', { exact: true })).toBeVisible();
+
+    // Lo ha guardado el servidor: sigue ahí al recargar.
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 1, name: user.username })).toBeVisible();
+    await expect(menuAvatar).toHaveAttribute('data-avatar', 'cat');
+    await expect(account.getByText('Gato', { exact: true })).toBeVisible();
+
+    // Y se puede volver a la inicial, esta vez con el ratón (se pulsa la etiqueta visible).
+    await account.getByRole('button', { name: 'Cambiar icono de perfil' }).click();
+    await expect(group.getByRole('radio', { name: 'Gato' })).toBeChecked();
+    await group.getByText('Tu inicial', { exact: true }).click();
+    await expect(group.getByRole('radio', { name: 'Tu inicial' })).toBeChecked();
+    await account.getByRole('button', { name: 'Guardar icono' }).click();
+    await expect(page.getByText('Icono de perfil cambiado: ahora se muestra tu inicial.')).toBeVisible();
+    await expect(menuAvatar).toHaveAttribute('data-avatar', 'initial');
+  });
+
+  test('a 375 px, con el selector de icono abierto, la rejilla no desborda la página', async ({ page, user, signIn }) => {
+    await signIn(user);
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto('/perfil');
+
+    const account = page.getByRole('region', { name: 'Cuenta' });
+    await account.getByRole('button', { name: 'Cambiar icono de perfil' }).click();
+    await expect(account.getByRole('button', { name: 'Guardar icono' })).toBeVisible();
+
+    const { scrollWidth, clientWidth } = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+    const card = await account.boundingBox();
+    const group = await account.getByRole('group', { name: 'Elige tu icono' }).boundingBox();
+    expect(group!.x + group!.width).toBeLessThanOrEqual(card!.x + card!.width);
   });
 
   test('cambiar la contraseña mantiene esta sesión, cierra las demás y solo vale la nueva', async ({

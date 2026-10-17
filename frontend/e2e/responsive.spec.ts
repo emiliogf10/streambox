@@ -207,7 +207,7 @@ for (const viewport of VIEWPORTS) {
       await expect(banner).toBeVisible();
       await expectNavbarFits(page, false);
       await expectFullyInsideViewportWidth(page.getByRole('heading', { level: 1, name: 'Series' }), page, 'título «Series»');
-      await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Ver episodios/ }), page, '«Ver episodios»');
+      await expectFullyInsideViewportWidth(banner.getByRole('link', { name: /^Más información/ }), page, '«Más información»');
       await expectFullyInsideViewportWidth(banner.getByRole('button', { name: /^Mi lista/ }), page, '«Mi lista» del banner');
       await expectWholePoster(banner.locator('img').last(), banner, 'póster del banner de series');
       await expectFilterBarFits(page, 'Filtrar series');
@@ -229,7 +229,7 @@ for (const viewport of VIEWPORTS) {
       // De vuelta al catálogo sin filtros para abrir la serie del banner.
       await page.goto('/series');
 
-      await banner.getByRole('link', { name: /^Ver episodios/ }).click();
+      await banner.getByRole('link', { name: /^Más información/ }).click();
       await expect(page.getByRole('heading', { level: 1, name: SERIES_HERO.title })).toBeVisible();
       const picker = page.getByRole('navigation', { name: 'Temporadas' });
       for (const name of ['Temporada 1', 'Temporada 2']) {
@@ -547,7 +547,7 @@ for (const viewport of [
       await expectNoHorizontalScroll(page);
 
       await page.goto('/series');
-      await page.getByRole('region', { name: SERIES_HERO.title }).getByRole('link', { name: /^Ver episodios/ }).click();
+      await page.getByRole('region', { name: SERIES_HERO.title }).getByRole('link', { name: /^Más información/ }).click();
       await expect(page.getByRole('heading', { level: 1, name: SERIES_HERO.title })).toBeVisible();
       await expectCenteredDetail(page, page.getByRole('region', { name: SERIES_HERO.title }));
       await expectNoHorizontalScroll(page);

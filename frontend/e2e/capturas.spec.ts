@@ -144,7 +144,7 @@ for (const viewport of VIEWPORTS) {
       await shot(page, '29-series-arriba');
       await shot(page, '30-series-completa', true);
 
-      await banner.getByRole('link', { name: /^Ver episodios/ }).click();
+      await banner.getByRole('link', { name: /^Más información/ }).click();
       await expect(page.getByRole('heading', { level: 1, name: SERIES_HERO.title })).toBeVisible();
       await expect(page.getByRole('list', { name: 'Episodios de la temporada 1' })).toBeVisible();
       await page.waitForLoadState('networkidle');

@@ -168,6 +168,32 @@ describe('SimilarMoviesRow: error', () => {
     expect(callsTo(SIMILAR_URL)).toBe(2);
     expect(screen.queryByRole('heading', { name: 'No se pudieron cargar las películas similares' })).not.toBeInTheDocument();
   });
+
+  it('el foco tras «Reintentar» (teclado): si vuelve a fallar, al nuevo «Reintentar»; si sale bien, se queda en la zona de la fila', async () => {
+    let fail = true;
+    const { user } = renderPage({
+      [`GET ${SIMILAR_URL}`]: () => (fail ? errorResponse(500, 'INTERNAL_ERROR', 'boom') : jsonResponse(similar)),
+    });
+    await screen.findByRole('heading', { level: 2, name: 'No se pudieron cargar las películas similares' });
+
+    // Vuelve a fallar: el foco no se pierde en <body>, acaba en el «Reintentar» nuevo.
+    screen.getByRole('button', { name: 'Reintentar' }).focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(callsTo(SIMILAR_URL)).toBe(2));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reintentar' })).toHaveFocus());
+
+    // Sale bien: el foco queda en el contenedor de la fila (no en <body> ni arriba del todo, en el <main>).
+    fail = false;
+    await user.keyboard('{Enter}');
+    const row = await screen.findByRole('region', { name: 'Películas similares' });
+    const focused = document.activeElement as HTMLElement;
+    expect(focused).not.toBe(document.body);
+    expect(focused).not.toBe(screen.getByRole('main'));
+    expect(focused).toContainElement(row);
+    // Y el siguiente Tab entra en la fila: la primera similar.
+    await user.tab();
+    expect(within(row).getByRole('link', { name: 'Gravity 2013 · 1h 31m' })).toHaveFocus();
+  });
 });
 
 describe('SimilarMoviesRow: caché', () => {

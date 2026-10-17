@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **2965** | 2576 con H2 y 389 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **1384** | |
-| E2E (Playwright) | **190** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
+| Backend (JUnit) | **3184** | 2741 con H2 y 443 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
+| Frontend (Vitest) | **1481** | |
+| E2E (Playwright) | **192** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
 
@@ -253,7 +253,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 - ✅ ~~**Portadas pesadas en `public/covers/`**~~ — **hecho el 2026-10-09**: las 21 JPG recomprimidas **con el mismo nombre** (máx. 800 px de ancho, calidad 82, progresivas, sin metadatos): de 17,9 MB a 3,5 MB (la carpeta, de 19 MB a 4,4 MB). Ninguna URL cambia, así que tu base de datos no se toca. E2E 150/150.
 - **E2E de dos pestañas** — *Baja · BAJA* (`frontend`). La propagación de la sesión entre pestañas está probada con Vitest (dos canales) y a mano con `agent-browser`, pero no con un E2E (`context.newPage()` en `e2e/auth.spec.ts`).
 - **Detalles del frontend (limpieza y auditoría)** — *Opcional · BAJA*
-  - Tras pulsar «Reintentar» en un `ErrorState`, el botón desaparece (pasa a la silueta) y el foco cae en `<body>`: llevarlo al contenido que llega o a la región (visto en «Películas similares», 2026-10-15).
+  - ✅ ~~Tras pulsar «Reintentar», el foco caía en `<body>`~~ — **hecho el 2026-10-16** (`hooks/useRetryFocus.ts`). Queda: «Cargar más» se desactiva mientras carga y podría perder el foco igual.
   - `public/favicon.svg` es el logo por defecto de Vite (decisión de diseño).
   - La prop `alt` de `MoviePoster` no se usa en producción (siempre `alt=""`), pero está documentada y probada (4 tests).
   - `oxlint -W suspicious` avisa de `exhaustive-effect-dependencies` en `FavoritesContext`, `useCatalog`, `MovieRow` y `SearchBar` (revisar las dependencias de esos efectos).
@@ -285,6 +285,10 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - **Tráileres**, y una imagen horizontal `backdropUrl` para el banner.
   - **Valoraciones**: me gusta o estrellas, y nota media.
 - ✅ ~~**Editar perfil**~~ — **hecho el 2026-10-09** (ver el [historial](#4-historial-de-trabajos)): cambiar nombre, cambiar contraseña y cerrar sesión en todos los dispositivos. El email no se puede cambiar (decisión del autor).
+- ✅ ~~**Icono de perfil personalizable**~~ — **opción 1 hecha el 2026-10-17** (ver el [historial](#4-historial-de-trabajos)); la opción 2 (subir foto) sigue pendiente. Diseño original: *Media · MEDIA* (`database` + `backend` + `security` + `frontend`). Petición del autor (2026-10-16). Hoy el avatar es un círculo con la inicial del nombre (`avatarInitial` en `lib/profile.ts`), en `/perfil` y en el menú de usuario. Dos caminos, de menos a más:
+  1. **Recomendado para empezar: elegir entre avatares predefinidos** (como los perfiles de Netflix): un conjunto de iconos o ilustraciones propias en `public/avatars/` (licencia libre y comprobada), y el usuario elige uno en «Editar perfil». En la BD solo se guarda la **clave** del avatar (columna `users.avatar` con una migración nueva y un `CHECK` o lista blanca en el backend), vía `PATCH /api/users/me` (id del token, sin IDOR). Sin subida de archivos: no hay que reactivar multipart, ni almacenar imágenes, ni validar contenido; la CSP no cambia.
+  2. **Más adelante, subir una imagen propia:** exige reactivar multipart **solo** para esa ruta y con límite bajo (cap. 13 del manual), validar el contenido de verdad (tipo real por los primeros bytes, no por la extensión; dimensiones; reescribir la imagen para quitar EXIF con la ubicación y cualquier contenido incrustado), guardarla fuera de la BD (Supabase Storage o similar, con URLs firmadas o un bucket público solo de avatares), un límite por usuario y la CSP de `img-src` para ese origen. Es bastante más superficie de ataque: mejor cuando haya despliegue real.
+  - En los dos casos: el avatar se ve en `/perfil`, en el menú de usuario de la barra y (si se añade) en cualquier lista de usuarios del panel; respaldo con la inicial si falta; texto alternativo correcto; la caché de TanStack se invalida al cambiarlo.
 - **Perfil: historial y suscripción** (2026-10-07) — *Opcional · ALTA*. La captura de referencia mostraba títulos vistos, horas, vistos recientemente y suscripción. No hay nada de eso en el modelo de datos: solo tendría sentido si se añade historial de reproducción (tabla nueva + endpoint).
 
 ### 2.10 Tests, herramientas y notas informativas
@@ -295,6 +299,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - Al fallar, los 7 tests del proyecto `catalogo-mutable` salen «did not run»; con `--project=catalogo-mutable --no-deps` pasan 7/7.
 - **E2E inestables con la máquina cargada** — *Baja · BAJA*
   - Un aviso que aparece bajo el cursor queda pausado por el *hover* y puede tapar un botón de la fila (p. ej. «Borrar» en Géneros, `admin.spec.ts:122`). Pausar solo con movimiento real del puntero, o colocar los avisos sin tapar acciones, cambia el comportamiento: queda como propuesta.
+  - El 2026-10-17, con la batería en 12,8 min, falló una vez `e2e/trailer-keyboard.spec.ts` («el foco no se escapa del diálogo»); repetido, 6/6.
   - El 2026-10-15, con la batería en 8 min (en vez de ~4), falló una vez `auth.spec.ts:484` (dos pestañas renuevan a la vez); por separado pasó 3/3.
   - El 2026-10-08, con la batería tardando casi 4 minutos en lugar de ~1, fallaron entre 2 y 4 E2E distintos por tiempo agotado; el último commit, sin los cambios del día, falló igual. Con la máquina menos cargada, 144/144.
   - Tests E2E de entre 15 y 19 s (`admin-series.spec.ts:61`, géneros de `admin.spec.ts`, `admin-peliculas.spec.ts:31`), por debajo del límite de 30 s.
@@ -311,6 +316,21 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 **Quitado de esta lista por estar hecho:** comodines de `LIKE` (S10), Swagger con 403 en vez de 401, la limpieza de anotaciones con nombre completo y la API que aceptaba YAML, multipart y formularios (2026-10-08).
 
 ---
+
+### 2.11 Auditoría técnica de Gemini (2026-10-16): lo que se acepta
+
+El informe original (sin versionar) se borró el 2026-10-17 a petición del autor: lo aceptado está aquí (análisis estático: Gemini no ejecutó tests). Revisado por el orquestador contra el código: casi todo lo «confirmado» se confirma, salvo un falso positivo (`tsconfig` sin `strict`: con TypeScript 7.0.2, `strict` está activo por defecto desde la 6.0, y el código compila con `--strict` sin errores; añadir `"strict": true` explícito solo por claridad). Prioridades del orquestador, no las del informe:
+
+- ✅ **Hecho el 2026-10-17.** ~~**Alta · BAJA (`backend`)**~~ — **Caracteres de control en los textos del catálogo y en `by-title`:** `title`/`description` de `MovieRequest`, `SeriesRequest` y `EpisodeRequest` y el `@RequestParam title` de `FavoriteController` (`by-title`, sin `@Validated`) aceptan `\u0000`; PostgreSQL lo rechaza (22021) y Spring lo traduce a `DataIntegrityViolationException` → **409 falso** en vez de 400. Es un hueco del punto 14 recién cerrado: misma regla que `TitleSearchParameter` (`[^\p{Cc}]*`). Test contra PostgreSQL real.
+- ✅ **Hecho el 2026-10-17** (500 + log sin datos personales; también se silenció el log de Hibernate que volcaba el email). ~~**Alta · BAJA (`backend`)**~~ — **`GlobalExceptionHandler.handleDataIntegrityViolation` no deja rastro:** responde 409 genérico a cualquier violación de integridad y no escribe nada en el log, aunque `EpisodeService`/`SeriesFavoriteService` dicen en sus comentarios que lo inesperado «acabará en un 500 y en el log». Registrar en `WARN`/`ERROR` (sin datos personales) y valorar que lo no traducido por un servicio sea 500.
+- 🟡 **Media · BAJA (`backend`)** — **Registro** (la carrera ya da 409 `USER_ALREADY_EXISTS` desde el 2026-10-17; queda sacar BCrypt de la transacción): `UserService.registerUser` calcula BCrypt dentro de `@Transactional` (retiene una conexión ~100 ms) y no traduce la carrera de dos registros iguales (`save` sin `saveAndFlush` ni captura de 23505 → 409 genérico en vez de `USER_ALREADY_EXISTS`). Mismo patrón que `PasswordChangeService`/`updateProfile`.
+- **Media · BAJA (`backend` + `frontend`)** — **Validación desigual:** `username` (`@NotBlank` + `@Size(min = 3)`) y `GenreRequest.name` (`@NotBlank` + `@Size(min = 2)`) devuelven un mensaje u otro al azar con `""` (el propio código lo advierte en otros DTOs); `MovieRequest.duration` sin `@Max` (episodios tienen 600); en el frontend, `movieValidation.ts` no comprueba el máximo de 20 géneros, `RegisterPage` muestra «Reintentar en 3600 s» en vez de `formatWaitTime` y no usa `normalizeUsername` al validar la longitud.
+- **Media · MEDIA (`security`)** — **JWT de acceso válido hasta 15 min tras `logout-all` o cambio de contraseña** (aceptado en el ADR 0011): como el filtro ya lee el `User` en cada petición, una columna `tokens_valid_after` comparada con el `iat` lo cerraría sin consultas extra (migración nueva).
+- **Media · BAJA (`security`)** — **Sacar `application-local.properties` de `src/main/resources`** (p. ej. `./config/application-local.properties` con `spring.config.import=optional:file:...`): ya hubo un incidente por leerlo, y hoy `process-resources` lo copia a `target/classes`.
+- **Media · BAJA (`backend`)** — **Retirar los endpoints `by-title`** (ya anotado en 2.6 como «valorar»): el frontend no los usa, el título no es único (por eso existe `AmbiguousTitleException`) y su consulta no tiene índice. Se van `AmbiguousTitleException`, `AMBIGUOUS_TITLE`, sus métodos y tests, y se actualizan OpenAPI y Postman.
+- **Media · BAJA (`qa` + orquestador)** — **Fragmentación de tests:** más de 20 clases H2 repiten `saveUser`/`saveMovie`/`cleanDatabase` (falta una base `H2IntegrationTestSupport` como la de PostgreSQL) y los archivos `*Qa*`/`*EdgeCases*` separados (consecuencia del flujo con agentes) dificultan encontrar dónde se prueba cada cosa y multiplican contextos de Spring. Consolidar poco a poco y ajustar el agente `qa` para que amplíe el archivo de test existente cuando tenga sentido. Mover las pruebas de géneros de `e2e/admin.spec.ts` al proyecto `catalogo-mutable` (mutan datos compartidos en paralelo: posible causa de E2E inestables).
+- **Baja · BAJA** — `SecurityErrorResponseWriter` usa un `ObjectMapper` de Jackson 2 (el resto es Jackson 3); `PasswordChangeService` inyecta `EntityManager` para el bloqueo (mejor `UserRepository.findByIdForUpdate`); `resolveGenres` duplicado en películas y series; las mismas expresiones regulares de normalización en tres clases; `User.favoriteMovies` (`@ManyToMany` que nadie usa como colección); borrados que cargan la entidad con sus géneros pese al `ON DELETE CASCADE`; `existsById` previo en `EpisodeService` en el camino feliz; tres cargas manuales con `useEffect` en el frontend (formularios del panel y `SearchBar`) en vez de TanStack Query; *code-splitting* de `/admin`; `frontend/README.md` con el árbol de archivos desfasado; springdoc desactivado por defecto y activado solo en `dev`/`test`.
+- **Se descarta o se rebaja:** adelantar la comprobación CSRF en `JwtAuthenticationFilter` (P1 en el informe) es una microoptimización sin efecto en la seguridad (y cambiaría qué código recibe un token caducado sin cabecera); exigir `X-Requested-With` en login/registro (ya exigen `application/json`, que no se puede enviar entre orígenes sin *preflight*); el *Seq Scan* del segundo intento con erratas solo importa con decenas de miles de títulos (medir antes; la solución sería el operador `<%` con `pg_trgm.word_similarity_threshold`). Las notas globales del informe (9,2/10) son optimistas y no se usan para decidir nada.
 
 ## 3. Completado: tareas numeradas
 
@@ -424,6 +444,25 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
 
+### 2026-10-17 · Icono de perfil y hallazgos de prioridad alta de la auditoría de Gemini
+
+- **Caracteres de control** (`backend` + `frontend`): `validation/ControlCharacters` en títulos (ningún control) y descripciones (solo `\t\n\r`, vienen de un `<textarea>`) de películas, series y episodios, y en `by-title` de favoritos (`@Validated`): un carácter nulo daba **409 falso** (PostgreSQL lo rechaza con 22021 y Spring lo traducía a violación de integridad); ahora 400. Los formularios del panel aplican la misma regla y los mismos mensajes.
+- **Violaciones de integridad** (`backend`): lo que ningún servicio traduce es **500 `INTERNAL_ERROR`** con una línea de log `ERROR` (SQLSTATE, restricción, origen; sin valores ni SQL); `DATA_INTEGRITY_VIOLATION` eliminado; las carreras esperadas se traducen en su servicio (registro → 409 `USER_ALREADY_EXISTS` por el nombre de la restricción; género borrado al guardar → 404). `logging.level.org.hibernate.orm.jdbc.error=OFF`: Hibernate escribía por su cuenta el `Detail: Key (email)=(…)` de PostgreSQL.
+- **Icono de perfil, opción 1** (`database` + `backend` + `frontend`): migración **V7** (`users.avatar VARCHAR(32)` con un `CHECK` solo de formato, para que añadir un avatar no exija migración); `validation/Avatar` (12 claves) y `PATCH /api/users/me` con `avatar` (ausente = no cambia, `null` = la inicial, otra cosa = 400); en el frontend, `lib/avatars.ts` (iconos de `lucide-react`, contraste ≥6,9:1), `UserAvatar` en la barra y en `/perfil` y `AvatarForm` (grupo de radio accesible) en «Editar perfil».
+- **Revisión de `qa`** (+46 tests de backend; incluidos casos contra PostgreSQL real): encontró que un **`PATCH /me` simultáneo podía deshacer un cambio de contraseña** (`updateProfile` lee sin bloquear y el `UPDATE` reescribía todas las columnas, también el hash): arreglado con `@DynamicUpdate` en `User`. También: el email en el log de Hibernate, el mensaje de un `PATCH` vacío («Indica al menos un cambio: el nombre de usuario o el icono de perfil»), `AvatarForm` borraba una clave desconocida al guardar sin cambios, y la causa real del test intermitente de `ProfilePage` (respuesta simulada fuera de `act`).
+- **Documentación de la API** regenerada (OpenAPI y Postman: Newman **95/95** peticiones y **186/186** aserciones).
+- **Auditoría:** el informe de Gemini se borró a petición del autor; lo aceptado está en 2.11.
+- **Verificación** (orquestador, sin nada más en marcha): backend **3184** (443 contra PostgreSQL, 0 omitidos), Vitest **1481**, build y lint limpios, E2E **192** + 24 omitidos (en la batería de 12,8 min falló una vez `e2e/trailer-keyboard.spec.ts` por tiempo; repetido, 6/6).
+- **Lección (orquestador):** un agente regeneraba el OpenAPI en el 8099 mientras otro pasaba un E2E y se rompieron mutuamente; ya está en `.claude/agents/orchestrator.md`.
+- **Pendiente nuevo:** catálogo JSON común para las claves de avatar y para los caracteres de control (como el de YouTube), para que Java y TypeScript no puedan divergir; renombrar o fusionar los `*Qa*` nuevos (`UserAvatarQaIntegrationTest` → dentro de `UserAvatarIntegrationTest`, etc.); acelerar los E2E (`vite build` + `vite preview` o otra política de traza: guardar la traza añade ~10 s por test); la tabla de endpoints del manual (§13.1) no tiene `refresh`, `logout-all` ni `PUT /me/password`.
+
+### 2026-10-16 · Remates: documentación de la API, «Más información» en series y foco tras «Reintentar»
+
+- **API documentada** (`backend`): `docs/api/openapi.yaml` regenerado desde el backend real (41 operaciones y 25 rutas: películas similares, `trailerUrl`, `videoUrl` opcional, y lo que también estaba desfasado: `approximate` de la búsqueda, `MALFORMED_REQUEST`, email ≤100) y colección de Postman ampliada (similares con orden y límites, tráiler normalizado y rechazado, película sin vídeo, `PUT` que borra el tráiler): **Newman 90/90 peticiones y 176/176 aserciones**. Detalle menor: springdoc publica el email del registro y el login con `minLength: 0` porque `@Size(max = 100)` pisa al `@NotBlank` (la API sí rechaza el vacío); arreglarlo es `@Size(min = 1, max = 100)` en los DTOs.
+- **Banner de `/series`** (`frontend`): «Ver episodios» → **«Más información»** (ningún episodio tiene vídeo y «Ver» sonaba a reproducir; mismo texto que el banner de películas).
+- **Foco tras «Reintentar»** (`frontend`, WCAG 2.4.3): `hooks/useRetryFocus.ts` lleva el foco a un elemento estable de la misma zona (encabezado, región o `<main>`) cuando el botón desaparece, y al nuevo «Reintentar» si vuelve a fallar; no lo roba si el usuario ya se ha movido.
+- **Verificación** (orquestador): Vitest **1395**, E2E **190** + 24 omitidos, build y lint limpios.
+
 ### 2026-10-16 · «Ver tráiler» y «Ver ahora» solo con vídeo de verdad
 
 - **Problema:** tras ampliar el catálogo (ver la entrada siguiente), el vídeo de todas las películas y episodios era el tráiler de YouTube: «Ver ahora», «Empezar a ver» y «Ver» abrían un tráiler y su texto mentía.
@@ -433,7 +472,7 @@ Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
 - **Frontend** (`frontend`): botón «Ver tráiler» en portada, película y serie; modal con el reproductor sin cookies (`iframe` construido solo desde el id revalidado, `sandbox` mínimo, `referrerpolicy="strict-origin-when-cross-origin"` porque YouTube rechaza los embebidos sin Referer, desmontado al cerrar); «Ver ahora» / «Empezar a ver» / «Ver» **solo si hay vídeo**; panel con tráiler y vídeo opcional.
 - **Revisión de `qa`** (+197 tests de backend, entre ellos un **catálogo de 89 casos en JSON que leen a la vez JUnit y Vitest** para que cliente y servidor acepten exactamente lo mismo, y que todo lo aceptado cumple el CHECK por la API real; +E2E de teclado y maquetación). Arreglado después (`frontend`): paridad de `%` y `[ ]` en los parámetros; pista «Pulsa Esc para cerrar. Si estás dentro del vídeo, sal antes con Mayús+Tab.» (desde la página no se pueden capturar las teclas de un iframe de otro origen); «Ver T2:E3» cuando el primer episodio con vídeo no es el primero; aviso por rol cuando no hay vídeo ni tráiler («Todavía no está disponible para ver.» / «No tiene vídeo ni tráiler: puedes añadirlos desde «Editar».»); acciones del banner sin partirse en móvil.
 - **Verificación** (orquestador): backend **2965** (389 contra PostgreSQL), Vitest **1384**, E2E **190** + 24 omitidos; build y lint limpios.
-- **Pendiente:** decidir «Ver episodios» en el banner de `/series` (ningún episodio tiene vídeo); comprobar en Supabase, tras el primer arranque con la V6, que no queda ningún `video_url` de YouTube sin mover (`SELECT id, title, video_url FROM movies WHERE video_url ILIKE '%youtu%'`, y lo mismo en `episodes`); probar la reproducción con la CSP completa de nginx (`docker compose`); a 1280 px las 4 acciones de la portada caben justas y con «En mi lista» podrían pasar a dos filas.
+- **Pendiente:** ~~decidir «Ver episodios»~~ (pasó a «Más información» el 2026-10-16) y ~~comprobar en Supabase que no queda ningún `video_url` de YouTube~~ (comprobado por el autor: 0 en películas y en episodios). Queda: probar la reproducción con la CSP completa de nginx (`docker compose`); a 1280 px las 4 acciones de la portada caben justas y con «En mi lista» podrían pasar a dos filas.
 
 ### 2026-10-16 · Catálogo ampliado (script de datos de un solo uso)
 
@@ -450,7 +489,7 @@ Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
 - **Frontend** (`frontend`): `hooks/useSimilarMovies.ts` (TanStack, clave bajo `movies`: editar o borrar en el panel la refresca) y `components/SimilarMoviesRow.tsx` (reutiliza `PosterRow`; vacío → no se pinta nada; error → aviso con «Reintentar» sin romper la página). Manual §20.8 bis.
 - **Revisión de `qa`** (+31 tests de backend, entre ellos un oráculo que compara el orden de la base con el criterio calculado en Java en H2 y PostgreSQL; +5 de Vitest; +1 E2E): sin fallos en el backend. Encontró que la fila **heredaba el desplazamiento horizontal** de la película anterior si las dos estaban en caché (React reutilizaba el mismo `<ul>`): corregido con `key={movie.id}` y su E2E de regresión. OpenAPI: el 400 también cubre un id no numérico.
 - **Verificación:** backend **2337** (366 contra PostgreSQL), Vitest **1137**, E2E **177** + 24 omitidos; build y lint limpios.
-- **Pendiente menor:** tras «Reintentar», el foco cae en `<body>` (pasa en todos los `ErrorState` con `onRetry`, ver 2.8); `docs/api/openapi.yaml` y la colección de Postman no tienen aún el endpoint (regenerar con `docs/api/README.md`).
+- **Pendiente menor (resuelto el 2026-10-16):** el foco tras «Reintentar» (`useRetryFocus`) y `docs/api/openapi.yaml` y la colección de Postman, que ya lo incluyen (regenerados el 2026-10-16 junto con los cambios del tráiler: 41 operaciones; Newman 90/90 peticiones y 176/176 aserciones).
 
 ### 2026-10-15 · Punto 14 de seguridad cerrado y página de serie a la par que la de película
 
@@ -709,7 +748,7 @@ Hecha por el agente `frontend` con las skills `impeccable` (crítica, auditoría
 
 ### Entorno de trabajo con Claude Code
 
-- `CLAUDE.md` (contexto y reglas del proyecto) y los agentes `backend`, `database`, `security`, `qa` y `frontend` en `.claude/agents/`.
+- `CLAUDE.md` (contexto y reglas del proyecto) y los agentes `backend`, `database`, `security`, `qa` y `frontend` en `.claude/agents/`, más `graphify` (2026-10-17), que hace la extracción semántica del grafo de conocimiento en lugar del subagente `general-purpose` que pide el skill y que la sesión con el orquestador no tiene (solo escribe en `graphify-out/`).
 - Agente `orchestrator` como **sesión principal** (`.claude/settings.json` → `"agent": "orchestrator"`): en Claude Code un subagente no puede lanzar a otros, así que solo puede delegar si dirige la sesión. Divide las peticiones, delega en el especialista de cada área (las de una sola área van directas a su agente), verifica con la suite real y actualiza el plan.
 - Fronteras entre agentes aclaradas (`database` es dueño de entidades, migraciones y `@Query`); todos devuelven un apartado «Peticiones para otros agentes».
 

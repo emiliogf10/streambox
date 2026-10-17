@@ -1,13 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Button } from '../Button';
+import { UserAvatar } from '../UserAvatar';
+import { avatarLabel } from '../../lib/avatars';
 import type { User } from '../../lib/types';
+import { AvatarForm } from './AvatarForm';
 import { PasswordForm } from './PasswordForm';
 import { ProfileCard } from './ProfileCard';
 import { UsernameForm } from './UsernameForm';
 
 /** Ajuste editable de la tarjeta: qué formulario está abierto (como mucho uno). */
-type EditableSetting = 'username' | 'password';
+type EditableSetting = 'username' | 'avatar' | 'password';
 
 /** Propiedades de {@link AccountRow}. */
 interface AccountRowProps {
@@ -49,10 +52,12 @@ interface AccountCardProps {
 }
 
 /**
- * Tarjeta «Cuenta» del perfil: nombre, correo y contraseña, con «Editar perfil»
- * en línea.
+ * Tarjeta «Cuenta» del perfil: nombre, icono de perfil, correo y contraseña,
+ * con «Editar perfil» en línea.
  *
  * - **Nombre**: «Cambiar» abre {@link UsernameForm}.
+ * - **Icono de perfil**: el avatar actual (o «Tu inicial») con su nombre en
+ *   texto; «Cambiar» abre el selector {@link AvatarForm}.
  * - **Correo**: no se puede cambiar (decisión del autor: es con lo que se inicia
  *   sesión y el `subject` del JWT; cambiarlo sin verificar el correo nuevo abriría
  *   la puerta a robos de cuenta). Se dice al lado, para que nadie busque cómo hacerlo.
@@ -71,15 +76,20 @@ interface AccountCardProps {
 export function AccountCard({ user }: AccountCardProps) {
   const [editing, setEditing] = useState<EditableSetting | null>(null);
   const usernameFormId = useId();
+  const avatarFormId = useId();
   const passwordFormId = useId();
   const usernameButtonRef = useRef<HTMLButtonElement>(null);
+  const avatarButtonRef = useRef<HTMLButtonElement>(null);
   const passwordButtonRef = useRef<HTMLButtonElement>(null);
+  const buttonRefs = { username: usernameButtonRef, avatar: avatarButtonRef, password: passwordButtonRef };
   // Botón al que hay que devolver el foco cuando su formulario se cierre (tras el render que lo vuelve a pintar).
   const returnFocusTo = useRef<EditableSetting | null>(null);
 
   useEffect(() => {
     if (editing !== null || returnFocusTo.current === null) return;
-    const target = returnFocusTo.current === 'username' ? usernameButtonRef : passwordButtonRef;
+    const target = { username: usernameButtonRef, avatar: avatarButtonRef, password: passwordButtonRef }[
+      returnFocusTo.current
+    ];
     returnFocusTo.current = null;
     target.current?.focus();
   }, [editing]);
@@ -98,7 +108,7 @@ export function AccountCard({ user }: AccountCardProps) {
   const changeButton = (setting: EditableSetting, what: string) =>
     editing !== setting && (
       <Button
-        ref={setting === 'username' ? usernameButtonRef : passwordButtonRef}
+        ref={buttonRefs[setting]}
         variant="outline"
         className="px-4"
         aria-label={`Cambiar ${what}`}
@@ -114,6 +124,25 @@ export function AccountCard({ user }: AccountCardProps) {
         <AccountRow label="Nombre" value={user.username} action={changeButton('username', 'nombre')}>
           {editing === 'username' && (
             <UsernameForm id={usernameFormId} currentUsername={user.username} onClose={() => close('username')} />
+          )}
+        </AccountRow>
+        <AccountRow
+          label="Icono de perfil"
+          value={
+            <span className="inline-flex items-center gap-2">
+              <UserAvatar username={user.username} avatar={user.avatar} size="xs" />
+              {avatarLabel(user.avatar)}
+            </span>
+          }
+          action={changeButton('avatar', 'icono de perfil')}
+        >
+          {editing === 'avatar' && (
+            <AvatarForm
+              id={avatarFormId}
+              username={user.username}
+              currentAvatar={user.avatar}
+              onClose={() => close('avatar')}
+            />
           )}
         </AccountRow>
         <AccountRow

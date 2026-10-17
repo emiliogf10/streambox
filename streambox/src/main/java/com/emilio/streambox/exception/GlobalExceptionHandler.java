@@ -3,6 +3,7 @@ package com.emilio.streambox.exception;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -28,6 +29,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import com.emilio.streambox.dto.ErrorCode;
 import com.emilio.streambox.dto.ErrorResponse;
 import com.emilio.streambox.security.JsonRequestRejectedHandler;
+import com.emilio.streambox.service.SqlStates;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -74,8 +76,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     private static final String VALIDATION_MESSAGE = "Los datos proporcionados no son válidos";
     private static final String MALFORMED_MESSAGE = GenericHttpError.MALFORMED_MESSAGE;
-    private static final String INTEGRITY_MESSAGE =
-            "No se puede completar la operación porque entra en conflicto con datos existentes";
+
+    /** Prefijo de las clases de la aplicación, para localizar el origen de un error en la traza. */
+    private static final String APPLICATION_PACKAGE = "com.emilio.streambox.";
+
+    /** Valor que se registra cuando no se conoce un dato (SQLSTATE, restricción, origen). */
+    private static final String UNKNOWN = "desconocido";
     private static final String INTERNAL_ERROR_MESSAGE = GenericHttpError.INTERNAL_ERROR_MESSAGE;
 
     // ------------------------------------------------------------------
@@ -239,11 +245,73 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 VALIDATION_MESSAGE, request, errors);
     }
 
+    /**
+     * Violación de integridad que <b>ningún servicio ha traducido</b>: 500
+     * {@code INTERNAL_ERROR} y una línea {@code ERROR} en el log.
+     *
+     * <p>
+     * <b>Por qué un 500 y no un 409.</b> Las violaciones que pueden ocurrir con
+     * datos correctos (un nombre repetido, una carrera entre dos peticiones,
+     * algo borrado entre la comprobación y la escritura) las traduce cada
+     * servicio a su excepción de dominio, con su código propio
+     * ({@code USER_ALREADY_EXISTS}, {@code GENRE_IN_USE},
+     * {@code EPISODE_ALREADY_EXISTS}, un 404...). Si una llega hasta aquí es que
+     * nadie la esperaba: una validación que falta (como pasaba con el NUL en un
+     * título, que PostgreSQL rechaza) o un fallo de programación. Antes se
+     * respondía un 409 «conflicto con datos existentes» que culpaba al cliente
+     * de algo que no había hecho, y no quedaba ningún rastro en el log, así que
+     * nadie se enteraba del fallo.
+     * </p>
+     *
+     * <p>
+     * <b>Qué se registra y qué no.</b> El método, la ruta (sin la consulta), el
+     * {@code SQLSTATE}, el nombre de la restricción y la línea de nuestro código
+     * donde se originó, que bastan para encontrar el fallo. <b>No</b> se pasa la
+     * excepción al log, aunque sea lo habitual en un error 500
+     * ({@link #handleUnexpectedException}): su mensaje y los de sus causas
+     * incluyen el SQL y, en PostgreSQL ({@code Detail: Key (email)=(...)}) y en
+     * H2, los valores de la fila, que pueden ser datos personales.
+     * </p>
+     *
+     * @param exception violación lanzada por la capa de datos
+     * @param request   petición en curso
+     * @return 500 con el mensaje genérico
+     */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(
             DataIntegrityViolationException exception, HttpServletRequest request) {
-        return buildErrorResponse(HttpStatus.CONFLICT, ErrorCode.DATA_INTEGRITY_VIOLATION,
-                INTEGRITY_MESSAGE, request);
+        LOGGER.error("Violación de integridad de datos no traducida al procesar {} {}: SQLSTATE={}, "
+                        + "restricción={}, origen={}",
+                request.getMethod(), request.getRequestURI(),
+                Objects.requireNonNullElse(SqlStates.find(exception), UNKNOWN),
+                Objects.requireNonNullElse(SqlStates.constraintName(exception), UNKNOWN),
+                applicationOrigin(exception));
+        return buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, ErrorCode.INTERNAL_ERROR,
+                INTERNAL_ERROR_MESSAGE, request);
+    }
+
+    /**
+     * Primera línea de la traza que pertenece a la aplicación (el servicio o
+     * el repositorio que hizo la escritura), sin las clases generadas por los
+     * proxies de Spring ({@code $$SpringCGLIB$$}). Sustituye a la traza
+     * completa, que no se puede registrar sin sus mensajes (ver
+     * {@link #handleDataIntegrityViolation}).
+     *
+     * @param exception excepción cuya traza se recorre (y la de sus causas)
+     * @return {@code Clase.método(Archivo.java:línea)}, o {@code "desconocido"}
+     */
+    private static String applicationOrigin(Throwable exception) {
+        Throwable current = exception;
+        for (int depth = 0; current != null && depth < 20; depth++) {
+            for (StackTraceElement frame : current.getStackTrace()) {
+                if (frame.getClassName().startsWith(APPLICATION_PACKAGE)
+                        && !frame.getClassName().contains("$$")) {
+                    return frame.toString();
+                }
+            }
+            current = current.getCause() == current ? null : current.getCause();
+        }
+        return UNKNOWN;
     }
 
     /**

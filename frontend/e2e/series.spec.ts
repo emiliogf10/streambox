@@ -37,7 +37,7 @@ function seriesCard(scope: Page | Locator, title: string) {
 /** Abre la página de la serie del banner de `/series` y espera a que esté cargada. */
 async function openHeroSeries(page: Page) {
   await page.goto('/series');
-  await page.getByRole('region', { name: SERIES_HERO.title }).getByRole('link', { name: /^Ver episodios/ }).click();
+  await page.getByRole('region', { name: SERIES_HERO.title }).getByRole('link', { name: /^Más información/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: SERIES_HERO.title })).toBeVisible();
 }
 

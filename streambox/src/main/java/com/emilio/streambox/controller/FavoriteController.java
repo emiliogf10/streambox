@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -13,14 +14,18 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.emilio.streambox.dto.MovieRequest;
 import com.emilio.streambox.dto.MovieResponse;
 import com.emilio.streambox.security.AuthenticatedUser;
 import com.emilio.streambox.service.FavoriteService;
+import com.emilio.streambox.validation.ControlCharacters;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import jakarta.validation.constraints.Pattern;
 
 /**
  * Controlador REST de la lista de favoritos del usuario autenticado
@@ -31,11 +36,30 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
  * obtiene del token JWT: no existe ninguna ruta para ver o modificar la lista
  * de otra persona.
  * </p>
+ *
+ * <p>
+ * Lleva {@code @Validated}, como el resto de controladores con parámetros
+ * validados, para que las restricciones del parámetro {@code title} de las
+ * rutas {@code by-title} se apliquen y un texto no válido sea un 400
+ * {@code VALIDATION_ERROR} con el motivo en {@code validationErrors.title}.
+ * </p>
  */
 @SecurityRequirement(name = "bearerAuth")
 @RestController
+@Validated
 @RequestMapping("/api/users/me/favorites")
 public class FavoriteController {
+
+    /**
+     * Documentación OpenAPI del parámetro {@code title} de las rutas
+     * {@code by-title}.
+     */
+    private static final String TITLE_DESCRIPTION = "Título exacto de la película (sin distinguir "
+            + "mayúsculas). Sin caracteres de control: si los tiene, 400 VALIDATION_ERROR.";
+
+    /** Respuesta 400 documentada en las rutas {@code by-title}. */
+    private static final String BAD_REQUEST_DESCRIPTION =
+            "Falta el parámetro title o contiene caracteres de control";
 
     private final FavoriteService favoriteService;
 
@@ -92,6 +116,14 @@ public class FavoriteController {
      * mayúsculas). El título es un parámetro de consulta para conservar
      * espacios y caracteres especiales sin meterlos en la ruta.
      *
+     * <p>
+     * El título no puede tener caracteres de control (la misma regla que al
+     * guardarlo, {@link ControlCharacters#SINGLE_LINE_TEXT}): ningún título
+     * guardado los tiene, y un {@code %00} llegaba a PostgreSQL, que no admite
+     * el NUL en un texto, y respondía un 409 «conflicto con datos existentes»
+     * falso en lugar de un 400.
+     * </p>
+     *
      * @param title     título exacto de la película
      * @param principal usuario autenticado
      */
@@ -100,12 +132,15 @@ public class FavoriteController {
     @Operation(summary = "Añade una película a mi lista por título", description = "Añade a favoritos una película cuyo título coincide exactamente con el parámetro title, sin distinguir mayúsculas.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Película añadida correctamente"),
+            @ApiResponse(responseCode = "400", description = BAD_REQUEST_DESCRIPTION),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "404", description = "No existe una película con el título indicado"),
             @ApiResponse(responseCode = "409", description = "La película ya está en mi lista, o el título es ambiguo")
     })
     public void addFavoriteByTitle(
-            @RequestParam String title,
+            @RequestParam @Parameter(description = TITLE_DESCRIPTION)
+            @Pattern(regexp = ControlCharacters.SINGLE_LINE_TEXT,
+                    message = MovieRequest.TITLE_CONTROL_CHARACTERS_MESSAGE) String title,
             @AuthenticationPrincipal AuthenticatedUser principal) {
 
         favoriteService.addFavoriteByTitle(principal.id(), title);
@@ -134,7 +169,8 @@ public class FavoriteController {
 
     /**
      * Quita una película de la lista por su título exacto (sin distinguir
-     * mayúsculas).
+     * mayúsculas). El título sigue la misma regla que en
+     * {@link #addFavoriteByTitle}.
      *
      * @param title     título exacto de la película
      * @param principal usuario autenticado
@@ -144,12 +180,15 @@ public class FavoriteController {
     @Operation(summary = "Elimina una película de mi lista por título", description = "Elimina de favoritos una película cuyo título coincide exactamente con el parámetro title, sin distinguir mayúsculas.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Película eliminada correctamente"),
+            @ApiResponse(responseCode = "400", description = BAD_REQUEST_DESCRIPTION),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "404", description = "La película no existe o no está en mi lista"),
             @ApiResponse(responseCode = "409", description = "El título es ambiguo")
     })
     public void removeFavoriteByTitle(
-            @RequestParam String title,
+            @RequestParam @Parameter(description = TITLE_DESCRIPTION)
+            @Pattern(regexp = ControlCharacters.SINGLE_LINE_TEXT,
+                    message = MovieRequest.TITLE_CONTROL_CHARACTERS_MESSAGE) String title,
             @AuthenticationPrincipal AuthenticatedUser principal) {
 
         favoriteService.removeFavoriteByTitle(principal.id(), title);

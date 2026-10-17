@@ -234,7 +234,9 @@ export function AdminGenresPage() {
   if (!loaded && status === 'loading') {
     list = <LoadingState label="Cargando géneros..." />;
   } else if (!loaded && status === 'error') {
-    list = <ErrorState title="No se pudieron cargar los géneros" message={errorMessage} onRetry={reload} />;
+    list = (
+      <ErrorState title="No se pudieron cargar los géneros" message={errorMessage} onRetry={reload} retryFocusRef={headingRef} />
+    );
   } else if (genres.length === 0) {
     list = (
       <EmptyState

@@ -24,6 +24,7 @@ import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 
 import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Movie;
+import com.emilio.streambox.migration.UserAvatarSchemaCases;
 
 import jakarta.persistence.EntityManagerFactory;
 
@@ -33,7 +34,7 @@ import jakarta.persistence.EntityManagerFactory;
  *
  * <p>
  * Que el contexto de Spring arranque ya demuestra dos cosas: que todas las
- * migraciones ({@code V1}..{@code V4}) se aplican en PostgreSQL desde cero y que Hibernate
+ * migraciones ({@code V1}..{@code V7}) se aplican en PostgreSQL desde cero y que Hibernate
  * ({@code ddl-auto=validate}) acepta las entidades contra ese esquema. Aquí se
  * comprueba además lo que H2 no puede garantizar: los tipos reales del catálogo
  * del sistema ({@code information_schema}, {@code pg_catalog}), las políticas de
@@ -78,7 +79,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL y V6 (sin
+     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6 y V7 (sin
      * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
      * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
@@ -88,7 +89,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2", "3", "4", "5", "6"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -131,13 +132,14 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     /**
      * Longitudes de los {@code VARCHAR} y obligatoriedad de cada columna: solo
      * admiten {@code NULL} el vídeo y el tráiler de la película (opcionales
-     * desde la {@code V6}).
+     * desde la {@code V6}) y el avatar del usuario ({@code V7}; {@code NULL} =
+     * se muestra la inicial).
      */
     @Test
     void lasLongitudesYLaObligatoriedadDeLasColumnasSonLasDeLasEntidades() {
         Map<String, Integer> expectedLengths = Map.ofEntries(
                 Map.entry("users.username", 50), Map.entry("users.email", 100),
-                Map.entry("users.password", 255), Map.entry("users.role", 20),
+                Map.entry("users.password", 255), Map.entry("users.role", 20), Map.entry("users.avatar", 32),
                 Map.entry("genres.name", 50),
                 Map.entry("movies.title", 150), Map.entry("movies.description", 1000),
                 Map.entry("movies.image_url", 500), Map.entry("movies.video_url", 500),
@@ -154,8 +156,8 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                     .findFirst().orElseThrow(() -> new AssertionError("falta la columna " + expected.getKey()));
             assertEquals(expected.getValue(), column.get("character_maximum_length"), expected.getKey());
         }
-        // Solo el vídeo y el tráiler de la película admiten NULL
-        assertEquals(java.util.Set.of("movies.video_url", "movies.trailer_url"), java.util.Set.copyOf(columns.stream()
+        // Solo el vídeo y el tráiler de la película y el avatar del usuario admiten NULL
+        assertEquals(java.util.Set.of("movies.video_url", "movies.trailer_url", "users.avatar"), java.util.Set.copyOf(columns.stream()
                 .filter(c -> !"NO".equals(c.get("is_nullable")))
                 .map(c -> c.get("table_name") + "." + c.get("column_name"))
                 .toList()));
@@ -339,14 +341,15 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         assertTrue(error.getMessage().contains("user_favorite_movies_pkey"), error.getMessage());
     }
 
-    /** Existen las tres restricciones CHECK con su nombre. */
+    /** Existen las restricciones CHECK de usuarios y películas con su nombre. */
     @Test
     void existenLasRestriccionesCheckConNombre() {
         Set<String> checks = Set.copyOf(jdbc.queryForList(
                 "SELECT conname FROM pg_constraint WHERE contype = 'c' AND connamespace = 'public'::regnamespace",
                 String.class));
 
-        assertTrue(checks.containsAll(Set.of("ck_users_role", "ck_movies_duration", "ck_movies_release_year")),
+        assertTrue(checks.containsAll(Set.of("ck_users_role", "ck_movies_duration", "ck_movies_release_year",
+                "ck_users_avatar")),
                 "checks: " + checks);
     }
 
@@ -387,6 +390,35 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
 
         assertEquals(CHECK_VIOLATION, sqlState(error));
         assertTrue(error.getMessage().contains("ck_users_role"), error.getMessage());
+    }
+
+    /**
+     * {@code ck_users_avatar} (V7) en PostgreSQL: rechaza con 23514 las mismas
+     * cadenas que en H2 ({@link UserAvatarSchemaCases#INVALID_FORMAT}) y acepta
+     * las claves con formato válido y {@code NULL}. Importa probarlo aquí porque
+     * {@code TRANSLATE}, {@code REPEAT} y {@code CHAR_LENGTH} se comportan con
+     * texto Unicode según el motor. Más de 32 caracteres lo rechaza el
+     * {@code VARCHAR(32)} (22001).
+     */
+    @Test
+    void laBaseDeDatosSoloAdmiteAvataresConFormatoDeClave() {
+        long userId = insertUser("avatar", "avatar@test.com");
+
+        for (String valid : UserAvatarSchemaCases.VALID) {
+            jdbc.update("UPDATE users SET avatar = ? WHERE id = ?", valid, userId);
+            assertEquals(valid, jdbc.queryForObject("SELECT avatar FROM users WHERE id = ?", String.class, userId));
+        }
+        jdbc.update("UPDATE users SET avatar = NULL WHERE id = ?", userId);
+        for (String invalid : UserAvatarSchemaCases.INVALID_FORMAT) {
+            DataIntegrityViolationException error = assertThrows(DataIntegrityViolationException.class,
+                    () -> jdbc.update("UPDATE users SET avatar = ? WHERE id = ?", invalid, userId), invalid);
+            assertEquals(CHECK_VIOLATION, sqlState(error), invalid);
+            assertTrue(error.getMessage().contains("ck_users_avatar"), error.getMessage());
+        }
+        DataIntegrityViolationException tooLong = assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("UPDATE users SET avatar = ? WHERE id = ?", "a".repeat(33), userId));
+        assertEquals("22001", sqlState(tooLong));
+        assertEquals(null, jdbc.queryForObject("SELECT avatar FROM users WHERE id = ?", String.class, userId));
     }
 
     /** Los {@code NOT NULL} se aplican en la base de datos (23502), no solo en Java. */

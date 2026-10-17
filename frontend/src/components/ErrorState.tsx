@@ -1,4 +1,6 @@
 import { TriangleAlert } from 'lucide-react';
+import type { RefObject } from 'react';
+import { useRetryFocus } from '../hooks/useRetryFocus';
 import { Button } from './Button';
 
 /** Propiedades de {@link ErrorState}. */
@@ -20,13 +22,29 @@ interface ErrorStateProps {
    * «No se pudo comprobar tu sesión», que se pinta sin barra ni contenido).
    */
   headingLevel?: 1 | 2;
+  /**
+   * Elemento estable de la zona (p. ej. su encabezado, con `tabIndex={-1}`) que
+   * recibe el foco cuando «Reintentar» desaparece al pulsarlo. Sin él, va al
+   * antecesor enfocable por código más cercano que siga en la página (en
+   * último término, el `<main>`). Ver `useRetryFocus`.
+   */
+  retryFocusRef?: RefObject<HTMLElement | null>;
 }
+
+/** Reintento vacío sin `onRetry`: el hook se llama siempre (reglas de los hooks), pero sin botón no se usa. */
+const NO_RETRY = () => {};
 
 /**
  * Estado de error a pantalla (casi) completa (o de una sola zona, con `compact`), con botón de reintento.
  *
  * `role="alert"` anuncia el error al instante. El mensaje no se redacta aquí:
  * viene de `ApiError`, que ya distingue red caída, 403, 429, 5xx...
+ *
+ * **El foco tras «Reintentar».** Al pulsarlo, este aviso se sustituye por la
+ * silueta de carga y el botón desaparece: sin hacer nada, el foco caería en
+ * `<body>`. {@link useRetryFocus} lo lleva a un elemento estable de la misma
+ * zona (`retryFocusRef` o el antecesor enfocable más cercano) y, si el
+ * reintento vuelve a fallar, al nuevo «Reintentar».
  */
 export function ErrorState({
   title = 'No se pudo cargar el contenido',
@@ -34,7 +52,9 @@ export function ErrorState({
   onRetry,
   compact = false,
   headingLevel = 2,
+  retryFocusRef,
 }: ErrorStateProps) {
+  const { retryRef, handleRetry } = useRetryFocus(onRetry ?? NO_RETRY, retryFocusRef && (() => retryFocusRef.current));
   const Heading = headingLevel === 1 ? 'h1' : 'h2';
   return (
     <div className={`flex items-center justify-center ${compact ? '' : 'min-h-[50vh] px-4'}`}>
@@ -46,7 +66,7 @@ export function ErrorState({
         <Heading className="font-semibold text-danger">{title}</Heading>
         <p className="text-sm leading-relaxed text-muted">{message}</p>
         {onRetry && (
-          <Button variant="outline" onClick={onRetry} className="mt-2">
+          <Button ref={retryRef} variant="outline" onClick={handleRetry} className="mt-2">
             Reintentar
           </Button>
         )}

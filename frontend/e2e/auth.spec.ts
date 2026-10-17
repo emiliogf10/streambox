@@ -513,12 +513,24 @@ test.describe('Sesión renovable (refresh token)', () => {
     expect(statuses.length).toBeLessThanOrEqual(2);
     expect(statuses.every((status) => status === 204)).toBe(true);
 
-    // La prueba de que el servidor no revocó nada: al recargar (/series), las dos siguen dentro.
+    // Las dos siguen dentro: navegar (dentro de la SPA) a otra sección pide datos nuevos y llegan, sin login.
     for (const tab of [page, second]) {
-      await tab.reload();
-      await expect(tab.getByRole('region', { name: SERIES_HERO.title })).toBeVisible();
-      await expect(tab).toHaveURL(/\/series$/);
+      await tab.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Películas' }).click();
+      await expect(tab.getByRole('region', { name: HERO_TITLE })).toBeVisible();
+      await expect(tab).toHaveURL(/\/peliculas$/);
     }
+
+    // La prueba de que el servidor no revocó la sesión: renovar otra vez con el refresh token que quedó en
+    // el navegador (`page.request` comparte sus cookies) da 204. Si una pestaña hubiera reutilizado un token
+    // ya rotado fuera de la gracia, la familia entera estaría revocada y esto daría 401 SESSION_EXPIRED.
+    //
+    // Antes se comprobaba recargando las dos pestañas, que NO lo demuestra (el filtro JWT no mira la tabla de
+    // refresh tokens: con la familia revocada, la cookie de acceso seguiría valiendo 15 min y la recarga
+    // entraría igual) y costaba dos cargas completas de la app en el Vite de desarrollo (cientos de módulos
+    // sueltos): unos 3 s de recargas más otros ~5 s al guardar la traza (`trace: 'retain-on-failure'` la
+    // graba siempre y crece con cada petición), y dejaba el test en 20-27 s, al límite de los 30 s.
+    const again = await page.request.post('/api/auth/refresh', { headers: { 'X-Requested-With': 'StreamBox' } });
+    expect(again.status(), 'la sesión debe seguir viva en el servidor').toBe(204);
     await second.close();
   });
 });

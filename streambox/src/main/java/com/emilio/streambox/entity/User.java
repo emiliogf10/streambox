@@ -16,6 +16,7 @@ import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.DynamicUpdate;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -30,13 +31,39 @@ import lombok.Setter;
  *
  * <p>
  * Contiene la información necesaria para identificar y autenticar
- * a un usuario, así como su rol y fecha de creación.
+ * a un usuario, así como su rol, su icono de perfil y su fecha de creación.
+ * </p>
+ *
+ * <p>
+ * <strong>Por qué {@code @DynamicUpdate}.</strong> Sin ella, Hibernate genera
+ * un único {@code UPDATE} que reescribe <em>todas</em> las columnas con los
+ * valores que la entidad tenía al leerse. Si dos peticiones leen la misma fila
+ * sin bloquearla y cada una cambia una cosa distinta, la que escribe la
+ * última devuelve a su valor antiguo lo que cambió la otra («actualización
+ * perdida»). Ocurría de verdad: un {@code PATCH /api/users/me} (cambio de
+ * avatar o de nombre) que coincidía con un {@code PUT /api/users/me/password}
+ * ya confirmado volvía a escribir el hash antiguo, de modo que la contraseña
+ * nueva se perdía y la antigua (quizá filtrada) volvía a valer. Con
+ * {@code @DynamicUpdate} el {@code UPDATE} solo incluye las columnas
+ * modificadas, así que cambiar el perfil nunca toca {@code password} y cambiar
+ * la contraseña nunca toca el perfil. Lo prueba
+ * {@code PostgresIntegrityRaceTranslationQaIntegrationTest}.
+ * </p>
+ *
+ * <p>
+ * No sustituye a un bloqueo cuando la escritura <em>depende</em> del valor
+ * leído: {@code PasswordChangeService} sigue bloqueando la fila
+ * ({@code PESSIMISTIC_WRITE}) porque comprueba la contraseña actual antes de
+ * cambiarla. El coste es que Hibernate genera el SQL del {@code UPDATE} en
+ * cada escritura en vez de reutilizar uno precalculado; con lo poco que se
+ * modifica una cuenta, es irrelevante.
  * </p>
  *
  * @author Emilio
  */
 @Entity
 @Table(name = "users")
+@DynamicUpdate
 @Getter
 @Setter
 public class User {
@@ -88,6 +115,22 @@ public class User {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Role role;
+
+    /**
+     * Clave del icono de perfil elegido (por ejemplo {@code "rocket"}), o
+     * {@code null} si el usuario no ha elegido ninguno y la interfaz muestra su
+     * inicial.
+     *
+     * <p>
+     * Es la clave de uno de los avatares predefinidos, no una imagen ni una URL:
+     * el frontend la traduce a un icono. La lista de claves válidas la valida el
+     * backend y no la base de datos, para que añadir un avatar no exija una
+     * migración; la base solo exige el formato (de 1 a 32 caracteres de
+     * {@code [a-z0-9-]}, restricción {@code ck_users_avatar} de la {@code V7}).
+     * </p>
+     */
+    @Column(name = "avatar", length = 32)
+    private String avatar;
 
     /**
      * Instante en el que se creó el registro.

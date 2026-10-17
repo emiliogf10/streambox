@@ -30,6 +30,8 @@ export const SIMILAR_MOVIES_TITLE = 'Películas similares';
  * - **Error** (red, 5xx...): un aviso compacto (`ErrorState compact`) con
  *   «Reintentar» que solo vuelve a pedir la fila; el resto de la página sigue
  *   siendo útil. El texto es verdad para cualquier rol: no se pudo cargar.
+ *   Al pulsarlo, el foco pasa al contenedor de la fila en `MovieDetailPage`
+ *   (enfocable por código y presente en todos los estados; ver `useRetryFocus`).
  *
  * Al pulsar una tarjeta cambia la película de la página: la clave de la caché
  * es otra, así que la fila pasa a cargando (nunca enseña las similares de la

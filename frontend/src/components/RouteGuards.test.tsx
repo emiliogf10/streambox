@@ -12,7 +12,7 @@
  * pendiente las rutas esperan: redirigir ya echaría al login a quien recarga con
  * la sesión abierta.
  */
-import { screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, Route, Routes } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -160,6 +160,31 @@ describe('RequireAuth', () => {
     // «Saltar al contenido» tiene destino: lleva el foco al <main>.
     await user.click(screen.getByRole('link', { name: 'Saltar al contenido' }));
     expect(main).toHaveFocus();
+  });
+
+  it('«Reintentar» con el teclado: mientras comprueba, el foco queda en el <main> (no en <body>); si vuelve a fallar, en el nuevo «Reintentar»', async () => {
+    // El primer intento falla al momento; el segundo espera a que el test conteste.
+    let attempts = 0;
+    let answerRetry: (response: Response) => void = () => {};
+    routeFetch(fetchMock, {
+      [CURRENT_USER]: () => {
+        attempts += 1;
+        if (attempts === 1) return errorResponse(500, 'INTERNAL_ERROR', 'boom');
+        return new Promise<Response>((resolve) => (answerRetry = resolve));
+      },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<Routing />, { route: '/', session: true });
+    await screen.findByRole('heading', { level: 1, name: 'No se pudo comprobar tu sesión' });
+
+    screen.getByRole('button', { name: 'Reintentar' }).focus();
+    await user.keyboard('{Enter}');
+
+    expect(await within(screen.getByRole('main')).findByRole('status')).toHaveTextContent('Comprobando tu sesión...');
+    await waitFor(() => expect(screen.getByRole('main')).toHaveFocus());
+
+    await act(async () => answerRetry(errorResponse(500, 'INTERNAL_ERROR', 'boom')));
+    expect(await screen.findByRole('button', { name: 'Reintentar' })).toHaveFocus();
   });
 
   it('mientras se comprueba la sesión también hay un <main> al que saltar', () => {

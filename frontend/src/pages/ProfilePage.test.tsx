@@ -11,7 +11,9 @@
  * («Cerrando sesión...»; si falla, la sesión sigue abierta y se avisa).
  *
  * «Editar perfil»: cambiar el nombre (`PATCH /api/users/me`; la cabecera lo
- * enseña al instante; 409 y 400 junto al campo), cambiar la contraseña
+ * enseña al instante; 409 y 400 junto al campo), el icono de perfil (grupo de
+ * radio con teclado; envía solo `avatar`, también `null`; 400 junto al grupo;
+ * una clave desconocida se pinta con la inicial), cambiar la contraseña
  * (`PUT /api/users/me/password`; cada error del contrato en su sitio y la cuenta
  * atrás del 429) y «Cerrar sesión en todos los dispositivos» (confirmación,
  * 204 → sesión cerrada, 500/502 → sigue abierta y se avisa en el diálogo).
@@ -44,6 +46,7 @@ import {
   routeFetch,
 } from '../test/helpers';
 import type { Movie, Series, User } from '../lib/types';
+import { Navbar } from '../components/Navbar';
 import { ProfilePage } from './ProfilePage';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -110,8 +113,10 @@ describe('ProfilePage: cabecera', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getByText('Usuario')).toBeInTheDocument();
     expect(screen.getByText('Miembro desde octubre de 2026')).toBeInTheDocument();
-    // La inicial es decorativa: el nombre ya está en el h1 y no debe leerse dos veces.
-    expect(screen.getByText('A')).toHaveAttribute('aria-hidden', 'true');
+    // La inicial es decorativa (en la cabecera y en la fila «Icono de perfil»): el nombre ya está en el h1.
+    const initials = screen.getAllByText('A');
+    expect(initials).toHaveLength(2);
+    for (const initial of initials) expect(initial).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByRole('link', { name: 'Panel de administración' })).not.toBeInTheDocument();
     expect(screen.queryByText('Administrador')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cerrar sesión' })).toBeInTheDocument();
@@ -126,7 +131,7 @@ describe('ProfilePage: cabecera', () => {
     await findName('jefa');
     expect(screen.getByText('Administrador')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Panel de administración' })).toHaveAttribute('href', '/admin');
-    expect(screen.getByText('J')).toHaveAttribute('aria-hidden', 'true');
+    for (const initial of screen.getAllByText('J')) expect(initial).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('pone el título de la pestaña «Mi perfil — StreamBox»', async () => {
@@ -185,9 +190,12 @@ describe('ProfilePage: tarjeta «Cuenta»', () => {
     expect(password).toHaveTextContent('No se muestra por seguridad.');
     // Sin los puntos de antes, que parecían un campo editable.
     expect(password).not.toHaveTextContent('•');
-    // Solo se pueden cambiar el nombre y la contraseña; el correo no tiene botón.
+    // Sin avatar elegido, la fila «Icono de perfil» dice «Tu inicial».
+    expect(within(account).getByText('Icono de perfil').nextElementSibling).toHaveTextContent('Tu inicial');
+    // Se pueden cambiar el nombre, el icono y la contraseña; el correo no tiene botón.
     expect(within(account).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
       'Cambiar nombre',
+      'Cambiar icono de perfil',
       'Cambiar contraseña',
     ]);
     expect(within(email as HTMLElement).queryByRole('button')).not.toBeInTheDocument();
@@ -403,6 +411,9 @@ describe('ProfilePage: estados de la lista', () => {
     expect(await screen.findByText('Película en mi lista')).toBeInTheDocument();
     expect(valueOf('Película en mi lista')).toHaveTextContent('1');
     expect(screen.queryByRole('heading', { name: 'No se pudo cargar tu lista' })).not.toBeInTheDocument();
+    // El botón desapareció al pulsarlo: el foco quedó en la zona de la tarjeta, no en <body>.
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toContainElement(section('Tus géneros'));
   });
 });
 
@@ -534,6 +545,227 @@ describe('ProfilePage: cambiar el nombre', () => {
   });
 });
 
+describe('ProfilePage: icono de perfil', () => {
+  const PATCH_ME = 'PATCH /api/users/me';
+
+  /** El avatar grande de la cabecera: el primero con `data-avatar` del bloque del `<h1>`. */
+  const headerAvatar = () =>
+    screen.getByRole('heading', { level: 1 }).parentElement!.parentElement!.querySelector('[data-avatar]');
+
+  /** Abre el selector con «Cambiar icono de perfil» y devuelve el grupo de opciones. */
+  async function openPicker(user: Events) {
+    await user.click(screen.getByRole('button', { name: 'Cambiar icono de perfil' }));
+    return screen.getByRole('group', { name: 'Elige tu icono' });
+  }
+
+  it('con un avatar elegido, la cabecera lo enseña (decorativo) y la fila «Icono de perfil» dice su nombre', async () => {
+    renderProfile({ user: makeUser({ avatar: 'cat' }) });
+    await findName('ana');
+
+    expect(headerAvatar()).toHaveAttribute('data-avatar', 'cat');
+    expect(headerAvatar()).toHaveAttribute('aria-hidden', 'true');
+    expect(within(section('Cuenta')).getByText('Icono de perfil').nextElementSibling).toHaveTextContent('Gato');
+    // Con icono, la inicial ya no aparece en ningún sitio.
+    expect(screen.queryByText('A')).not.toBeInTheDocument();
+  });
+
+  it('una clave que la interfaz no conoce se pinta con la inicial, sin romper la página', async () => {
+    renderProfile({ user: makeUser({ avatar: 'dragon' }) });
+    await findName('ana');
+
+    expect(headerAvatar()).toHaveAttribute('data-avatar', 'initial');
+    expect(headerAvatar()).toHaveTextContent('A');
+    expect(within(section('Cuenta')).getByText('Icono de perfil').nextElementSibling).toHaveTextContent('Tu inicial');
+  });
+
+  it('el selector es un grupo de 13 opciones con nombre («Tu inicial» y los 12 avatares), con la actual marcada y el foco en ella', async () => {
+    const user = renderProfile({ user: makeUser({ avatar: 'moon' }) });
+    await findName('ana');
+
+    const group = await openPicker(user);
+
+    const names = within(group)
+      .getAllByRole('radio')
+      .map((radio) => radio.closest('label')?.textContent);
+    // La opción «Tu inicial» enseña la «A» decorativa delante de su nombre.
+    expect(names).toEqual([
+      'ATu inicial',
+      'Cohete',
+      'Fantasma',
+      'Gato',
+      'Perro',
+      'Estrella',
+      'Llama',
+      'Hoja',
+      'Luna',
+      'Sol',
+      'Rayo',
+      'Música',
+      'Corona',
+    ]);
+    expect(within(group).getByRole('radio', { name: 'Tu inicial' })).toBeInTheDocument();
+    expect(within(group).getByRole('radio', { name: 'Luna' })).toBeChecked();
+    expect(within(group).getByRole('radio', { name: 'Luna' })).toHaveFocus();
+    expect(within(group).getAllByRole('radio', { checked: true })).toHaveLength(1);
+    expect(screen.getByText('Vista previa:', { exact: false })).toHaveTextContent('Vista previa: Luna');
+  });
+
+  it('con el teclado: las flechas cambian la opción marcada y la vista previa la sigue', async () => {
+    const user = renderProfile();
+    await findName('ana');
+
+    const group = await openPicker(user);
+    expect(within(group).getByRole('radio', { name: 'Tu inicial' })).toHaveFocus();
+    await user.keyboard('{ArrowRight}');
+
+    const rocket = within(group).getByRole('radio', { name: 'Cohete' });
+    expect(rocket).toBeChecked();
+    expect(rocket).toHaveFocus();
+    expect(within(group).getByRole('radio', { name: 'Tu inicial' })).not.toBeChecked();
+    expect(screen.getByText('Vista previa:', { exact: false })).toHaveTextContent('Vista previa: Cohete');
+  });
+
+  it('«Guardar icono» envía SOLO { avatar: "cat" }; la cabecera cambia al instante, avisa y el foco vuelve a «Cambiar»', async () => {
+    const user = renderProfile({ extra: { [PATCH_ME]: () => jsonResponse(makeUser({ avatar: 'cat' })) } });
+    await findName('ana');
+
+    const group = await openPicker(user);
+    await user.click(within(group).getByRole('radio', { name: 'Gato' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar icono' }));
+
+    expect(await screen.findByText('Icono de perfil cambiado a «Gato».')).toBeInTheDocument();
+    const [call] = callsTo('/api/users/me', 'PATCH');
+    expect(bodyOf(call)).toEqual({ avatar: 'cat' });
+    expect(new Headers(call[1]?.headers).get('X-Requested-With')).toBe('StreamBox');
+    expect(headerAvatar()).toHaveAttribute('data-avatar', 'cat');
+    // Se usa la respuesta: no se vuelve a pedir el usuario.
+    expect(callsTo('/api/users/me', 'GET')).toHaveLength(1);
+    expect(screen.queryByRole('group', { name: 'Elige tu icono' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cambiar icono de perfil' })).toHaveFocus();
+  });
+
+  it('elegir «Tu inicial» envía { avatar: null } y vuelve a la inicial', async () => {
+    const user = renderProfile({
+      user: makeUser({ avatar: 'cat' }),
+      extra: { [PATCH_ME]: () => jsonResponse(makeUser({ avatar: null })) },
+    });
+    await findName('ana');
+
+    const group = await openPicker(user);
+    await user.click(within(group).getByRole('radio', { name: 'Tu inicial' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar icono' }));
+
+    expect(await screen.findByText('Icono de perfil cambiado: ahora se muestra tu inicial.')).toBeInTheDocument();
+    expect(bodyOf(callsTo('/api/users/me', 'PATCH')[0])).toEqual({ avatar: null });
+    expect(headerAvatar()).toHaveAttribute('data-avatar', 'initial');
+  });
+
+  it('si no cambia nada, «Guardar icono» cierra sin llamar al servidor; «Cancelar» también cierra y devuelve el foco', async () => {
+    const user = renderProfile({ user: makeUser({ avatar: 'sun' }) });
+    await findName('ana');
+
+    await openPicker(user);
+    await user.click(screen.getByRole('button', { name: 'Guardar icono' }));
+    expect(screen.queryByRole('group', { name: 'Elige tu icono' })).not.toBeInTheDocument();
+
+    const group = await openPicker(user);
+    await user.click(within(group).getByRole('radio', { name: 'Rayo' }));
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(screen.queryByRole('group', { name: 'Elige tu icono' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cambiar icono de perfil' })).toHaveFocus();
+    expect(headerAvatar()).toHaveAttribute('data-avatar', 'sun');
+    expect(callsTo('/api/users/me', 'PATCH')).toHaveLength(0);
+  });
+
+  it('400 VALIDATION_ERROR: el mensaje va junto al grupo, describe la opción marcada (con el foco) y NO cierra la sesión', async () => {
+    const message = 'Elige uno de los avatares disponibles';
+    const user = renderProfile({
+      extra: {
+        [PATCH_ME]: () =>
+          errorResponse(400, 'VALIDATION_ERROR', 'Datos no válidos', { validationErrors: { avatar: message } }),
+      },
+    });
+    await findName('ana');
+
+    const group = await openPicker(user);
+    await user.click(within(group).getByRole('radio', { name: 'Hoja' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar icono' }));
+
+    expect(await within(group).findByText(message)).toHaveAttribute('role', 'alert');
+    const leaf = within(group).getByRole('radio', { name: 'Hoja' });
+    expect(leaf).toHaveAccessibleDescription(message);
+    expect(leaf).toHaveFocus();
+    expectSessionStillOpen();
+    // Elegir otra opción quita el error.
+    await user.click(within(group).getByRole('radio', { name: 'Luna' }));
+    expect(within(group).queryByText(message)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['red caída', () => Promise.reject(new TypeError('Failed to fetch')), /No se pudo conectar con el servidor/],
+    ['500', () => errorResponse(500, 'INTERNAL_ERROR', 'x'), /El servidor ha tenido un problema/],
+    [
+      '429',
+      () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x', {}, { 'Retry-After': '30' }),
+      /Demasiados intentos\. Inténtalo de nuevo en 30 s\./,
+    ],
+  ] as const)('%s: lo dice en el formulario, que sigue abierto con la opción marcada para reintentar', async (_, answer, text) => {
+    const user = renderProfile({ extra: { [PATCH_ME]: answer } });
+    await findName('ana');
+
+    const group = await openPicker(user);
+    await user.click(within(group).getByRole('radio', { name: 'Corona' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar icono' }));
+
+    expect(await screen.findByText(text)).toHaveAttribute('role', 'alert');
+    expect(within(group).getByRole('radio', { name: 'Corona' })).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Guardar icono' })).toBeEnabled();
+    expect(headerAvatar()).toHaveAttribute('data-avatar', 'initial');
+    expectSessionStillOpen();
+  });
+
+  it('al guardar, el botón «Menú de usuario» de la barra cambia al instante al avatar nuevo', async () => {
+    routeFetch(fetchMock, {
+      [CURRENT_USER]: () => jsonResponse(makeUser()),
+      [MOVIES]: () => jsonResponse([]),
+      [FAVORITE_SERIES]: () => jsonResponse([]),
+      [ANY_MOVIE]: () => jsonResponse(makePage([makeMovie({ id: 99 })])),
+      [PATCH_ME]: () => jsonResponse(makeUser({ avatar: 'rocket' })),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <FavoritesProvider>
+        <Navbar />
+        <ProfilePage />
+      </FavoritesProvider>,
+      { session: true, route: '/perfil' },
+    );
+    await findName('ana');
+    const menuButton = screen.getByRole('button', { name: 'Menú de usuario' });
+    expect(menuButton.querySelector('[data-avatar]')).toHaveAttribute('data-avatar', 'initial');
+
+    const group = await openPicker(user);
+    await user.click(within(group).getByRole('radio', { name: 'Cohete' }));
+    await user.click(screen.getByRole('button', { name: 'Guardar icono' }));
+
+    await waitFor(() => expect(menuButton.querySelector('[data-avatar]')).toHaveAttribute('data-avatar', 'rocket'));
+    // El nombre del botón no cambia: el avatar es decorativo.
+    expect(menuButton).toHaveAccessibleName('Menú de usuario');
+  });
+
+  it.each(['USER', 'ADMIN'] as const)('el rol %s ve el mismo selector con los mismos textos', async (role) => {
+    const user = renderProfile({ user: makeUser({ role }) });
+    await findName('ana');
+
+    await openPicker(user);
+
+    expect(
+      screen.getByText('Se muestra en la barra superior y en tu perfil. «Tu inicial» usa la primera letra de tu nombre.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('form', { name: 'Cambiar icono de perfil' })).toBeInTheDocument();
+  });
+});
+
 describe('ProfilePage: cambiar la contraseña', () => {
   const PUT_PASSWORD = 'PUT /api/users/me/password';
   const NEW = 'tres palabras al azar 2026';
@@ -606,7 +838,13 @@ describe('ProfilePage: cambiar la contraseña', () => {
     await user.click(submitButton());
 
     expect(screen.getByRole('button', { name: 'Cambiando contraseña...' })).toBeDisabled();
-    answer(noContentResponse());
+    // Dentro de `act`: la respuesta llega desde el test, fuera de cualquier evento de user-event. Sin `act`,
+    // React aplicaba el cierre del formulario en una tarea y el efecto que devuelve el foco a «Cambiar» en
+    // OTRA posterior, y `findByText` podía terminar entre las dos: el foco aún estaba en el `body` y la
+    // comprobación del foco fallaba de vez en cuando (≈1 de cada 15 ejecuciones del test solo). `act`
+    // aplica el render y sus efectos antes de seguir, como ocurre en el navegador antes de que el usuario
+    // pueda hacer nada; la comprobación del foco sigue siendo la misma.
+    await act(async () => answer(noContentResponse()));
 
     // Con la suite entera en paralelo, el aviso puede tardar más que el segundo por defecto de `findBy*`.
     expect(await screen.findByText(PASSWORD_CHANGED, {}, { timeout: 3000 })).toBeInTheDocument();

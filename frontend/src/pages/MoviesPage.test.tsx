@@ -336,6 +336,8 @@ describe('MoviesPage: filtros leídos de la URL', () => {
 
     await genresLoaded();
     expect(screen.queryByText('No se pudieron cargar los géneros.')).not.toBeInTheDocument();
+    // El aviso (con su botón) desapareció: el foco pasó al desplegable de género, lo que se estaba reintentando.
+    expect(genreSelect()).toHaveFocus();
   });
 });
 
@@ -607,5 +609,7 @@ describe('MoviesPage: cuadrícula de resultados', () => {
 
     expect(await within(results()).findByRole('link', { name: /^Segunda/ })).toBeInTheDocument();
     expect(callsWith('genreId=4')).toHaveLength(2);
+    // El botón pulsado desapareció: el foco quedó en el encabezado de los resultados, no en <body>.
+    expect(within(results()).getByRole('heading', { level: 2, name: 'Resultados' })).toHaveFocus();
   });
 });

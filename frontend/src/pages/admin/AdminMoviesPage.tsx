@@ -95,7 +95,14 @@ export function AdminMoviesPage() {
   if ((!data && list.loading) || list.pendingPageFix) {
     content = <LoadingState label="Cargando películas..." />;
   } else if (list.errorMessage !== null) {
-    content = <ErrorState title="No se pudieron cargar las películas" message={list.errorMessage} onRetry={list.reload} />;
+    content = (
+      <ErrorState
+        title="No se pudieron cargar las películas"
+        message={list.errorMessage}
+        onRetry={list.reload}
+        retryFocusRef={headingRef}
+      />
+    );
   } else if (list.searchError !== null) {
     // El servidor ha rechazado el texto (el motivo se ve bajo el campo): «Reintentar» fallaría igual,
     // así que se ofrece lo que sí sirve, corregirlo o borrarlo.

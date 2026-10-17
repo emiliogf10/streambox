@@ -319,6 +319,47 @@ describe('MovieFormPage: alta', () => {
     expect(submitNew()).toBeEnabled();
   });
 
+  it('un título con un carácter de control (NUL pegado) se marca con el mensaje del servidor y no se envía', async () => {
+    routeFetch(fetchMock, GENRES_ROUTE);
+    const user = setupUser();
+    renderForm('/admin/peliculas/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+    await fill(user, field.title(), 'Inter\u0000stellar');
+
+    await user.click(submitNew());
+
+    expect(field.title()).toHaveAccessibleDescription('El título no puede contener caracteres de control');
+    expect(field.title()).toHaveFocus();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
+
+  /**
+   * Carrera con el borrado de un género: el servidor responde 404 con un
+   * mensaje que dice que falta un GÉNERO. El formulario debe mostrar ese texto
+   * (no «Película no encontrada»), conservar lo escrito y recargar los géneros
+   * para que desaparezca el que ya no existe.
+   */
+  it('404 por un género borrado mientras se guardaba: lo dice el mensaje del servidor y se recargan los géneros', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'POST /api/movies': () => errorResponse(404, 'RESOURCE_NOT_FOUND', 'Alguno de los géneros indicados ya no existe'),
+    });
+    const user = setupUser();
+    renderForm('/admin/peliculas/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+    const genreRequests = () => fetchMock.mock.calls.filter(([input]) => String(input) === '/api/genres').length;
+    const before = genreRequests();
+
+    await user.click(submitNew());
+
+    expect(await screen.findByText('Alguno de los géneros indicados ya no existe')).toHaveAttribute('role', 'alert');
+    expect(screen.queryByText('Película no encontrada')).not.toBeInTheDocument();
+    expect(field.title()).toHaveValue('  Interstellar ');
+    await waitFor(() => expect(genreRequests()).toBeGreaterThan(before));
+  });
+
   it('sin géneros: explica que hay que crear uno y enlaza a la pestaña Géneros', async () => {
     routeFetch(fetchMock, { 'GET /api/genres': () => jsonResponse([]) });
     renderForm('/admin/peliculas/nueva');
@@ -338,6 +379,8 @@ describe('MovieFormPage: alta', () => {
     await user.click(within(genresGroup()).getByRole('button', { name: 'Reintentar' }));
 
     expect(await within(genresGroup()).findByRole('checkbox', { name: 'Drama' })).toBeInTheDocument();
+    // El botón desapareció al pulsarlo: el foco se quedó en el grupo «Géneros», no en <body>.
+    expect(genresGroup()).toHaveFocus();
   });
 
   it('el contador de la sinopsis avisa (con texto, no solo color) al pasarse de 1000 caracteres', async () => {

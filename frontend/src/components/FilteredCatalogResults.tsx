@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { SearchX } from 'lucide-react';
 import type { PagedCatalog } from '../hooks/usePagedCatalog';
@@ -61,12 +61,16 @@ export function FilteredCatalogResults<T extends { id: number }>({
 }: Props<T>) {
   const { items, total, status, errorMessage, loadingMore, loadMoreFailed, hasMore, loadMore, reload } = results;
   const headingId = useId();
+  // Destino del foco cuando «Reintentar» desaparece al pulsarlo: el encabezado está en todos los estados.
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   let content: ReactNode;
   if (status === 'loading') {
     content = <GridSkeleton label={`Buscando ${plural}...`} />;
   } else if (status === 'error') {
-    content = <ErrorState title={errorTitle} message={errorMessage} onRetry={reload} />;
+    content = (
+      <ErrorState title={errorTitle} message={errorMessage} onRetry={reload} retryFocusRef={headingRef} />
+    );
   } else if (items.length === 0) {
     content = (
       <EmptyState
@@ -109,7 +113,8 @@ export function FilteredCatalogResults<T extends { id: number }>({
   return (
     <section aria-labelledby={headingId} className="px-4 pt-4 sm:px-6">
       <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 id={headingId} className="text-lg font-bold tracking-tight text-white">
+        {/* tabIndex -1: recibe el foco por código tras «Reintentar» (ver `useRetryFocus`); no es una parada de tabulador. */}
+        <h2 id={headingId} ref={headingRef} tabIndex={-1} className="focus-ring rounded-sm text-lg font-bold tracking-tight text-white">
           Resultados
         </h2>
         <p role="status" className="text-sm text-muted tabular-nums">

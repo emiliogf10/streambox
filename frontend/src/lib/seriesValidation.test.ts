@@ -54,6 +54,35 @@ describe('validateSeriesForm', () => {
     expect(errors.description).toBe('La descripción no puede superar los 1000 caracteres');
   });
 
+  /*
+   * Caracteres de control (`ControlCharacters` del backend): la regla es la
+   * de las películas, pero el mensaje de la descripción es el de series.
+   * Escapes (`\u0000`) en lugar de literales: esos caracteres no se ven.
+   */
+  it.each([
+    ['NUL (U+0000)', 'Da\u0000rk'],
+    ['campana (U+0007)', 'Da\u0007rk'],
+    ['tabulador', 'Da\trk'],
+    ['salto de línea', 'Da\nrk'],
+    ['retorno de carro', 'Da\rrk'],
+  ])('título con %s → «El título no puede contener caracteres de control»', (_name, title) => {
+    expect(validateSeriesForm(valid({ title }))).toEqual({ title: 'El título no puede contener caracteres de control' });
+  });
+
+  it('título con un espacio de ancho cero (U+200B, no es de control): válido, como en el servidor', () => {
+    expect(validateSeriesForm(valid({ title: 'Da​rk' }))).toEqual({});
+  });
+
+  it('descripción: tabulador y saltos de línea valen; el NUL y el resto de controles, no (mensaje de series)', () => {
+    expect(validateSeriesForm(valid({ description: 'Primero.\tLuego.\nDespués.\r\nAl final.' }))).toEqual({});
+    expect(validateSeriesForm(valid({ description: 'Un pueblo​ alemán.' }))).toEqual({});
+    for (const control of ['\u0000', '\u0007', '\u000b', '\u001b', '\u007f', '\u0085']) {
+      expect(validateSeriesForm(valid({ description: `Un pueblo${control} alemán.` }))).toEqual({
+        description: 'La descripción contiene caracteres de control no permitidos',
+      });
+    }
+  });
+
   it.each(['1887', '2101', 'abc', '20.5', '-2000', '99999999999'])('año de estreno «%s» fuera de rango', (year) => {
     expect(validateSeriesForm(valid({ releaseYear: year, endYear: '' })).releaseYear).toBe(
       'El año de estreno debe estar entre 1888 y 2100',

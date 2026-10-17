@@ -46,6 +46,12 @@ class PostgresTrailerUrlMigrationIntegrationTest {
     /** SQLSTATE de PostgreSQL para una violación de {@code CHECK}. */
     private static final String CHECK_VIOLATION = "23514";
 
+    /**
+     * Versión hasta la que se migra al probar la V6: así el test mide solo la
+     * V6 y no cambia cada vez que se añade una migración posterior.
+     */
+    private static final MigrationVersion V6 = MigrationVersion.fromVersion("6");
+
     @Test
     void laV6MueveLosTrailersDeYoutubeYDejaIntactoLoDemas() throws Exception {
         String db = createDatabase();
@@ -53,12 +59,12 @@ class PostgresTrailerUrlMigrationIntegrationTest {
         JdbcTemplate jdbc = jdbc(db);
         TrailerUrlMigrationScenario.seedAtV5(jdbc);
 
-        var result = flyway(db).load().migrate();
+        var result = flyway(db).target(V6).load().migrate();
 
         assertEquals(1, result.migrationsExecuted, "solo debe quedar por aplicar la V6");
         TrailerUrlMigrationScenario.assertMovedByV6(jdbc);
-        assertEquals(0, flyway(db).load().migrate().migrationsExecuted, "una segunda ejecución no hace nada");
-        flyway(db).load().validate();
+        assertEquals(0, flyway(db).target(V6).load().migrate().migrationsExecuted, "una segunda ejecución no hace nada");
+        flyway(db).target(V6).load().validate();
     }
 
     /**
@@ -75,7 +81,7 @@ class PostgresTrailerUrlMigrationIntegrationTest {
         TrailerUrlMigrationScenario.seedAtV5(jdbc);
         jdbc.execute("ALTER TABLE series ADD CONSTRAINT ck_series_trailer_url CHECK (true)");
 
-        assertThrows(org.flywaydb.core.api.FlywayException.class, () -> flyway(db).load().migrate());
+        assertThrows(org.flywaydb.core.api.FlywayException.class, () -> flyway(db).target(V6).load().migrate());
 
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns"
                 + " WHERE table_schema = 'public' AND column_name = 'trailer_url'", Integer.class),
@@ -87,7 +93,7 @@ class PostgresTrailerUrlMigrationIntegrationTest {
 
         // Resuelta la causa, el siguiente arranque la aplica sin repair
         jdbc.execute("ALTER TABLE series DROP CONSTRAINT ck_series_trailer_url");
-        assertEquals(1, flyway(db).load().migrate().migrationsExecuted);
+        assertEquals(1, flyway(db).target(V6).load().migrate().migrationsExecuted);
         TrailerUrlMigrationScenario.assertMovedByV6(jdbc);
     }
 
