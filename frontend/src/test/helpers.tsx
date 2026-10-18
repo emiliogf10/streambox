@@ -17,7 +17,7 @@ import { AuthProvider } from '../context/AuthContext';
 import { ToastProvider } from '../context/ToastContext';
 import { LocationProbe } from './LocationProbe';
 import { createTestQueryClient } from './queryClient';
-import type { ApiErrorBody, Episode, Movie, PageResponse, Series, SeriesDetail, User } from '../lib/types';
+import type { ApiErrorBody, Episode, Movie, PageResponse, Recommendations, Series, SeriesDetail, User } from '../lib/types';
 
 /** Crea un usuario de prueba (`UserResponse`); por defecto, rol `USER`. */
 export function makeUser(overrides: Partial<User> = {}): User {
@@ -37,6 +37,18 @@ export const CURRENT_USER = 'GET /api/users/me';
 
 /** Clave de {@link routeFetch} de la lista de series favoritas, que `FavoritesProvider` pide siempre al montarse. */
 export const FAVORITE_SERIES = 'GET /api/users/me/favorites/series';
+
+/** Claves de {@link routeFetch} de los «Me gusta», que `useLikes` pide en la página de un título y en el perfil. */
+export const LIKED_MOVIES = 'GET /api/users/me/likes/movies';
+export const LIKED_SERIES = 'GET /api/users/me/likes/series';
+
+/** Clave de {@link routeFetch} de las recomendaciones de la portada (`RecommendedRows`). */
+export const RECOMMENDATIONS = 'GET /api/users/me/recommendations?limit=12';
+
+/** Recomendaciones de prueba; por defecto, las de quien no tiene ningún «Me gusta». */
+export function makeRecommendations(overrides: Partial<Recommendations> = {}): Recommendations {
+  return { basedOnLikes: false, movies: [], series: [], ...overrides };
+}
 
 /** Clave de {@link routeFetch} de la renovación de la sesión, que `apiFetch` pide ante un 401. */
 export const REFRESH_SESSION = 'POST /api/auth/refresh';
@@ -209,6 +221,11 @@ export function currentUserAs(user: User): () => Response {
  * las series no tienen nada que decir de ella. Los tests de series favoritas la
  * sobrescriben. (La de películas no tiene valor por defecto: sus tests ya la declaran.)
  *
+ * Lo mismo con los «Me gusta» ({@link LIKED_MOVIES} y {@link LIKED_SERIES}:
+ * listas vacías) y las recomendaciones ({@link RECOMMENDATIONS}: sin «Me
+ * gusta», nada que pintar): la página de cada título, el perfil y la portada
+ * los piden siempre, y los tests anteriores a ellos no tienen nada que decir.
+ *
  * Y {@link REFRESH_SESSION} (`POST /api/auth/refresh`) responde por defecto 401
  * `SESSION_EXPIRED` («no hay sesión que renovar»): `apiFetch` lo pide ante
  * cualquier 401 de una ruta autenticada, también en el arranque sin sesión, así
@@ -223,6 +240,9 @@ export function routeFetch(fetchMock: Mock<typeof fetch>, routes: Record<string,
     [CURRENT_USER]: () =>
       sessionActive ? jsonResponse(makeUser()) : errorResponse(401, 'UNAUTHORIZED', 'No autenticado.'),
     [FAVORITE_SERIES]: () => jsonResponse([]),
+    [LIKED_MOVIES]: () => jsonResponse([]),
+    [LIKED_SERIES]: () => jsonResponse([]),
+    [RECOMMENDATIONS]: () => jsonResponse(makeRecommendations()),
     [REFRESH_SESSION]: sessionExpiredResponse,
     ...routes,
   };

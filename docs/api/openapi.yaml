@@ -73,6 +73,176 @@ paths:
       security:
       - cookieAuth: []
       - bearerAuth: []
+  /api/users/me/likes/series/{seriesId}:
+    put:
+      tags:
+      - like-controller
+      summary: Da «me gusta» a una serie
+      description: 'Marca la serie como «me gusta» del usuario autenticado. Es idempotente: si ya le gustaba, responde igual
+        y conserva la fecha original. Solo se admiten series con episodios.'
+      operationId: likeSeries
+      parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: La serie te gusta (ahora o ya antes)
+        '400':
+          description: El id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 'Serie no encontrada: no existe o no tiene episodios, sin distinguir entre ambos casos'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+    delete:
+      tags:
+      - like-controller
+      summary: Quita el «me gusta» de una serie
+      description: 'Quita la serie de los «me gusta» del usuario autenticado. Es idempotente: si no le gustaba, o la serie
+        no existe o no tiene episodios, también responde 204.'
+      operationId: unlikeSeries
+      parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: La serie ya no te gusta
+        '400':
+          description: El id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+  /api/users/me/likes/movies/{movieId}:
+    put:
+      tags:
+      - like-controller
+      summary: Da «me gusta» a una película
+      description: 'Marca la película como «me gusta» del usuario autenticado. Es idempotente: si ya le gustaba, responde
+        igual y conserva la fecha original.'
+      operationId: likeMovie
+      parameters:
+      - name: movieId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: La película te gusta (ahora o ya antes)
+        '400':
+          description: El id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Película no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+    delete:
+      tags:
+      - like-controller
+      summary: Quita el «me gusta» de una película
+      description: 'Quita la película de los «me gusta» del usuario autenticado. Es idempotente: si no le gustaba, o la película
+        no existe, también responde 204.'
+      operationId: unlikeMovie
+      parameters:
+      - name: movieId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: La película ya no te gusta
+        '400':
+          description: El id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
   /api/series/{seriesId}/episodes/{episodeId}:
     put:
       tags:
@@ -1559,6 +1729,102 @@ paths:
       security:
       - cookieAuth: []
       - bearerAuth: []
+  /api/users/me/recommendations:
+    get:
+      tags:
+      - recommendation-controller
+      summary: Obtiene mis recomendaciones
+      description: 'Devuelve películas y series recomendadas al usuario autenticado según los géneros de lo que le gusta:
+        cada género pesa tantos puntos como títulos con «me gusta» lo tienen y cada título suma los pesos de sus géneros.
+        No incluye lo que ya le gusta ni series sin episodios; a igual puntuación, primero lo añadido más recientemente y
+        después el id mayor. Si no tiene ningún «me gusta», basedOnLikes es false y las dos listas van vacías.'
+      operationId: getRecommendations
+      parameters:
+      - name: limit
+        in: query
+        description: 'Número máximo de películas y, por separado, de series: de 1 a 24 (por defecto, 12)'
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 12
+          maximum: 24
+          minimum: 1
+      responses:
+        '200':
+          description: Recomendaciones obtenidas correctamente (las listas pueden estar vacías)
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/RecommendationsResponse'
+        '400':
+          description: El límite no es un número entero entre 1 y 24
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+  /api/users/me/likes/series:
+    get:
+      tags:
+      - like-controller
+      summary: Obtiene las series que me gustan
+      description: Devuelve las series a las que el usuario autenticado ha dado «me gusta», de la que le gustó más recientemente
+        a la más antigua (a igual fecha, id descendente). Las series que se han quedado sin episodios no aparecen (vuelven
+        a aparecer si se les añade alguno).
+      operationId: getLikedSeries
+      responses:
+        '200':
+          description: Lista obtenida correctamente (puede estar vacía)
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SeriesResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+  /api/users/me/likes/movies:
+    get:
+      tags:
+      - like-controller
+      summary: Obtiene las películas que me gustan
+      description: Devuelve las películas a las que el usuario autenticado ha dado «me gusta», de la que le gustó más recientemente
+        a la más antigua (a igual fecha, id descendente).
+      operationId: getLikedMovies
+      responses:
+        '200':
+          description: Lista obtenida correctamente (puede estar vacía)
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MovieResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
   /api/users/me/favorites:
     get:
       tags:
@@ -2464,6 +2730,23 @@ components:
           - crown
           - null
           example: rocket
+    RecommendationsResponse:
+      type: object
+      properties:
+        basedOnLikes:
+          type: boolean
+          description: true si las recomendaciones salen de los «me gusta» del usuario; false si no tiene ninguno visible
+            (las dos listas van vacías)
+        movies:
+          type: array
+          description: Películas recomendadas, de más a menos recomendable (como mucho limit)
+          items:
+            $ref: '#/components/schemas/MovieResponse'
+        series:
+          type: array
+          description: Series recomendadas (solo con episodios), de más a menos recomendable (como mucho limit)
+          items:
+            $ref: '#/components/schemas/SeriesResponse'
     SeriesResponse:
       type: object
       properties:

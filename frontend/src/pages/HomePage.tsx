@@ -10,9 +10,11 @@ import { HeroBanner } from '../components/HeroBanner';
 import { LatestSeriesRow } from '../components/LatestSeriesRow';
 import { LoadMoreFooter } from '../components/LoadMoreFooter';
 import { MovieRow } from '../components/MovieRow';
+import { RecommendedRows } from '../components/RecommendedRows';
 import { useAuth } from '../context/AuthContext';
 import { useCatalog } from '../hooks/useCatalog';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { usePrefetchRecommendations } from '../hooks/useRecommendations';
 import { buildCatalogRows } from '../lib/catalog';
 import { ADMIN_MOVIES_PATH } from './admin/adminPaths';
 
@@ -48,12 +50,32 @@ function EmptyCatalog({ isAdmin }: { isAdmin: boolean }) {
 }
 
 /**
+ * Hueco de las filas «… recomendadas para ti» ({@link RecommendedRows}).
+ *
+ * Es enfocable por código (`tabIndex={-1}`, no es una parada de tabulador): si
+ * «Reintentar» de su aviso de error desaparece al pulsarlo, el foco se queda
+ * aquí, en la misma zona (`useRetryFocus`), y no salta al `<main>`. `empty:hidden`:
+ * sin recomendaciones, o mientras cargan sin motivo para esperarlas, no pinta
+ * nada y no deja hueco.
+ */
+function RecommendationsSlot() {
+  return (
+    <div tabIndex={-1} className="focus-ring rounded-xl empty:hidden">
+      <RecommendedRows />
+    </div>
+  );
+}
+
+/**
  * Portada de la aplicación.
  *
  * - El banner es la película más reciente del catálogo.
- * - Debajo, filas horizontales: "Novedades", la fila «Series» (las series más
+ * - Debajo, filas horizontales: "Novedades", las recomendadas para el usuario
+ *   («Películas/Series recomendadas para ti», solo si le gusta algo y hay qué
+ *   recomendar; ver `RecommendedRows`), la fila «Series» (las series más
  *   recientes, ver `LatestSeriesRow`; no aparece si no hay ninguna) y una por
- *   género (ver `buildCatalogRows`).
+ *   género (ver `buildCatalogRows`). Sin películas, las recomendaciones (de
+ *   series, si las hay) van antes de la fila «Series».
  * - El catálogo está paginado en el servidor; el botón "Cargar más películas"
  *   pide la página siguiente y la añade sin recargar nada.
  *
@@ -78,6 +100,9 @@ export function HomePage() {
   const { isAdmin } = useAuth();
   const { movies, total, status, errorMessage, loadingMore, loadMoreFailed, hasMore, loadMore, reload } =
     useCatalog();
+  // Las recomendaciones se piden ya, en paralelo con el catálogo, y no cuando se montan sus filas
+  // (después de él): así llegan a la vez y no empujan la portada al aparecer.
+  usePrefetchRecommendations();
 
   const hero = movies[0];
   // Las filas se calculan sin la película del banner para no repetirla justo debajo.
@@ -95,6 +120,7 @@ export function HomePage() {
     // encima, la fila quedaría pegada a la barra superior.
     content = (
       <div className="pt-6">
+        <RecommendationsSlot />
         <LatestSeriesRow whenEmpty={<EmptyCatalog isAdmin={isAdmin} />} />
       </div>
     );
@@ -106,11 +132,21 @@ export function HomePage() {
         {rows.map((row, index) => (
           <Fragment key={row.id}>
             <MovieRow title={row.title} movies={row.items} />
-            {/* La fila «Series» va justo después de «Novedades»: a la vista sin bajar mucho, sin desplazar al banner. */}
-            {index === 0 && <LatestSeriesRow />}
+            {/* Tras «Novedades», lo personal (las recomendaciones) y la fila «Series»: a la vista sin bajar mucho. */}
+            {index === 0 && (
+              <>
+                <RecommendationsSlot />
+                <LatestSeriesRow />
+              </>
+            )}
           </Fragment>
         ))}
-        {rows.length === 0 && <LatestSeriesRow />}
+        {rows.length === 0 && (
+          <>
+            <RecommendationsSlot />
+            <LatestSeriesRow />
+          </>
+        )}
 
         <LoadMoreFooter
           shown={movies.length}

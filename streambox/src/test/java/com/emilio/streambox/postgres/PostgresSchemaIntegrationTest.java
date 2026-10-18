@@ -34,7 +34,7 @@ import jakarta.persistence.EntityManagerFactory;
  *
  * <p>
  * Que el contexto de Spring arranque ya demuestra dos cosas: que todas las
- * migraciones ({@code V1}..{@code V7}) se aplican en PostgreSQL desde cero y que Hibernate
+ * migraciones ({@code V1}..{@code V8}) se aplican en PostgreSQL desde cero y que Hibernate
  * ({@code ddl-auto=validate}) acepta las entidades contra ese esquema. Aquí se
  * comprueba además lo que H2 no puede garantizar: los tipos reales del catálogo
  * del sistema ({@code information_schema}, {@code pg_catalog}), las políticas de
@@ -79,7 +79,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6 y V7 (sin
+     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7 y V8 (sin
      * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
      * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
@@ -89,7 +89,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -493,8 +493,81 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     }
 
     // ------------------------------------------------------------------
+    // V8: «me gusta» (user_liked_movies, user_liked_series)
+    // ------------------------------------------------------------------
+
+    /**
+     * Tablas de la V8 tal como las ve PostgreSQL: clave primaria compuesta
+     * {@code (user_id, <título>_id)}, {@code created_at} {@code timestamptz}
+     * obligatorio, las cuatro claves foráneas en cascada y los índices con sus
+     * columnas y su sentido reales ({@code pg_indexes}). Sus consultas (y el
+     * borrado en cascada de punta a punta) se prueban en
+     * {@code PostgresLikesIntegrationTest}.
+     */
+    @Test
+    void lasTablasDeMeGustaTienenClavesCascadaEIndicesEsperados() {
+        assertEquals(List.of("user_id", "movie_id"), primaryKeyColumns("user_liked_movies"));
+        assertEquals(List.of("user_id", "series_id"), primaryKeyColumns("user_liked_series"));
+        for (String table : List.of("user_liked_movies", "user_liked_series")) {
+            Map<String, Object> column = jdbc.queryForMap("SELECT data_type, is_nullable FROM information_schema.columns"
+                    + " WHERE table_schema = 'public' AND table_name = ? AND column_name = 'created_at'", table);
+            assertEquals("timestamp with time zone", column.get("data_type"), table);
+            assertEquals("NO", column.get("is_nullable"), table);
+        }
+
+        Map<String, String> rules = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT constraint_name, delete_rule FROM information_schema.referential_constraints"
+                        + " WHERE constraint_schema = 'public'")
+                .forEach(r -> rules.put((String) r.get("constraint_name"), (String) r.get("delete_rule")));
+        for (String fk : List.of("fk_liked_movies_user", "fk_liked_movies_movie",
+                "fk_liked_series_user", "fk_liked_series_series")) {
+            assertEquals("CASCADE", rules.get(fk), fk);
+        }
+
+        Map<String, String> definitions = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public'")
+                .forEach(r -> definitions.put((String) r.get("indexname"), (String) r.get("indexdef")));
+        assertIndex(definitions, "idx_liked_movies_movie_id", "ON public.user_liked_movies USING btree (movie_id)");
+        assertIndex(definitions, "idx_liked_series_series_id", "ON public.user_liked_series USING btree (series_id)");
+        assertIndex(definitions, "idx_liked_movies_user_created_at",
+                "ON public.user_liked_movies USING btree (user_id, created_at DESC)");
+        assertIndex(definitions, "idx_liked_series_user_created_at",
+                "ON public.user_liked_series USING btree (user_id, created_at DESC)");
+    }
+
+    /**
+     * Con el código real de PostgreSQL: un «me gusta» repetido viola la clave
+     * primaria ({@code 23505}) con un {@code INSERT} normal y no hace nada con
+     * {@code ON CONFLICT DO NOTHING} (lo que usa el repositorio); uno hacia una
+     * película inexistente viola la clave foránea ({@code 23503}) incluso con
+     * {@code ON CONFLICT}; y la fecha es obligatoria ({@code 23502}).
+     */
+    @Test
+    void laBaseDeDatosRechazaMeGustaDuplicadosHuerfanosOSinFechaConElCodigoReal() {
+        long movieId = insertMovie("Gusta", 2000);
+        long userId = insertUser("gusta", "gusta@test.com");
+        String insert = "INSERT INTO user_liked_movies (user_id, movie_id, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)";
+        jdbc.update(insert, userId, movieId);
+
+        assertEquals(UNIQUE_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(insert, userId, movieId))));
+        assertEquals(0, jdbc.update(insert + " ON CONFLICT DO NOTHING", userId, movieId));
+        assertEquals(FOREIGN_KEY_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(insert + " ON CONFLICT DO NOTHING", userId, Long.MAX_VALUE))));
+        assertEquals(NOT_NULL_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("INSERT INTO user_liked_movies (user_id, movie_id, created_at) VALUES (?, ?, NULL)",
+                        userId, insertMovie("Sin fecha", 2000)))));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM user_liked_movies", Integer.class));
+    }
+
+    // ------------------------------------------------------------------
     // Utilidades
     // ------------------------------------------------------------------
+
+    private static void assertIndex(Map<String, String> definitions, String name, String expected) {
+        assertTrue(definitions.containsKey(name), "falta el índice " + name);
+        assertTrue(definitions.get(name).contains(expected), definitions.get(name));
+    }
 
     private List<String> primaryKeyColumns(String table) {
         return jdbc.queryForList(

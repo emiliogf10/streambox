@@ -242,6 +242,38 @@ class PostgresIntegrityRaceTranslationQaIntegrationTest extends PostgresIntegrat
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }
 
+    /**
+     * La película se borra justo antes del {@code INSERT} del «me gusta»
+     * ({@code ON CONFLICT DO NOTHING} solo ignora el duplicado, no la clave
+     * foránea): 404 de película, no 500, y sin fila huérfana.
+     */
+    @Test
+    void meGustaDePeliculaBorradaEnMedioDa404() throws Exception {
+        Long gone = movie.getId();
+        movieRepository.deleteById(gone);
+        doReturn(true).when(spiedMovies).existsById(gone);
+
+        mockMvc.perform(json(put("/api/users/me/likes/movies/" + gone), null, tokenFor(user)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("Película no encontrada"));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM user_liked_movies", Integer.class));
+    }
+
+    /** La serie se borra justo antes del {@code INSERT} del «me gusta»: el 404 de siempre de una serie. */
+    @Test
+    void meGustaDeSerieBorradaEnMedioDa404() throws Exception {
+        Long gone = series.getId();
+        seriesRepository.deleteById(gone);
+        doReturn(true).when(spiedEpisodes).existsBySeriesId(gone);
+
+        mockMvc.perform(json(put("/api/users/me/likes/series/" + gone), null, tokenFor(user)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("Serie no encontrada"));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM user_liked_series", Integer.class));
+    }
+
     /** La serie se borra justo antes del {@code INSERT} del episodio: 404 de serie. */
     @Test
     void episodioDeSerieBorradaEnMedioDa404() throws Exception {

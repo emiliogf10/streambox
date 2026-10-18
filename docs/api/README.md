@@ -3,7 +3,7 @@
 | Archivo | Para qué sirve |
 | :--- | :--- |
 | [`openapi.yaml`](openapi.yaml) | Especificación OpenAPI 3.1 de todos los endpoints (41 operaciones en 25 rutas), con sus DTOs, códigos de error y seguridad. Se puede importar en Postman, Insomnia, Swagger Editor, etc. |
-| [`postman/streambox.postman_collection.json`](postman/streambox.postman_collection.json) | Colección de Postman (formato v2.1) con 95 peticiones y 186 aserciones, organizadas en 10 carpetas. |
+| [`postman/streambox.postman_collection.json`](postman/streambox.postman_collection.json) | Colección de Postman (formato v2.1) con 107 peticiones y 209 aserciones, organizadas en 10 carpetas. |
 | [`postman/streambox-local.postman_environment.json`](postman/streambox-local.postman_environment.json) | Entorno `StreamBox - Local` (`baseUrl = http://localhost:8080`). |
 
 ## Cómo funciona la autenticación
@@ -36,7 +36,7 @@ En `openapi.yaml` las dos formas son esquemas de seguridad alternativos de cada 
 3. Rellena `adminEmail` y `adminPassword` con los valores de `ADMIN_EMAIL` / `ADMIN_PASSWORD` con los que arrancó el backend (las cuentas ADMIN solo se crean así). Son opcionales solo si no vas a ejecutar las peticiones de administrador. `userPassword` es la contraseña de una cuenta de prueba que la propia colección registra: no es una credencial real.
 4. Lanza la colección entera con el **Runner**, en orden. Las peticiones se encadenan solas (los ids se guardan en variables de colección), la carpeta 8 borra lo que se creó, la 9 cierra las sesiones y la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones.
 
-Carpetas: 1 Autenticación · 2 Seguridad (401/403) · 3 Usuarios · 4 Géneros · 5 Películas · 6 Series y episodios · 7 Favoritos · 8 Limpieza · 9 Sesión (refresh y logout) · 10 Cuenta (contraseña y logout-all).
+Carpetas: 1 Autenticación · 2 Seguridad (401/403) · 3 Usuarios · 4 Géneros · 5 Películas · 6 Series y episodios · 7 Favoritos, «me gusta» y recomendaciones · 8 Limpieza · 9 Sesión (refresh y logout) · 10 Cuenta (contraseña y logout-all).
 
 ### Cómo modela la sesión
 
@@ -71,7 +71,7 @@ El registro permite 5 altas por hora y IP, el login 10 por minuto y el refresh 3
 ## Cómo se generó y cómo regenerarla
 
 - **`openapi.yaml`**: se arrancó el backend con la base H2 en memoria y el perfil `e2e` (como hace Playwright: `spring-boot:run -Dspring-boot.run.useTestClasspath=true -Dspring-boot.run.profiles=e2e` desde `streambox/`, con `SERVER_PORT=8099`, `SPRING_DATASOURCE_*` apuntando a H2, un `JWT_SECRET` de prueba, `STREAMBOX_AUTH_COOKIE_SECURE=false` y un administrador de prueba en `ADMIN_*`; ver `frontend/playwright.config.ts`), sin tocar la base de desarrollo. Se descargó `GET /v3/api-docs` y se convirtió a YAML (PyYAML, `sort_keys=False`, `width=120`). Solo se cambió `servers` (apunta a `localhost:8080`). Es la salida de `springdoc`, así que refleja exactamente lo que anotan los controladores. Si cambia un endpoint o un DTO, hay que volver a generarla.
-- **Colección**: escrita a partir de la especificación y comprobada con Newman 6 contra ese backend efímero: 95/95 peticiones y 186/186 aserciones en la primera ejecución, y 95/95 y 185/185 en una segunda sobre la misma base (el registro da 409 «el usuario ya existe» y se omite la aserción que solo aplica al 201).
+- **Colección**: escrita a partir de la especificación y comprobada con Newman 6 contra ese backend efímero: 107/107 peticiones y 209/209 aserciones en la primera ejecución, y 107/107 y 208/208 en una segunda sobre la misma base (el registro da 409 «el usuario ya existe» y se omite la aserción que solo aplica al 201).
 
 ## Qué comprueban los tests de la colección
 
@@ -83,6 +83,13 @@ Códigos de estado reales (200, 201, 204, 400, 401, 403, 404, 409), forma de las
 - `trailerUrl` es opcional y solo de YouTube, en películas y series. Se envía en formas no normalizadas (`https://youtu.be/<id>?si=...` al crear la película, `/embed/<id>?start=10` al editarla, `youtube-nocookie.com/embed/<id>` en la serie) y la respuesta lo devuelve siempre como `https://www.youtube.com/watch?v=<id>`. Un enlace de otro host (`vimeo.com`) o de un host parecido (`www.youtube.com.evil.example`) da 400 `VALIDATION_ERROR` con el error solo en `validationErrors.trailerUrl` y el mensaje exacto «El tráiler debe ser un enlace de un vídeo de YouTube». Un `PUT` sin `trailerUrl` lo borra (queda a `null`): el `PUT` sustituye el recurso entero.
 - Un título con un carácter de control (un nulo, ` `) da 400 `VALIDATION_ERROR` con el error solo en `validationErrors.title` («El título no puede contener caracteres de control»); antes acababa en un 409 falso.
 - `GET /api/movies/{id}/similar` devuelve una **lista** (no una página) sin la propia película. La colección crea tres películas con el mismo género (que ella misma crea, así que nadie más lo comparte) estrenadas en 2021, 2020 y 1990, y comprueba el orden exacto de las similares de la primera (la de 2020 antes que la de 1990: a igualdad de géneros, gana el año más cercano), que `limit=1` devuelve solo la más parecida, que `limit=0` y `limit=25` dan 400 con el error en `validationErrors.limit` («El límite mínimo es 1» / «El límite máximo es 24») y que un id inexistente da 404 `RESOURCE_NOT_FOUND`. La carpeta 8 borra las tres.
+
+**«Me gusta» y recomendaciones** (carpeta 7, tras los favoritos; el USER, por cookie):
+
+- `PUT /api/users/me/likes/movies/{id}` responde 204 sin cuerpo y **repetirlo también es 204** (es idempotente y conserva la fecha original; «Mi lista», en cambio, da 409). Un id inexistente da 404 `RESOURCE_NOT_FOUND` «Película no encontrada». La serie se marca igual (`/likes/series/{id}`); una serie sin episodios daría el mismo 404 que una inexistente.
+- `GET /api/users/me/likes/movies` contiene la película **una sola vez**; `GET /api/users/me/likes/series`, la serie con sus recuentos (`episodeCount` > 0).
+- `GET /api/users/me/recommendations?limit=12` responde `basedOnLikes: true` y, de las películas de la colección, recomienda exactamente la tercera y la segunda, en ese orden (las tres y la serie comparten un género que solo usa la colección: las dos candidatas empatan en puntuación y gana la añadida más recientemente) y nunca la que ya gusta; la serie que gusta tampoco sale. `limit=0` da 400 con `validationErrors.limit` = «El límite mínimo es 1».
+- `DELETE` del «me gusta» responde 204, **también con un id inexistente** (quitar nunca da 404). Sin ningún «me gusta», las recomendaciones vuelven con `basedOnLikes: false` y las dos listas vacías.
 
 ## Nota sobre Postman en la nube
 

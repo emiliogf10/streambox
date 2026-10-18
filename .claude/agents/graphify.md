@@ -1,6 +1,6 @@
 ---
 name: graphify
-description: Extractor semántico del grafo de conocimiento (skill graphify). Úsalo SOLO cuando el orquestador ejecute /graphify --update o /graphify sobre la documentación y el skill pida subagentes "general-purpose": recibe un trozo de archivos (docs, ADRs, CLAUDE.md, agentes, CI), extrae entidades y relaciones según la especificación del skill y escribe su resultado en graphify-out/. No toca código, ni documentación, ni nada fuera de graphify-out/.
+description: Extractor semántico del grafo de conocimiento (skill graphify). Úsalo SOLO cuando el orquestador ejecute /graphify --update o /graphify sobre la documentación y el skill pida subagentes general-purpose. Recibe un trozo de archivos (docs, ADRs, CLAUDE.md, agentes, CI), extrae entidades y relaciones según la especificación del skill y escribe su resultado en graphify-out/. No toca código, ni documentación, ni nada fuera de graphify-out/.
 tools: Read, Grep, Glob, Write, Bash
 model: sonnet
 ---

@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "36f1cc7d-d712-5ceb-bd83-b75fec0d4c79",
     "name": "StreamBox API",
-    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend (solo para las carpetas con peticiones de administrador).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9 y en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Límites**: login, registro y refresh tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 7 de los 10 logins por minuto y 6 de las 30 renovaciones por minuto: a la tercera ejecución en una hora el registro responde 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` más alto. No la ejecutes en bucle contra un entorno real.",
+    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend (solo para las carpetas con peticiones de administrador).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9 y en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos, sus «me gusta» y ve sus recomendaciones; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Límites**: login, registro y refresh tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 7 de los 10 logins por minuto y 6 de las 30 renovaciones por minuto: a la tercera ejecución en una hora el registro responde 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` más alto. No la ejecutes en bucle contra un entorno real.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -2819,7 +2819,7 @@
       ]
     },
     {
-      "name": "7. Favoritos (usuario autenticado)",
+      "name": "7. Favoritos, «me gusta» y recomendaciones (usuario autenticado)",
       "description": "",
       "item": [
         {
@@ -3194,6 +3194,429 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dar «me gusta» a una película",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/likes/movies/{{movieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "likes",
+                "movies",
+                "{{movieId}}"
+              ]
+            },
+            "description": "«Me gusta» (la vi y me gustó) es distinto de «Mi lista» (quiero verla). PUT porque es un estado: repetirlo deja lo mismo. El usuario sale del token; con la cookie lleva X-Requested-With (lo añade el pre-request de la colección)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Sin cuerpo\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repetir el «me gusta» (204, idempotente)",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/likes/movies/{{movieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "likes",
+                "movies",
+                "{{movieId}}"
+              ]
+            },
+            "description": "A diferencia de «Mi lista» (409 al repetir), dar «me gusta» dos veces no es un error y conserva la fecha original."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "«Me gusta» a una película inexistente (404)",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/likes/movies/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "likes",
+                "movies",
+                "999999999"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 404\", function () { pm.response.to.have.status(404); });",
+                  "pm.test(\"Cuerpo de error con code RESOURCE_NOT_FOUND\", function () { pm.expect(pm.response.json().code).to.eql(\"RESOURCE_NOT_FOUND\"); });",
+                  "pm.test(\"Mensaje «Película no encontrada»\", function () { pm.expect(pm.response.json().message).to.eql(\"Película no encontrada\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dar «me gusta» a una serie",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/likes/series/{{seriesId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "likes",
+                "series",
+                "{{seriesId}}"
+              ]
+            },
+            "description": "Solo series con episodios: una sin episodios da el mismo 404 que una inexistente."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar películas que me gustan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/likes/movies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "likes",
+                "movies"
+              ]
+            },
+            "description": "La más reciente primero (por la fecha del «me gusta»)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Contiene la película una sola vez\", function () { const ids = pm.response.json().map(m => m.id); pm.expect(ids.filter(id => id === Number(pm.collectionVariables.get(\"movieId\")))).to.have.lengthOf(1); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar series que me gustan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/likes/series",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "likes",
+                "series"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Contiene la serie con sus recuentos\", function () { const serie = pm.response.json().find(s => s.id === Number(pm.collectionVariables.get(\"seriesId\"))); pm.expect(serie).to.be.an(\"object\"); pm.expect(serie.episodeCount).to.be.above(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recomendaciones por géneros",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/recommendations?limit=12",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "recommendations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "12"
+                }
+              ]
+            },
+            "description": "Las tres películas y la serie de la colección comparten su género (que nadie más tiene), así que las otras dos películas empatan en puntuación y gana la añadida más recientemente (la tercera)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Se basan en mis «me gusta»\", function () { pm.expect(pm.response.json().basedOnLikes).to.eql(true); });",
+                  "pm.test(\"Recomienda las otras películas del género, la más nueva primero, sin la que ya me gusta\", function () { const v = n => Number(pm.collectionVariables.get(n)); const mine = [v(\"movieId\"), v(\"secondMovieId\"), v(\"thirdMovieId\")]; const ids = pm.response.json().movies.map(m => m.id).filter(id => mine.includes(id)); pm.expect(ids).to.eql([v(\"thirdMovieId\"), v(\"secondMovieId\")]); });",
+                  "pm.test(\"No recomienda la serie que ya me gusta\", function () { pm.expect(pm.response.json().series.map(s => s.id)).to.not.include(Number(pm.collectionVariables.get(\"seriesId\"))); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recomendaciones con limit=0 (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/recommendations?limit=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "recommendations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error de validación en limit\", function () { const body = pm.response.json(); pm.expect(body.code).to.eql(\"VALIDATION_ERROR\"); pm.expect(body.validationErrors.limit).to.eql(\"El límite mínimo es 1\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quitar el «me gusta» de la película",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/likes/movies/{{movieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "likes",
+                "movies",
+                "{{movieId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Sin cuerpo\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quitar un «me gusta» que no existe (204, idempotente)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/likes/movies/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "likes",
+                "movies",
+                "999999999"
+              ]
+            },
+            "description": "Quitar nunca da 404: el resultado pedido («que no me guste») ya se cumple."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quitar el «me gusta» de la serie",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/likes/series/{{seriesId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "likes",
+                "series",
+                "{{seriesId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recomendaciones sin «me gusta» (vacías)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/recommendations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "recommendations"
+              ]
+            },
+            "description": "Sin ningún «me gusta» no hay en qué basarse: el inicio no pinta la fila «Recomendadas para ti»."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"basedOnLikes false y listas vacías\", function () { const body = pm.response.json(); pm.expect(body.basedOnLikes).to.eql(false); pm.expect(body.movies).to.eql([]); pm.expect(body.series).to.eql([]); });"
                 ]
               }
             }

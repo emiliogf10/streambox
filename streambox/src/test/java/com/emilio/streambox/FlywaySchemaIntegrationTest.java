@@ -22,7 +22,8 @@ import com.emilio.streambox.migration.UserAvatarSchemaCases;
  * claves foráneas con borrado en cascada y restricciones de integridad
  * (películas en {@code V1}/{@code V2}; series y episodios en {@code V3};
  * refresh tokens en {@code V4}; tráiler y vídeo opcional en {@code V6};
- * icono de perfil en {@code V7}).
+ * icono de perfil en {@code V7}; «me gusta» en {@code V8}, cuyas consultas
+ * se prueban en {@code repository.LikesRepositoryIntegrationTest}).
  * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
  * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
  * de PostgreSQL.
@@ -568,7 +569,151 @@ class FlywaySchemaIntegrationTest {
         assertEquals(null, jdbc.queryForObject("SELECT avatar FROM users WHERE id = ?", String.class, userId));
     }
 
+    // --- V8: «me gusta» (user_liked_movies, user_liked_series) ---
+
+    @Test
+    void v8EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '8' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * Las dos tablas tienen la clave primaria compuesta {@code (user_id,
+     * <título>_id)} y un {@code created_at} con zona horaria y obligatorio (el
+     * «cuándo» que ordena la sección «Te gusta»).
+     */
+    @Test
+    void lasTablasDeMeGustaTienenSuClavePrimariaYUnaFechaObligatoriaConZona() {
+        assertEquals(List.of("user_id", "movie_id"), keyColumns("pk_user_liked_movies"));
+        assertEquals(List.of("user_id", "series_id"), keyColumns("pk_user_liked_series"));
+        for (String table : List.of("user_liked_movies", "user_liked_series")) {
+            java.util.Map<String, Object> column = jdbc.queryForMap("SELECT DATA_TYPE AS T, IS_NULLABLE AS N"
+                    + " FROM INFORMATION_SCHEMA.COLUMNS"
+                    + " WHERE LOWER(TABLE_NAME) = ? AND LOWER(COLUMN_NAME) = 'created_at'", table);
+            assertEquals("TIMESTAMP WITH TIME ZONE", column.get("T"), table);
+            assertEquals("NO", column.get("N"), table);
+        }
+    }
+
+    /**
+     * Índices de la V8 con sus columnas y su orden: por título (cascada al
+     * borrarlo) y {@code (user_id, created_at DESC)} (sección «Te gusta», del
+     * más reciente al más antiguo).
+     */
+    @Test
+    void existenLosIndicesDeMeGustaConSusColumnasYOrden() {
+        assertEquals(List.of("movie_id ASC"), indexColumns("idx_liked_movies_movie_id"));
+        assertEquals(List.of("series_id ASC"), indexColumns("idx_liked_series_series_id"));
+        assertEquals(List.of("user_id ASC", "created_at DESC"), indexColumns("idx_liked_movies_user_created_at"));
+        assertEquals(List.of("user_id ASC", "created_at DESC"), indexColumns("idx_liked_series_user_created_at"));
+    }
+
+    /** Las cuatro claves foráneas de la V8 borran en cascada (decisión del autor). */
+    @Test
+    void lasClavesForaneasDeMeGustaBorranEnCascada() {
+        java.util.Map<String, String> rules = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT LOWER(CONSTRAINT_NAME) AS NAME, DELETE_RULE AS RULE"
+                        + " FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS")
+                .forEach(r -> rules.put((String) r.get("NAME"), (String) r.get("RULE")));
+
+        assertEquals("CASCADE", rules.get("fk_liked_movies_user"));
+        assertEquals("CASCADE", rules.get("fk_liked_movies_movie"));
+        assertEquals("CASCADE", rules.get("fk_liked_series_user"));
+        assertEquals("CASCADE", rules.get("fk_liked_series_series"));
+    }
+
+    /**
+     * Borrar una película o una serie borra solo sus «me gusta» (no los de otros
+     * títulos ni al usuario); borrar un usuario borra todos los suyos y ninguno
+     * de los de otro usuario.
+     */
+    @Test
+    void borrarUnTituloOUnUsuarioBorraSusMeGustaYNadaMas() {
+        long kept = insertMovie("Sigue gustando", 2000);
+        long doomed = insertMovie("Se borra", 2000);
+        long keptSeries = insertSeries("Serie que sigue", 2010, null);
+        long doomedSeries = insertSeries("Serie que se borra", 2010, null);
+        long ana = insertUser("likeana");
+        long bea = insertUser("likebea");
+        for (long user : new long[] { ana, bea }) {
+            insertLike("user_liked_movies", "movie_id", user, kept);
+            insertLike("user_liked_movies", "movie_id", user, doomed);
+            insertLike("user_liked_series", "series_id", user, keptSeries);
+            insertLike("user_liked_series", "series_id", user, doomedSeries);
+        }
+
+        jdbc.update("DELETE FROM movies WHERE id = ?", doomed);
+        jdbc.update("DELETE FROM series WHERE id = ?", doomedSeries);
+
+        assertEquals(0, countWhere("user_liked_movies", "movie_id", doomed));
+        assertEquals(2, countWhere("user_liked_movies", "movie_id", kept));
+        assertEquals(0, countWhere("user_liked_series", "series_id", doomedSeries));
+        assertEquals(2, countWhere("user_liked_series", "series_id", keptSeries));
+
+        jdbc.update("DELETE FROM users WHERE id = ?", ana);
+
+        assertEquals(0, countWhere("user_liked_movies", "user_id", ana));
+        assertEquals(0, countWhere("user_liked_series", "user_id", ana));
+        assertEquals(1, countWhere("user_liked_movies", "user_id", bea));
+        assertEquals(1, countWhere("user_liked_series", "user_id", bea));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM movies WHERE id = ?", Integer.class, kept));
+    }
+
+    /**
+     * La clave primaria impide dos «me gusta» del mismo usuario al mismo título
+     * (un {@code INSERT} normal falla; el repositorio usa {@code ON CONFLICT DO
+     * NOTHING} para que repetirlo no sea un error), y las claves foráneas
+     * impiden un «me gusta» de un título o un usuario inexistentes. Tampoco
+     * admite una fecha nula.
+     */
+    @Test
+    void laBaseDeDatosRechazaMeGustaDuplicadosHuerfanosOSinFecha() {
+        long movieId = insertMovie("Una vez", 2000);
+        long seriesId = insertSeries("Una vez serie", 2010, null);
+        long userId = insertUser("likedup");
+        insertLike("user_liked_movies", "movie_id", userId, movieId);
+        insertLike("user_liked_series", "series_id", userId, seriesId);
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertLike("user_liked_movies", "movie_id", userId, movieId));
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertLike("user_liked_series", "series_id", userId, seriesId));
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertLike("user_liked_movies", "movie_id", userId, Long.MAX_VALUE));
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertLike("user_liked_series", "series_id", Long.MAX_VALUE, seriesId));
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
+                "INSERT INTO user_liked_movies (user_id, movie_id, created_at) VALUES (?, ?, NULL)",
+                userId, insertMovie("Sin fecha", 2000)));
+    }
+
     // --- Utilidades ---
+
+    private void insertLike(String table, String titleColumn, long userId, long titleId) {
+        jdbc.update("INSERT INTO " + table + " (user_id, " + titleColumn + ", created_at)"
+                + " VALUES (?, ?, CURRENT_TIMESTAMP)", userId, titleId);
+    }
+
+    private int countWhere(String table, String column, long value) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM " + table + " WHERE " + column + " = ?",
+                Integer.class, value);
+    }
+
+    /** Columnas de una restricción (clave primaria), en su orden. */
+    private List<String> keyColumns(String constraint) {
+        return jdbc.queryForList("SELECT LOWER(COLUMN_NAME) FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE"
+                + " WHERE LOWER(CONSTRAINT_NAME) = ? ORDER BY ORDINAL_POSITION", String.class, constraint);
+    }
+
+    /** Columnas de un índice con su sentido ({@code ASC}/{@code DESC}), en su orden. */
+    private List<String> indexColumns(String index) {
+        return jdbc.queryForList("SELECT LOWER(COLUMN_NAME) || ' ' || ORDERING_SPECIFICATION"
+                + " FROM INFORMATION_SCHEMA.INDEX_COLUMNS"
+                + " WHERE LOWER(INDEX_NAME) = ? ORDER BY ORDINAL_POSITION", String.class, index);
+    }
 
     /** Token válido de un día (familia de siete) con el sucesor indicado. */
     private long insertToken(long userId, String hash, java.util.UUID family, Long replacedById) {

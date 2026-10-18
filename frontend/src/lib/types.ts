@@ -94,6 +94,25 @@ export interface SeriesDetail extends Series {
   seasons: Season[];
 }
 
+/**
+ * Recomendaciones del usuario de la sesión (`GET /api/users/me/recommendations`).
+ *
+ * Las calcula el servidor a partir de los géneros de lo que le gusta («Me
+ * gusta»), sin incluir lo que ya le gusta. Cada lista llega ya ordenada (la más
+ * afín primero) y por separado: el servidor no da una puntuación común con la
+ * que mezclarlas sin inventar un orden.
+ */
+export interface Recommendations {
+  /**
+   * `true` si hay algún «Me gusta» en el que basarse. Con `false` las dos listas
+   * llegan vacías y la portada no pinta nada (las novedades ya están).
+   */
+  basedOnLikes: boolean;
+  movies: Movie[];
+  /** Solo series con episodios (las demás no las ve un usuario). */
+  series: Series[];
+}
+
 /** Página de resultados con los metadatos de paginación (`MoviePageResponse`, `SeriesPageResponse`). */
 export interface PageResponse<T> {
   content: T[];

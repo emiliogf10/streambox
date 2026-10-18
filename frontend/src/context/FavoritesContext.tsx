@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, apiFetch, currentSessionKey, getErrorMessage } from '../lib/api';
+import { fetchTitleLists } from '../lib/titleLists';
+import type { TitleKind, TitleLists } from '../lib/titleLists';
 import { loadStatusOf } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import type { CatalogItem, Movie, Series } from '../lib/types';
@@ -15,7 +17,7 @@ type FavoritesStatus = 'loading' | 'ready' | 'error';
  * (y sus ids pueden coincidir: la película 3 y la serie 3 son cosas distintas),
  * así que todo lo que identifica un favorito va acompañado de su tipo.
  */
-export type FavoriteKind = 'movie' | 'series';
+export type FavoriteKind = TitleKind;
 
 /** Endpoint de cada lista: `GET` la lee, `DELETE` la vacía y `/{id}` añade (`POST`) o quita (`DELETE`) un título. */
 const ENDPOINTS: Record<FavoriteKind, string> = {
@@ -54,10 +56,7 @@ interface FavoritesContextValue {
 }
 
 /** Las dos listas guardadas juntas: así una actualización toca solo la de su tipo sin pisar la otra. */
-interface Lists {
-  movie: Movie[];
-  series: Series[];
-}
+type Lists = TitleLists;
 
 /** Listas vacías compartidas mientras no han llegado las de verdad (misma identidad en cada render). */
 const NO_LISTS: Lists = { movie: [], series: [] };
@@ -117,27 +116,9 @@ function pendingKey(kind: FavoriteKind, id: number): string {
   return `${kind}:${id}`;
 }
 
-/**
- * Pide las DOS listas a la vez. Si falla una, se cancela la otra (ya no
- * interesa: la lista solo está «lista» con las dos). El `signal` de TanStack
- * cancela ambas si ya nadie las espera (p. ej. al cerrar sesión).
- */
-async function fetchLists(signal: AbortSignal): Promise<Lists> {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  signal.addEventListener('abort', abort);
-  try {
-    const [movie, series] = await Promise.all([
-      apiFetch<Movie[]>(ENDPOINTS.movie, { signal: controller.signal }),
-      apiFetch<Series[]>(ENDPOINTS.series, { signal: controller.signal }),
-    ]);
-    return { movie, series };
-  } catch (error) {
-    controller.abort();
-    throw error;
-  } finally {
-    signal.removeEventListener('abort', abort);
-  }
+/** Pide las dos listas a la vez (ver `fetchTitleLists`: si falla una, se cancela la otra). */
+function fetchLists(signal: AbortSignal): Promise<Lists> {
+  return fetchTitleLists(ENDPOINTS, signal);
 }
 
 /**

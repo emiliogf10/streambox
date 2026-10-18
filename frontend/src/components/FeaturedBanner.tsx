@@ -99,7 +99,9 @@ interface Props {
  *
  * **Acciones.** Cuántas hay depende del título y del rol: «Ver ahora» y «Ver
  * tráiler» solo existen si hay vídeo o tráiler, y «Editar» solo para un
- * administrador, así que pueden ser de una a cuatro. Dos reglas:
+ * administrador, así que pueden ser de una a cinco (en la página de un título,
+ * con «Mi lista» y «Me gusta»: a 375 px quedan de dos en dos y la última, sola a
+ * todo el ancho). Dos reglas:
  * - **Ningún texto se parte en dos líneas** (`min-width: max-content` en cada
  *   acción). Antes, a 375 px, «Más información» no cabía en media fila y se
  *   partía (incidencia QA trailer-7), y su vecino se estiraba a la misma altura.

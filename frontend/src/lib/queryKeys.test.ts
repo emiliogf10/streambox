@@ -28,6 +28,8 @@ const ENTRIES: Record<string, QueryKey> = {
   panelSeries: queryKeys.series.admin('dark', 2),
   generos: queryKeys.genres.all,
   miLista: queryKeys.favorites.all,
+  meGusta: queryKeys.likes.all,
+  recomendaciones: queryKeys.recommendations.list(12),
 };
 
 /** Nombres de las entradas que quedan invalidadas tras `change`. */
@@ -41,7 +43,7 @@ async function invalidatedBy(change: CatalogChange): Promise<string[]> {
 }
 
 describe('keysAffectedBy', () => {
-  it('una película cambia los listados de películas (con y sin filtros, y el del panel), su página, sus similares y «Mi lista»', async () => {
+  it('una película cambia los listados de películas (con y sin filtros, y el del panel), su página, sus similares y los datos personales con copias de títulos', async () => {
     expect(await invalidatedBy('movies')).toEqual([
       'portada',
       'filtros',
@@ -49,11 +51,21 @@ describe('keysAffectedBy', () => {
       'panelPeliculas',
       'similares',
       'miLista',
+      'meGusta',
+      'recomendaciones',
     ]);
   });
 
-  it('una serie o un episodio cambian los listados de series (con y sin filtros), su detalle, el panel y «Mi lista»', async () => {
-    expect(await invalidatedBy('series')).toEqual(['series', 'filtrosSeries', 'detalleSerie', 'panelSeries', 'miLista']);
+  it('una serie o un episodio cambian los listados de series (con y sin filtros), su detalle, el panel y los datos personales', async () => {
+    expect(await invalidatedBy('series')).toEqual([
+      'series',
+      'filtrosSeries',
+      'detalleSerie',
+      'panelSeries',
+      'miLista',
+      'meGusta',
+      'recomendaciones',
+    ]);
   });
 
   it('un género cambia todo lo que lleva nombres de géneros, salvo su propia lista (ya la actualiza el panel)', async () => {
@@ -68,6 +80,8 @@ describe('keysAffectedBy', () => {
       'detalleSerie',
       'panelSeries',
       'miLista',
+      'meGusta',
+      'recomendaciones',
     ]);
   });
 });

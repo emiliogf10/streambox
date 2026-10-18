@@ -170,6 +170,24 @@ describe('MovieDetailPage: contenido', () => {
     expect(await screen.findByText('«Interstellar» se ha añadido a tu lista.')).toBeInTheDocument();
     expect(add).toHaveBeenCalledTimes(1);
   });
+
+  it('«Me gusta» va justo después de «Mi lista», es otro botón y da el «Me gusta» de verdad (PUT)', async () => {
+    const like = vi.fn(() => noContentResponse());
+    const user = renderDetail('/peliculas/7', () => jsonResponse(movie), { 'PUT /api/users/me/likes/movies/7': like });
+
+    const myList = await screen.findByRole('button', { name: /^Mi lista\s*—\s*Interstellar$/ });
+    const heart = screen.getByRole('button', { name: /^Me gusta\s*—\s*Interstellar$/ });
+    // En la misma rejilla de acciones, a continuación de «Mi lista».
+    expect(myList.nextElementSibling).toBe(heart);
+    expect(heart).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(heart);
+
+    expect(await screen.findByRole('button', { name: /^Te gusta\s*—\s*Interstellar$/ })).toHaveAttribute('aria-pressed', 'true');
+    // «Mi lista» no cambia: son dos cosas distintas.
+    expect(screen.getByRole('button', { name: /^Mi lista\s*—\s*Interstellar$/ })).toBeInTheDocument();
+    expect(like).toHaveBeenCalledTimes(1);
+  });
 });
 
 /** Valor (`<dd>`) de un dato de la ficha, buscado por su nombre (`<dt>`). */

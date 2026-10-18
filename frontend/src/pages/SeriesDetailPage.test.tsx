@@ -23,6 +23,7 @@ import {
   makeEpisode,
   makeSeriesDetail,
   makeUser,
+  noContentResponse,
   renderWithProviders,
   routeFetch,
 } from '../test/helpers';
@@ -170,8 +171,9 @@ describe('SeriesDetailPage: cabecera', () => {
     expect(within(episodeList()).getAllByRole('listitem')).toHaveLength(2);
     expect(within(episodeList()).queryByRole('link')).not.toBeInTheDocument();
     expect(within(episodeList()).queryByRole('button')).not.toBeInTheDocument();
-    // «Mi lista» sigue, y es la única acción: no queda ningún botón que prometa ver algo.
+    // «Mi lista» y «Me gusta» siguen, y son las únicas acciones: no queda ningún botón que prometa ver algo.
     expect(screen.getByRole('button', { name: /^Mi lista/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Me gusta/ })).toBeInTheDocument();
   });
 
   it('con tráiler y sin vídeos: «Ver tráiler» es la acción principal y abre el diálogo', async () => {
@@ -213,6 +215,23 @@ describe('SeriesDetailPage: cabecera', () => {
     renderDetail();
 
     expect(await screen.findByRole('button', { name: /^Mi lista\s*—\s*La casa de cristal$/ })).toBeInTheDocument();
+  });
+
+  it('tiene «Me gusta» para la serie, tras «Mi lista», que da el «Me gusta» de la SERIE (PUT)', async () => {
+    const like = vi.fn(() => noContentResponse());
+    const user = renderDetail(undefined, undefined, { 'PUT /api/users/me/likes/series/7': like });
+
+    const myList = await screen.findByRole('button', { name: /^Mi lista\s*—\s*La casa de cristal$/ });
+    const heart = screen.getByRole('button', { name: /^Me gusta\s*—\s*La casa de cristal$/ });
+    expect(myList.nextElementSibling).toBe(heart);
+
+    await user.click(heart);
+
+    expect(await screen.findByRole('button', { name: /^Te gusta\s*—\s*La casa de cristal$/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(like).toHaveBeenCalledTimes(1);
   });
 
   it('«Volver a series» lleva a /series y va antes del título (primera parada del contenido con Tab)', async () => {

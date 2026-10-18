@@ -114,7 +114,7 @@ class PostgresBaselineAdoptionIntegrationTest {
 
     /**
      * La historia queda registrada: baseline en la versión 0 (por eso V1 SÍ se
-     * ejecuta), luego V1, V2, V3, V4, la V5 de PostgreSQL (db/vendor/postgresql), V6 y V7, todas correctas. Una segunda ejecución no
+     * ejecuta), luego V1, V2, V3, V4, la V5 de PostgreSQL (db/vendor/postgresql), V6, V7 y V8, todas correctas. Una segunda ejecución no
      * hace nada y {@code validate} pasa (los checksums coinciden).
      */
     @Test
@@ -123,10 +123,10 @@ class PostgresBaselineAdoptionIntegrationTest {
 
         MigrateResult first = flyway(db).migrate();
 
-        assertEquals(7, first.migrationsExecuted, "deben ejecutarse V1, V2, V3, V4, V5, V6 y V7");
+        assertEquals(8, first.migrationsExecuted, "deben ejecutarse V1, V2, V3, V4, V5, V6, V7 y V8");
         List<Map<String, Object>> history = jdbc(db).queryForList(
                 "SELECT version, description, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertEquals(List.of("0", "1", "2", "3", "4", "5", "6", "7"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
+        assertEquals(List.of("0", "1", "2", "3", "4", "5", "6", "7", "8"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
         assertEquals("BASELINE", history.get(0).get("type"));
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
 
@@ -178,7 +178,9 @@ class PostgresBaselineAdoptionIntegrationTest {
         assertEquals(Set.of("idx_favorites_movie_id", "idx_movie_genres_genre_id", "idx_movies_release_year",
                         "idx_series_genres_genre_id", "idx_favorite_series_series_id", "idx_series_release_year",
                         "idx_refresh_tokens_user_id", "idx_refresh_tokens_family_id", "idx_refresh_tokens_replaced_by_id",
-                        "idx_movies_title_search", "idx_series_title_search"),
+                        "idx_movies_title_search", "idx_series_title_search",
+                        "idx_liked_movies_movie_id", "idx_liked_series_series_id",
+                        "idx_liked_movies_user_created_at", "idx_liked_series_user_created_at"),
                 Set.copyOf(jdbc.queryForList("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
                         + " AND indexname LIKE 'idx\\_%'", String.class)));
     }
@@ -405,7 +407,36 @@ class PostgresBaselineAdoptionIntegrationTest {
     }
 
     /**
-     * Contraste: una base vacía NO recibe fila de baseline (solo V1 a V7) y
+     * La V8 sobre una base heredada: crea las tablas de «me gusta» vacías y,
+     * a diferencia de {@code user_favorite_movies} (que conserva sus claves
+     * foráneas antiguas sin cascada), con sus cuatro claves foráneas en
+     * cascada, porque las tablas son nuevas en todas las bases. Borrar un
+     * usuario heredado sin favoritos ({@code root}) arrastra sus «me gusta».
+     */
+    @Test
+    void laV8SobreUnaBaseAdoptadaCreaLasTablasDeMeGustaConCascada() throws Exception {
+        String db = createDatabase(true);
+        JdbcTemplate jdbc = jdbc(db);
+
+        flyway(db).migrate();
+
+        assertEquals(0, count(jdbc, "user_liked_movies"));
+        assertEquals(0, count(jdbc, "user_liked_series"));
+        assertEquals(List.of("CASCADE", "CASCADE", "CASCADE", "CASCADE"), jdbc.queryForList(
+                "SELECT delete_rule FROM information_schema.referential_constraints"
+                        + " WHERE constraint_schema = 'public' AND constraint_name LIKE 'fk\\_liked\\_%'", String.class));
+        jdbc.update("INSERT INTO user_liked_movies (user_id, movie_id, created_at)"
+                + " SELECT u.id, m.id, now() FROM users u, movies m WHERE u.username = 'root'");
+        assertEquals(2, count(jdbc, "user_liked_movies"));
+
+        jdbc.update("DELETE FROM users WHERE username = 'root'");
+
+        assertEquals(0, count(jdbc, "user_liked_movies"));
+        assertEquals(2, count(jdbc, "movies"));
+    }
+
+    /**
+     * Contraste: una base vacía NO recibe fila de baseline (solo V1 a V8) y
      * sí tiene cascadas y CHECK. Garantiza que los dos caminos de arranque
      * producen lo que describe cada test.
      */
@@ -416,13 +447,14 @@ class PostgresBaselineAdoptionIntegrationTest {
         flyway(db).migrate();
 
         JdbcTemplate jdbc = jdbc(db);
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7"), jdbc.queryForList(
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8"), jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history ORDER BY installed_rank", String.class));
-        // Ocho claves foráneas en cascada. V1: géneros->película, favoritos->usuario y
+        // Doce claves foráneas en cascada. V1: géneros->película, favoritos->usuario y
         // favoritos->película. V3: géneros->serie, episodios->serie, favoritos de
         // series->usuario y favoritos de series->serie. V4: refresh tokens->usuario
         // (la del sucesor, fk_refresh_tokens_replaced_by, es SET NULL y no cuenta).
-        assertEquals(8, jdbc.queryForObject(
+        // V8: «me gusta» de películas->usuario/película y de series->usuario/serie.
+        assertEquals(12, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.referential_constraints"
                         + " WHERE constraint_schema = 'public' AND delete_rule = 'CASCADE'", Integer.class));
         assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(

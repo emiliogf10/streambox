@@ -1,7 +1,8 @@
 /**
  * Revisión de QA de «Ver tráiler»: la rejilla de acciones de las cabeceras con
- * de UNA a CUATRO acciones, según lo que tenga el título (vídeo, tráiler) y el
- * rol (USER / ADMIN, que añade «Editar»).
+ * de DOS a CINCO acciones, según lo que tenga el título (vídeo, tráiler), dónde
+ * esté (la página de un título añade «Me gusta») y el rol (USER / ADMIN, que
+ * añade «Editar»).
  *
  * `FeaturedBanner` reparte las acciones en móvil de dos en dos y, si una no
  * cabe en media fila o se queda sola, la pone en su propia fila a todo el
@@ -21,11 +22,11 @@
  *
  * Casos (catálogo sembrado en `support/catalog.ts`):
  *  - Portada, «Dune: Parte Dos» (vídeo + tráiler), USER: 4 acciones.
- *  - «Tenet» (solo tráiler): USER 2 acciones; ADMIN 3 («Editar» sola abajo).
- *  - «Noches de Invierno» (nada que ver), USER: 1 acción («Mi lista», a todo el ancho).
- *  - «Dune: Parte Dos», ADMIN, en su página: 4 acciones.
+ *  - «Tenet» (solo tráiler): USER 3 acciones («Me gusta» sola abajo); ADMIN 4.
+ *  - «Noches de Invierno» (nada que ver), USER: 2 acciones («Mi lista» y «Me gusta», a medias).
+ *  - «Dune: Parte Dos», ADMIN, en su página: 5 acciones («Editar» sola abajo).
  *
- * Solo lee el catálogo (no pulsa «Mi lista»): va en el proyecto `chromium`.
+ * Solo lee el catálogo (no pulsa «Mi lista» ni «Me gusta»): va en el proyecto `chromium`.
  */
 import type { Locator, Page } from '@playwright/test';
 import { HERO_TITLE, MOVIES } from './support/catalog';
@@ -130,7 +131,7 @@ async function expectActionsLayout(page: Page, header: Locator, width: number, e
   }
 }
 
-test.describe('Acciones de la cabecera con 1–4 botones (vídeo, tráiler y rol)', () => {
+test.describe('Acciones de la cabecera con 2–5 botones (vídeo, tráiler, «Me gusta» y rol)', () => {
   test.beforeEach(async ({ page }) => {
     // Cada test recorre la misma página a cuatro anchos (y «Tenet», con dos roles): más
     // cargas de página que un test normal, así que se le da el triple de tiempo.
@@ -157,7 +158,7 @@ test.describe('Acciones de la cabecera con 1–4 botones (vídeo, tráiler y rol
     }
   });
 
-  test('«Tenet» (solo tráiler): USER 2 acciones; ADMIN 3, con «Editar» a todo el ancho en móvil', async ({
+  test('«Tenet» (solo tráiler): USER 3 acciones, con «Me gusta» a todo el ancho en móvil; ADMIN 4, de dos en dos', async ({
     page,
     request,
     user,
@@ -170,6 +171,7 @@ test.describe('Acciones de la cabecera con 1–4 botones (vídeo, tráiler y rol
       await expectActionsLayout(page, page.getByRole('region', { name: 'Tenet' }), width, [
         /^Ver tráiler/,
         /^(Mi lista|En mi lista)/,
+        /^(Me gusta|Te gusta)/,
       ]);
     }
 
@@ -179,11 +181,16 @@ test.describe('Acciones de la cabecera con 1–4 botones (vídeo, tráiler y rol
       await openMovie(page, 'Tenet');
       const header = page.getByRole('region', { name: 'Tenet' });
       await expect(header.getByRole('link', { name: 'Editar Tenet' })).toBeVisible();
-      await expectActionsLayout(page, header, width, [/^Ver tráiler/, /^(Mi lista|En mi lista)/, /^Editar/]);
+      await expectActionsLayout(page, header, width, [
+        /^Ver tráiler/,
+        /^(Mi lista|En mi lista)/,
+        /^(Me gusta|Te gusta)/,
+        /^Editar/,
+      ]);
     }
   });
 
-  test('«Noches de Invierno» (nada que ver), USER: «Mi lista» es la única acción y ocupa todo el ancho en móvil', async ({
+  test('«Noches de Invierno» (nada que ver), USER: solo «Mi lista» y «Me gusta», a partes iguales en móvil', async ({
     page,
     user,
     signIn,
@@ -193,13 +200,13 @@ test.describe('Acciones de la cabecera con 1–4 botones (vídeo, tráiler y rol
       await page.setViewportSize({ width, height: 900 });
       await openMovie(page, 'Noches de Invierno');
       const header = page.getByRole('region', { name: 'Noches de Invierno' });
-      await expectActionsLayout(page, header, width, [/^(Mi lista|En mi lista)/]);
+      await expectActionsLayout(page, header, width, [/^(Mi lista|En mi lista)/, /^(Me gusta|Te gusta)/]);
       // Y algo explica por qué no hay nada que ver (incidencia QA trailer-5), fuera de las acciones.
       await expect(header.getByText('Todavía no está disponible para ver.')).toBeVisible();
     }
   });
 
-  test('«Dune: Parte Dos», ADMIN, en su página: 4 acciones (con «Editar») sin salirse a ningún ancho', async ({
+  test('«Dune: Parte Dos», ADMIN, en su página: 5 acciones (con «Me gusta» y «Editar») sin salirse a ningún ancho', async ({
     page,
     request,
     signIn,
@@ -212,6 +219,7 @@ test.describe('Acciones de la cabecera con 1–4 botones (vídeo, tráiler y rol
         /^Ver ahora/,
         /^Ver tráiler/,
         /^(Mi lista|En mi lista)/,
+        /^(Me gusta|Te gusta)/,
         /^Editar/,
       ]);
     }

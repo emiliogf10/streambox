@@ -10,12 +10,13 @@
  *   el viejo).
  * - **Cambio de usuario:** al cerrar sesión (o al caducar la sesión) y entrar
  *   con otra cuenta no aparece ni un instante la lista de la anterior
- *   (`AuthProvider` vacía la caché).
+ *   (`AuthProvider` vacía la caché). Lo mismo con sus «Me gusta» (perfil) y
+ *   sus recomendaciones (portada).
  *
  * `fetch` está simulado con un pequeño «servidor» en memoria que recuerda qué
  * sesión hay y qué datos tiene cada usuario.
  */
-import { act, screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppRoutes } from './App';
@@ -173,6 +174,71 @@ describe('Cambio de usuario en el mismo navegador', () => {
     expect(await screen.findByRole('heading', { name: 'Tu lista está vacía' })).toBeInTheDocument();
     expect(screen.queryByText('La favorita de Ana')).not.toBeInTheDocument();
     expect(getCalls('/api/users/me/favorites')).toBe(2);
+  });
+});
+
+describe('Cambio de usuario: «Me gusta» y recomendaciones', () => {
+  it('quien entra después no ve ni un instante los «Me gusta» ni las recomendaciones del anterior', async () => {
+    const ana = makeUser({ id: 1, username: 'ana', email: 'ana@example.com' });
+    const bea = makeUser({ id: 2, username: 'bea', email: 'bea@example.com' });
+    const likedOf: Record<number, Movie[]> = { 1: [makeMovie({ id: 7, title: 'La que le gusta a Ana' })], 2: [] };
+    const recommendedOf: Record<number, Movie[]> = { 1: [makeMovie({ id: 8, title: 'Recomendada a Ana' })], 2: [] };
+    let current: User | null = ana;
+
+    routeFetch(fetchMock, {
+      ...commonRoutes(() => [makeMovie({ id: 1, title: 'Interstellar' })]),
+      'GET /api/users/me': () => (current ? jsonResponse(current) : errorResponse(401, 'UNAUTHORIZED', 'No autenticado.')),
+      'GET /api/users/me/likes/movies': () => jsonResponse(current ? likedOf[current.id] : []),
+      'GET /api/users/me/recommendations?limit=12': () => {
+        const movies = current ? recommendedOf[current.id] : [];
+        return jsonResponse({ basedOnLikes: movies.length > 0, movies, series: [] });
+      },
+      'POST /api/auth/logout': () => {
+        current = null;
+        return noContentResponse();
+      },
+      'POST /api/auth/login': () => {
+        current = bea;
+        return noContentResponse();
+      },
+    });
+    const queryClient = createTestQueryClient();
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: '/', session: true, queryClient });
+    const anaRow = await screen.findByRole('region', { name: 'Películas recomendadas para ti' });
+    expect(within(anaRow).getByText('Recomendada a Ana')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Menú de usuario' }));
+    await user.click(screen.getByRole('link', { name: 'Mi perfil' }));
+    const anaLikes = await screen.findByRole('region', { name: 'Te gusta' });
+    expect(await within(anaLikes).findByText('La que le gusta a Ana')).toBeInTheDocument();
+
+    // «Cerrar sesión» de la cabecera del perfil (con el menú cerrado, es el único).
+    await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+    expect(await screen.findByText('ruta:/login')).toBeInTheDocument();
+    expect(queryClient.getQueryData(queryKeys.likes.all)).toBeUndefined();
+    expect(queryClient.getQueryData(queryKeys.recommendations.list(12))).toBeUndefined();
+
+    await user.type(screen.getByLabelText('Correo electrónico'), bea.email);
+    await user.type(screen.getByLabelText('Contraseña'), 'una-contraseña-cualquiera');
+    await user.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
+    await screen.findByText('ruta:/');
+
+    // Portada de Bea: nunca las recomendaciones de Ana (ni mientras llegan las suyas, que no hay).
+    expect(screen.queryByText('Recomendada a Ana')).not.toBeInTheDocument();
+    await screen.findByRole('heading', { level: 2, name: 'Interstellar' });
+    // Se espera a que hayan llegado las de Bea (sin «Me gusta» no hay esqueleto cuya desaparición esperar).
+    await waitFor(() => expect(queryClient.getQueryState(queryKeys.recommendations.list(12))?.status).toBe('success'));
+    expect(screen.queryByText('Cargando recomendaciones...')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Películas recomendadas para ti' })).not.toBeInTheDocument();
+
+    // Su perfil: «Te gusta» vacío, sin un instante de lo de Ana.
+    await user.click(screen.getByRole('button', { name: 'Menú de usuario' }));
+    await user.click(screen.getByRole('link', { name: 'Mi perfil' }));
+    expect(screen.queryByText('La que le gusta a Ana')).not.toBeInTheDocument();
+    const beaLikes = await screen.findByRole('region', { name: 'Te gusta' });
+    expect(await within(beaLikes).findByText('Todavía no te gusta ningún título')).toBeInTheDocument();
+    expect(screen.queryByText('La que le gusta a Ana')).not.toBeInTheDocument();
   });
 });
 

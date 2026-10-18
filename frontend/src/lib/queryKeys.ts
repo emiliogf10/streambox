@@ -6,7 +6,7 @@
  * (`['movies', …]` aquí, `['peliculas', …]` allá), una invalidación tras editar
  * una película podría no alcanzar a algún listado y este seguiría enseñando el
  * título viejo. Aquí cada clave cuelga de una **raíz** (`movies`, `series`,
- * `genres`, `favorites`) y las invalidaciones van por raíz: «ha cambiado una
+ * `genres`, `favorites`, `likes`, `recommendations`) y las invalidaciones van por raíz: «ha cambiado una
  * película» = todo lo que empieza por `['movies']` (portada, `/peliculas`, sus
  * filtros, el listado del panel, la comprobación de si hay películas...).
  *
@@ -67,12 +67,30 @@ export const queryKeys = {
     all: ['genres'] as const,
   },
   /**
-   * «Mi lista» del usuario de la sesión (películas y series). Es el único dato
-   * PERSONAL de la caché: por eso `AuthProvider` vacía la caché entera al
-   * cambiar de sesión (ver `AuthContext`).
+   * «Mi lista» del usuario de la sesión (películas y series). Es un dato
+   * PERSONAL (como `likes` y `recommendations`): por eso `AuthProvider` vacía
+   * la caché entera al cambiar de sesión (ver `AuthContext`).
    */
   favorites: {
     all: ['favorites'] as const,
+  },
+  /**
+   * Títulos que le gustan al usuario de la sesión («Me gusta», películas y
+   * series en UNA entrada, como «Mi lista»). Dato PERSONAL: lo borra el
+   * `queryClient.clear()` de cada cambio de sesión.
+   */
+  likes: {
+    all: ['likes'] as const,
+  },
+  /**
+   * Recomendaciones del usuario de la sesión (`GET /api/users/me/recommendations`).
+   * Dependen de sus «Me gusta» (se invalidan tras cada cambio) y del catálogo
+   * (un título editado o borrado). El `limit` va en la clave: con otro tamaño
+   * sería otra respuesta. Dato PERSONAL, como `likes`.
+   */
+  recommendations: {
+    all: ['recommendations'] as const,
+    list: (limit: number) => ['recommendations', { limit }] as const,
   },
   /**
    * Un listado paginado del catálogo (`usePagedCatalog`): portada, `/peliculas`
@@ -94,22 +112,31 @@ export const queryKeys = {
 export type CatalogChange = 'movies' | 'series' | 'genres';
 
 /**
- * Raíces de la caché que deja anticuadas cada tipo de cambio. «Mi lista» va en
- * todas porque guarda copias de los títulos (título, portada, géneros, número de
- * episodios). Un género renombrado aparece dentro de cada película y serie, por
- * eso arrastra también sus listados. La propia lista de géneros NO se invalida
- * tras un cambio de géneros: la pestaña Géneros ya la actualiza con la respuesta
- * del servidor (ver `AdminGenresPage`).
+ * Datos personales que guardan COPIAS de los títulos (título, portada, géneros,
+ * número de episodios): «Mi lista», los «Me gusta» y las recomendaciones. Se
+ * invalidan tras cualquier cambio del catálogo; las recomendaciones, además,
+ * porque un título nuevo, editado (sus géneros) o borrado cambia lo que se
+ * recomienda.
+ */
+const PERSONAL_COPIES: QueryKey[] = [queryKeys.favorites.all, queryKeys.likes.all, queryKeys.recommendations.all];
+
+/**
+ * Raíces de la caché que deja anticuadas cada tipo de cambio. Los datos
+ * personales con copias de títulos ({@link PERSONAL_COPIES}) van en todas. Un
+ * género renombrado aparece dentro de cada película y serie, por eso arrastra
+ * también sus listados. La propia lista de géneros NO se invalida tras un
+ * cambio de géneros: la pestaña Géneros ya la actualiza con la respuesta del
+ * servidor (ver `AdminGenresPage`).
  *
  * @param change qué tipo de dato se ha escrito
  */
 export function keysAffectedBy(change: CatalogChange): QueryKey[] {
   switch (change) {
     case 'movies':
-      return [queryKeys.movies.all, queryKeys.favorites.all];
+      return [queryKeys.movies.all, ...PERSONAL_COPIES];
     case 'series':
-      return [queryKeys.series.all, queryKeys.favorites.all];
+      return [queryKeys.series.all, ...PERSONAL_COPIES];
     case 'genres':
-      return [queryKeys.movies.all, queryKeys.series.all, queryKeys.favorites.all];
+      return [queryKeys.movies.all, queryKeys.series.all, ...PERSONAL_COPIES];
   }
 }

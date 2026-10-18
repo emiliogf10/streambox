@@ -11,6 +11,7 @@ import type { Fact } from '../components/FactSheet';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { FeaturedBanner } from '../components/FeaturedBanner';
 import { GenreLinks } from '../components/GenreLinks';
+import { LikeButton } from '../components/LikeButton';
 import { MovieMetaTags } from '../components/MovieMetaTags';
 import { NothingToWatchNote } from '../components/NothingToWatchNote';
 import { SimilarMoviesRow } from '../components/SimilarMoviesRow';
@@ -132,7 +133,11 @@ export function MovieDetailPage() {
  * - **«Ver tráiler»** ({@link TrailerButton}), solo si hay tráiler de YouTube:
  *   abre un diálogo con el reproductor. Secundaria (borde) si hay «Ver ahora»;
  *   si no, es lo único que se puede ver y pasa a ser la principal (blanca).
- * - **«Mi lista»** ({@link FavoriteButton}): la lista compartida de `FavoritesContext`.
+ * - **«Mi lista»** ({@link FavoriteButton}): la lista compartida de `FavoritesContext`
+ *   (lo que quieres ver).
+ * - **«Me gusta»** ({@link LikeButton}): la viste y te gustó (`useLikes`); alimenta
+ *   las recomendaciones de la portada. Secundaria (borde), como «Mi lista», con
+ *   corazón y textos propios para no confundirlas.
  * - **Sin vídeo ni tráiler**, bajo las acciones, {@link NothingToWatchNote}:
  *   «Todavía no está disponible para ver.» (usuario, y mientras carga el rol) o
  *   «No tiene vídeo ni tráiler: puedes añadirlos desde «Editar».» (administrador).
@@ -167,6 +172,7 @@ function MovieDetailView({ movie, confirmed }: { movie: Movie; confirmed: boolea
             <WatchButton videoUrl={movie.videoUrl} title={movie.title} />
             <TrailerButton trailerUrl={movie.trailerUrl} title={movie.title} variant={hasVideo ? 'outline' : 'light'} />
             <FavoriteButton movie={movie} />
+            <LikeButton movie={movie} />
             {isAdmin && (
               <Link
                 to={adminEditMoviePath(movie.id)}

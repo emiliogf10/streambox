@@ -13,15 +13,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FavoritesProvider } from '../context/FavoritesContext';
 import {
   CURRENT_USER,
+  RECOMMENDATIONS,
   errorResponse,
   jsonResponse,
   makeMovie,
   makePage,
+  makeRecommendations,
   makeSeries,
   makeUser,
   renderWithProviders,
   routeFetch,
 } from '../test/helpers';
+import type { QueryClient } from '@tanstack/react-query';
+import { RECOMMENDATIONS_LIMIT } from '../hooks/useRecommendations';
+import { queryKeys } from '../lib/queryKeys';
+import type { TitleLists } from '../lib/titleLists';
+import { createTestQueryClient } from '../test/queryClient';
 import { UserStatusProbe } from '../test/UserStatusProbe';
 import { HomePage } from './HomePage';
 
@@ -45,14 +52,15 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
 });
 
-function renderHome() {
+/** Monta la portada; `queryClient`, para los tests que miran o siembran la caché. */
+function renderHome(queryClient?: QueryClient) {
   const user = userEvent.setup();
   renderWithProviders(
     <FavoritesProvider>
       <HomePage />
       <UserStatusProbe />
     </FavoritesProvider>,
-    { session: true },
+    { session: true, queryClient },
   );
   return user;
 }
@@ -335,5 +343,168 @@ describe('HomePage: fila «Series»', () => {
 
     await screen.findByRole('region', { name: 'Novedades' });
     expect(screen.getByText('Cargando series...')).toBeInTheDocument();
+  });
+});
+
+describe('HomePage: «Recomendadas para ti»', () => {
+  const liked = makeRecommendations({
+    basedOnLikes: true,
+    movies: [makeMovie({ id: 20, title: 'Recomendada', genres: [terror] })],
+    series: [makeSeries({ id: 21, title: 'Serie recomendada' })],
+  });
+
+  it('con «Me gusta», las dos filas van justo después de «Novedades» y antes de la fila «Series»', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+      [SERIES_ROW]: () => jsonResponse(makePage([makeSeries({ id: 10, title: 'Serie nueva' })])),
+      [RECOMMENDATIONS]: () => jsonResponse(liked),
+    });
+    renderHome();
+
+    const movies = await screen.findByRole('region', { name: 'Películas recomendadas para ti' });
+    expect(within(movies).getByRole('link', { name: /^Recomendada 2020 ·/ })).toHaveAttribute('href', '/peliculas/20');
+    await screen.findByRole('region', { name: 'Series' });
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Estreno estrella',
+      'Novedades',
+      'Películas recomendadas para ti',
+      'Series recomendadas para ti',
+      'Series',
+      'Terror',
+    ]);
+  });
+
+  it.each([
+    ['un usuario', 'USER'],
+    ['un administrador', 'ADMIN'],
+  ] as const)(
+    'a %s sin ningún «Me gusta» no se le enseña ni se le anuncia nada de las recomendaciones en ningún momento',
+    async (_who, role) => {
+      let answer: (response: Response) => void = () => {};
+      routeFetch(fetchMock, {
+        ...FAVORITES,
+        [CURRENT_USER]: () => jsonResponse(makeUser({ role })),
+        [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+        [RECOMMENDATIONS]: () => new Promise<Response>((resolve) => (answer = resolve)),
+      });
+      // Cualquier cambio del DOM que deje a la vista (o en el texto que lee un lector de pantalla,
+      // `sr-only` incluido) algo de las recomendaciones queda anotado: así se cubre TODO el recorrido,
+      // no solo los instantes en que el test mira.
+      const seen: string[] = [];
+      const mentionsRecommendations = () => /recomend/i.test(document.body.textContent ?? '');
+      const observer = new MutationObserver(() => {
+        if (mentionsRecommendations()) seen.push(document.body.textContent ?? '');
+      });
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+      const queryClient = createTestQueryClient();
+      try {
+        renderHome(queryClient);
+
+        // Cargando: la portada ya está y la petición ha salido, pero no hay hueco ni aviso.
+        await screen.findByRole('region', { name: 'Novedades' });
+        await waitFor(() =>
+          expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/users/me/recommendations?limit=12')).toBe(
+            true,
+          ),
+        );
+        expect(screen.queryByText('Cargando recomendaciones...')).not.toBeInTheDocument();
+
+        // Llega la respuesta (`basedOnLikes: false`): tampoco aparece nada.
+        answer(jsonResponse(makeRecommendations()));
+        await waitFor(() =>
+          expect(queryClient.getQueryState(queryKeys.recommendations.list(RECOMMENDATIONS_LIMIT))?.status).toBe(
+            'success',
+          ),
+        );
+        expect(screen.queryByRole('region', { name: /recomendadas para ti/ })).not.toBeInTheDocument();
+        expect(mentionsRecommendations()).toBe(false);
+        expect(seen).toEqual([]);
+      } finally {
+        observer.disconnect();
+      }
+    },
+  );
+
+  it('la petición sale a la vez que la del catálogo, no cuando este ya ha llegado (así no empuja la portada)', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => new Promise<Response>(() => {}),
+      [RECOMMENDATIONS]: () => jsonResponse(makeRecommendations()),
+    });
+    renderHome();
+
+    expect(await screen.findByText('Cargando catálogo...')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/users/me/recommendations?limit=12')).toBe(true),
+    );
+  });
+
+  it('si la caché ya sabe que le gusta algo (vuelve tras un «Me gusta»), reserva el hueco y anuncia la carga', async () => {
+    const queryClient = createTestQueryClient();
+    const likes: TitleLists = { movie: [makeMovie({ id: 30, title: 'Me encantó', genres: [terror] })], series: [] };
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      // Se siembra al responder el catálogo: la sesión ya está resuelta (al resolverse se vacía la caché),
+      // como cuando se vuelve a la portada desde la página de un título con los «Me gusta» ya cargados.
+      [PAGE_0]: () => {
+        queryClient.setQueryData(queryKeys.likes.all, likes);
+        return jsonResponse(makePage([hero, ...others]));
+      },
+      [RECOMMENDATIONS]: () => new Promise<Response>(() => {}),
+    });
+    renderHome(queryClient);
+
+    await screen.findByRole('region', { name: 'Novedades' });
+    const skeleton = await screen.findByText('Cargando recomendaciones...');
+    expect(skeleton.closest('[role="status"]')).toBeInTheDocument();
+  });
+
+  it('si la caché sabe que no le gusta nada (listas vacías), tampoco reserva el hueco', async () => {
+    const queryClient = createTestQueryClient();
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => {
+        queryClient.setQueryData<TitleLists>(queryKeys.likes.all, { movie: [], series: [] });
+        return jsonResponse(makePage([hero, ...others]));
+      },
+      [RECOMMENDATIONS]: () => new Promise<Response>(() => {}),
+    });
+    renderHome(queryClient);
+
+    await screen.findByRole('region', { name: 'Novedades' });
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Terror' })).toBeInTheDocument());
+    expect(screen.queryByText('Cargando recomendaciones...')).not.toBeInTheDocument();
+  });
+
+  it('si fallan, un aviso compacto con «Reintentar» y el resto de la portada sigue ahí', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+      [RECOMMENDATIONS]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+    });
+    renderHome();
+
+    expect(await screen.findByRole('heading', { name: 'No se pudieron cargar tus recomendaciones' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Novedades' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Terror' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
+  });
+
+  it('sin películas en el catálogo, las series recomendadas salen antes de la fila «Series»', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([])),
+      [SERIES_ROW]: () => jsonResponse(makePage([makeSeries({ id: 10, title: 'Serie nueva' })])),
+      [RECOMMENDATIONS]: () => jsonResponse(makeRecommendations({ basedOnLikes: true, series: liked.series })),
+    });
+    renderHome();
+
+    await screen.findByRole('region', { name: 'Series recomendadas para ti' });
+    await screen.findByRole('region', { name: 'Series' });
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Series recomendadas para ti',
+      'Series',
+    ]);
   });
 });

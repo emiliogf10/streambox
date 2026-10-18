@@ -24,6 +24,7 @@
   - Filtrado multicriterio combinable (título insensible a mayúsculas, género y año de lanzamiento) implementado mediante **Spring Data JPA `Specification`**.
 - **⭐ Lista de Favoritos ("Mi Lista")**:
   - Gestión integral vinculada al usuario autenticado (`/api/users/me/favorites`).
+  - **«Me gusta» y recomendaciones** (`/api/users/me/likes`, `/api/users/me/recommendations`): un corazón distinto de «Mi lista» y filas «Recomendadas para ti» en el inicio, calculadas por géneros detrás de una interfaz `Recommender` pensada para poder sustituirla por una IA.
   - Soporte para añadir y eliminar películas por `ID` o por `título exacto`.
   - Acción de vaciado completo en una sola operación.
   - Prevención de duplicados (`409 Conflict`) y validación estricta de propiedad de recursos (prevención de IDOR).
@@ -120,6 +121,9 @@ La base de todos los endpoints es `/api`.
 | `DELETE` | `/api/users/me/favorites/{movieId}` | `USER`, `ADMIN` | Elimina una película de la lista por su ID |
 | `DELETE` | `/api/users/me/favorites/by-title?title=...` | `USER`, `ADMIN` | Elimina una película de la lista por coincidencia de título |
 | `DELETE` | `/api/users/me/favorites` | `USER`, `ADMIN` | Vacía por completo la lista del usuario actual |
+| `GET` | `/api/users/me/likes/movies` · `/api/users/me/likes/series` | `USER`, `ADMIN` | Títulos que le gustan al usuario («la vi y me gustó»), lo más reciente primero (solo series con episodios) |
+| `PUT` / `DELETE` | `/api/users/me/likes/movies/{movieId}` · `/api/users/me/likes/series/{seriesId}` | `USER`, `ADMIN` | Da o quita un «me gusta» (204, idempotentes; el `PUT` da 404 si el título no existe o la serie no tiene episodios) |
+| `GET` | `/api/users/me/recommendations?limit=12` | `USER`, `ADMIN` | Recomendaciones por géneros de lo que te gusta (`limit` 1–24): `{ basedOnLikes, movies, series }`; sin «me gusta», listas vacías |
 
 ### 3. Catálogo de Películas
 | Método | Endpoint | Acceso | Descripción |

@@ -36,6 +36,17 @@
   --color-field-border: #687286;
   --color-danger: #f87171;
   --color-success: #4ade80;
+  /*
+   * Corazón relleno de «Te gusta» (`LikeButton`). Mismo valor que `danger`, con
+   * otro nombre porque significa otra cosa: un «Me gusta» no es un error.
+   * Contraste de componente (WCAG 1.4.11, 3:1): 6.83 sobre canvas, 6.22 sobre
+   * surface y ≈4.6 sobre el botón activo (blanco al 15 %) con el fondo oscuro
+   * habitual del banner. Con el peor fondo del banner (póster blanco: gris ≈85
+   * bajo el velo) baja a ≈1.8, igual que la ✓ verde de «En mi lista»: por eso el
+   * estado NUNCA depende solo del corazón (cambia el texto, «Me gusta» → «Te
+   * gusta», y `aria-pressed`), y el corazón es un refuerzo, no la información.
+   */
+  --color-like: #f87171;
 
   /*
    * Curva de salida "fuerte" para entradas y respuestas a una acción (genera

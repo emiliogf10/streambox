@@ -338,6 +338,8 @@ describe('ProfilePage: con la lista llena', () => {
       'Sesiones',
       'Tus géneros',
       'De tu lista',
+      // «Te gusta» va al final: son los «Me gusta» (otra lista, ver `LikedTitlesSection.test.tsx`).
+      'Te gusta',
     ]);
   });
 

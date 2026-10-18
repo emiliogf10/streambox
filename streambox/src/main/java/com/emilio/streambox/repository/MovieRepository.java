@@ -1,5 +1,6 @@
 package com.emilio.streambox.repository;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -191,4 +192,179 @@ public interface MovieRepository
     @Modifying
     @Query(value = "DELETE FROM user_favorite_movies WHERE movie_id = :movieId", nativeQuery = true)
     void deleteFromAllFavorites(@Param("movieId") Long movieId);
+
+    // ------------------------------------------------------------------
+    // «Me gusta» de películas (tabla user_liked_movies, V8)
+    //
+    // Mismo patrón que los favoritos de series (SeriesRepository): consultas
+    // nativas sobre la tabla de unión, sin colección en User ni entidad propia.
+    // Viven aquí porque el listado devuelve Movie (Spring Data solo convierte
+    // una consulta nativa en entidades del tipo del propio repositorio). No
+    // hace falta limpiar los «me gusta» antes de borrar una película: la clave
+    // foránea tiene ON DELETE CASCADE en todas las bases (la tabla es nueva).
+    // ------------------------------------------------------------------
+
+    /**
+     * Devuelve las películas que le gustan a un usuario, de la que le gustó más
+     * recientemente a la más antigua.
+     *
+     * <p>
+     * El orden es el de {@code user_liked_movies.created_at} (cuándo dio el «me
+     * gusta», no cuándo se creó la película) y, a igual fecha, {@code id}
+     * descendente, como el catálogo cuando se pide {@code createdAt desc}. Lo
+     * resuelve el índice {@code idx_liked_movies_user_created_at}.
+     * </p>
+     *
+     * <p>
+     * Los géneros no se cargan aquí: se resuelven por lotes
+     * ({@code default_batch_fetch_size}) al convertir a DTO dentro de la
+     * transacción, como en «Mi lista».
+     * </p>
+     *
+     * @param userId identificador del usuario
+     * @return películas que le gustan, la más reciente primero
+     */
+    @Query(value = "SELECT m.* FROM movies m"
+            + " JOIN user_liked_movies l ON l.movie_id = m.id"
+            + " WHERE l.user_id = :userId"
+            + " ORDER BY l.created_at DESC, m.id DESC", nativeQuery = true)
+    List<Movie> findLikedByUserId(@Param("userId") Long userId);
+
+    /**
+     * Da «me gusta» a una película. <strong>Idempotente</strong>.
+     *
+     * <p>
+     * {@code ON CONFLICT DO NOTHING}: si el usuario ya le había dado «me gusta»,
+     * no hace nada (devuelve 0) y <em>conserva la fecha original</em>, así que
+     * repetir la acción no la sube al principio de la lista. Además es seguro
+     * ante dos peticiones simultáneas: en PostgreSQL la segunda espera a la
+     * primera y no inserta, sin provocar una violación de la clave primaria
+     * (que abortaría la transacción). La sintaxis sin columnas de conflicto es
+     * la que también acepta H2 en modo PostgreSQL.
+     * </p>
+     *
+     * <p>
+     * Solo ignora el duplicado: si la película o el usuario no existen (p. ej.
+     * se borró la película entre la comprobación del servicio y este
+     * {@code INSERT}), la base de datos sigue lanzando la violación de clave
+     * foránea ({@code 23503}; {@code 23506} en H2), que el servicio debe
+     * traducir a 404.
+     * </p>
+     *
+     * @param userId  identificador del usuario
+     * @param movieId identificador de la película
+     * @param likedAt instante del «me gusta» (el servicio lo toma de su {@code Clock})
+     * @return filas insertadas: 1 si es nuevo, 0 si ya le gustaba
+     */
+    @Modifying(flushAutomatically = true)
+    @Query(value = "INSERT INTO user_liked_movies (user_id, movie_id, created_at)"
+            + " VALUES (:userId, :movieId, :likedAt) ON CONFLICT DO NOTHING", nativeQuery = true)
+    int addLike(@Param("userId") Long userId, @Param("movieId") Long movieId,
+            @Param("likedAt") Instant likedAt);
+
+    /**
+     * Quita el «me gusta» de una película. Idempotente: si no le gustaba (o la
+     * película no existe) no borra nada y no falla.
+     *
+     * @param userId  identificador del usuario
+     * @param movieId identificador de la película
+     * @return filas eliminadas: 1 si le gustaba, 0 si no
+     */
+    @Modifying(flushAutomatically = true)
+    @Query(value = "DELETE FROM user_liked_movies WHERE user_id = :userId AND movie_id = :movieId",
+            nativeQuery = true)
+    int removeLike(@Param("userId") Long userId, @Param("movieId") Long movieId);
+
+    /**
+     * Devuelve los ids de las películas <strong>recomendadas</strong> a un
+     * usuario según los géneros de lo que le gusta, ya ordenados de más a menos
+     * recomendable.
+     *
+     * <p>
+     * <strong>Criterio</strong> (primera versión, sin IA):
+     * </p>
+     * <ol>
+     * <li>Cada género recibe un <em>peso</em>: cuántos de los títulos que le
+     * gustan al usuario lo tienen. Cuentan sus «me gusta» de películas
+     * <em>y</em> de series, porque el catálogo de géneros es común y un
+     * usuario al que le gustan series de terror querrá ver películas de
+     * terror. De las series solo cuentan las visibles (con episodios), para
+     * que la recomendación se base exactamente en lo que el usuario ve en su
+     * sección «Te gusta».</li>
+     * <li>La puntuación de cada película candidata es la <strong>suma de los
+     * pesos de sus géneros</strong>. Por tanto, una película que comparte dos
+     * géneros con un título que te gusta suma por los dos (cuenta 2): cuantos
+     * más géneros en común, más parecida, el mismo criterio que
+     * {@link #findSimilarMovieIds(Long, int)}. Y un género presente en muchos
+     * de tus «me gusta» pesa más que uno que solo aparece en uno.</li>
+     * <li>Se excluyen las películas que ya le gustan. Las que solo tienen
+     * géneros que no aparecen en sus «me gusta» no son candidatas.</li>
+     * <li>Desempate: {@code created_at} descendente (lo más nuevo primero) y
+     * {@code id} descendente, como el catálogo con {@code createdAt desc}; el
+     * orden es total, así que la respuesta no cambia entre llamadas.</li>
+     * </ol>
+     *
+     * <p>
+     * <strong>Cómo funciona la consulta.</strong> La subconsulta {@code pesos}
+     * reúne con {@code UNION ALL} una fila por cada pareja («me gusta»,
+     * género) de películas y de series (clave primaria de las tablas de unión)
+     * y la agrupa por género. Después se une con {@code movie_genres} por
+     * {@code genre_id} (índice {@code idx_movie_genres_genre_id}): cada fila del
+     * join es un género que la candidata comparte, así que {@code SUM(peso)}
+     * por película es la puntuación. El {@code NOT EXISTS} usa la clave primaria
+     * {@code (user_id, movie_id)} de {@code user_liked_movies}. Sin ningún «me
+     * gusta», {@code pesos} está vacía y el resultado también.
+     * </p>
+     *
+     * <p>
+     * SQL nativo y estándar (tabla derivada, {@code UNION ALL},
+     * {@code GROUP BY}, {@code FETCH FIRST}) por lo mismo que
+     * {@link #findSimilarMovieIds(Long, int)}: es una agregación sobre tablas de
+     * unión que en JPQL no se expresa sin entidades para ellas. Devuelve solo
+     * ids para que el {@code LIMIT} se aplique en la base de datos; las
+     * películas se cargan después con
+     * {@link #findAllWithGenresByIdIn(Collection)} (que no conserva el orden:
+     * hay que reconstruirlo con esta lista). En total, dos consultas.
+     * </p>
+     *
+     * @param userId identificador del usuario
+     * @param limit  número máximo de ids devueltos (lo valida el servicio)
+     * @return ids de las películas recomendadas, en orden; vacío si no tiene
+     *         «me gusta» o no hay candidatas
+     */
+    @Query(value = "SELECT mg.movie_id"
+            + " FROM (" + LIKED_GENRE_WEIGHTS + ") pesos"
+            + " JOIN movie_genres mg ON mg.genre_id = pesos.genre_id"
+            + " JOIN movies m ON m.id = mg.movie_id"
+            + " WHERE NOT EXISTS (SELECT 1 FROM user_liked_movies ya"
+            + "   WHERE ya.user_id = :userId AND ya.movie_id = mg.movie_id)"
+            + " GROUP BY mg.movie_id, m.created_at"
+            + " ORDER BY SUM(pesos.peso) DESC, m.created_at DESC, mg.movie_id DESC"
+            + " FETCH FIRST :limit ROWS ONLY", nativeQuery = true)
+    List<Long> findRecommendedMovieIds(@Param("userId") Long userId, @Param("limit") int limit);
+
+    /**
+     * Subconsulta común a las recomendaciones de películas y de series
+     * ({@code SeriesRepository.findRecommendedSeriesIds}): una fila por género
+     * de los títulos que le gustan al usuario {@code :userId}, con su
+     * {@code peso} (cuántos de esos títulos lo tienen). Las series que le
+     * gustan pero están ocultas (sin episodios) no cuentan: el {@code EXISTS}
+     * se resuelve con el índice único de {@code episodes}, que empieza por
+     * {@code series_id}.
+     *
+     * <p>
+     * Es una constante para que las dos recomendaciones no puedan divergir en
+     * cómo pesan los géneros.
+     * </p>
+     */
+    String LIKED_GENRE_WEIGHTS = "SELECT gustos.genre_id, COUNT(*) AS peso FROM ("
+            + " SELECT g.genre_id FROM user_liked_movies l"
+            + "   JOIN movie_genres g ON g.movie_id = l.movie_id"
+            + "  WHERE l.user_id = :userId"
+            + " UNION ALL"
+            + " SELECT g.genre_id FROM user_liked_series l"
+            + "   JOIN series_genres g ON g.series_id = l.series_id"
+            + "  WHERE l.user_id = :userId"
+            + "    AND EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = l.series_id)"
+            + " ) gustos GROUP BY gustos.genre_id";
 }

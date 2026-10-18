@@ -1,5 +1,7 @@
 package com.emilio.streambox.repository;
 
+import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -183,4 +185,128 @@ public interface SeriesRepository
     @Modifying(flushAutomatically = true)
     @Query(value = "DELETE FROM user_favorite_series WHERE user_id = :userId", nativeQuery = true)
     int clearFavorites(@Param("userId") Long userId);
+
+    /**
+     * Carga varias series por id <strong>con sus géneros</strong> en una sola
+     * consulta.
+     *
+     * <p>
+     * Es la gemela de {@link MovieRepository#findAllWithGenresByIdIn(Collection)}
+     * para completar {@link #findRecommendedSeriesIds(Long, int)}: la lista de
+     * ids ya viene limitada, así que el {@code JOIN FETCH} de la colección es
+     * seguro. No filtra las series sin episodios (los ids recomendados ya
+     * salen solo de series con episodios) y <strong>no conserva el orden de
+     * {@code ids}</strong>: hay que reconstruirlo.
+     * </p>
+     *
+     * @param ids identificadores de las series a cargar
+     * @return las series encontradas, con sus géneros ya inicializados
+     */
+    @EntityGraph(attributePaths = { "genres" })
+    @Query("select s from Series s where s.id in :ids")
+    List<Series> findAllWithGenresByIdIn(@Param("ids") Collection<Long> ids);
+
+    // ------------------------------------------------------------------
+    // «Me gusta» de series (tabla user_liked_series, V8)
+    //
+    // Mismo patrón que los favoritos de series y que los «me gusta» de
+    // películas (MovieRepository): consultas nativas sobre la tabla de unión.
+    // La existencia de una serie visible se comprueba con
+    // EpisodeRepository.existsBySeriesId (si tiene algún episodio, existe).
+    // No hace falta limpiar nada antes de borrar una serie: ON DELETE CASCADE.
+    // ------------------------------------------------------------------
+
+    /**
+     * Devuelve las series <strong>visibles</strong> (con al menos un episodio)
+     * que le gustan a un usuario, de la que le gustó más recientemente a la más
+     * antigua ({@code user_liked_series.created_at} descendente y, a igual
+     * fecha, {@code id} descendente).
+     *
+     * <p>
+     * Una serie que le gustó y que después el administrador dejó sin episodios
+     * no sale (como en «Mi lista»: una serie oculta es indistinguible de una
+     * inexistente), pero su «me gusta» se conserva y reaparece si vuelve a
+     * tener episodios. El {@code EXISTS} usa el índice único de
+     * {@code episodes}; los géneros se cargan por lotes al convertir a DTO.
+     * </p>
+     *
+     * @param userId identificador del usuario
+     * @return series visibles que le gustan, la más reciente primero
+     */
+    @Query(value = "SELECT s.* FROM series s"
+            + " JOIN user_liked_series l ON l.series_id = s.id"
+            + " WHERE l.user_id = :userId"
+            + "   AND EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = s.id)"
+            + " ORDER BY l.created_at DESC, s.id DESC", nativeQuery = true)
+    List<Series> findVisibleLikedByUserId(@Param("userId") Long userId);
+
+    /**
+     * Da «me gusta» a una serie. <strong>Idempotente</strong>
+     * ({@code ON CONFLICT DO NOTHING}): si ya le gustaba no hace nada, conserva
+     * la fecha original y no provoca una violación de la clave primaria, ni
+     * siquiera con dos peticiones simultáneas.
+     *
+     * <p>
+     * No comprueba que la serie tenga episodios: eso lo hace el servicio antes
+     * ({@code EpisodeRepository.existsBySeriesId}). Si la serie o el usuario no
+     * existen, la base de datos lanza la violación de clave foránea
+     * ({@code 23503}; {@code 23506} en H2), que el servicio traduce a 404. Ver
+     * {@link MovieRepository#addLike(Long, Long, Instant)}.
+     * </p>
+     *
+     * @param userId   identificador del usuario
+     * @param seriesId identificador de la serie
+     * @param likedAt  instante del «me gusta» (el servicio lo toma de su {@code Clock})
+     * @return filas insertadas: 1 si es nuevo, 0 si ya le gustaba
+     */
+    @Modifying(flushAutomatically = true)
+    @Query(value = "INSERT INTO user_liked_series (user_id, series_id, created_at)"
+            + " VALUES (:userId, :seriesId, :likedAt) ON CONFLICT DO NOTHING", nativeQuery = true)
+    int addLike(@Param("userId") Long userId, @Param("seriesId") Long seriesId,
+            @Param("likedAt") Instant likedAt);
+
+    /**
+     * Quita el «me gusta» de una serie. Idempotente: si no le gustaba (o la
+     * serie no existe) no borra nada y no falla.
+     *
+     * @param userId   identificador del usuario
+     * @param seriesId identificador de la serie
+     * @return filas eliminadas: 1 si le gustaba, 0 si no
+     */
+    @Modifying(flushAutomatically = true)
+    @Query(value = "DELETE FROM user_liked_series WHERE user_id = :userId AND series_id = :seriesId",
+            nativeQuery = true)
+    int removeLike(@Param("userId") Long userId, @Param("seriesId") Long seriesId);
+
+    /**
+     * Devuelve los ids de las series <strong>recomendadas</strong> a un usuario
+     * según los géneros de lo que le gusta, ya ordenados.
+     *
+     * <p>
+     * Mismo criterio que {@link MovieRepository#findRecommendedMovieIds(Long, int)}
+     * y la misma subconsulta de pesos ({@link MovieRepository#LIKED_GENRE_WEIGHTS}:
+     * cuentan los «me gusta» de películas y de series visibles): puntuación =
+     * suma de los pesos de los géneros de la serie, excluidas las que ya le
+     * gustan, desempate por {@code created_at} e {@code id} descendentes. Solo
+     * son candidatas las series <strong>con episodios</strong> (las ocultas no
+     * se recomiendan nunca). Las series se cargan después con
+     * {@link #findAllWithGenresByIdIn(Collection)}.
+     * </p>
+     *
+     * @param userId identificador del usuario
+     * @param limit  número máximo de ids devueltos (lo valida el servicio)
+     * @return ids de las series recomendadas, en orden; vacío si no tiene «me
+     *         gusta» o no hay candidatas
+     */
+    @Query(value = "SELECT sg.series_id"
+            + " FROM (" + MovieRepository.LIKED_GENRE_WEIGHTS + ") pesos"
+            + " JOIN series_genres sg ON sg.genre_id = pesos.genre_id"
+            + " JOIN series s ON s.id = sg.series_id"
+            + " WHERE NOT EXISTS (SELECT 1 FROM user_liked_series ya"
+            + "   WHERE ya.user_id = :userId AND ya.series_id = sg.series_id)"
+            + "   AND EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = sg.series_id)"
+            + " GROUP BY sg.series_id, s.created_at"
+            + " ORDER BY SUM(pesos.peso) DESC, s.created_at DESC, sg.series_id DESC"
+            + " FETCH FIRST :limit ROWS ONLY", nativeQuery = true)
+    List<Long> findRecommendedSeriesIds(@Param("userId") Long userId, @Param("limit") int limit);
 }

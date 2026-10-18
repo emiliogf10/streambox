@@ -18,6 +18,7 @@ import type { Fact } from '../components/FactSheet';
 import { FavoriteButton } from '../components/FavoriteButton';
 import { FeaturedBanner } from '../components/FeaturedBanner';
 import { GenreLinks } from '../components/GenreLinks';
+import { LikeButton } from '../components/LikeButton';
 import { NothingToWatchNote } from '../components/NothingToWatchNote';
 import { SeasonPicker } from '../components/SeasonPicker';
 import { SeriesMetaTags } from '../components/SeriesMetaTags';
@@ -135,7 +136,8 @@ export function SeriesDetailPage() {
  *   episodio con vídeo, ver {@link StartWatchingButton}; si ningún episodio
  *   tiene vídeo, no aparece), «Ver tráiler» ({@link TrailerButton}, solo si la
  *   serie tiene tráiler; principal si no hay episodio que ver, secundaria si
- *   lo hay), «Mi lista» y, solo para un administrador (rol
+ *   lo hay), «Mi lista», «Me gusta» ({@link LikeButton}: la viste y te gustó;
+ *   alimenta las recomendaciones de la portada) y, solo para un administrador (rol
  *   confirmado por el servidor; mientras carga el usuario no aparece),
  *   **«Editar»**: lleva al formulario del panel, con el nombre accesible
  *   «Editar Dark» como en el listado del panel, y pasa esta página como vuelta
@@ -184,6 +186,7 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
               variant={firstEpisode ? 'outline' : 'light'}
             />
             <FavoriteButton series={series} />
+            <LikeButton series={series} />
             {isAdmin && (
               <Link
                 to={adminEditSeriesPath(series.id)}

@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **3184** | 2741 con H2 y 443 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **1481** | |
-| E2E (Playwright) | **192** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
+| Backend (JUnit) | **3316** | 2841 con H2 y 475 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
+| Frontend (Vitest) | **1524** | |
+| E2E (Playwright) | **196** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
 
@@ -50,7 +50,7 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 1. ✅ ~~**Rehacer la maquetación de la página de película**~~ — **hecho el 2026-10-15** (también `/series/:id`; ver el [historial](#4-historial-de-trabajos)).
 2. ✅ ~~**Escaneo de vulnerabilidades en el CI**~~ — **hecho el 2026-10-15** (y los ajustes de GitHub, hechos por el autor).
 3. ✅ ~~**«Películas similares»**~~ — **hecho el 2026-10-15** (ver el [historial](#4-historial-de-trabajos)).
-4. **«Me gusta» y recomendaciones en el inicio** ([2.9](#29-funcionalidades-nuevas)).
+4. ✅ ~~**«Me gusta» y recomendaciones en el inicio**~~ — **hecho el 2026-10-18** (ver el [historial](#4-historial-de-trabajos)).
 5. **Revisión visual humana** del frontend ([2.3](#23-revisión-visual-humana-del-frontend)).
 6. **Antes de publicar la app:** HTTPS, HSTS, cookie `Secure` y CAPTCHA (puntos 9, 12, 18 y 19 de la lista de seguridad).
 
@@ -62,7 +62,6 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 
 | Tema | Prioridad | Dónde |
 | :--- | :--- | :--- |
-| «Me gusta» y recomendaciones | Media | [2.9](#29-funcionalidades-nuevas) |
 | Revisión visual humana | Media | [2.3](#23-revisión-visual-humana-del-frontend) |
 | Bloqueo de cuenta como arma (residual) | Media | [2.5](#25-seguridad) |
 | CORS y cabeceras por perfil (S12) | Media | [2.5](#25-seguridad) |
@@ -263,7 +262,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 ### 2.9 Funcionalidades nuevas
 
 - ✅ ~~**«Películas similares» en cada película**~~ — **hecho el 2026-10-15** (`GET /api/movies/{id}/similar`, ver el [historial](#4-historial-de-trabajos)). Queda opcional: **lo mismo para series** (`series_genres`, misma consulta) y, si el catálogo creciera mucho, precalcular o cachear (el coste crece con las películas que comparten género, no con `limit`).
-- **«Me gusta» y recomendaciones personalizadas** — *Media · MEDIA-ALTA* (`database` + `backend` + `security` + `frontend`). Decisiones del autor (2026-10-14):
+- ✅ ~~**«Me gusta» y recomendaciones personalizadas**~~ — **hecho el 2026-10-18** (películas y series, sección «Te gusta» en `/perfil`, cascada al borrar un título). Pendiente relacionado: límite de peticiones por usuario en rutas autenticadas (ya en el punto 11 de seguridad: `limit_req` en nginx o un contador por id del token) y paginar las listas de «me gusta» si el catálogo crece. Menores (`frontend`): (1) si al pulsar «Reintentar» en las recomendaciones el servidor responde `basedOnLikes: false`, el contenedor que tenía el foco se vacía (`empty:hidden`) y el foco cae en `<body>`: llevarlo a un destino estable (p. ej. el `<main>`); (2) `vite build` avisa de un *chunk* de más de 500 kB: partir el panel de administración con `React.lazy` (solo lo descargan los ADMIN). Diseño original: *Media · MEDIA-ALTA* (`database` + `backend` + `security` + `frontend`). Decisiones del autor (2026-10-14):
   - **Un corazón** (sí/no), no estrellas ni pulgares.
   - **Distinto de «Mi lista»:** «Mi lista» = *quiero verla*; «me gusta» = *la vi y me gustó*. La interfaz debe dejar clara la diferencia (iconos y textos distintos).
   - **Recomendaciones en el inicio**, al principio **por géneros** de lo que te gusta (sin IA), y sin «me gusta» todavía, las novedades como hoy.
@@ -443,6 +442,16 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-10-18 · «Me gusta» y recomendaciones (punto 4 del orden)
+
+- **Qué:** un corazón en la página de cada película y serie («la vi y me gustó», distinto de «Mi lista» = «quiero verla»), una sección **«Te gusta»** en `/perfil` y filas **«Películas/Series recomendadas para ti»** en el inicio, por géneros de lo que te gusta (sin IA).
+- **Base de datos** (`database`): migración **V8** (`user_liked_movies`, `user_liked_series` con `created_at`; PK `(user_id, título)`; FKs **`ON DELETE CASCADE`** al usuario y al título; índices por título para la cascada y `(user_id, created_at DESC)` para el listado). Sin entidades: SQL nativo con `INSERT … ON CONFLICT DO NOTHING` (idempotente y sin carreras). Recomendación en SQL: cada género pesa tantos «me gusta» visibles como lo tengan (películas + series) y cada candidata suma los pesos de sus géneros; se excluye lo que ya te gusta. `EXPLAIN ANALYZE` con 20 000 películas: 15–35 ms.
+- **API** (`backend`): `PUT`/`DELETE /api/users/me/likes/{movies|series}/{id}` (204 idempotentes; serie sin episodios = mismo 404 que inexistente), listados por fecha y `GET /api/users/me/recommendations?limit=` → `{basedOnLikes, movies, series}`. **`Recommender`** (interfaz, la excepción deliberada a «servicios sin interfaz») con `GenreBasedRecommender`, que devuelve solo ids; `RecommendationService` valida, carga, ordena y filtra, así que una IA futura no podría saltarse las reglas de visibilidad. Número fijo de consultas. OpenAPI (48 operaciones) y Postman (Newman **107/107** peticiones y **209/209** aserciones).
+- **Frontend** (`frontend`): `hooks/useLikes.ts` (TanStack, optimista, sin proveedor global para no pedir «me gusta» en cada visita al inicio), `components/LikeButton.tsx` (`aria-pressed`, «Me gusta»/«Te gusta»), `components/RecommendedRows.tsx` (dos filas: el servidor ordena cada tipo por separado), `components/profile/LikedTitlesSection.tsx`.
+- **Revisiones:** `security` (solo lectura): sin hallazgos graves; propuso el límite por usuario (pendiente) y un aviso de privacidad para una IA futura (añadido al Javadoc de `Recommender`). `qa`: ningún fallo funcional, +20 tests (HEAD/OPTIONS sin token, borrado desde el panel en cascada, carreras en PostgreSQL); el esqueleto de recomendaciones ya no aparece a quien no tiene «me gusta».
+- **Verificación** (orquestador, sin nada más en marcha): backend **3316** (2841 con H2 + 475 contra PostgreSQL, 0 omitidos), Vitest **1524** (un fallo por tiempo con la máquina cargada en `serverCache.test.tsx`; repetido, verde), build y lint limpios, E2E **196** + 24 omitidos.
+- **Grafo** (orquestador + 3 agentes `graphify`): documentación reextraída (manual, plan, CLAUDE.md, README, OpenAPI, ADR, agentes y CI) y código actualizado: 6613 nodos, 25563 aristas, 231 comunidades. Lección: `build_merge` solo devuelve el grafo en memoria; hay que exportarlo (`to_json`) y reagrupar (`graphify cluster-only .`).
 
 ### 2026-10-17 · Icono de perfil y hallazgos de prioridad alta de la auditoría de Gemini
 

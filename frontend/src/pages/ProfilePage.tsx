@@ -11,6 +11,7 @@ import { MovieCard } from '../components/MovieCard';
 import { SeriesCard } from '../components/SeriesCard';
 import { UserAvatar } from '../components/UserAvatar';
 import { AccountCard } from '../components/profile/AccountCard';
+import { LikedTitlesSection } from '../components/profile/LikedTitlesSection';
 import { ProfileCard } from '../components/profile/ProfileCard';
 import { SessionsCard } from '../components/profile/SessionsCard';
 import { useAuth } from '../context/AuthContext';
@@ -251,14 +252,19 @@ function ListPreview({ movies, series }: ListPreviewProps) {
  * Página «Mi perfil» (`/perfil`): quién eres y qué has guardado.
  *
  * **De dónde sale cada dato (no hay nada inventado).** El usuario viene de
- * `GET /api/users/me` (`AuthContext`) y todo lo demás de la lista compartida de
- * favoritos (`FavoritesContext`, que `AppShell` ya cargó): para enseñarlo no
- * hace falta ninguna petición propia. Las únicas son las de «Editar perfil»
- * (nombre, icono de perfil y contraseña en {@link AccountCard}; cerrar sesión en todos los
+ * `GET /api/users/me` (`AuthContext`), las estadísticas, «Tus géneros» y «De tu
+ * lista» de la lista compartida de favoritos (`FavoritesContext`, que `AppShell`
+ * ya cargó) y «Te gusta» de los «Me gusta» (`useLikes`, la única lectura propia
+ * de la página). Las escrituras son las de «Editar perfil» (nombre, icono de
+ * perfil y contraseña en {@link AccountCard}; cerrar sesión en todos los
  * dispositivos en {@link SessionsCard}). Por eso no hay «títulos vistos», «horas», suscripción ni
  * preferencias de idioma: no existen ni historial de reproducción ni planes.
  *
- * **Estados.** Dos fuentes independientes, cada una con los tres estados:
+ * **«Te gusta»** ({@link LikedTitlesSection}), al final: lo que vio y le gustó
+ * (distinto de «Mi lista», que es lo que quiere ver), con sus propios estados.
+ *
+ * **Estados.** Tres fuentes independientes, cada una con los tres estados (la
+ * de «Te gusta», dentro de su sección):
  * - El usuario (cabecera y «Cuenta»): cargando o error con «Reintentar»
  *   (`refreshUser`). El `<h1>` «Mi perfil» está siempre; con el usuario cargado
  *   pasa a ser su nombre.
@@ -339,6 +345,8 @@ export function ProfilePage() {
         {status === 'ready' && totalTitles > 0 && (
           <ListPreview movies={movies} series={series} />
         )}
+
+        <LikedTitlesSection />
       </>
     );
   }
