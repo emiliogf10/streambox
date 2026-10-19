@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.support.TestAccounts;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /** Tests de integración del inicio de sesión ({@code POST /api/auth/login}). */
@@ -42,6 +43,7 @@ class AuthControllerIntegrationTest {
     @BeforeEach
     void setUp() {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername("loginuser");
         user.setEmail("loginuser@test.com");
         user.setPassword(passwordEncoder.encode("correct-password"));
@@ -84,6 +86,7 @@ class AuthControllerIntegrationTest {
     @Test
     void unaCuentaAntiguaConContrasenaDe8CaracteresSigueEntrando() throws Exception {
         User legacy = new User();
+        legacy.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         legacy.setUsername("legacyuser");
         legacy.setEmail("legacy@test.com");
         legacy.setPassword(passwordEncoder.encode("perro123"));
@@ -140,7 +143,10 @@ class AuthControllerIntegrationTest {
                 "password", "Secure-Pass-2026");
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(register)))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
+
+        // El registro deja la cuenta pendiente (V9); aquí se prueba el email.
+        TestAccounts.markEmailVerified(userRepository, "Mixed.Case@Test.com");
 
         login("Mixed.Case@Test.com", "Secure-Pass-2026")
                 .andExpect(status().isNoContent())

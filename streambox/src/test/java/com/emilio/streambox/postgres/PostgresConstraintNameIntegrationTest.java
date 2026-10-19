@@ -1,5 +1,7 @@
 package com.emilio.streambox.postgres;
 
+import java.time.Instant;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -96,6 +98,7 @@ class PostgresConstraintNameIntegrationTest extends PostgresIntegrationTestSuppo
 
     private User user(String username, String email) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(username);
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode("password123"));

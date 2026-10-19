@@ -70,6 +70,7 @@ class SeriesAuthorizationIntegrationTest {
     @BeforeEach
     void setUp() {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername("seriesauthuser");
         user.setEmail("seriesauthuser@test.com");
         user.setPassword(passwordEncoder.encode("password123"));

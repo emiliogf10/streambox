@@ -546,6 +546,7 @@ class RefreshTokenIntegrationTest {
 
     private User createUser(String name) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name + "-refresh");
         user.setEmail(name + DOMAIN);
         user.setPassword(passwordEncoder.encode(PASSWORD));

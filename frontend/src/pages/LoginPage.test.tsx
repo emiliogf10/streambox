@@ -5,7 +5,11 @@
  * (por etiqueta, rol y texto). Protegen que un 401 de login sea "credenciales
  * incorrectas" (y no cierre ninguna sesión), que un 429 bloquee el botón con
  * cuenta atrás en vez de dejar martillear al servidor, y que el login no deje
- * ningún token en el navegador (la sesión es una cookie HttpOnly). `fetch` está simulado.
+ * ningún token en el navegador (la sesión es una cookie HttpOnly). También que
+ * todo 401 y la cuenta bloqueada lleven la pista «¿aún no has confirmado tu
+ * correo?» (una cuenta pendiente recibe el mismo 401 que una contraseña
+ * incorrecta) y que ningún 403 se trate ya como «cuenta sin confirmar».
+ * `fetch` está simulado.
  */
 import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -186,6 +190,216 @@ describe('LoginPage', () => {
     });
   });
 
+  /**
+   * Pista «¿aún no has confirmado tu correo?». El servidor responde a una cuenta pendiente con la
+   * contraseña correcta el MISMO 401 que a una contraseña incorrecta (así el login no revela qué correos
+   * tienen cuenta), así que la pista acompaña a todo 401 y a la cuenta bloqueada, y nunca a lo demás.
+   */
+  describe('pista de correo sin confirmar (401 y cuenta bloqueada)', () => {
+    const RESEND_URL = '/api/auth/email-verification/resend';
+    const HINT_TITLE = '¿Te acabas de registrar o aún no has confirmado tu correo?';
+    const HINT_TEXT = (email: string) =>
+      'Hasta que lo confirmes no podrás entrar, aunque la contraseña sea correcta. Pulsa el enlace del correo ' +
+      'de confirmación de StreamBox (mira también en spam); si no tienes ninguno o ha caducado, pide uno nuevo ' +
+      `para ${email}.`;
+    const RESEND_BUTTON = 'Reenviar el correo de confirmación';
+
+    /** Llamadas al reenvío del correo de confirmación. */
+    const resendCalls = () => apiCalls(fetchMock).filter(([url]) => url === RESEND_URL);
+
+    it('en un 401 sale DEBAJO del error (que conserva los intentos), en tono neutro y como región cortés', async () => {
+      routeFetch(fetchMock, {
+        'POST /api/auth/login': () =>
+          errorResponse(401, 'INVALID_CREDENTIALS', 'Texto interno del servidor', { remainingAttempts: 3 }),
+      });
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: '/login' });
+
+      await fillAndSubmit(user);
+
+      const alert = (await screen.findByText('Correo o contraseña incorrectos.')).closest('[role="alert"]');
+      expect(alert).toHaveTextContent('Te quedan 3 intentos antes de que la cuenta se bloquee 15 minutos.');
+      const title = screen.getByText(HINT_TITLE);
+      const hint = title.closest('[role="status"]');
+      expect(hint).not.toBeNull();
+      expect(hint).toHaveTextContent(`${HINT_TITLE}${HINT_TEXT('ana@example.com')}`);
+      // Es una pista, no parte del error: fuera de la alerta, después de ella y sin el rojo de los errores.
+      expect(alert?.contains(title)).toBe(false);
+      expect(alert!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+      expect(hint?.parentElement?.className).not.toMatch(/red|accent|danger/);
+      // El botón va después del texto y FUERA de la región viva (no se leería como parte del mensaje).
+      const button = screen.getByRole('button', { name: RESEND_BUTTON });
+      expect(hint?.contains(button)).toBe(false);
+      expect(title.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+      // Se puede pedir al momento (no se acaba de enviar ninguno) y no se ha pedido nada solo.
+      expect(button).toBeEnabled();
+      expect(resendCalls()).toHaveLength(0);
+      expect(screen.queryByText('Texto interno del servidor')).not.toBeInTheDocument();
+    });
+
+    it('no afirma que la cuenta exista ni que se haya enviado nada', async () => {
+      routeFetch(fetchMock, { 'POST /api/auth/login': () => errorResponse(401, 'INVALID_CREDENTIALS', 'x') });
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: '/login' });
+
+      await fillAndSubmit(user);
+
+      const hint = (await screen.findByText(HINT_TITLE)).closest('[role="status"]');
+      expect(hint).not.toHaveTextContent(/tu cuenta|hemos enviado|te hemos|está pendiente/i);
+    });
+
+    it('«Reenviar el correo de confirmación» lo pide para el correo del intento, recortado', async () => {
+      routeFetch(fetchMock, {
+        'POST /api/auth/login': () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'),
+        [`POST ${RESEND_URL}`]: () => jsonResponse({ message: 'x' }, 202),
+      });
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: '/login' });
+      await fillAndSubmit(user, '  ana@example.com ');
+      expect(screen.getByText(HINT_TITLE).closest('[role="status"]')).toHaveTextContent('para ana@example.com.');
+
+      await user.click(screen.getByRole('button', { name: RESEND_BUTTON }));
+
+      expect(
+        await screen.findByText(
+          'Si hay una cuenta pendiente de confirmar con ana@example.com, te llegará un enlace nuevo en unos minutos, ' +
+            'salvo que ya hayas pedido varios hace poco. Usa siempre el del correo más reciente.',
+        ),
+      ).toBeInTheDocument();
+      expect(resendCalls()).toHaveLength(1);
+      expect(JSON.parse(String(resendCalls()[0][1]?.body))).toEqual({ email: 'ana@example.com' });
+      expect(screen.getByRole('button', { name: /^Reenviar en/ })).toBeDisabled();
+    });
+
+    it('la pista usa el correo del intento aunque después se edite el campo', async () => {
+      routeFetch(fetchMock, {
+        'POST /api/auth/login': () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'),
+        [`POST ${RESEND_URL}`]: () => jsonResponse({ message: 'x' }, 202),
+      });
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: '/login' });
+      await fillAndSubmit(user);
+      await screen.findByText(HINT_TITLE);
+
+      await user.type(screen.getByLabelText('Correo electrónico'), 'x');
+      await user.click(screen.getByRole('button', { name: RESEND_BUTTON }));
+
+      // El texto decía «para ana@example.com»: se envía a ese, no a lo que haya ahora en el campo.
+      await vi.waitFor(() => expect(resendCalls()).toHaveLength(1));
+      expect(JSON.parse(String(resendCalls()[0][1]?.body))).toEqual({ email: 'ana@example.com' });
+    });
+
+    it('la espera del reenvío sobrevive a otro intento de entrar (no se puede reenviar al momento)', async () => {
+      routeFetch(fetchMock, {
+        'POST /api/auth/login': () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'),
+        [`POST ${RESEND_URL}`]: () => jsonResponse({ message: 'x' }, 202),
+      });
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: '/login' });
+      await fillAndSubmit(user);
+      await user.click(await screen.findByRole('button', { name: RESEND_BUTTON }));
+      expect(await screen.findByRole('button', { name: /^Reenviar en/ })).toBeDisabled();
+
+      // Vuelve a intentarlo antes de confirmar: otro 401 y la pista vuelve, pero el botón sigue esperando.
+      await user.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
+      await vi.waitFor(() =>
+        expect(apiCalls(fetchMock).filter(([url]) => url === '/api/auth/login')).toHaveLength(2),
+      );
+      expect(await screen.findByText(HINT_TITLE)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Reenviar en/ })).toBeDisabled();
+      expect(screen.queryByRole('button', { name: RESEND_BUTTON })).not.toBeInTheDocument();
+      expect(resendCalls()).toHaveLength(1);
+    });
+
+    it('si el reenvío da 429, dice cuánto esperar (Retry-After) y bloquea el botón', async () => {
+      routeFetch(fetchMock, {
+        'POST /api/auth/login': () => errorResponse(401, 'INVALID_CREDENTIALS', 'x'),
+        [`POST ${RESEND_URL}`]: () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x', {}, { 'Retry-After': '30' }),
+      });
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: '/login' });
+      await fillAndSubmit(user);
+
+      await user.click(await screen.findByRole('button', { name: RESEND_BUTTON }));
+
+      expect(
+        await screen.findByText('Has pedido demasiados correos seguidos. Podrás pedir otro en 30 s.'),
+      ).toHaveAttribute('role', 'alert');
+      expect(screen.getByRole('button', { name: /^Reenviar en (30|29) s$/ })).toBeDisabled();
+      // El error del login sigue en su sitio: el aviso del reenvío no lo sustituye.
+      expect(screen.getByText('Correo o contraseña incorrectos.')).toBeInTheDocument();
+    });
+
+    it('con un correo mal formado no hay pista ni botón: no hay cuenta posible a la que enviar nada', async () => {
+      routeFetch(fetchMock, { 'POST /api/auth/login': () => errorResponse(401, 'INVALID_CREDENTIALS', 'x') });
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: '/login' });
+
+      await fillAndSubmit(user, 'ana-sin-arroba');
+
+      expect(await screen.findByText('Correo o contraseña incorrectos.')).toBeInTheDocument();
+      expect(screen.queryByText(HINT_TITLE)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: RESEND_BUTTON })).not.toBeInTheDocument();
+      expect(resendCalls()).toHaveLength(0);
+    });
+
+    it.each([
+      ['red caída', () => Promise.reject(new TypeError('Failed to fetch')), /No se pudo conectar con el servidor/],
+      ['500', () => errorResponse(500, 'INTERNAL_ERROR', 'x'), /El servidor ha tenido un problema/],
+      ['400 de validación', () => errorResponse(400, 'VALIDATION_ERROR', 'Datos no válidos.'), /Datos no válidos\./],
+      ['límite por IP (429 RATE_LIMIT_EXCEEDED)', () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x'), /Demasiados intentos/],
+    ])('no sale con un error que no tiene que ver con la cuenta: %s', async (_name, response, message) => {
+      routeFetch(fetchMock, { 'POST /api/auth/login': response });
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: '/login' });
+
+      await fillAndSubmit(user);
+
+      expect(await screen.findByText(message)).toHaveAttribute('role', 'alert');
+      expect(screen.queryByText(HINT_TITLE)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: RESEND_BUTTON })).not.toBeInTheDocument();
+    });
+
+    it('al volver a enviar el formulario, la pista desaparece mientras espera la respuesta', async () => {
+      let attempts = 0;
+      routeFetch(fetchMock, {
+        'POST /api/auth/login': () => {
+          attempts += 1;
+          return attempts === 1 ? errorResponse(401, 'INVALID_CREDENTIALS', 'x') : new Promise<Response>(() => {});
+        },
+      });
+      const user = userEvent.setup();
+      renderWithProviders(<LoginPage />, { route: '/login' });
+      await fillAndSubmit(user);
+      expect(await screen.findByText(HINT_TITLE)).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
+
+      expect(screen.queryByText(HINT_TITLE)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: RESEND_BUTTON })).not.toBeInTheDocument();
+    });
+
+    it.each(['EMAIL_NOT_VERIFIED', 'CSRF_REJECTED'])(
+      'un 403 (%s) es «sin permisos», sin pista ni el aviso antiguo de cuenta sin confirmar',
+      async (code) => {
+        // El backend ya no envía `EMAIL_NOT_VERIFIED`; si un servidor antiguo lo hiciera, es un 403 más.
+        routeFetch(fetchMock, { 'POST /api/auth/login': () => errorResponse(403, code, 'Texto interno del servidor') });
+        const user = userEvent.setup();
+        renderWithProviders(<LoginPage />, { route: '/login' });
+
+        await fillAndSubmit(user);
+
+        expect(await screen.findByText('No tienes permisos para realizar esta acción.')).toHaveAttribute('role', 'alert');
+        expect(screen.queryByText('Tienes que confirmar tu correo antes de entrar.')).not.toBeInTheDocument();
+        expect(screen.queryByText(/confirmar tu correo|confirmado tu correo/)).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /Reenviar/ })).not.toBeInTheDocument();
+        // Un 403 no cierra ni renueva la sesión: solo el refresh del arranque sin sesión.
+        expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/auth/refresh')).toHaveLength(1);
+        expect(screen.getByText('ruta:/login')).toBeInTheDocument();
+      },
+    );
+  });
+
   it('red caída: muestra el mensaje de conexión', async () => {
     fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
     const user = userEvent.setup();
@@ -255,6 +469,10 @@ describe('LoginPage', () => {
       expect(await screen.findByText(message)).toHaveAttribute('role', 'alert');
       expect(screen.queryByText(/Demasiados intentos\./)).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Reintentar en 15 min' })).toBeDisabled();
+      // Una cuenta pendiente que reintenta con la contraseña correcta acaba aquí: también lleva la pista,
+      // y su botón de reenvío no depende del bloqueo del login.
+      expect(screen.getByText('¿Te acabas de registrar o aún no has confirmado tu correo?')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Reenviar el correo de confirmación' })).toBeEnabled();
 
       act(() => {
         vi.advanceTimersByTime(1_000);
@@ -273,6 +491,8 @@ describe('LoginPage', () => {
       });
       expect(screen.getByRole('button', { name: 'Iniciar sesión' })).toBeEnabled();
       expect(screen.queryByText(/bloqueada/)).not.toBeInTheDocument();
+      // La pista se va con el aviso al que acompaña: sola no tendría contexto.
+      expect(screen.queryByText(/aún no has confirmado tu correo/)).not.toBeInTheDocument();
     });
 
     it('cuenta bloqueada sin Retry-After: lo explica sin inventar una espera', async () => {

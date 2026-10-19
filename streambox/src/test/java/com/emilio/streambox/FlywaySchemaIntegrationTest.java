@@ -4,7 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,7 +26,11 @@ import com.emilio.streambox.migration.UserAvatarSchemaCases;
  * (películas en {@code V1}/{@code V2}; series y episodios en {@code V3};
  * refresh tokens en {@code V4}; tráiler y vídeo opcional en {@code V6};
  * icono de perfil en {@code V7}; «me gusta» en {@code V8}, cuyas consultas
- * se prueban en {@code repository.LikesRepositoryIntegrationTest}).
+ * se prueban en {@code repository.LikesRepositoryIntegrationTest};
+ * verificación del correo en {@code V9}, cuyas consultas se prueban en
+ * {@code repository.AccountTokenRepositoryIntegrationTest} y cuyo efecto sobre
+ * las cuentas existentes (solo las ADMIN quedan verificadas), en
+ * {@code migration.EmailVerificationMigrationH2Test}).
  * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
  * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
  * de PostgreSQL.
@@ -690,7 +697,161 @@ class FlywaySchemaIntegrationTest {
                 userId, insertMovie("Sin fecha", 2000)));
     }
 
+    // --- V9: verificación del correo (users.email_verified_at, account_tokens) ---
+
+    private static final OffsetDateTime T0 = OffsetDateTime.of(2026, 10, 18, 10, 0, 0, 0, ZoneOffset.UTC);
+
+    @Test
+    void v9EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '9' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * {@code users.email_verified_at} es una fecha con zona y opcional, sin
+     * valor por defecto: una cuenta insertada sin indicarla nace
+     * <b>pendiente</b> ({@code NULL}). Qué pasa con las filas anteriores a la
+     * V9 (solo las ADMIN quedan verificadas; las USER, pendientes) se prueba
+     * partiendo de una base en la V8
+     * ({@code migration.EmailVerificationMigrationH2Test}).
+     */
+    @Test
+    void laFechaDeVerificacionEsOpcionalConZonaYUnaCuentaNuevaNacePendiente() {
+        Map<String, Object> column = jdbc.queryForMap("SELECT DATA_TYPE AS T, IS_NULLABLE AS N, COLUMN_DEFAULT AS D"
+                + " FROM INFORMATION_SCHEMA.COLUMNS"
+                + " WHERE LOWER(TABLE_NAME) = 'users' AND LOWER(COLUMN_NAME) = 'email_verified_at'");
+        long userId = insertUser("pendiente");
+
+        assertEquals("TIMESTAMP WITH TIME ZONE", column.get("T"));
+        assertEquals("YES", column.get("N"));
+        assertEquals(null, column.get("D"), "sin DEFAULT: un DEFAULT verificaría cuentas por error");
+        assertEquals(null, jdbc.queryForObject("SELECT email_verified_at FROM users WHERE id = ?",
+                OffsetDateTime.class, userId));
+    }
+
+    /** Columnas de {@code account_tokens} con su tipo, tamaño y nulabilidad (solo {@code used_at} es opcional). */
+    @Test
+    void laTablaDeTokensDeCuentaTieneLasColumnasEsperadas() {
+        Map<String, String> columns = new java.util.TreeMap<>();
+        jdbc.queryForList("SELECT LOWER(COLUMN_NAME) AS C, DATA_TYPE AS T, CHARACTER_MAXIMUM_LENGTH AS L,"
+                        + " IS_NULLABLE AS N FROM INFORMATION_SCHEMA.COLUMNS WHERE LOWER(TABLE_NAME) = 'account_tokens'")
+                .forEach(r -> columns.put((String) r.get("C"), r.get("T")
+                        + (r.get("L") == null ? "" : "(" + ((Number) r.get("L")).intValue() + ")")
+                        + ("YES".equals(r.get("N")) ? " NULL" : " NOT NULL")));
+
+        assertEquals(Map.of(
+                "id", "BIGINT NOT NULL",
+                "user_id", "BIGINT NOT NULL",
+                "purpose", "CHARACTER VARYING(32) NOT NULL",
+                "token_hash", "CHARACTER VARYING(64) NOT NULL",
+                "created_at", "TIMESTAMP WITH TIME ZONE NOT NULL",
+                "expires_at", "TIMESTAMP WITH TIME ZONE NOT NULL",
+                "used_at", "TIMESTAMP WITH TIME ZONE NULL"), columns);
+    }
+
+    /** Índice {@code (user_id, purpose)}: reenviar, «¿tiene uno vigente?» y la cascada al borrar el usuario. */
+    @Test
+    void existeElIndiceDeTokensDeCuentaPorUsuarioYProposito() {
+        assertEquals(List.of("user_id ASC", "purpose ASC"), indexColumns("idx_account_tokens_user_purpose"));
+    }
+
+    /** Borrar una cuenta borra sus tokens (y solo los suyos). */
+    @Test
+    void borrarUnUsuarioBorraSusTokensDeCuentaEnCascada() {
+        java.util.Map<String, String> rules = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT LOWER(CONSTRAINT_NAME) AS NAME, DELETE_RULE AS RULE"
+                        + " FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS")
+                .forEach(r -> rules.put((String) r.get("NAME"), (String) r.get("RULE")));
+        long gone = insertUser("tokencuentagone");
+        long stays = insertUser("tokencuentastays");
+        insertAccountToken(gone, "EMAIL_VERIFICATION", HASH_A, T0, T0.plusDays(1), null);
+        insertAccountToken(stays, "EMAIL_VERIFICATION", HASH_B, T0, T0.plusDays(1), null);
+
+        jdbc.update("DELETE FROM users WHERE id = ?", gone);
+
+        assertEquals("CASCADE", rules.get("fk_account_tokens_user"));
+        assertEquals(List.of(HASH_B), jdbc.queryForList("SELECT token_hash FROM account_tokens", String.class));
+    }
+
+    /**
+     * El hash es único (en toda la tabla, sea cual sea el propósito o la cuenta)
+     * y tiene formato de SHA-256 hexadecimal en minúsculas: guardar el token en
+     * claro por error falla. Un token necesita una cuenta existente.
+     */
+    @Test
+    void elHashDelTokenDeCuentaEsUnicoYConFormatoSha256() {
+        long userId = insertUser("tokencuentahash");
+        long otherId = insertUser("tokencuentahash2");
+        insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, T0, T0.plusDays(1), null);
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(otherId, "EMAIL_VERIFICATION", HASH_A, T0, T0.plusDays(1), null));
+        for (String invalid : List.of("a".repeat(63), "A".repeat(64), "g".repeat(64), "Zq3-_x" + "a".repeat(58))) {
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> insertAccountToken(userId, "EMAIL_VERIFICATION", invalid, T0, T0.plusDays(1), null), invalid);
+        }
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(987654L, "EMAIL_VERIFICATION", HASH_B, T0, T0.plusDays(1), null));
+        assertEquals(1, count("account_tokens"));
+    }
+
+    /**
+     * {@code ck_account_tokens_purpose}: hoy solo {@code EMAIL_VERIFICATION},
+     * exactamente así (ni en minúsculas, ni con espacios, ni un propósito
+     * futuro que aún no tiene su migración).
+     */
+    @Test
+    void elPropositoDelTokenSoloAdmiteLosValoresDelCheck() {
+        long userId = insertUser("tokencuentaproposito");
+
+        for (String invalid : java.util.Arrays.asList("PASSWORD_RESET", "email_verification", "EMAIL_VERIFICATION ",
+                "", null)) {
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> insertAccountToken(userId, invalid, HASH_A, T0, T0.plusDays(1), null), String.valueOf(invalid));
+        }
+        insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, T0, T0.plusDays(1), null);
+        assertEquals(1, count("account_tokens"));
+    }
+
+    /**
+     * Las fechas del token son coherentes: caduca después de emitirse y solo
+     * se usa (o invalida) antes de caducar. Las tres son obligatorias salvo
+     * {@code used_at}.
+     */
+    @Test
+    void lasFechasDelTokenDeCuentaSonCoherentes() {
+        long userId = insertUser("tokencuentafechas");
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, T0, T0, null), "caduca al nacer");
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, T0, T0.minusSeconds(1), null));
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, T0, T0.plusDays(1), T0.plusDays(1)),
+                "usado justo al caducar");
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, T0, T0.plusDays(1), T0.plusDays(2)));
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, null, T0.plusDays(1), null));
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, T0, null, null));
+        assertEquals(0, count("account_tokens"));
+
+        // Límite válido: usado un instante antes de caducar
+        insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, T0, T0.plusDays(1), T0.plusDays(1).minusNanos(1000));
+        assertEquals(1, count("account_tokens"));
+    }
+
     // --- Utilidades ---
+
+    private void insertAccountToken(long userId, String purpose, String hash, OffsetDateTime createdAt,
+            OffsetDateTime expiresAt, OffsetDateTime usedAt) {
+        jdbc.update("INSERT INTO account_tokens (user_id, purpose, token_hash, created_at, expires_at, used_at)"
+                + " VALUES (?, ?, ?, ?, ?, ?)", userId, purpose, hash, createdAt, expiresAt, usedAt);
+    }
 
     private void insertLike(String table, String titleColumn, long userId, long titleId) {
         jdbc.update("INSERT INTO " + table + " (user_id, " + titleColumn + ", created_at)"

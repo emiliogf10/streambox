@@ -102,24 +102,34 @@ class UserAvatarIntegrationTest {
         assertNullField(body, "avatar");
     }
 
+    /**
+     * El registro ya no devuelve la cuenta (202 con un mensaje fijo, para no
+     * revelar qué emails existen), así que la cuenta recién registrada se
+     * comprueba en la base de datos y en el listado del administrador: nace
+     * sin icono y el listado lleva {@code avatar} en cada usuario.
+     */
     @Test
-    void elRegistroYElListadoDeAdminTambienLlevanAvatar() throws Exception {
-        JsonNode created = json(mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
+    void laCuentaRecienRegistradaYElListadoDeAdminLlevanAvatar() throws Exception {
+        mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"recien_llegada\",\"email\":\"recien@test.com\","
                                 + "\"password\":\"Secure-Pass-2026\"}"))
-                .andExpect(status().isCreated()));
-        assertNullField(created, "avatar");
+                .andExpect(status().isAccepted());
+        User created = userRepository.findByEmail("recien@test.com").orElseThrow();
+        assertNull(created.getAvatar());
 
         user.setAvatar("cat");
         userRepository.saveAndFlush(user);
         JsonNode list = json(mockMvc.perform(get("/api/users").header("Authorization", "Bearer " + adminJwt))
                 .andExpect(status().isOk()));
         assertTrue(list.isArray());
+        boolean listed = false;
         for (JsonNode item : list) {
+            listed |= item.get("id").asLong() == created.getId();
             assertTrue(item.has("avatar"), "cada usuario del listado lleva avatar: " + item);
             String expected = item.get("id").asLong() == user.getId() ? "cat" : null;
             assertEquals(expected, item.get("avatar").isNull() ? null : item.get("avatar").asText());
         }
+        assertTrue(listed, "la cuenta recién registrada sale en el listado");
     }
 
     // --- Cambios correctos ---
@@ -355,6 +365,7 @@ class UserAvatarIntegrationTest {
 
     private User newUser(String username, String email, Role role) {
         User u = new User();
+        u.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         u.setUsername(username);
         u.setEmail(email);
         u.setPassword(passwordEncoder.encode("irrelevante-en-este-test"));

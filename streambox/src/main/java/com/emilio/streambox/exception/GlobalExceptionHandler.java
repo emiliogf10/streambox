@@ -174,6 +174,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
+     * Token de verificación del correo que no sirve: 400
+     * {@code INVALID_VERIFICATION_TOKEN}, mismo cuerpo en todos los casos
+     * (inexistente, caducado, usado o mal formado).
+     */
+    @ExceptionHandler(InvalidVerificationTokenException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidVerificationToken(
+            InvalidVerificationTokenException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, ErrorCode.INVALID_VERIFICATION_TOKEN,
+                exception.getMessage(), request);
+    }
+
+    /**
      * Refresh token que no sirve para renovar la sesión: 401 {@code SESSION_EXPIRED},
      * mismo cuerpo en todos los casos. Las cookies borradas las añade
      * {@code AuthController} antes de relanzar la excepción.

@@ -86,10 +86,10 @@ class PostgresPublicApiClosureIntegrationTest {
     /** Privilegios de tabla cuya presencia en cualquiera de ellos cuenta como "abierta". */
     private static final String TABLE_PRIVILEGES = "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER";
 
-    /** Tablas que crean V1 a V4 y V8 más el historial de Flyway. */
+    /** Tablas que crean V1 a V4, V8 y V9 más el historial de Flyway. */
     private static final Set<String> KNOWN_TABLES = Set.of("users", "genres", "movies", "movie_genres",
             "user_favorite_movies", "series", "series_genres", "episodes", "user_favorite_series",
-            "refresh_tokens", "user_liked_movies", "user_liked_series", "flyway_schema_history");
+            "refresh_tokens", "user_liked_movies", "user_liked_series", "account_tokens", "flyway_schema_history");
 
     private static PostgreSQLContainer supabaseLike;
 
@@ -263,7 +263,7 @@ class PostgresPublicApiClosureIntegrationTest {
 
         var result = flyway(shared, db, shared.getUsername(), shared.getPassword(), true).migrate();
 
-        assertEquals(8, result.migrationsExecuted, "V1 a V4 y V6 a V8 comunes y la V5 de db/vendor/postgresql");
+        assertEquals(9, result.migrationsExecuted, "V1 a V4 y V6 a V9 comunes y la V5 de db/vendor/postgresql");
         assertEquals(allTables(shared, db, shared.getUsername(), shared.getPassword()),
                 tablesWithoutRls(shared, db), "sin los roles no se activa RLS en ninguna tabla");
         assertEquals(0, flyway(shared, db, shared.getUsername(), shared.getPassword(), true).migrate().migrationsExecuted);

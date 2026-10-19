@@ -254,6 +254,7 @@ class KnownIpLockoutIntegrationTest {
     private String createUser() {
         String name = "knownip" + SEQUENCE.getAndIncrement();
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode(PASSWORD));

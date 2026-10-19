@@ -121,8 +121,9 @@ class UserAvatarQaIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"qa_nueva\",\"email\":\"qa_nueva@test.com\","
                                 + "\"password\":\"tres gatos pardos en el tejado\",\"avatar\":\"crown\"}"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.avatar").value((Object) null));
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.avatar").doesNotExist());
+
 
         assertNull(userRepository.findByEmail("qa_nueva@test.com").orElseThrow().getAvatar());
     }
@@ -260,6 +261,7 @@ class UserAvatarQaIntegrationTest {
 
     private User newUser(String username, Role role) {
         User u = new User();
+        u.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         u.setUsername(username);
         u.setEmail(username + "@test.com");
         u.setPassword(passwordEncoder.encode("irrelevante-en-este-test"));

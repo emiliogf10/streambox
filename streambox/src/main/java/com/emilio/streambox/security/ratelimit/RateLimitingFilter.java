@@ -28,8 +28,10 @@ import jakarta.servlet.http.HttpServletResponse;
 /**
  * Limita por IP cuántas veces se puede llamar a los endpoints públicos más
  * sensibles: el inicio de sesión ({@code POST /api/auth/login}), el registro
- * ({@code POST /api/users}) y la renovación de sesión
- * ({@code POST /api/auth/refresh}).
+ * ({@code POST /api/users}), la renovación de sesión
+ * ({@code POST /api/auth/refresh}) y la verificación del correo
+ * ({@code POST /api/auth/email-verification} y
+ * {@code POST /api/auth/email-verification/resend}).
  *
  * <p>
  * Al superar el límite responde {@code 429 Too Many Requests} con la cabecera
@@ -166,6 +168,32 @@ import jakarta.servlet.http.HttpServletResponse;
  * el controlador ve {@code null} o un valor en blanco y la rechaza antes del
  * servicio.
  * </p>
+ *
+ * <h2>Verificación del correo</h2>
+ * <p>
+ * Las dos rutas son públicas, llevan cuerpo JSON y tienen cada una su contador
+ * por IP, con el <b>mismo criterio que login y registro</b> (no cuentan las
+ * peticiones sin {@code Content-Type}, con uno mal formado o CORS-safelisted):
+ * </p>
+ * <ul>
+ * <li><b>Confirmar</b> ({@value #EMAIL_VERIFICATION_PATH},
+ * {@code rate-limit.email-verification}, 20 cada 15 minutos). El token tiene
+ * 256 bits: adivinarlo es imposible con o sin límite. El límite es contra el
+ * abuso, porque cada intento hace un {@code UPDATE} en la base de datos, y
+ * deja margen para quien pulsa el botón varias veces.</li>
+ * <li><b>Reenviar</b> ({@value #EMAIL_VERIFICATION_RESEND_PATH},
+ * {@code rate-limit.email-verification-resend}, 5 por hora). Cada petición
+ * puede mandar un correo: sin límite, cualquiera usaría el servidor para
+ * llenar buzones ajenos o agotar el cupo del proveedor de correo.</li>
+ * </ul>
+ *
+ * <p>
+ * <b>Este límite es por IP y sí responde 429</b>: no revela nada sobre ningún
+ * email, porque cuenta igual exista o no la cuenta. El límite <b>por email</b>
+ * del reenvío no está aquí sino en el servicio, y es <b>silencioso</b> (el
+ * 202 de siempre, sin enviar nada): un 429 por email delataría que ese email
+ * tiene una cuenta pendiente, justo lo que el 202 constante quiere ocultar.
+ * </p>
  */
 public class RateLimitingFilter extends OncePerRequestFilter {
 
@@ -185,6 +213,19 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     public static final String REFRESH_PATH = "/api/auth/refresh";
 
     /**
+     * Ruta de la confirmación del correo con el token del enlace (pública y
+     * limitada, como {@link #LOGIN_PATH}; ver «Verificación del correo» en la
+     * clase).
+     */
+    public static final String EMAIL_VERIFICATION_PATH = "/api/auth/email-verification";
+
+    /**
+     * Ruta del reenvío del correo de confirmación (pública y limitada, como
+     * {@link #LOGIN_PATH}; ver «Verificación del correo» en la clase).
+     */
+    public static final String EMAIL_VERIFICATION_RESEND_PATH = "/api/auth/email-verification/resend";
+
+    /**
      * Tipos de la lista CORS-safelisted del estándar Fetch: los únicos con
      * los que otra web puede enviar un {@code POST} sin preflight.
      */
@@ -194,12 +235,18 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     private final RequestMatcher loginRequest;
     private final RequestMatcher registerRequest;
     private final RequestMatcher refreshRequest;
+    private final RequestMatcher emailVerificationRequest;
+    private final RequestMatcher emailVerificationResendRequest;
     private final RateLimitProperties.Rule loginRule;
     private final RateLimitProperties.Rule registerRule;
     private final RateLimitProperties.Rule refreshRule;
+    private final RateLimitProperties.Rule emailVerificationRule;
+    private final RateLimitProperties.Rule emailVerificationResendRule;
     private final SlidingWindowCounter loginCounter;
     private final SlidingWindowCounter registerCounter;
     private final SlidingWindowCounter refreshCounter;
+    private final SlidingWindowCounter emailVerificationCounter;
+    private final SlidingWindowCounter emailVerificationResendCounter;
     private final SecurityErrorResponseWriter errorWriter;
 
     /**
@@ -227,6 +274,14 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         this.loginCounter = new SlidingWindowCounter(loginRule.window(), clock, properties.maxKeys());
         this.registerCounter = new SlidingWindowCounter(registerRule.window(), clock, properties.maxKeys());
         this.refreshCounter = new SlidingWindowCounter(refreshRule.window(), clock, properties.maxKeys());
+        this.emailVerificationRequest = matchers.matcher(HttpMethod.POST, EMAIL_VERIFICATION_PATH);
+        this.emailVerificationResendRequest = matchers.matcher(HttpMethod.POST, EMAIL_VERIFICATION_RESEND_PATH);
+        this.emailVerificationRule = properties.emailVerification();
+        this.emailVerificationResendRule = properties.emailVerificationResend();
+        this.emailVerificationCounter = new SlidingWindowCounter(
+                emailVerificationRule.window(), clock, properties.maxKeys());
+        this.emailVerificationResendCounter = new SlidingWindowCounter(
+                emailVerificationResendRule.window(), clock, properties.maxKeys());
         this.errorWriter = errorWriter;
     }
 
@@ -252,6 +307,18 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             // la clase).
             if (!acquire(request, response, refreshCounter, refreshRule,
                     JwtAuthenticationFilter.hasCsrfHeader(request) && hasRefreshCookie(request))) {
+                return;
+            }
+        } else if (emailVerificationRequest.matches(request)) {
+            // Con cuerpo JSON, como login y registro: mismo criterio del
+            // Content-Type (ver «Verificación del correo» en la clase).
+            if (!acquire(request, response, emailVerificationCounter, emailVerificationRule,
+                    countsTowardsLimit(request.getContentType()))) {
+                return;
+            }
+        } else if (emailVerificationResendRequest.matches(request)) {
+            if (!acquire(request, response, emailVerificationResendCounter, emailVerificationResendRule,
+                    countsTowardsLimit(request.getContentType()))) {
                 return;
             }
         }

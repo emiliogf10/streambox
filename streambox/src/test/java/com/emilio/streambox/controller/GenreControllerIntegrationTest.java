@@ -63,6 +63,7 @@ class GenreControllerIntegrationTest {
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
         User admin = new User();
+        admin.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         admin.setUsername("admingenre");
         admin.setEmail("admingenre@test.com");
         admin.setPassword(passwordEncoder.encode("adminpass1"));
@@ -71,6 +72,7 @@ class GenreControllerIntegrationTest {
         adminToken = "Bearer " + jwtService.generateToken(userRepository.save(admin));
 
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername("usergenre");
         user.setEmail("usergenre@test.com");
         user.setPassword(passwordEncoder.encode("userpass1"));

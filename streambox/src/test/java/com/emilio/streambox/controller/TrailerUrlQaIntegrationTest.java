@@ -1,5 +1,7 @@
 package com.emilio.streambox.controller;
 
+import java.time.Instant;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -92,6 +94,7 @@ class TrailerUrlQaIntegrationTest {
     void setUp() {
         cleanDatabase();
         User admin = new User();
+        admin.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         admin.setUsername("qatraileradmin");
         admin.setEmail("qatraileradmin@test.com");
         admin.setPassword(passwordEncoder.encode("password123"));

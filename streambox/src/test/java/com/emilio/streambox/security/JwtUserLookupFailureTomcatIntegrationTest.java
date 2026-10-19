@@ -1,5 +1,7 @@
 package com.emilio.streambox.security;
 
+import java.time.Instant;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -186,6 +188,7 @@ class JwtUserLookupFailureTomcatIntegrationTest {
 
     private String validToken() {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setEmail(EMAIL);
         return jwtService.generateToken(user);
     }

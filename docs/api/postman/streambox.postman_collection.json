@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "36f1cc7d-d712-5ceb-bd83-b75fec0d4c79",
     "name": "StreamBox API",
-    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend (solo para las carpetas con peticiones de administrador).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9 y en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos, sus «me gusta» y ve sus recomendaciones; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Límites**: login, registro y refresh tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 7 de los 10 logins por minuto y 6 de las 30 renovaciones por minuto: a la tercera ejecución en una hora el registro responde 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` más alto. No la ejecutes en bucle contra un entorno real.",
+    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend. Son necesarios: además de las peticiones de administrador, la carpeta 1 lee como ADMIN el correo de verificación de la bandeja del perfil `e2e` (arranca el backend con ese perfil; si no, pon el token del enlace a mano en `verificationToken`).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9 y en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos, sus «me gusta» y ve sus recomendaciones; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Verificación del correo.** El registro responde 202 siempre igual y deja la cuenta pendiente: el login con la contraseña correcta responde el mismo 401 INVALID_CREDENTIALS que una contraseña incorrecta (no revela que el email está registrado) hasta confirmar el correo con `POST /api/auth/email-verification` (token del enlace; 204, o 400 INVALID_VERIFICATION_TOKEN). `POST /api/auth/email-verification/resend` pide otro enlace (202 siempre igual). Las dos son públicas.\n\n**Límites**: login, registro, refresh, confirmación y reenvío tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 2 de los 5 reenvíos por hora, 8 de los 10 logins por minuto y 6 de las 30 renovaciones por minuto: a la tercera ejecución en una hora el registro y el reenvío responden 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` (y `..._EMAIL_VERIFICATION_RESEND_MAX_REQUESTS`) más altos. No la ejecutes en bucle contra un entorno real.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -64,12 +64,28 @@
     {
       "key": "otherDeviceRefreshToken",
       "value": ""
+    },
+    {
+      "key": "verificationToken",
+      "value": ""
+    },
+    {
+      "key": "userAlreadyVerified",
+      "value": ""
+    },
+    {
+      "key": "pendingLoginBody",
+      "value": ""
+    },
+    {
+      "key": "inboxAttempts",
+      "value": "0"
     }
   ],
   "item": [
     {
       "name": "1. Autenticación",
-      "description": "Registro y login. El login del USER deja sus cookies de sesión en el jar de Postman; el del ADMIN, sin jar, guarda su JWT en `adminToken` para usarlo como Bearer.",
+      "description": "Registro, verificación del correo y login. El registro responde 202 y deja la cuenta **pendiente**: hasta confirmar el correo, el login con la contraseña correcta responde el mismo 401 INVALID_CREDENTIALS que una contraseña incorrecta (así no revela que ese email está registrado). La colección lee el enlace del correo en la bandeja del perfil `e2e` (como ADMIN), confirma la cuenta y entonces inicia sesión. El login del USER deja sus cookies de sesión en el jar de Postman; el del ADMIN, sin jar, guarda su JWT en `adminToken` para usarlo como Bearer.",
       "item": [
         {
           "name": "Registrar usuario de prueba",
@@ -91,7 +107,7 @@
                 "users"
               ]
             },
-            "description": "Registro público (POST /api/users). Siempre crea un usuario con rol USER. Límite por IP: 429 RATE_LIMIT_EXCEEDED. Contraseña: 12-64 caracteres, no común.",
+            "description": "Registro público (POST /api/users). Responde **202 siempre con el mismo cuerpo**, exista o no una cuenta con ese correo (así no revela quién está registrado): con un correo nuevo crea la cuenta (siempre rol USER) **pendiente de confirmar** y envía un enlace `<STREAMBOX_PUBLIC_URL>/verificar-email#token=...` (24 h); si el correo ya tiene una cuenta confirmada, envía un aviso de «ya tienes una cuenta» y no cambia nada. Solo el nombre de usuario ocupado da 409 (en una segunda ejecución sobre la misma base, el de la cuenta de la primera). Límite por IP: 429 RATE_LIMIT_EXCEEDED. Contraseña: 12-64 caracteres, no común.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"username\": \"{{userUsername}}\",\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
@@ -112,13 +128,17 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"201 (creado) o 409 (ya existía de una ejecución anterior)\", function () { pm.expect(pm.response.code).to.be.oneOf([201, 409]); });",
-                  "if (pm.response.code === 201) {",
-                  "  pm.test(\"Devuelve el usuario con rol USER y sin contraseña\", function () {",
-                  "    const u = pm.response.json();",
-                  "    pm.expect(u.role).to.eql(\"USER\");",
-                  "    pm.expect(u).to.not.have.property(\"password\");",
+                  "// 202 con un nombre de usuario libre, exista o no el email. En una segunda ejecución sobre la misma base el",
+                  "// nombre ya es de la cuenta creada en la primera: 409 (depende solo del nombre, nunca del email).",
+                  "pm.test(\"202 (aceptado) o 409 (nombre ocupado por una ejecución anterior)\", function () { pm.expect(pm.response.code).to.be.oneOf([202, 409]); });",
+                  "if (pm.response.code === 202) {",
+                  "  pm.test(\"Cuerpo fijo: solo message, sin datos del usuario\", function () {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(Object.keys(b)).to.eql([\"message\"]);",
+                  "    pm.expect(b.message).to.eql(\"Si el correo es correcto, te llegará un enlace para confirmar tu cuenta.\");",
                   "  });",
+                  "} else {",
+                  "  pm.test(\"El 409 es USER_ALREADY_EXISTS\", function () { pm.expect(pm.response.json().code).to.eql(\"USER_ALREADY_EXISTS\"); });",
                   "}"
                 ]
               }
@@ -171,76 +191,6 @@
                   "  const b = pm.response.json();",
                   "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
                   "  pm.expect(b.validationErrors).to.include.keys(\"username\", \"email\", \"password\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Login usuario (deja las cookies de sesión)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/login",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "login"
-              ]
-            },
-            "description": "Responde 204 sin cuerpo y entrega la sesión en dos cookies HttpOnly; SameSite=Strict: `streambox_token` (JWT de acceso, `Path=/api`, 15 min) y `streambox_refresh` (refresh token opaco, `Path=/api/auth`, 7 días). Postman las guarda en su cookie jar (botón **Cookies**, bajo *Send*) y las manda solas en las peticiones siguientes a ese dominio. JavaScript del navegador no puede leerlas (HttpOnly); aquí el script lee el `Set-Cookie` solo para comprobarlo.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
-                  "function setCookie(name) {",
-                  "  return pm.response.headers.all()",
-                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
-                  "    .map(function (h) { return h.value; })[0];",
-                  "}",
-                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
-                  "pm.test(\"Responde 204 sin cuerpo\", function () {",
-                  "  pm.response.to.have.status(204);",
-                  "  pm.expect(pm.response.text()).to.eql(\"\");",
-                  "});",
-                  "pm.test(\"Cookie streambox_token: JWT, HttpOnly, SameSite=Strict, Path=/api\", function () {",
-                  "  const c = setCookie(\"streambox_token\");",
-                  "  pm.expect(c, \"falta Set-Cookie streambox_token\").to.be.a(\"string\");",
-                  "  pm.expect(cookieValue(c)).to.match(/^[\\w-]+\\.[\\w-]+\\.[\\w-]+$/);",
-                  "  pm.expect(c).to.match(/; Path=\\/api(;|$)/).and.match(/HttpOnly/).and.match(/SameSite=Strict/);",
-                  "});",
-                  "pm.test(\"Cookie streambox_refresh: HttpOnly, SameSite=Strict, Path=/api/auth\", function () {",
-                  "  const c = setCookie(\"streambox_refresh\");",
-                  "  pm.expect(c, \"falta Set-Cookie streambox_refresh\").to.be.a(\"string\");",
-                  "  pm.expect(c).to.match(/; Path=\\/api\\/auth(;|$)/).and.match(/HttpOnly/).and.match(/SameSite=Strict/);",
-                  "  pm.collectionVariables.set(\"loginRefreshToken\", cookieValue(c));",
                   "});"
                 ]
               }
@@ -317,6 +267,516 @@
           }
         },
         {
+          "name": "Login antes de confirmar el correo (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Con la contraseña correcta, una cuenta que aún no ha confirmado su correo recibe **el mismo 401 INVALID_CREDENTIALS que una contraseña incorrecta** (con `remainingAttempts`) y ninguna cookie. Antes era un 403 propio, pero quien acababa de registrarse con un email ajeno conocía la contraseña y ese 403 le confirmaba que el email ya tenía cuenta. Cuenta como intento fallido; el login correcto del final de la carpeta pone el contador a cero. La petición «Login con credenciales incorrectas (401)» compara las dos respuestas. Sin cookie jar, para no tocar la sesión del USER. En una segunda ejecución sobre la misma base la cuenta ya está confirmada y responde 204.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Primera ejecución: 401. Si la cuenta se confirmó en una ejecución anterior: 204, y la colección",
+                  "// lo recuerda para no exigir un enlace nuevo en las peticiones siguientes.",
+                  "const alreadyVerified = pm.response.code === 204;",
+                  "pm.collectionVariables.set(\"userAlreadyVerified\", String(alreadyVerified));",
+                  "pm.collectionVariables.unset(\"pendingLoginBody\");",
+                  "if (alreadyVerified) {",
+                  "  pm.test(\"204: la cuenta ya se confirmó en una ejecución anterior\", function () { pm.response.to.have.status(204); });",
+                  "} else {",
+                  "  pm.test(\"Responde 401, como una contraseña incorrecta\", function () { pm.response.to.have.status(401); });",
+                  "  pm.test(\"Código INVALID_CREDENTIALS con remainingAttempts\", function () {",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(b.code).to.eql(\"INVALID_CREDENTIALS\");",
+                  "    pm.expect(b.remainingAttempts).to.be.a(\"number\").and.at.least(1);",
+                  "  });",
+                  "  pm.test(\"No entrega ninguna cookie de sesión\", function () {",
+                  "    const cookies = pm.response.headers.all().filter(function (h) { return h.key.toLowerCase() === \"set-cookie\"; });",
+                  "    pm.expect(cookies).to.have.lengthOf(0);",
+                  "  });",
+                  "  // Se guarda para compararlo con el 401 de unas credenciales incorrectas (última petición de la carpeta).",
+                  "  pm.collectionVariables.set(\"pendingLoginBody\", pm.response.text());",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Leer el correo de verificación (bandeja del perfil e2e)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/e2e/emails?to={{userEmail}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "e2e",
+                "emails"
+              ],
+              "query": [
+                {
+                  "key": "to",
+                  "value": "{{userEmail}}"
+                }
+              ]
+            },
+            "description": "**Solo existe si el backend arranca con el perfil `e2e`** (correos en una bandeja en memoria; en `dev` y `prod` esta ruta da 404) y solo para ADMIN; no aparece en `openapi.yaml`. Devuelve los correos enviados a esa dirección, del más reciente al más antiguo, y la colección guarda el token del enlace (lo que va tras `#token=`) en `verificationToken`. El envío es asíncrono: si el correo aún no ha llegado, la petición se repite (hasta 10 veces, cada medio segundo). **Sin el perfil `e2e`** copia el token a mano en la variable `verificationToken`: en `dev` sin SMTP el correo se escribe en el log del backend; con Docker, en Mailpit (http://localhost:8025).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// En los reintentos, espera medio segundo antes de volver a leer la bandeja.",
+                  "if (Number(pm.collectionVariables.get(\"inboxAttempts\") || 0) > 0) {",
+                  "  setTimeout(function () {}, 500);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const attempts = Number(pm.collectionVariables.get(\"inboxAttempts\") || 0);",
+                  "const alreadyVerified = pm.collectionVariables.get(\"userAlreadyVerified\") === \"true\";",
+                  "const tokenPattern = /\\/verificar-email#token=([A-Za-z0-9_-]+)/;",
+                  "const emails = pm.response.code === 200 ? pm.response.json() : [];",
+                  "// El más reciente con enlace (la lista viene del más reciente al más antiguo).",
+                  "const verification = emails.find(function (e) { return tokenPattern.test(e.body); });",
+                  "if (pm.response.code === 200 && !verification && !alreadyVerified && attempts < 10) {",
+                  "  // El correo se envía en un hilo aparte tras guardar la cuenta: puede no haber llegado aún.",
+                  "  pm.collectionVariables.set(\"inboxAttempts\", String(attempts + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "} else {",
+                  "  pm.collectionVariables.set(\"inboxAttempts\", \"0\");",
+                  "  pm.test(\"Responde 200 (si da 404, el backend no tiene el perfil e2e)\", function () { pm.response.to.have.status(200); });",
+                  "  if (verification) {",
+                  "    pm.collectionVariables.set(\"verificationToken\", verification.body.match(tokenPattern)[1]);",
+                  "  }",
+                  "  if (!alreadyVerified) {",
+                  "    pm.test(\"Llegó «Confirma tu correo en StreamBox» con el enlace y un token de 43 caracteres\", function () {",
+                  "      pm.expect(verification, \"no llegó el correo de verificación\").to.be.an(\"object\");",
+                  "      pm.expect(verification.to).to.eql(pm.variables.get(\"userEmail\"));",
+                  "      pm.expect(verification.subject).to.eql(\"Confirma tu correo en StreamBox\");",
+                  "      pm.expect(pm.collectionVariables.get(\"verificationToken\")).to.match(/^[A-Za-z0-9_-]{43}$/);",
+                  "    });",
+                  "    pm.test(\"El correo dice el nombre de la cuenta que se confirma (para que el dueño del buzón vea si es suya)\", function () {",
+                  "      pm.expect(verification.body).to.include(\"con la cuenta «\" + pm.variables.get(\"userUsername\") + \"»\");",
+                  "    });",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Confirmar con un token inválido (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/email-verification",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "email-verification"
+              ]
+            },
+            "description": "Pública (sin sesión ni `X-Requested-With`). Un token que no existe, caducado, ya usado o invalidado por un reenvío dan **el mismo** 400 INVALID_VERIFICATION_TOKEN: la respuesta no dice cuál de los casos es.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Código INVALID_VERIFICATION_TOKEN con su mensaje\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"INVALID_VERIFICATION_TOKEN\");",
+                  "  pm.expect(b.message).to.eql(\"El enlace de confirmación no es válido o ha caducado.\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirmar el correo (204)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/email-verification",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "email-verification"
+              ]
+            },
+            "description": "Confirma la cuenta con el token del enlace (`{{verificationToken}}`, que guarda «Leer el correo de verificación»). Responde 204 sin cuerpo y **no inicia sesión**: después hay que entrar con la contraseña. Si la cuenta ya se confirmó en una ejecución anterior, el token guardado ya está usado y responde 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{verificationToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get(\"userAlreadyVerified\") === \"true\") {",
+                  "  pm.test(\"400: el token ya se usó en una ejecución anterior\", function () { pm.response.to.have.status(400); });",
+                  "} else {",
+                  "  pm.test(\"Responde 204 sin cuerpo\", function () {",
+                  "    pm.response.to.have.status(204);",
+                  "    pm.expect(pm.response.text()).to.eql(\"\");",
+                  "  });",
+                  "  pm.test(\"No inicia sesión (ninguna cookie)\", function () {",
+                  "    const cookies = pm.response.headers.all().filter(function (h) { return h.key.toLowerCase() === \"set-cookie\"; });",
+                  "    pm.expect(cookies).to.have.lengthOf(0);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Repetir la confirmación con el mismo token (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/email-verification",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "email-verification"
+              ]
+            },
+            "description": "Cada token sirve **una sola vez**: el segundo uso responde el mismo 400 que un token inventado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{verificationToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400 INVALID_VERIFICATION_TOKEN, igual que un token inventado\", function () {",
+                  "  pm.response.to.have.status(400);",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"INVALID_VERIFICATION_TOKEN\");",
+                  "  pm.expect(b.message).to.eql(\"El enlace de confirmación no es válido o ha caducado.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Reenviar el correo a un email sin cuenta (202)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/email-verification/resend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "email-verification",
+                "resend"
+              ]
+            },
+            "description": "Pública (sin sesión ni `X-Requested-With`). Solo envía un enlace nuevo (e invalida los anteriores) si el email es de una cuenta **pendiente**; pero responde **202 con el mismo cuerpo** exista o no la cuenta y esté o no confirmada, para no revelar qué emails están registrados. Límite por IP: 5 por hora (429 RATE_LIMIT_EXCEEDED); por cuenta, 3 correos por hora y uno por minuto, en silencio (sigue respondiendo 202).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"no-existe-postman@streambox.local\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 202\", function () { pm.response.to.have.status(202); });",
+                  "pm.test(\"Cuerpo fijo: solo message\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(Object.keys(b)).to.eql([\"message\"]);",
+                  "  pm.expect(b.message).to.eql(\"Si hay una cuenta pendiente de confirmar con ese correo, te llegará un enlace nuevo.\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reenviar con un email mal formado (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/email-verification/resend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "email-verification",
+                "resend"
+              ]
+            },
+            "description": "El formato del email sí se valida (depende solo del texto enviado, no de si hay cuenta).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"no-es-un-email\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR con el error solo en email\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(Object.keys(b.validationErrors)).to.eql([\"email\"]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login usuario (deja las cookies de sesión)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Ya con el correo confirmado. Responde 204 sin cuerpo y entrega la sesión en dos cookies HttpOnly; SameSite=Strict: `streambox_token` (JWT de acceso, `Path=/api`, 15 min) y `streambox_refresh` (refresh token opaco, `Path=/api/auth`, 7 días). Postman las guarda en su cookie jar (botón **Cookies**, bajo *Send*) y las manda solas en las peticiones siguientes a ese dominio. JavaScript del navegador no puede leerlas (HttpOnly); aquí el script lee el `Set-Cookie` solo para comprobarlo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204 sin cuerpo\", function () {",
+                  "  pm.response.to.have.status(204);",
+                  "  pm.expect(pm.response.text()).to.eql(\"\");",
+                  "});",
+                  "pm.test(\"Cookie streambox_token: JWT, HttpOnly, SameSite=Strict, Path=/api\", function () {",
+                  "  const c = setCookie(\"streambox_token\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_token\").to.be.a(\"string\");",
+                  "  pm.expect(cookieValue(c)).to.match(/^[\\w-]+\\.[\\w-]+\\.[\\w-]+$/);",
+                  "  pm.expect(c).to.match(/; Path=\\/api(;|$)/).and.match(/HttpOnly/).and.match(/SameSite=Strict/);",
+                  "});",
+                  "pm.test(\"Cookie streambox_refresh: HttpOnly, SameSite=Strict, Path=/api/auth\", function () {",
+                  "  const c = setCookie(\"streambox_refresh\");",
+                  "  pm.expect(c, \"falta Set-Cookie streambox_refresh\").to.be.a(\"string\");",
+                  "  pm.expect(c).to.match(/; Path=\\/api\\/auth(;|$)/).and.match(/HttpOnly/).and.match(/SameSite=Strict/);",
+                  "  pm.collectionVariables.set(\"loginRefreshToken\", cookieValue(c));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Login con credenciales incorrectas (401)",
           "request": {
             "method": "POST",
@@ -337,7 +797,7 @@
                 "login"
               ]
             },
-            "description": "Tras 5 fallos seguidos la cuenta se bloquea (429 ACCOUNT_LOCKED). Este test usa un email inexistente a propósito para no bloquear ninguna cuenta real.",
+            "description": "Tras 5 fallos seguidos la cuenta se bloquea (429 ACCOUNT_LOCKED). Este test usa un email inexistente a propósito para no bloquear ninguna cuenta real. Si la petición «Login antes de confirmar el correo (401)» respondió 401 en esta ejecución, comprueba además que las dos respuestas son iguales (mismos campos, código y mensaje): desde fuera no se distingue una cuenta pendiente de unas credenciales incorrectas.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"no-existe-postman@streambox.local\",\n  \"password\": \"una-contrasena-incorrecta\"\n}",
@@ -360,7 +820,19 @@
                 "exec": [
                   "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
                   "pm.test(\"Cuerpo de error con code INVALID_CREDENTIALS\", function () { pm.expect(pm.response.json().code).to.eql(\"INVALID_CREDENTIALS\"); });",
-                  "pm.test(\"Informa de remainingAttempts (≥ 1)\", function () { pm.expect(pm.response.json().remainingAttempts).to.be.a(\"number\").and.at.least(1); });"
+                  "pm.test(\"Informa de remainingAttempts (≥ 1)\", function () { pm.expect(pm.response.json().remainingAttempts).to.be.a(\"number\").and.at.least(1); });",
+                  "// remainingAttempts y timestamp pueden variar (contadores distintos, otro instante): se compara el resto.",
+                  "const pendingRaw = pm.collectionVariables.get(\"pendingLoginBody\");",
+                  "if (pendingRaw) {",
+                  "  pm.test(\"Igual que el 401 de la cuenta pendiente con su contraseña correcta\", function () {",
+                  "    const pending = JSON.parse(pendingRaw);",
+                  "    const b = pm.response.json();",
+                  "    pm.expect(Object.keys(b).sort()).to.eql(Object.keys(pending).sort());",
+                  "    pm.expect(b.status).to.eql(pending.status);",
+                  "    pm.expect(b.code).to.eql(pending.code);",
+                  "    pm.expect(b.message).to.eql(pending.message);",
+                  "  });",
+                  "}"
                 ]
               }
             }

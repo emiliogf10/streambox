@@ -1,5 +1,7 @@
 package com.emilio.streambox.controller;
 
+import java.time.Instant;
+
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
@@ -525,6 +527,7 @@ class TrailerUrlIntegrationTest {
 
     private User saveUser(String name, Role role) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode("password123"));

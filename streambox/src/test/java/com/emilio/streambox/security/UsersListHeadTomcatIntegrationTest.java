@@ -79,6 +79,7 @@ class UsersListHeadTomcatIntegrationTest {
 
     private User save(String name, Role role) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + DOMAIN);
         user.setPassword(passwordEncoder.encode("Contraseña-Segura-2026"));

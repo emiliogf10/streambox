@@ -1,5 +1,7 @@
 package com.emilio.streambox.controller;
 
+import java.time.Instant;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -463,6 +465,7 @@ class CatalogIntegrationTest {
 
     private User saveUser(String name, Role role) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode("password123"));

@@ -160,6 +160,26 @@ export interface RegisterRequest {
 }
 
 /**
+ * Respuesta 202 de las operaciones que, a propósito, contestan SIEMPRE lo mismo
+ * para no revelar qué correos tienen cuenta: el registro (`POST /api/users`) y
+ * el reenvío del correo de confirmación (`POST /api/auth/email-verification/resend`).
+ * La interfaz no enseña este texto: pone el suyo, pensado para cada pantalla.
+ */
+export interface AcceptedResponse {
+  message: string;
+}
+
+/** Cuerpo de `POST /api/auth/email-verification` (confirmar el correo; 204 si el token vale). */
+export interface EmailVerificationRequest {
+  token: string;
+}
+
+/** Cuerpo de `POST /api/auth/email-verification/resend` (pedir un enlace nuevo; 202 siempre igual). */
+export interface ResendVerificationRequest {
+  email: string;
+}
+
+/**
  * Cuerpo de `PATCH /api/users/me` (editar mi perfil). Cada campo es opcional:
  * ausente = no cambia. `avatar: null` vuelve a la inicial. Enviar `email`,
  * `role` o `password` da 400.

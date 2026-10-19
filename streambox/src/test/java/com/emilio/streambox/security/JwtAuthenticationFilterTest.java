@@ -236,10 +236,36 @@ class JwtAuthenticationFilterTest {
         verify(userRepository, never()).findByEmail(anyString());
     }
 
+    /**
+     * Token válido de una cuenta pendiente de confirmar el correo (sesión de
+     * antes de la V9): la petición sigue como anónima, igual que con una
+     * cuenta borrada, y la ruta protegida responderá 401.
+     */
+    @Test
+    void unTokenValidoDeUnaCuentaPendienteNoAutentica() throws Exception {
+        User user = new User();
+        user.setId(8L);
+        user.setEmail(EMAIL);
+        user.setRole(Role.ADMIN);
+        user.setCreatedAt(Instant.now());
+        user.setEmailVerifiedAt(null);
+        when(jwtService.extractEmail(TOKEN)).thenReturn(EMAIL);
+        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(bearerRequest(), new MockHttpServletResponse(), chain);
+
+        assertNotNull(chain.getRequest(), "la petición sigue (anónima): la autorización decide");
+        assertNull(currentAuthentication());
+        assertFalse(JwtAuthenticationFilter.canUseSession(user));
+        assertFalse(JwtAuthenticationFilter.canUseSession(null));
+    }
+
     /** Control: con token válido y usuario existente, se autentica con su rol. */
     @Test
     void unTokenValidoDeUnUsuarioExistenteAutentica() throws Exception {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setId(7L);
         user.setEmail(EMAIL);
         user.setRole(Role.ADMIN);

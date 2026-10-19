@@ -40,6 +40,11 @@ import {
  *  - `STREAMBOX_SECURITY_RATE_LIMIT_*`: límites por IP muy altos (todos los
  *    tests salen de 127.0.0.1) y bloqueo de cuenta en 5 fallos para poder
  *    provocar un 429 real. Solo afecta a este proceso efímero, no a producción.
+ *  - `STREAMBOX_EMAIL_*` y `STREAMBOX_PUBLIC_URL`: sin límite silencioso de
+ *    reenvíos y con los enlaces de los correos apuntando a este Vite. Con el
+ *    perfil `e2e` los correos no salen: van a una bandeja en memoria que los
+ *    tests leen como administrador (`GET /api/admin/e2e/emails`, ver
+ *    `e2e/support/api.ts`).
  *
  * `reuseExistingServer: false` (por defecto, ver `reuseServers`): si los puertos ya están ocupados la suite falla
  * en lugar de "engancharse" a un servidor ajeno (y sembrar datos en él).
@@ -139,6 +144,20 @@ export default defineConfig({
         STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS: '100000',
         STREAMBOX_SECURITY_RATE_LIMIT_REFRESH_MAX_REQUESTS: '100000',
         STREAMBOX_SECURITY_RATE_LIMIT_LOCKOUT_MAX_FAILURES: String(LOCKOUT_MAX_FAILURES),
+        // Verificación del correo: todos los tests confirman su cuenta (y algunos piden reenvíos) desde
+        // 127.0.0.1, así que los límites por IP de confirmar y reenviar se suben como los demás...
+        STREAMBOX_SECURITY_RATE_LIMIT_EMAIL_VERIFICATION_MAX_REQUESTS: '100000',
+        STREAMBOX_SECURITY_RATE_LIMIT_EMAIL_VERIFICATION_RESEND_MAX_REQUESTS: '100000',
+        // ...y el límite SILENCIOSO por cuenta (60 s entre correos, 3 por hora) se quita: con él, un reenvío
+        // justo después del registro respondería 202 sin enviar nada y el test esperaría un correo que no llega.
+        STREAMBOX_EMAIL_RESEND_MIN_INTERVAL: '0s',
+        STREAMBOX_EMAIL_RESEND_MAX_PER_WINDOW: '1000',
+        // Origen de los enlaces de los correos (`/verificar-email#token=…`): el Vite de ESTA suite, para que
+        // el test pueda abrir el enlace tal cual llega al buzón.
+        STREAMBOX_PUBLIC_URL: FRONTEND_URL,
+        // Sin SMTP: con el perfil `e2e` el arranque falla a propósito si hay `spring.mail.host` (los correos
+        // deben quedarse en la bandeja en memoria). Vacío aquí, por si la terminal heredara uno.
+        SPRING_MAIL_HOST: '',
       },
     },
     {

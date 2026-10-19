@@ -23,7 +23,12 @@ public enum ErrorCode {
     /** Los datos de entrada no cumplen las reglas de validación. */
     VALIDATION_ERROR,
 
-    /** Las credenciales de autenticación no son válidas. */
+    /**
+     * Las credenciales de autenticación no son válidas. En el login incluye,
+     * con la misma respuesta, el email inexistente, la contraseña incorrecta y
+     * la cuenta pendiente de confirmar el correo aunque la contraseña sea
+     * correcta (para no revelar qué emails tienen cuenta).
+     */
     INVALID_CREDENTIALS,
 
     /*
@@ -142,5 +147,30 @@ public enum ErrorCode {
      * puede tratarlo aparte (por ejemplo, vaciar solo ese campo).
      * </p>
      */
-    CURRENT_PASSWORD_INCORRECT
+    CURRENT_PASSWORD_INCORRECT,
+
+    /*
+     * Aquí estuvo EMAIL_NOT_VERIFIED (403 en el login con la contraseña
+     * correcta de una cuenta pendiente de confirmar el correo). Se retiró antes
+     * de publicarse (incidencia QA-1): quien se registraba con un email ajeno y
+     * su propia contraseña recibía 403 si el email era nuevo y 401 si ya tenía
+     * cuenta, así que delataba qué emails están registrados. Ahora ese login
+     * responde el 401 INVALID_CREDENTIALS de cualquier fallo (ver
+     * AuthenticationService#isUsableForLogin).
+     */
+
+    /**
+     * {@code POST /api/auth/email-verification}: el token del enlace no sirve
+     * (400). No existe, ha caducado, ya se usó, se invalidó al pedir otro
+     * correo o no tiene el formato de un token.
+     *
+     * <p>
+     * Un único código y un único mensaje para todos esos casos, a propósito:
+     * el usuario tiene que hacer lo mismo en todos (pedir otro enlace) y
+     * distinguirlos solo ayudaría a quien prueba tokens. Es un 400 y no un 404
+     * o un 401 porque lo que falla es el dato enviado, no una ruta ni una
+     * sesión.
+     * </p>
+     */
+    INVALID_VERIFICATION_TOKEN
 }

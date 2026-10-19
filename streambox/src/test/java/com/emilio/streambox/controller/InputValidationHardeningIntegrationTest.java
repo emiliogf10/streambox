@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -82,6 +83,7 @@ class InputValidationHardeningIntegrationTest {
     @BeforeEach
     void setUp() {
         User admin = new User();
+        admin.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         admin.setUsername("inputadmin");
         admin.setEmail("inputadmin@test.com");
         admin.setPassword(passwordEncoder.encode("adminpass1"));
@@ -123,7 +125,10 @@ class InputValidationHardeningIntegrationTest {
         String email = "x".repeat(64) + "@" + "d".repeat(31) + ".com";
         assertEquals(100, email.length());
 
-        register("email100", email).andExpect(status().isCreated());
+        // 202 (registro con verificación del correo): la respuesta es la misma
+        // exista o no el email, así que se comprueba en la base de datos.
+        register("email100", email).andExpect(status().isAccepted());
+        assertTrue(userRepository.findByEmail(email).isPresent());
     }
 
     /**
@@ -298,7 +303,8 @@ class InputValidationHardeningIntegrationTest {
     /** Con cada campo de su tipo (lo que envía el frontend), todo sigue funcionando. */
     @Test
     void conLosTiposCorrectosSeCreanCuentaYPelicula() throws Exception {
-        register("tiposok", "tiposok@test.com").andExpect(status().isCreated());
+        register("tiposok", "tiposok@test.com").andExpect(status().isAccepted());
+        assertTrue(userRepository.findByEmail("tiposok@test.com").isPresent());
 
         postJson("/api/movies", movieJson("\"Tipos correctos\"", "100", "[%d]".formatted(drama.getId())), adminToken)
                 .andExpect(status().isCreated())

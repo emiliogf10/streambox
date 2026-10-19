@@ -3,18 +3,17 @@ package com.emilio.streambox.service;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.emilio.streambox.dto.CreateUserRequest;
 import com.emilio.streambox.dto.UpdateProfileRequest;
 import com.emilio.streambox.dto.UserResponse;
-import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.exception.UserAlreadyExistsException;
@@ -28,25 +27,19 @@ import com.emilio.streambox.repository.UserRepository;
  * <p>
  * Los métodos devuelven {@link UserResponse} (nunca la entidad, que contiene
  * la contraseña cifrada). La lista de favoritos tiene su propio servicio:
- * {@link FavoriteService}.
+ * {@link FavoriteService}; el registro, {@link RegistrationService} (que usa
+ * las normalizaciones de aquí).
  * </p>
  */
 @Service
 public class UserService {
 
-    /** Mensaje del 409 cuando el nombre de usuario pertenece a otra cuenta. */
-    static final String USERNAME_TAKEN_MESSAGE = "El nombre de usuario ya está en uso";
-
-    /** Mensaje del 409 cuando el email pertenece a otra cuenta. */
-    static final String EMAIL_TAKEN_MESSAGE = "El correo electrónico ya está en uso";
-
     /**
-     * Mensaje del 409 de una carrera en el registro cuando la base de datos no
-     * dice qué restricción falló (no debería pasar con PostgreSQL ni con H2,
-     * pero el mensaje sigue siendo cierto).
+     * Mensaje del 409 cuando el nombre de usuario pertenece a otra cuenta (en
+     * «Editar perfil» y en el registro, {@link RegistrationService}). Ya no hay
+     * mensaje de «correo en uso»: el registro no revela qué emails tienen cuenta.
      */
-    static final String USERNAME_OR_EMAIL_TAKEN_MESSAGE =
-            "El nombre de usuario o el correo electrónico ya están en uso";
+    static final String USERNAME_TAKEN_MESSAGE = "El nombre de usuario ya está en uso";
 
     /**
      * Caracteres invisibles en los extremos del nombre: separadores Unicode
@@ -62,20 +55,23 @@ public class UserService {
     private static final Pattern INNER_SPACES = Pattern.compile("[\\p{Z}\\p{Cc}]+");
 
     private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
+    private final UsernameReservations usernameReservations;
+    private final EmailVerificationService emailVerificationService;
 
     /**
      * Crea el servicio de usuarios.
      *
-     * @param userRepository  repositorio de usuarios
-     * @param passwordEncoder codificador con el que se cifran las contraseñas
+     * @param userRepository           repositorio de usuarios
+     * @param usernameReservations     nombres reservados por el registro
+     * @param emailVerificationService regla de las cuentas pendientes
+     *                                 sustituibles (bloqueo y borrado)
      */
-    public UserService(
-            UserRepository userRepository,
-            PasswordEncoder passwordEncoder) {
+    public UserService(UserRepository userRepository, UsernameReservations usernameReservations,
+            EmailVerificationService emailVerificationService) {
 
         this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
+        this.usernameReservations = usernameReservations;
+        this.emailVerificationService = emailVerificationService;
     }
 
     /**
@@ -105,91 +101,6 @@ public class UserService {
     }
 
     /**
-     * Registra una cuenta nueva con rol {@link Role#USER}.
-     *
-     * <p>
-     * El email se normaliza (sin espacios y en minúsculas), el nombre de
-     * usuario con {@link #normalizeUsername} y la contraseña se
-     * guarda cifrada con BCrypt. El rol nunca viene del cliente: los
-     * administradores solo se crean con {@code AdminAccountInitializer}.
-     * </p>
-     *
-     * @param request datos de registro (ya validados)
-     * @return la cuenta creada
-     * @throws UserAlreadyExistsException si el nombre de usuario o el email ya están en uso
-     * @throws InvalidParameterException  si el nombre normalizado no tiene una longitud válida
-     *                                    o el email normalizado no cabe en su columna
-     */
-    @Transactional
-    public UserResponse registerUser(CreateUserRequest request) {
-
-        String email = normalizeEmail(request.getEmail());
-        String username = normalizeUsername(request.getUsername());
-
-        if (userRepository.existsByUsername(username)) {
-            throw new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
-        }
-        if (userRepository.existsByEmail(email)) {
-            throw new UserAlreadyExistsException(EMAIL_TAKEN_MESSAGE);
-        }
-
-        User user = new User();
-        user.setEmail(email);
-        user.setUsername(username);
-        user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setRole(Role.USER);
-
-        try {
-            return UserMapper.toResponse(userRepository.saveAndFlush(user));
-        } catch (DataIntegrityViolationException e) {
-            throw translateRegistrationViolation(e);
-        }
-    }
-
-    /**
-     * Traduce la violación de integridad del {@code INSERT} del registro.
-     *
-     * <p>
-     * <strong>Comprobación previa + restricción como respaldo</strong>, como en
-     * {@link #updateProfile}: dos registros simultáneos con el mismo nombre o
-     * email pasan los dos {@code existsBy...} y solo el {@code UNIQUE} de la
-     * base de datos frena al segundo. Antes esa violación llegaba sin traducir
-     * a {@code GlobalExceptionHandler}, que respondía un 409 genérico; hoy allí
-     * sería un 500, así que se traduce aquí a la misma
-     * {@link UserAlreadyExistsException} que la comprobación previa, gane quien
-     * gane la carrera.
-     * </p>
-     *
-     * <p>
-     * <strong>Cuál de las dos.</strong> Aquí se insertan las dos columnas
-     * únicas a la vez y, tras el error, la transacción ya no admite más
-     * consultas (en PostgreSQL queda abortada), así que no se puede volver a
-     * preguntar: se mira el nombre de la restricción ({@code uk_users_email} o
-     * {@code uk_users_username}, de la migración {@code V1}). Cualquier otra
-     * violación se relanza tal cual (500 y registro en el log): disfrazarla de
-     * "ya está en uso" ocultaría un fallo.
-     * </p>
-     *
-     * @param error excepción lanzada por el repositorio
-     * @return la excepción de dominio a lanzar; si no es de unicidad, el propio {@code error}
-     */
-    private static RuntimeException translateRegistrationViolation(DataIntegrityViolationException error) {
-
-        if (!(error instanceof DuplicateKeyException)
-                && !SqlStates.UNIQUE_VIOLATION.equals(SqlStates.find(error))) {
-            return error;
-        }
-        String constraint = SqlStates.constraintName(error);
-        if (constraint != null && constraint.contains("uk_users_email")) {
-            return new UserAlreadyExistsException(EMAIL_TAKEN_MESSAGE);
-        }
-        if (constraint != null && constraint.contains("uk_users_username")) {
-            return new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
-        }
-        return new UserAlreadyExistsException(USERNAME_OR_EMAIL_TAKEN_MESSAGE);
-    }
-
-    /**
      * Cambia el nombre de usuario y/o el icono de perfil (avatar) de la cuenta
      * autenticada.
      *
@@ -204,7 +115,20 @@ public class UserService {
      *
      * <ul>
      * <li><b>Nombre</b>: se normaliza igual que en el registro. Un cambio solo
-     * de mayúsculas ({@code bob} a {@code Bob}) sí es un cambio.</li>
+     * de mayúsculas ({@code bob} a {@code Bob}) sí es un cambio. Un nombre
+     * <b>reservado</b> por un registro con el email de otra cuenta
+     * ({@link UsernameReservations}) da el mismo 409 que uno en uso: si no,
+     * registrarse con el email de alguien y después cambiarse el nombre al
+     * del registro diría si ese email tenía cuenta. La cuenta del email de la
+     * reserva sí puede usarlo.</li>
+     * <li><b>Nombre de una cuenta pendiente sustituible</b> (la creó el
+     * registro y todos sus enlaces caducaron, ver
+     * {@link EmailVerificationService#isReplaceable}): se borra esa cuenta y el
+     * nombre queda libre, igual que en el registro. Si no, pasadas 24 h el
+     * nombre de un registro con un email nuevo daría 409 (la pendiente sigue
+     * en la base de datos) y el de uno con un email que ya tenía cuenta, 200
+     * (su reserva ya caducó): el mismo oráculo de emails. Una cuenta heredada
+     * o con un enlace vigente nunca se borra: 409.</li>
      * <li><b>Avatar</b>: ya viene validado contra la lista blanca
      * ({@code Avatar}); {@code null} lo quita (la interfaz vuelve a la
      * inicial).</li>
@@ -216,7 +140,7 @@ public class UserService {
      *
      * <p>
      * <strong>Comprobación previa + restricción como respaldo</strong> (como en
-     * {@link GenreService}): {@code existsByUsername} da el 409 claro en el
+     * {@link GenreService}): {@code findByUsername} da el 409 claro en el
      * caso normal, pero otra petición puede quedarse el nombre entre esa
      * consulta y el {@code UPDATE}. Entonces salta el {@code UNIQUE} de
      * {@code users.username} y su violación se traduce a la misma
@@ -236,12 +160,14 @@ public class UserService {
      * </p>
      *
      * <p>
-     * <strong>Sin bloqueo, pero sin pisar la contraseña.</strong> La fila se
-     * lee sin bloquearla, así que un cambio de contraseña puede confirmarse
-     * entre esa lectura y el {@code UPDATE}. No pasa nada porque {@link User}
-     * lleva {@code @DynamicUpdate}: el {@code UPDATE} solo escribe
-     * {@code username} y {@code avatar}, nunca el hash leído al principio. Aquí
-     * no hace falta bloquear porque nada se decide a partir de la contraseña.
+     * <strong>Sin bloqueo, pero sin pisar la contraseña.</strong> En el caso
+     * normal la fila se lee sin bloquearla, así que un cambio de contraseña
+     * puede confirmarse entre esa lectura y el {@code UPDATE}. No pasa nada
+     * porque {@link User} lleva {@code @DynamicUpdate}: el {@code UPDATE} solo
+     * escribe {@code username} y {@code avatar}, nunca el hash leído al
+     * principio. Aquí no hace falta bloquear porque nada se decide a partir de
+     * la contraseña. Solo se bloquea cuando el nombre lo tiene una cuenta
+     * pendiente (ver {@link #freeUsernameOrFail}).
      * </p>
      *
      * <p>
@@ -255,7 +181,8 @@ public class UserService {
      * @return los datos de la cuenta tras el cambio (completos, como {@code GET /api/users/me})
      * @throws InvalidParameterException  si no se pide ningún cambio o el nombre
      *                                    normalizado no tiene una longitud válida
-     * @throws UserAlreadyExistsException si el nombre lo usa otra cuenta
+     * @throws UserAlreadyExistsException si el nombre lo usa otra cuenta que no
+     *                                    se puede sustituir, o está reservado
      * @throws UserNotFoundException      si la cuenta ya no existe
      */
     @Transactional
@@ -274,9 +201,11 @@ public class UserService {
 
         boolean changed = false;
         if (usernameSent && !username.equals(user.getUsername())) {
-            if (userRepository.existsByUsername(username)) {
+            if (usernameReservations.isReservedForOthers(username, user.getEmail())) {
                 throw new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
             }
+            // Puede devolver otra instancia (releída bajo bloqueo): se sigue con ella.
+            user = freeUsernameOrFail(user, username);
             user.setUsername(username);
             changed = true;
         }
@@ -301,6 +230,76 @@ public class UserService {
             }
             throw e;
         }
+    }
+
+    /**
+     * Comprueba que el nombre está libre para la cuenta y, si lo tiene una
+     * cuenta pendiente <b>sustituible</b>, la borra para liberarlo (misma
+     * regla que el registro: {@link EmailVerificationService#deleteIfReplaceable}).
+     *
+     * <ul>
+     *   <li>Nadie lo tiene: se sigue sin bloquear nada (si otra petición se lo
+     *       queda antes del {@code UPDATE}, salta el {@code UNIQUE}).</li>
+     *   <li>Lo tiene una cuenta confirmada: 409 sin bloquear nada (nunca es
+     *       sustituible).</li>
+     *   <li>Lo tiene una cuenta pendiente: se bloquean las dos filas (la propia
+     *       y la de la pendiente) <b>de menor a mayor id</b>, como hace el
+     *       registro. Así un registro con el email de esta cuenta y ese nombre,
+     *       que bloquea las mismas dos filas en el mismo orden, espera en lugar
+     *       de cruzarse con esta petición en un interbloqueo. Bajo el bloqueo se
+     *       decide con el estado releído: si la pendiente ya no existe o cambió
+     *       de nombre, el nombre se da por libre (el {@code UNIQUE} sigue de
+     *       respaldo); si no es sustituible (enlace vigente, heredada o recién
+     *       verificada), 409.</li>
+     * </ul>
+     *
+     * <p>
+     * El borrado vacía la sesión de Hibernate, así que la cuenta devuelta puede
+     * quedar desacoplada: {@code saveAndFlush} la vuelve a unir
+     * ({@code merge}) y, con {@code @DynamicUpdate}, solo escribe lo cambiado.
+     * La contraseña que copia {@code merge} es la releída bajo el bloqueo, que
+     * nadie puede cambiar hasta el final de la transacción.
+     * </p>
+     *
+     * @param user     cuenta que quiere el nombre (leída en esta transacción)
+     * @param username nombre normalizado, distinto del actual
+     * @return la cuenta con la que seguir: la recibida o, si hubo que
+     *         bloquear, la releída bajo el bloqueo
+     * @throws UserAlreadyExistsException si el nombre lo tiene otra cuenta que
+     *                                    no se puede sustituir
+     * @throws UserNotFoundException      si la propia cuenta desapareció al bloquearla
+     */
+    private User freeUsernameOrFail(User user, String username) {
+
+        Optional<User> found = userRepository.findByUsername(username);
+        if (found.isEmpty() || found.get().getId().equals(user.getId())) {
+            return user;
+        }
+        User holder = found.get();
+        if (holder.isEmailVerified()) {
+            throw new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
+        }
+
+        User lockedUser;
+        Optional<User> lockedHolder;
+        if (user.getId() < holder.getId()) {
+            lockedUser = lockOwn(user);
+            lockedHolder = emailVerificationService.lockForUpdate(holder);
+        } else {
+            lockedHolder = emailVerificationService.lockForUpdate(holder);
+            lockedUser = lockOwn(user);
+        }
+        Optional<User> stillHolder = lockedHolder.filter(locked -> username.equals(locked.getUsername()));
+        if (stillHolder.isPresent() && !emailVerificationService.deleteIfReplaceable(stillHolder.get())) {
+            throw new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
+        }
+        return lockedUser;
+    }
+
+    /** Bloquea la fila de la propia cuenta y la devuelve releída (404 si ya no existe). */
+    private User lockOwn(User user) {
+        return emailVerificationService.lockForUpdate(user)
+                .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado"));
     }
 
     /**

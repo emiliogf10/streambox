@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { MAIN_CONTENT_ID } from './SkipLink';
 
 /** Propiedades de {@link AuthLayout}. */
@@ -8,12 +8,19 @@ interface AuthLayoutProps {
   children: ReactNode;
   /** Pie del formulario, normalmente el enlace cruzado login/registro. */
   footer?: ReactNode;
+  /**
+   * `ref` del título (`<h1>`). Si se pasa, el título se puede enfocar por código
+   * (`tabIndex={-1}`): las pantallas que cambian de estado sin cambiar de ruta
+   * («Revisa tu correo», «Correo confirmado») llevan ahí el foco para que el
+   * lector de pantalla anuncie la pantalla nueva y el siguiente Tab empiece en ella.
+   */
+  titleRef?: Ref<HTMLHeadingElement>;
 }
 
 /**
- * Estructura común de las pantallas públicas (login y registro): logotipo,
- * título, formulario y pie. Así las dos pantallas son idénticas por
- * construcción y no duplican marcado. El `<main>` es el destino del enlace
+ * Estructura común de las pantallas públicas (login, registro y confirmación
+ * del correo en `/verificar-email`): logotipo, título, formulario y pie. Así
+ * todas son idénticas por construcción y no duplican marcado. El `<main>` es el destino del enlace
  * "Saltar al contenido" (`id="contenido"`).
  *
  * **Por qué ya no hay tarjeta.** Antes el formulario iba en una tarjeta con
@@ -31,7 +38,7 @@ interface AuthLayoutProps {
  * Se centra (y no se usa un diseño asimétrico) porque es una tarea de un solo
  * paso: el usuario viene a escribir dos campos y pulsar un botón, no a explorar.
  */
-export function AuthLayout({ title, subtitle, children, footer }: AuthLayoutProps) {
+export function AuthLayout({ title, subtitle, children, footer, titleRef }: AuthLayoutProps) {
   return (
     <main
       id={MAIN_CONTENT_ID}
@@ -49,7 +56,14 @@ export function AuthLayout({ title, subtitle, children, footer }: AuthLayoutProp
           <span className="text-xl font-bold tracking-tight">streambox</span>
         </div>
 
-        <h1 className="mb-2 text-3xl leading-tight font-bold tracking-tight text-balance">{title}</h1>
+        {/* Sin anillo al enfocarlo por código: no es un control (como el `<main>`). */}
+        <h1
+          ref={titleRef}
+          tabIndex={titleRef ? -1 : undefined}
+          className="mb-2 text-3xl leading-tight font-bold tracking-tight text-balance outline-hidden"
+        >
+          {title}
+        </h1>
         <p className="mb-8 text-sm text-muted">{subtitle}</p>
         {children}
         {footer && <div className="mt-8 border-t border-line pt-6 text-sm text-muted">{footer}</div>}

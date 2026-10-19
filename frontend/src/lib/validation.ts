@@ -49,16 +49,26 @@ export function validateRegistration(values: RegisterRequest): RegisterErrors {
   const usernameProblem = usernameError(values.username);
   if (usernameProblem) errors.username = usernameProblem;
 
-  if (!values.email) {
-    errors.email = 'Introduce tu correo electrónico.';
-  } else if (!/^[^\s@]+@[^\s@]+$/.test(values.email)) {
-    errors.email = 'Introduce un correo electrónico válido.';
-  }
+  const emailProblem = emailError(values.email);
+  if (emailProblem) errors.email = emailProblem;
 
   const passwordProblem = newPasswordLengthError(values.password);
   if (passwordProblem) errors.password = passwordProblem;
 
   return errors;
+}
+
+/**
+ * Error de un correo electrónico (registro y «pedir un enlace nuevo» de la
+ * confirmación del correo), o `undefined` si es válido. Formato permisivo a
+ * propósito (algo antes y después de una `@`): manda la regla del backend.
+ *
+ * @param email correo ya recortado (`trim`)
+ */
+export function emailError(email: string): string | undefined {
+  if (!email) return 'Introduce tu correo electrónico.';
+  if (!/^[^\s@]+@[^\s@]+$/.test(email)) return 'Introduce un correo electrónico válido.';
+  return undefined;
 }
 
 /**

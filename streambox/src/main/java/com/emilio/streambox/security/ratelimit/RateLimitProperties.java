@@ -18,9 +18,21 @@ import jakarta.validation.constraints.Positive;
  * @param register límite de registros de usuario por IP
  * @param refresh  límite de renovaciones de sesión ({@code POST /api/auth/refresh})
  *                 por IP
+ * @param emailVerification límite de confirmaciones del correo
+ *                 ({@code POST /api/auth/email-verification}) por IP. El token
+ *                 tiene 256 bits, así que no hace falta contra la fuerza bruta:
+ *                 limita el abuso (cada intento consulta la base de datos)
+ * @param emailVerificationResend límite de reenvíos del correo de
+ *                 confirmación ({@code POST /api/auth/email-verification/resend})
+ *                 por IP. Cada reenvío puede mandar un correo: sin límite,
+ *                 cualquiera usaría el servidor para inundar buzones ajenos o
+ *                 gastar el cupo del proveedor de correo. El límite <b>por
+ *                 email</b> va aparte, en el servicio, y es silencioso (ver
+ *                 {@code RateLimitingFilter})
  * @param lockout  bloqueo temporal de una cuenta tras varios logins fallidos
  * @param maxKeys  tope de claves vivas <b>por contador</b> (cada contador en
- *                 memoria, el de login, el de registro, el de refresh, el de bloqueo por
+ *                 memoria, el de login, el de registro, el de refresh, los dos
+ *                 de la verificación del correo, el de bloqueo por
  *                 cuenta y el de IP conocida, lo aplica por separado). Al
  *                 llenarse se purgan las caducadas y, si sigue lleno, se
  *                 expulsa la clave con la actividad más antigua; ver
@@ -32,6 +44,8 @@ public record RateLimitProperties(
         @Valid @NotNull Rule login,
         @Valid @NotNull Rule register,
         @Valid @NotNull Rule refresh,
+        @Valid @NotNull Rule emailVerification,
+        @Valid @NotNull Rule emailVerificationResend,
         @Valid @NotNull Lockout lockout,
         @Positive int maxKeys) {
 

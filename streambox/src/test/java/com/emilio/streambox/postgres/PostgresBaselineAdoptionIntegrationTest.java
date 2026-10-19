@@ -114,7 +114,7 @@ class PostgresBaselineAdoptionIntegrationTest {
 
     /**
      * La historia queda registrada: baseline en la versión 0 (por eso V1 SÍ se
-     * ejecuta), luego V1, V2, V3, V4, la V5 de PostgreSQL (db/vendor/postgresql), V6, V7 y V8, todas correctas. Una segunda ejecución no
+     * ejecuta), luego V1, V2, V3, V4, la V5 de PostgreSQL (db/vendor/postgresql), V6, V7, V8 y V9, todas correctas. Una segunda ejecución no
      * hace nada y {@code validate} pasa (los checksums coinciden).
      */
     @Test
@@ -123,10 +123,10 @@ class PostgresBaselineAdoptionIntegrationTest {
 
         MigrateResult first = flyway(db).migrate();
 
-        assertEquals(8, first.migrationsExecuted, "deben ejecutarse V1, V2, V3, V4, V5, V6, V7 y V8");
+        assertEquals(9, first.migrationsExecuted, "deben ejecutarse V1, V2, V3, V4, V5, V6, V7, V8 y V9");
         List<Map<String, Object>> history = jdbc(db).queryForList(
                 "SELECT version, description, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertEquals(List.of("0", "1", "2", "3", "4", "5", "6", "7", "8"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
+        assertEquals(List.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
         assertEquals("BASELINE", history.get(0).get("type"));
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
 
@@ -180,7 +180,8 @@ class PostgresBaselineAdoptionIntegrationTest {
                         "idx_refresh_tokens_user_id", "idx_refresh_tokens_family_id", "idx_refresh_tokens_replaced_by_id",
                         "idx_movies_title_search", "idx_series_title_search",
                         "idx_liked_movies_movie_id", "idx_liked_series_series_id",
-                        "idx_liked_movies_user_created_at", "idx_liked_series_user_created_at"),
+                        "idx_liked_movies_user_created_at", "idx_liked_series_user_created_at",
+                        "idx_account_tokens_user_purpose"),
                 Set.copyOf(jdbc.queryForList("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
                         + " AND indexname LIKE 'idx\\_%'", String.class)));
     }
@@ -436,7 +437,43 @@ class PostgresBaselineAdoptionIntegrationTest {
     }
 
     /**
-     * Contraste: una base vacía NO recibe fila de baseline (solo V1 a V8) y
+     * La V9 sobre una base heredada: sigue la misma regla que en una base
+     * creada por Flyway (decisión del autor): el ADMIN {@code root} queda
+     * verificado y la USER {@code alice}, pendiente, sin tocar nada más; y
+     * {@code account_tokens} nace vacía y con su cascada hacia el
+     * {@code users} heredado. Si el ADMIN quedara pendiente, el administrador
+     * no podría entrar a gestionar la aplicación.
+     */
+    @Test
+    void laV9SobreUnaBaseAdoptadaVerificaSoloAlAdminYCreaLosTokensConCascada() throws Exception {
+        String db = createDatabase(true);
+        JdbcTemplate jdbc = jdbc(db);
+
+        flyway(db).migrate();
+
+        assertEquals(List.of("root"), jdbc.queryForList(
+                "SELECT username FROM users WHERE email_verified_at IS NOT NULL ORDER BY username", String.class),
+                "solo el ADMIN heredado queda verificado");
+        assertEquals(List.of("alice"), jdbc.queryForList(
+                "SELECT username FROM users WHERE email_verified_at IS NULL ORDER BY username", String.class),
+                "la USER heredada queda pendiente");
+        assertEquals("hash-r", jdbc.queryForObject("SELECT password FROM users WHERE username = 'root'", String.class));
+        assertEquals("hash-a", jdbc.queryForObject("SELECT password FROM users WHERE username = 'alice'", String.class));
+        assertEquals(0, count(jdbc, "account_tokens"));
+        assertEquals("CASCADE", jdbc.queryForObject("SELECT delete_rule FROM information_schema.referential_constraints"
+                + " WHERE constraint_schema = 'public' AND constraint_name = 'fk_account_tokens_user'", String.class));
+        jdbc.update("INSERT INTO account_tokens (user_id, purpose, token_hash, created_at, expires_at)"
+                + " SELECT id, 'EMAIL_VERIFICATION', ?, now(), now() + interval '1 day' FROM users WHERE username = 'root'",
+                "b".repeat(64));
+
+        jdbc.update("DELETE FROM users WHERE username = 'root'");
+
+        assertEquals(0, count(jdbc, "account_tokens"));
+        assertEquals(1, count(jdbc, "users"));
+    }
+
+    /**
+     * Contraste: una base vacía NO recibe fila de baseline (solo V1 a V9) y
      * sí tiene cascadas y CHECK. Garantiza que los dos caminos de arranque
      * producen lo que describe cada test.
      */
@@ -447,14 +484,15 @@ class PostgresBaselineAdoptionIntegrationTest {
         flyway(db).migrate();
 
         JdbcTemplate jdbc = jdbc(db);
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8"), jdbc.queryForList(
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9"), jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history ORDER BY installed_rank", String.class));
-        // Doce claves foráneas en cascada. V1: géneros->película, favoritos->usuario y
+        // Trece claves foráneas en cascada. V1: géneros->película, favoritos->usuario y
         // favoritos->película. V3: géneros->serie, episodios->serie, favoritos de
         // series->usuario y favoritos de series->serie. V4: refresh tokens->usuario
         // (la del sucesor, fk_refresh_tokens_replaced_by, es SET NULL y no cuenta).
         // V8: «me gusta» de películas->usuario/película y de series->usuario/serie.
-        assertEquals(12, jdbc.queryForObject(
+        // V9: tokens de cuenta->usuario.
+        assertEquals(13, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.referential_constraints"
                         + " WHERE constraint_schema = 'public' AND delete_rule = 'CASCADE'", Integer.class));
         assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(

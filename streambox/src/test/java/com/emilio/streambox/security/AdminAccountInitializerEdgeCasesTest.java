@@ -15,10 +15,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
@@ -42,6 +47,12 @@ import ch.qos.logback.core.read.ListAppender;
  */
 class AdminAccountInitializerEdgeCasesTest {
 
+    /** Instante de las cuentas que ya existían verificadas. */
+    private static final Instant VERIFIED_AT = Instant.parse("2026-01-01T00:00:00Z");
+
+    /** Reloj fijo: la fecha de verificación del administrador nuevo sale de él. */
+    private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-18T10:00:00Z"), ZoneOffset.UTC);
+
     private UserRepository userRepository;
 
     @BeforeEach
@@ -52,12 +63,16 @@ class AdminAccountInitializerEdgeCasesTest {
     private static User account(Role role) {
         User user = new User();
         user.setRole(role);
+        // Cuenta ya existente y verificada, como las que deja la V9 (los
+        // ADMIN quedan verificados): el caso pendiente se prueba aparte.
+        user.setEmailVerifiedAt(VERIFIED_AT);
         return user;
     }
 
     private AdminAccountInitializer initializer(String email, String username, String password) {
         return new AdminAccountInitializer(
-                new AdminProperties(email, username, password), userRepository, new BCryptPasswordEncoder());
+                new AdminProperties(email, username, password), userRepository, new BCryptPasswordEncoder(),
+                CLOCK, mock(PlatformTransactionManager.class));
     }
 
     /**

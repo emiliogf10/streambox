@@ -79,7 +79,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7 y V8 (sin
+     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8 y V9 (sin
      * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
      * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
@@ -89,7 +89,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -132,8 +132,9 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     /**
      * Longitudes de los {@code VARCHAR} y obligatoriedad de cada columna: solo
      * admiten {@code NULL} el vídeo y el tráiler de la película (opcionales
-     * desde la {@code V6}) y el avatar del usuario ({@code V7}; {@code NULL} =
-     * se muestra la inicial).
+     * desde la {@code V6}), el avatar del usuario ({@code V7}; {@code NULL} =
+     * se muestra la inicial) y {@code users.email_verified_at} ({@code V9};
+     * {@code NULL} = cuenta pendiente de verificar el correo).
      */
     @Test
     void lasLongitudesYLaObligatoriedadDeLasColumnasSonLasDeLasEntidades() {
@@ -156,8 +157,10 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                     .findFirst().orElseThrow(() -> new AssertionError("falta la columna " + expected.getKey()));
             assertEquals(expected.getValue(), column.get("character_maximum_length"), expected.getKey());
         }
-        // Solo el vídeo y el tráiler de la película y el avatar del usuario admiten NULL
-        assertEquals(java.util.Set.of("movies.video_url", "movies.trailer_url", "users.avatar"), java.util.Set.copyOf(columns.stream()
+        // Solo el vídeo y el tráiler de la película, el avatar del usuario y su
+        // fecha de verificación del correo (V9: NULL = cuenta pendiente) admiten NULL
+        assertEquals(java.util.Set.of("movies.video_url", "movies.trailer_url", "users.avatar",
+                "users.email_verified_at"), java.util.Set.copyOf(columns.stream()
                 .filter(c -> !"NO".equals(c.get("is_nullable")))
                 .map(c -> c.get("table_name") + "." + c.get("column_name"))
                 .toList()));
@@ -217,7 +220,8 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
      * Unicidad de usuario, email y nombre de género, por restricción con nombre
      * (más la de episodios de V3, que se prueba en
      * {@code PostgresSeriesSchemaIntegrationTest}, y la del hash de los refresh
-     * tokens de V4, en {@code PostgresRefreshTokenIntegrationTest}).
+     * tokens de V4, en {@code PostgresRefreshTokenIntegrationTest}, y la de
+     * los tokens de cuenta de V9, en {@code PostgresAccountTokenIntegrationTest}).
      */
     @Test
     void existenLasRestriccionesDeUnicidadYSeRechazanLosDuplicadosConElCodigoReal() {
@@ -225,7 +229,8 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                 "SELECT conname FROM pg_constraint WHERE contype = 'u' AND connamespace = 'public'::regnamespace",
                 String.class));
         assertEquals(Set.of("uk_users_username", "uk_users_email", "uk_genres_name",
-                "uk_episodes_series_season_episode", "uk_refresh_tokens_token_hash"), uniques);
+                "uk_episodes_series_season_episode", "uk_refresh_tokens_token_hash",
+                "uk_account_tokens_token_hash"), uniques);
 
         insertUser("dup", "dup@test.com");
         DataIntegrityViolationException byUsername = assertThrows(DataIntegrityViolationException.class,

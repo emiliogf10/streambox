@@ -1,5 +1,7 @@
 package com.emilio.streambox.controller;
 
+import java.time.Instant;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -15,6 +17,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
@@ -33,6 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import com.emilio.streambox.dto.AcceptedResponse;
 import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.entity.Role;
@@ -61,7 +65,7 @@ import tools.jackson.databind.json.JsonMapper;
  * registro simultáneo con el mismo email o nombre (el {@code UNIQUE} de
  * {@code users}) y un género borrado mientras se guarda una película o serie
  * (la clave foránea de {@code movie_genres}/{@code series_genres}). Los tests
- * unitarios ({@code UserServiceTest}, {@code CatalogGenreRaceTest}) prueban la
+ * unitarios ({@code RegistrationServiceTest}, {@code CatalogGenreRaceTest}) prueban la
  * traducción con excepciones simuladas; estos comprueban que H2 entrega de
  * verdad el {@code SQLSTATE} y el nombre de la restricción que esa traducción
  * necesita. Sin el arreglo, el registro respondía 409
@@ -72,8 +76,9 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>
  * <b>Cómo se provoca la carrera sin hilos.</b> Con {@link MockitoSpyBean} sobre
  * el repositorio real, la comprobación previa contesta lo que contestaría si la
- * otra petición aún no hubiera escrito ({@code existsByEmail} → {@code false};
- * {@code findAllById} → el género ya borrado). El {@code INSERT} es real y
+ * otra petición aún no hubiera escrito ({@code findByEmail} o
+ * {@code findByUsername} → vacío; {@code findAllById} → el género ya
+ * borrado). El {@code INSERT} es real y
  * choca con la restricción, como en la carrera.
  * </p>
  *
@@ -126,21 +131,41 @@ class IntegrityViolationTranslationIntegrationTest {
     // Registro: el UNIQUE de users
     // ------------------------------------------------------------------
 
+    /**
+     * Carrera por el email: el segundo registro choca con {@code uk_users_email}
+     * y recibe el <b>mismo 202</b> que cualquier registro (antes, 409 «El correo
+     * electrónico ya está en uso», que revelaba el email). La cuenta que existe
+     * es la primera y el segundo no se guarda, pero su nombre queda reservado
+     * como en cualquier registro con un email que ya tiene cuenta
+     * ({@code UsernameReservations}): el siguiente registro con ese nombre da
+     * 409, igual que si la cuenta se hubiera creado.
+     *
+     * <p>
+     * Cada test de esta clase usa un nombre distinto por eso mismo: la reserva
+     * vive en memoria durante todo el contexto de Spring (24 h).
+     * </p>
+     */
     @Test
-    void dosRegistrosConElMismoEmailDanAlSegundoEl409DeEmailEnUso() throws Exception {
-        saveUser("primera", "carrera@test.com");
-        doReturn(false).when(userRepository).existsByEmail("carrera@test.com");
+    void dosRegistrosConElMismoEmailDanAlSegundoElMismo202() throws Exception {
+        User first = saveUser("primera", "carrera@test.com");
+        doReturn(Optional.empty()).when(userRepository).findByEmail("carrera@test.com");
 
         register("segunda", "carrera@test.com")
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.message").value(AcceptedResponse.REGISTRATION_MESSAGE));
+        register("segunda", "otra.carrera@test.com")
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("USER_ALREADY_EXISTS"))
-                .andExpect(jsonPath("$.message").value("El correo electrónico ya está en uso"));
+                .andExpect(jsonPath("$.message").value("El nombre de usuario ya está en uso"));
+
+        assertEquals(first.getId(), userRepository.findAll().stream()
+                .filter(user -> user.getEmail().equals("carrera@test.com")).findFirst().orElseThrow().getId());
+        assertTrue(userRepository.findAll().stream().noneMatch(user -> user.getUsername().equals("segunda")));
     }
 
     @Test
     void dosRegistrosConElMismoNombreDanAlSegundoEl409DeNombreEnUso() throws Exception {
         saveUser("carrera", "primera@test.com");
-        doReturn(false).when(userRepository).existsByUsername("carrera");
+        doReturn(Optional.empty()).when(userRepository).findByUsername("carrera");
 
         register("carrera", "segunda@test.com")
                 .andExpect(status().isConflict())
@@ -150,7 +175,7 @@ class IntegrityViolationTranslationIntegrationTest {
 
     /**
      * Una carrera de registro no deja el email en <b>ningún</b> log, aunque la
-     * respuesta sea el 409 correcto.
+     * respuesta sea el 202 correcto.
      *
      * <p>
      * Hibernate registra por su cuenta (en {@code WARN}, categoría
@@ -172,16 +197,15 @@ class IntegrityViolationTranslationIntegrationTest {
         DataIntegrityViolationException error = assertThrows(DataIntegrityViolationException.class,
                 () -> saveUser("tercera", email));
         assertTrue(messages(error).contains(email), "H2 debería incluir el valor duplicado en su mensaje");
-        doReturn(false).when(userRepository).existsByEmail(email);
+        doReturn(Optional.empty()).when(userRepository).findByEmail(email);
 
         Logger root = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         root.addAppender(appender);
         try {
-            register("segunda", email)
-                    .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.code").value("USER_ALREADY_EXISTS"));
+            register("segunda_privada", email)
+                    .andExpect(status().isAccepted());
         } finally {
             root.detachAppender(appender);
             appender.stop();
@@ -297,6 +321,7 @@ class IntegrityViolationTranslationIntegrationTest {
 
     private User saveUser(String username, String email) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(username);
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode(PASSWORD));

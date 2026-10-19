@@ -1,5 +1,7 @@
 package com.emilio.streambox.controller;
 
+import java.time.Instant;
+
 import static org.hamcrest.Matchers.hasItem;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -1076,6 +1078,7 @@ class SeriesQaEdgeCasesIntegrationTest {
 
     private User saveUser(String name, Role role) {
         User u = new User();
+        u.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         u.setUsername(name);
         u.setEmail(name + "@test.com");
         u.setPassword(passwordEncoder.encode("password123"));

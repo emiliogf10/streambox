@@ -245,11 +245,13 @@ class LoginAttemptsIntegrationTest {
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
                 .andExpect(jsonPath("$.remainingAttempts").doesNotExist());
 
-        // 400 del registro (política de contraseñas) y 409 de email duplicado
+        // 400 del registro (política de contraseñas) y 409 de nombre duplicado
+        // (el email duplicado ya no es un error: 202, para no revelar qué
+        // emails existen)
         register("att7b", "att7b@test.com", "corta")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.remainingAttempts").doesNotExist());
-        register("att7c", "att7@test.com", PASSWORD)
+        register("att7", "att7c@test.com", PASSWORD)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.remainingAttempts").doesNotExist());
     }
@@ -274,6 +276,7 @@ class LoginAttemptsIntegrationTest {
 
     private User createUser(String name) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode(PASSWORD));

@@ -94,8 +94,10 @@ public class AuthenticationService {
      *                 desconocida (ver {@link LoginAttemptService})
      * @return JWT de acceso y refresh token; el controlador los entrega en
      *         cookies HttpOnly, nunca en el cuerpo
-     * @throws InvalidCredentialsException si el email no existe o la contraseña es
-     *         incorrecta; lleva los intentos que quedan antes del bloqueo
+     * @throws InvalidCredentialsException si el email no existe, la contraseña es
+     *         incorrecta o la cuenta aún no ha confirmado su correo (aunque la
+     *         contraseña sea correcta: ver {@code isUsableForLogin}); lleva los
+     *         intentos que quedan antes del bloqueo
      * @throws AccountLockedException si la cuenta está bloqueada temporalmente
      *         por demasiados intentos fallidos, o si este fallo agota los intentos
      */
@@ -117,9 +119,11 @@ public class AuthenticationService {
      *
      * <p>
      * Por motivos de seguridad, se devuelve el mismo mensaje de error
-     * tanto cuando el correo electrónico no existe como cuando la contraseña
-     * es incorrecta. De esta forma no se revela si una dirección de correo
-     * está registrada en la aplicación.
+     * cuando el correo electrónico no existe, cuando la contraseña es
+     * incorrecta y cuando la cuenta está pendiente de confirmar el correo
+     * (aunque la contraseña sea correcta). De esta forma no se revela si una
+     * dirección de correo está registrada en la aplicación, ni siquiera a
+     * quien acaba de registrarse con ella (ver {@code isUsableForLogin}).
      * </p>
      *
      * <p>
@@ -137,8 +141,9 @@ public class AuthenticationService {
      * @param password contraseña proporcionada durante el inicio de sesión
      * @param clientIp dirección remota del cliente
      * @return usuario autenticado correctamente
-     * @throws InvalidCredentialsException si el correo electrónico no existe o
-     *                          la contraseña proporcionada es incorrecta
+     * @throws InvalidCredentialsException si el correo electrónico no existe,
+     *                          la contraseña proporcionada es incorrecta o la
+     *                          cuenta está pendiente de confirmar el correo
      * @throws AccountLockedException si la cuenta está bloqueada o este fallo
      *                          agota los intentos
      */
@@ -169,7 +174,12 @@ public class AuthenticationService {
         String hashToCheck = user != null ? user.getPassword() : dummyPasswordHash;
         boolean passwordMatches = passwordEncoder.matches(password, hashToCheck);
 
-        if (user == null || !passwordMatches) {
+        // Una cuenta pendiente de confirmar el correo con la contraseña
+        // correcta es, para el login, un fallo más: misma condición, mismo
+        // camino y, por tanto, la misma respuesta que una contraseña incorrecta
+        // o un email inexistente (ver isUsableForLogin). No es una rama aparte
+        // que imite el 401: así no puede desincronizarse nunca de él.
+        if (!isUsableForLogin(user, passwordMatches)) {
 
             // Lanza AccountLockedException (429) si este fallo agota los intentos.
             int remainingAttempts = loginAttemptService.recordFailure(attempt);
@@ -177,10 +187,57 @@ public class AuthenticationService {
             throw new InvalidCredentialsException(INVALID_CREDENTIALS_MESSAGE, remainingAttempts);
         }
 
-        // Solo aquí, con la contraseña verificada de una cuenta que existe, la
-        // IP pasa a ser "conocida" de la cuenta (ver LoginAttemptService).
+        // Solo aquí, con la contraseña verificada de una cuenta que existe y
+        // está confirmada, la IP pasa a ser "conocida" de la cuenta (ver
+        // LoginAttemptService).
         loginAttemptService.recordSuccess(attempt);
 
         return user;
+    }
+
+    /**
+     * Decide si el intento de login abre sesión: solo con una cuenta que
+     * existe, la contraseña correcta y el correo ya confirmado.
+     *
+     * <p>
+     * <b>Por qué una cuenta pendiente con la contraseña correcta recibe el
+     * mismo 401 que una contraseña incorrecta (incidencia QA-1).</b> El
+     * registro responde siempre el mismo 202 para no revelar qué emails tienen
+     * cuenta, pero no basta con mirar esa respuesta: un atacante se registra
+     * con el email de la víctima y una contraseña suya, y después intenta
+     * entrar con ella. Si el email era nuevo, el registro creó una cuenta
+     * pendiente con <i>su</i> contraseña; si ya tenía cuenta, no se creó nada
+     * y la contraseña no es la del titular. Antes el primer caso respondía 403
+     * {@code EMAIL_NOT_VERIFIED} y el segundo 401: dos peticiones bastaban para
+     * saber si un email estaba registrado. Un aviso «confirma tu correo» solo
+     * tendría sentido si la contraseña la hubiera elegido el dueño del email,
+     * y aquí la puede haber elegido cualquiera.
+     * </p>
+     *
+     * <p>
+     * Por eso cuenta como intento fallido a todos los efectos: gasta intento,
+     * bloquea la cuenta al agotarlos (429 {@code ACCOUNT_LOCKED}), no borra los
+     * fallos anteriores, no anota la IP como «conocida» y, desde una IP ya
+     * conocida (una cuenta USER anterior a la V9 que inició sesión antes de
+     * quedar pendiente), usa el contador de esa IP como cualquier otro fallo.
+     * </p>
+     *
+     * <p>
+     * <b>Contrapartida aceptada:</b> quien acaba de registrarse e intenta
+     * entrar sin haber confirmado el correo ve «Email o contraseña
+     * incorrectos», no «confirma tu correo». La interfaz del login le da la
+     * pista (revisar el correo de confirmación) y el botón de reenviar el
+     * enlace, que responde siempre igual (202) y solo envía algo si hay una
+     * cuenta pendiente.
+     * </p>
+     *
+     * @param user            cuenta encontrada por el email, o {@code null}
+     * @param passwordMatches si la contraseña coincide con su hash (con
+     *                        {@code user == null} se comparó contra el hash
+     *                        falso y su valor no importa)
+     * @return {@code true} solo si el login puede abrir sesión
+     */
+    private static boolean isUsableForLogin(User user, boolean passwordMatches) {
+        return user != null && passwordMatches && user.isEmailVerified();
     }
 }

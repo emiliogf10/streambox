@@ -188,7 +188,7 @@ class RateLimitingContentTypeIntegrationTest {
         }
 
         String name = "ctreg" + SEQUENCE.incrementAndGet();
-        register(name, MediaType.APPLICATION_JSON_VALUE, victimIp).andExpect(status().isCreated());
+        register(name, MediaType.APPLICATION_JSON_VALUE, victimIp).andExpect(status().isAccepted());
         assertTrue(userRepository.existsByEmail(name + "@test.com"));
     }
 
@@ -263,7 +263,7 @@ class RateLimitingContentTypeIntegrationTest {
         String prefix = "ctjson" + SEQUENCE.incrementAndGet();
 
         for (int i = 0; i < LIMIT; i++) {
-            register(prefix + "n" + i, contentType, ip).andExpect(status().isCreated());
+            register(prefix + "n" + i, contentType, ip).andExpect(status().isAccepted());
         }
 
         register(prefix + "x", MediaType.APPLICATION_JSON_VALUE, ip)
@@ -413,6 +413,7 @@ class RateLimitingContentTypeIntegrationTest {
     private String createUser() {
         String name = "ctuser" + SEQUENCE.incrementAndGet();
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode(PASSWORD));

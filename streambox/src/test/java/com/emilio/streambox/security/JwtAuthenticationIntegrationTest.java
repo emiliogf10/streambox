@@ -216,6 +216,7 @@ class JwtAuthenticationIntegrationTest {
 
     private User saveUser(String name, Role role) {
         User u = new User();
+        u.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         u.setUsername(name);
         u.setEmail(name + "@test.com");
         u.setPassword(passwordEncoder.encode("password123"));

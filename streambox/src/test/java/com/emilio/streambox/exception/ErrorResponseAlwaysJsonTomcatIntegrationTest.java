@@ -81,6 +81,7 @@ class ErrorResponseAlwaysJsonTomcatIntegrationTest {
     void createAdmin() {
         deleteUsersOfThisSuite();
         User admin = new User();
+        admin.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         admin.setUsername("acceptjsonadmin");
         admin.setEmail("acceptjsonadmin" + DOMAIN);
         admin.setPassword(passwordEncoder.encode("Contraseña-Larga-Correcta-2026"));

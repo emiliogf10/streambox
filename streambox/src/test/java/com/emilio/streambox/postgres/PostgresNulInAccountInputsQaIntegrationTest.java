@@ -23,6 +23,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
+import com.emilio.streambox.support.TestAccounts;
 
 /**
  * Revisión de QA: el carácter nulo ({@code U+0000}) en los textos de la
@@ -96,10 +97,12 @@ class PostgresNulInAccountInputsQaIntegrationTest extends PostgresIntegrationTes
 
         register("{\"username\":\"ana\\u0000pg" + n + "\",\"email\":\"nulnombre" + n + "@test.com\","
                 + "\"password\":\"" + PASSWORD + "\"}")
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.username").value("ana pg" + n));
+                .andExpect(status().isAccepted());
 
+        // El 202 no devuelve la cuenta (no revela qué emails existen): el
+        // nombre guardado se lee de la base de datos.
         User saved = userRepository.findByEmail("nulnombre" + n + "@test.com").orElseThrow();
+        assertEquals("ana pg" + n, saved.getUsername());
         assertFalse(saved.getUsername().contains("\u0000"));
     }
 
@@ -131,7 +134,9 @@ class PostgresNulInAccountInputsQaIntegrationTest extends PostgresIntegrationTes
 
         register("{\"username\":\"nulpass" + n + "\",\"email\":\"" + email + "\","
                 + "\"password\":\"" + prefix + "\\u0000 en el tejado\"}")
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
+        // El registro deja la cuenta pendiente (V9); aquí se prueba la contraseña.
+        TestAccounts.markEmailVerified(userRepository, email);
 
         login("{\"email\":\"" + email + "\",\"password\":\"" + prefix + "\"}", "10.77.0." + n)
                 .andExpect(status().isUnauthorized())

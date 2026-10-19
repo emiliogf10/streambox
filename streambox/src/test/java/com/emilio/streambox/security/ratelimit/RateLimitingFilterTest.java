@@ -44,6 +44,8 @@ class RateLimitingFilterTest {
                     new RateLimitProperties.Rule(1, Duration.ofMinutes(1)),
                     new RateLimitProperties.Rule(1, Duration.ofHours(1)),
                     new RateLimitProperties.Rule(1, Duration.ofMinutes(1)),
+                    new RateLimitProperties.Rule(1, Duration.ofMinutes(15)),
+                    new RateLimitProperties.Rule(1, Duration.ofHours(1)),
                     new RateLimitProperties.Lockout(5, Duration.ofMinutes(15), 5, Duration.ofDays(30)),
                     100_000),
             new MutableClock(),
@@ -345,6 +347,83 @@ class RateLimitingFilterTest {
         request.setCookies(new Cookie(REFRESH_COOKIE, ""), new Cookie(REFRESH_COOKIE, WELL_FORMED_TOKEN));
 
         assertFalse(RateLimitingFilter.hasRefreshCookie(request));
+    }
+
+    // ------------------------------------------------------------------
+    // Verificación del correo: confirmar y reenviar
+    // ------------------------------------------------------------------
+
+    private static final String VERIFY = "/api/auth/email-verification";
+    private static final String RESEND = "/api/auth/email-verification/resend";
+
+    /**
+     * Las dos rutas nuevas están limitadas por IP, también con sus variantes
+     * codificadas (mismo {@code PathPatternRequestMatcher} que la regla
+     * {@code permitAll}).
+     */
+    @ParameterizedTest
+    @CsvSource({
+            "/api/auth/email-verification, /api/auth/%65mail-verification",
+            "/api/auth/email-verification, /api/auth/email-verification;x=1",
+            "/api/auth/email-verification/resend, /api/auth/email-verification/%72esend",
+            "/api/auth/email-verification/resend, /%61pi/auth/email-verification/resend"
+    })
+    void lasRutasDeVerificacionDelCorreoSeLimitanTambienConSusVariantes(String path, String variant)
+            throws Exception {
+        assertPassed(post(path));
+
+        assertRejected(post(variant));
+    }
+
+    /**
+     * Cada ruta tiene su contador: agotar los reenvíos no impide confirmar
+     * (quien acaba de recibir el enlace debe poder usarlo) ni gasta el login.
+     */
+    @Test
+    void confirmarReenviarYLoginNoCompartenContador() throws Exception {
+        assertPassed(post(RESEND));
+        assertRejected(post(RESEND));
+
+        assertPassed(post(VERIFY));
+        assertPassed(post("/api/auth/login"));
+        assertRejected(post(VERIFY));
+    }
+
+    /**
+     * Mismo criterio que login y registro: lo que otra web puede enviar sin
+     * preflight no gasta el presupuesto de la víctima (acabará en 415/400
+     * antes del controlador).
+     */
+    @ParameterizedTest
+    @ValueSource(strings = { "text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x",
+            "", "json" })
+    void enLaVerificacionDelCorreoLoQueOtraWebPuedeEnviarNoGastaElHueco(String contentType) throws Exception {
+        for (String path : new String[] { VERIFY, RESEND }) {
+            for (int i = 0; i < 3; i++) {
+                MockHttpServletRequest request = post(path);
+                request.setContentType(contentType);
+                assertPassed(request);
+            }
+            MockHttpServletRequest withoutType = post(path);
+            withoutType.setContentType(null);
+            assertPassed(withoutType);
+
+            assertPassed(post(path));
+            assertRejected(post(path));
+        }
+    }
+
+    /** Solo se limita el {@code POST}: el resto de métodos no es público (401 en la cadena). */
+    @ParameterizedTest
+    @CsvSource({
+            "GET, /api/auth/email-verification",
+            "PUT, /api/auth/email-verification",
+            "GET, /api/auth/email-verification/resend",
+            "POST, /api/auth/email-verification/otra"
+    })
+    void otrosMetodosORutasDeLaVerificacionNoSeLimitan(String method, String rawPath) throws Exception {
+        assertPassed(request(method, rawPath));
+        assertPassed(request(method, rawPath));
     }
 
     // ------------------------------------------------------------------

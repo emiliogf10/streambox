@@ -100,7 +100,11 @@ public class AuthController {
                     + "remainingAttempts: intentos que le quedan a la cuenta ya descontado este fallo "
                     + "(siempre 1 o más); si el siguiente intento también falla y era el último, la "
                     + "cuenta se bloquea y se responde 429 ACCOUNT_LOCKED. Desde una misma IP de origen es idéntico "
-                    + "exista o no el email"),
+                    + "exista o no el email, y esté o no confirmado su correo. Una cuenta que aún no ha "
+                    + "confirmado su correo recibe esta misma respuesta aunque la contraseña sea correcta, y "
+                    + "cuenta como intento fallido: si no, registrarse con un email ajeno y entrar con la "
+                    + "contraseña elegida revelaría si ese email ya tenía cuenta. El cliente puede ofrecer "
+                    + "pedir otro enlace con POST /api/auth/email-verification/resend"),
             @ApiResponse(responseCode = "429", description = "Demasiados intentos; la cabecera Retry-After "
                     + "indica los segundos que hay que esperar. Código ACCOUNT_LOCKED: la cuenta está "
                     + "bloqueada por logins fallidos (lo devuelve el fallo que agota los intentos y "
@@ -153,7 +157,8 @@ public class AuthController {
                     + "nuevo"),
             @ApiResponse(responseCode = "401", description = "Código SESSION_EXPIRED: el refresh token falta, "
                     + "no existe, ha caducado (él o su sesión de 30 días), está revocado (logout) o se ha "
-                    + "reutilizado (y entonces se revoca toda la sesión). Mismo cuerpo en todos los casos. La "
+                    + "reutilizado (y entonces se revoca toda la sesión), o la cuenta está pendiente de confirmar "
+                    + "su correo (y entonces se revocan todas sus sesiones). Mismo cuerpo en todos los casos. La "
                     + "respuesta borra las dos cookies: hay que volver a iniciar sesión"),
             @ApiResponse(responseCode = "403", description = "Código CSRF_REJECTED: falta la cabecera "
                     + "X-Requested-With: StreamBox. No se mira el refresh token ni se gasta el límite por IP"),

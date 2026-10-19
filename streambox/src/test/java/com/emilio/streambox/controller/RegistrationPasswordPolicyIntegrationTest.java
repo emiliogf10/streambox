@@ -64,13 +64,13 @@ class RegistrationPasswordPolicyIntegrationTest {
     @Test
     void doceCaracteresSeAceptan() throws Exception {
         register("pwd12", "pwd12@test.com", "Rio-Tajo-482")
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.password").doesNotExist());
     }
 
     @Test
     void sesentaYCuatroCaracteresSeAceptan() throws Exception {
-        register("pwd64", "pwd64@test.com", ascii(64)).andExpect(status().isCreated());
+        register("pwd64", "pwd64@test.com", ascii(64)).andExpect(status().isAccepted());
     }
 
     @Test
@@ -136,7 +136,7 @@ class RegistrationPasswordPolicyIntegrationTest {
         String password = ascii(56) + "ñ".repeat(8);
         assertEquals(72, password.getBytes(StandardCharsets.UTF_8).length);
 
-        register("pwd72", "pwd72@test.com", password).andExpect(status().isCreated());
+        register("pwd72", "pwd72@test.com", password).andExpect(status().isAccepted());
     }
 
     // ------------------------------------------------------------------
@@ -177,7 +177,7 @@ class RegistrationPasswordPolicyIntegrationTest {
     void unaParteLocalDeMenosDe4CaracteresNoSeComprueba() throws Exception {
         // "ab" aparece en muchas contraseñas por casualidad: no se rechaza
         // (el mínimo es 4; el caso de 3 está en el test de casos límite).
-        register("pwdshortlocal", "ab@test.com", "Cabra-Montes-77").andExpect(status().isCreated());
+        register("pwdshortlocal", "ab@test.com", "Cabra-Montes-77").andExpect(status().isAccepted());
     }
 
     // ------------------------------------------------------------------

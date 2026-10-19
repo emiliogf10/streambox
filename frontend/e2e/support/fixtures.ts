@@ -1,8 +1,10 @@
 /**
  * `test` extendido con lo que necesitan casi todas las pruebas:
  *
- *  - `user`: una cuenta recién registrada (email y usuario únicos) con su JWT
- *    (el valor de la cookie de sesión que fijó el login).
+ *  - `user`: una cuenta recién registrada (email y usuario únicos) y con el
+ *    correo YA CONFIRMADO (el enlace se lee de la bandeja del backend E2E, ver
+ *    `createUserWithToken`), con su JWT (el valor de la cookie de sesión que fijó
+ *    el login). Sin confirmar, el login daría 401 (como una contraseña incorrecta).
  *    Cada test tiene la suya, por eso son independientes y paralelizables.
  *  - `signIn`: función que deja la sesión abierta en el navegador sin pasar por
  *    el formulario (siembra en el contexto del navegador la cookie `streambox_token`,

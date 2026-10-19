@@ -119,10 +119,13 @@ updates:
 
   # -----------------------------------------------------------------
   # Imágenes base de los Dockerfile (FROM ...): Maven + JDK, JRE, Node y
-  # nginx. Las versiones están fijadas hasta el parche; Dependabot propone
-  # los parches nuevos, que suelen traer arreglos de seguridad del sistema
-  # base (por eso sin cooldown: son imágenes oficiales y lo urgente es
-  # tener el parche).
+  # nginx. Están fijadas hasta el parche salvo la de compilación del
+  # backend (maven:3.9-eclipse-temurin-26), cuya etiqueta solo fija Maven
+  # 3.9 y Temurin 26: cada construcción puede traer otro parche de los dos
+  # (no llega a la imagen final, que es la del JRE, fijada). Dependabot
+  # propone los parches nuevos de las demás, que suelen traer arreglos de
+  # seguridad del sistema base (por eso sin cooldown: son imágenes oficiales
+  # y lo urgente es tener el parche).
   # -----------------------------------------------------------------
   - package-ecosystem: docker
     directories:
@@ -161,7 +164,11 @@ updates:
         update-types: [minor, patch]
 
   # -----------------------------------------------------------------
-  # docker-compose.yml: la imagen de PostgreSQL (servicio db).
+  # docker-compose.yml: las imágenes que no se construyen aquí, PostgreSQL
+  # (servicio db) y Mailpit (servicio mailpit, la bandeja de correo de
+  # pruebas). Dependabot lee todas las "image:" del archivo: no hay que
+  # listarlas. Las de backend y frontend se construyen (build:) y sus
+  # imágenes base las cubre el bloque "docker" de arriba.
   # -----------------------------------------------------------------
   - package-ecosystem: docker-compose
     directory: /
@@ -173,6 +180,15 @@ updates:
     open-pull-requests-limit: 2
     commit-message:
       prefix: chore(deps)
+    # Mailpit no es una imagen oficial de Docker sino de un desarrollador
+    # (axllent) y saca versiones casi cada semana: se espera 7 días antes de
+    # proponer una, por si se retira o resulta problemática (los ataques a la
+    # cadena de suministro suelen descubrirse en esos días). Es una
+    # herramienta de pruebas, así que no hay prisa. PostgreSQL, oficial y con
+    # arreglos de seguridad, sigue sin espera.
+    cooldown:
+      default-days: 7
+      include: ['axllent/mailpit']
     ignore:
       # Solo parches dentro de la 16 (16.15 → 16.16...), que PostgreSQL
       # publica cada trimestre con arreglos y se aplican con solo cambiar la

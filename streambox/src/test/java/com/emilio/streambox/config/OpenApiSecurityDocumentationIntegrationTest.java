@@ -50,7 +50,9 @@ class OpenApiSecurityDocumentationIntegrationTest {
             new String[] {"/api/auth/login", "post"},
             new String[] {"/api/users", "post"},
             new String[] {"/api/auth/refresh", "post"},
-            new String[] {"/api/auth/logout", "post"});
+            new String[] {"/api/auth/logout", "post"},
+            new String[] {"/api/auth/email-verification", "post"},
+            new String[] {"/api/auth/email-verification/resend", "post"});
 
     @Autowired private MockMvc mockMvc;
 
@@ -179,6 +181,9 @@ class OpenApiSecurityDocumentationIntegrationTest {
             assertFalse(operation.at("/responses/403/description").asText()
                     .contains(CookieAuthOperationCustomizer.CSRF_DESCRIPTION), where);
         }
+        // Ni el login ni el registro tienen 403: la cuenta pendiente de
+        // confirmar el correo recibe en el login el mismo 401 que un fallo
+        // (incidencia QA-1), y el CSRF no se les aplica.
         assertTrue(paths.at("/~1api~1auth~1login/post/responses/403").isMissingNode());
         assertTrue(paths.at("/~1api~1users/post/responses/403").isMissingNode());
     }

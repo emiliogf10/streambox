@@ -61,6 +61,7 @@ class CookieAuthenticationIntegrationTest {
     @BeforeEach
     void setUp() {
         user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername("cookieuser");
         user.setEmail(EMAIL);
         user.setPassword(passwordEncoder.encode(PASSWORD));

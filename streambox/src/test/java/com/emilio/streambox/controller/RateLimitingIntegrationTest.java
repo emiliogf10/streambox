@@ -34,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.support.TestAccounts;
 import com.emilio.streambox.security.JwtService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -75,6 +76,7 @@ class RateLimitingIntegrationTest {
      */
     private void createUser(String name) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode("correct-password"));
@@ -121,8 +123,8 @@ class RateLimitingIntegrationTest {
     void superarElLimiteDeRegistroPorIpRetorna429() throws Exception {
         createUser("user3");
         String ip = "10.3.0.1";
-        register("reg1", ip).andExpect(status().isCreated());
-        register("reg2", ip).andExpect(status().isCreated());
+        register("reg1", ip).andExpect(status().isAccepted());
+        register("reg2", ip).andExpect(status().isAccepted());
 
         register("reg3", ip)
                 .andExpect(status().isTooManyRequests())
@@ -134,8 +136,8 @@ class RateLimitingIntegrationTest {
     void elLimiteDeRegistroYElDeLoginSonIndependientes() throws Exception {
         createUser("user4");
         String ip = "10.4.0.1";
-        register("indep1", ip).andExpect(status().isCreated());
-        register("indep2", ip).andExpect(status().isCreated());
+        register("indep1", ip).andExpect(status().isAccepted());
+        register("indep2", ip).andExpect(status().isAccepted());
 
         login("user4@test.com", "correct-password", ip).andExpect(status().isNoContent());
     }
@@ -213,6 +215,7 @@ class RateLimitingIntegrationTest {
     void elBloqueoDeUnaCuentaNoAfectaAOtra() throws Exception {
         createUser("user9");
         User other = new User();
+        other.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         other.setUsername("other");
         other.setEmail("other@test.com");
         other.setPassword(passwordEncoder.encode("other-password"));
@@ -273,8 +276,8 @@ class RateLimitingIntegrationTest {
     void elLimiteDeRegistroNoSeSaltaCodificandoLaRuta(String encodedPath) throws Exception {
         String ip = nextVariantIp();
         String prefix = "codif" + VARIANT_SEQUENCE.get();
-        register(prefix + "a", ip).andExpect(status().isCreated());
-        register(prefix + "b", ip).andExpect(status().isCreated());
+        register(prefix + "a", ip).andExpect(status().isAccepted());
+        register(prefix + "b", ip).andExpect(status().isAccepted());
 
         mockMvc.perform(post(URI.create(encodedPath))
                         .with(ip(ip))
@@ -296,8 +299,8 @@ class RateLimitingIntegrationTest {
     @Test
     void lasVariantesQueSpringNoEnrutaNoCreanCuentasNiDanToken() throws Exception {
         String ip = nextVariantIp();
-        register("noenruta1", ip).andExpect(status().isCreated());
-        register("noenruta2", ip).andExpect(status().isCreated());
+        register("noenruta1", ip).andExpect(status().isAccepted());
+        register("noenruta2", ip).andExpect(status().isAccepted());
 
         for (String path : new String[] { "/api/users/", "/api/Users", "/api/USERS" }) {
             mockMvc.perform(post(URI.create(path)).with(ip(ip))
@@ -328,10 +331,11 @@ class RateLimitingIntegrationTest {
     @Test
     void conTokenLasVariantesNoEnrutadasTampocoRegistran() throws Exception {
         String ip = nextVariantIp();
-        register("contoken1", ip).andExpect(status().isCreated());
-        register("contoken2", ip).andExpect(status().isCreated());
+        register("contoken1", ip).andExpect(status().isAccepted());
+        register("contoken2", ip).andExpect(status().isAccepted());
+        // El registro deja la cuenta pendiente (V9) y su JWT no autenticaría.
         String token = "Bearer " + jwtService.generateToken(
-                userRepository.findByEmail("contoken1@test.com").orElseThrow());
+                TestAccounts.markEmailVerified(userRepository, "contoken1@test.com"));
 
         for (String path : new String[] { "/api/users/", "/api/Users" }) {
             mockMvc.perform(post(URI.create(path)).with(ip(ip)).header("Authorization", token)

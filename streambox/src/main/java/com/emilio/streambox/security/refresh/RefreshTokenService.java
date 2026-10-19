@@ -66,6 +66,9 @@ import com.emilio.streambox.security.JwtService;
  *       sigue vivo, no es robo: se le da solo un JWT nuevo, sin rotar ni
  *       cambiar la cookie del refresh (el navegador ya tiene la del sucesor,
  *       que le llegó con la respuesta de la primera pestaña).</li>
+ *   <li><b>Cuenta pendiente de confirmar el correo:</b> nunca se renueva
+ *       (tampoco en la gracia) y se revocan todas sus sesiones; ver
+ *       {@code rejectIfEmailNotVerified}.</li>
  * </ul>
  *
  * <h2>Concurrencia</h2>
@@ -155,7 +158,9 @@ public class RefreshTokenService {
      *         {@code null})
      * @throws SessionExpiredException si el token falta, no tiene el formato
      *         esperado, no existe, ha caducado (él o su familia), está revocado
-     *         o se ha reutilizado (en este caso, además, se revoca la familia)
+     *         o se ha reutilizado (en este caso, además, se revoca la familia),
+     *         o si la cuenta está pendiente de confirmar el correo (se revocan
+     *         todas sus sesiones; ver {@code rejectIfEmailNotVerified})
      */
     @Transactional(noRollbackFor = SessionExpiredException.class)
     public SessionTokens refresh(String presentedToken) {
@@ -170,7 +175,9 @@ public class RefreshTokenService {
 
         if (token.getRevokedAt() != null) {
             if (isConcurrentRefresh(token, now)) {
-                return new SessionTokens(jwtService.generateToken(token.getUser()), null);
+                User user = token.getUser();
+                rejectIfEmailNotVerified(user);
+                return new SessionTokens(jwtService.generateToken(user), null);
             }
             revokeFamilyOnReuse(token, now);
             throw new SessionExpiredException();
@@ -181,6 +188,7 @@ public class RefreshTokenService {
         }
 
         User user = token.getUser();
+        rejectIfEmailNotVerified(user);
         NewToken successor = issue(user, token.getFamilyId(), now, token.getFamilyExpiresAt());
         // El INSERT del sucesor ya se ha hecho (id IDENTITY); el UPDATE del
         // viejo (revocado + enlace) lo escribe Hibernate al confirmar, en la
@@ -327,6 +335,49 @@ public class RefreshTokenService {
         RefreshToken saved = refreshTokenRepository.save(token);
 
         return new NewToken(saved, new IssuedRefreshToken(value, Duration.between(now, expiresAt)));
+    }
+
+    /**
+     * Rechaza la renovación si la cuenta está pendiente de confirmar el correo,
+     * y de paso revoca <b>todas</b> sus sesiones.
+     *
+     * <p>
+     * <b>Por qué.</b> Desde la {@code V9}, las cuentas {@code USER} que ya
+     * existían quedaron pendientes, pero pueden tener sesiones abiertas de
+     * antes (refresh tokens de hasta 30 días). Una cuenta pendiente no puede
+     * iniciar sesión (el login la trata como un intento fallido), así que tampoco debe
+     * poder <i>seguir</i> en una sesión: si no, la verificación se esquivaría
+     * renovando la cookie. Además, una sesión abierta antes de demostrar el
+     * correo pudo abrirla otra persona que se registró con un email ajeno: si el
+     * titular real confirma después el correo, esas sesiones no deben
+     * «despertar». Por eso se revocan todas las familias del usuario y no solo
+     * la presentada (cuesta un {@code UPDATE}; las demás se rechazarían igual
+     * al presentarse, pero así quedan cerradas aunque no se presenten).
+     * </p>
+     *
+     * <p>
+     * Se comprueba después de las demás condiciones (revocado, caducado), para
+     * que la reutilización de un token se siga detectando y registrando como
+     * siempre. El mismo 401 {@code SESSION_EXPIRED} que cualquier otro fallo:
+     * el frontend vuelve al login, y allí la interfaz le recuerda confirmar el
+     * correo. La
+     * transacción confirma la revocación pese a la excepción
+     * ({@code noRollbackFor} en {@link #refresh(String)}).
+     * </p>
+     *
+     * @param user dueño del token presentado
+     * @throws SessionExpiredException si la cuenta está pendiente
+     */
+    private void rejectIfEmailNotVerified(User user) {
+
+        if (user.isEmailVerified()) {
+            return;
+        }
+        Long userId = user.getId();
+        int revoked = revokeAllSessions(userId);
+        LOGGER.debug("Refresh de una cuenta pendiente de confirmar el correo (usuario {}): se revocan sus "
+                + "sesiones ({} tokens activos)", userId, revoked);
+        throw new SessionExpiredException();
     }
 
     /**

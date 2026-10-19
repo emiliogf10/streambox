@@ -55,6 +55,7 @@ class RefreshTokenConcurrencyIntegrationTest {
     @Test
     void variosRefreshSimultaneosDelMismoTokenSoloRotanUnaVez() throws Exception {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername("concurrency-refresh");
         user.setEmail("ana" + DOMAIN);
         user.setPassword(passwordEncoder.encode("Contraseña-Concurrente-2026"));

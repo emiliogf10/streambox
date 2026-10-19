@@ -154,6 +154,46 @@ for (const viewport of VIEWPORTS) {
       await expectNoHorizontalScroll(page);
     });
 
+    test('«Revisa tu correo» con un correo muy largo (sin cortes de palabra no hay sitio a 375 px)', async ({ page }) => {
+      // Respuesta simulada: aquí solo importa la maquetación, no crear una cuenta.
+      await page.route('**/api/users', (route) =>
+        route.fulfill({
+          status: 202,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'Si el correo es correcto, te llegará un enlace para confirmar tu cuenta.' }),
+        }),
+      );
+      const longEmail = `nombre.apellido.muy.largo.sin.espacios.${'x'.repeat(20)}@subdominio.ejemplo-largo.com`;
+      await page.goto('/registro');
+      await page.getByLabel('Nombre de usuario').fill('usuario_responsive');
+      await page.getByLabel('Correo electrónico').fill(longEmail);
+      await page.getByLabel('Contraseña').fill('Tranvia-Lienzo-Faro-47');
+      await page.getByRole('button', { name: 'Crear cuenta' }).click();
+
+      await expectFullyInsideViewportWidth(page.getByRole('heading', { level: 1, name: 'Revisa tu correo' }), page, 'título');
+      await expectFullyInsideViewportWidth(page.getByText(longEmail), page, 'correo escrito');
+      await expectFullyInsideViewportWidth(page.getByRole('button', { name: /^Reenviar en / }), page, 'botón de reenviar');
+      await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Corregir el correo' }), page, '«Corregir el correo»');
+      await expectNoHorizontalScroll(page);
+    });
+
+    test('/verificar-email: «Confirma tu correo» y «enlace no válido» con su formulario', async ({ page }) => {
+      await page.goto(`/verificar-email#token=${'A'.repeat(43)}`);
+      await expectFullyInsideViewportWidth(page.getByRole('heading', { level: 1, name: 'Confirma tu correo' }), page, 'título');
+      await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Confirmar mi correo' }), page, 'botón de confirmar');
+      await expectNoHorizontalScroll(page);
+
+      await page.goto('/verificar-email');
+      await expectFullyInsideViewportWidth(
+        page.getByRole('heading', { level: 1, name: 'El enlace no es válido o ha caducado' }),
+        page,
+        'título',
+      );
+      await expectFullyInsideViewportWidth(page.getByLabel('Correo electrónico'), page, 'campo de correo');
+      await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Enviar un enlace nuevo' }), page, 'botón de enviar');
+      await expectNoHorizontalScroll(page);
+    });
+
     test('/ (portada): barra, banner y botones', async ({ page, user, signIn }) => {
       await signIn(user);
       await page.goto('/');

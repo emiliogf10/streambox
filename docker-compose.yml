@@ -4,7 +4,8 @@
 # Levantar todo:   1) cp .env.example .env   y rellena los valores
 #                  2) docker compose up -d --build
 #                  3) abre http://localhost:8088 (o el STREAMBOX_PORT del .env)
-# Ver el estado:   docker compose ps          (los tres deben salir "healthy")
+# Ver el estado:   docker compose ps          (los cuatro deben salir "healthy")
+# Ver los correos: http://localhost:8025      (Mailpit: bandeja de pruebas)
 # Ver los logs:    docker compose logs -f backend
 # Parar:           docker compose down        (los datos se conservan)
 # Borrar datos:    docker compose down -v     (⚠ borra el volumen de la base)
@@ -16,12 +17,14 @@
 # muestra el mensaje); ${VAR:-valor} = opcional con valor por defecto.
 #
 # Puertos: ni la base de datos ni el backend se publican en tu máquina.
-# Solo se puede llegar a ellos desde dentro de la red de Docker. El único
-# puerto publicado es el de nginx (servicio "frontend"), que sirve la web y
+# Solo se puede llegar a ellos desde dentro de la red de Docker. El puerto
+# de la aplicación es el de nginx (servicio "frontend"), que sirve la web y
 # reenvía /api/ al backend. Y así tiene que ser: el perfil prod confía en
 # la cabecera X-Forwarded-For (server.forward-headers-strategy=native) para
 # el límite por IP, y eso solo es seguro si nadie puede hablar con el
 # backend saltándose el proxy (nginx la fija con la IP real del cliente).
+# El otro puerto publicado es la web de Mailpit (127.0.0.1:8025), la
+# bandeja de pruebas donde se ven los correos que envía la aplicación.
 # ===================================================================
 
 # Nombre fijo del proyecto: los contenedores, la red y el volumen se llaman
@@ -35,7 +38,7 @@ services:
   # Testcontainers, para probar contra el mismo motor que se despliega.
   # Versión fijada hasta el parche y la base (Debian 13 "trixie", la misma
   # que usa la etiqueta "16" y los tests; no Alpine, cuya libc musl ordena
-  # el texto de otra forma), como las otras dos imágenes. Dependabot
+  # el texto de otra forma), como las demás imágenes. Dependabot
   # propone las subidas de parche (16.x); las de versión mayor están
   # ignoradas a propósito (ver .github/dependabot.yml): de 16 a 17 hace
   # falta migrar los datos del volumen (pg_upgrade o volcado y carga).
@@ -62,7 +65,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
-    # Endurecimiento, como en los otros dos servicios. La imagen oficial
+    # Endurecimiento, como en los demás servicios. La imagen oficial
     # arranca como root solo para preparar carpetas y luego cambia al
     # usuario postgres (UID 999); para eso necesita capacidades del kernel
     # (CHOWN, SETUID...). Arrancando directamente como postgres (modo que la
@@ -108,6 +111,74 @@ services:
     # Más rápido, sin override: docker compose exec db psql -U streambox
 
   # ---------------------------------------------------------------
+  # Mailpit: servidor SMTP de PRUEBAS con una bandeja web. Recibe todos
+  # los correos que envía el backend (el enlace para confirmar el email al
+  # registrarse) y NO los entrega a nadie: se quedan aquí para leerlos en
+  # http://localhost:8025 (o el MAILPIT_PORT del .env). Así el registro
+  # funciona de punta a punta sin una cuenta de correo real.
+  #
+  # Hace falta porque el perfil prod (el de este compose) se niega a
+  # arrancar sin servidor SMTP (ver EmailSenderConfig): en producción nadie
+  # lee el log para copiar el enlace, como se hace en desarrollo.
+  #
+  # En un despliegue REAL este servicio no va: el backend usa el SMTP de un
+  # proveedor (SPRING_MAIL_HOST, SPRING_MAIL_PORT, SPRING_MAIL_USERNAME,
+  # SPRING_MAIL_PASSWORD), un remitente de tu dominio (STREAMBOX_EMAIL_FROM)
+  # y la URL pública de la web (STREAMBOX_PUBLIC_URL). Ojo: en este compose
+  # el backend solo está en redes internas, sin salida a Internet, así que no
+  # podría hablar con un SMTP externo sin cambiar también sus redes.
+  #
+  # Imagen fijada hasta el parche, como las demás; Dependabot propone las
+  # subidas (ecosistema docker-compose de .github/dependabot.yml).
+  # ---------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    restart: unless-stopped
+    environment:
+      # Sin consultar a GitHub si hay versión nueva (lo haría al abrir
+      # "Acerca de" en la web): no aporta nada y es una conexión saliente.
+      MP_DISABLE_VERSION_CHECK: "true"
+      # Como mucho 500 correos; al pasarse borra los más antiguos. Los
+      # guarda en /tmp (en memoria, ver tmpfs): se pierden al parar.
+      MP_MAX_MESSAGES: "500"
+      # Solo se atienden peticiones cuya cabecera Host sea localhost o
+      # 127.0.0.1 (Mailpit compara el nombre, sin el puerto; las IP de
+      # loopback siempre valen). Defensa contra el DNS rebinding: publicarla
+      # en 127.0.0.1 no basta, porque una web maliciosa puede hacer que SU
+      # dominio resuelva a 127.0.0.1 y leer desde tu navegador esta API sin
+      # contraseña, con los enlaces de verificación. Esa petición llega con
+      # su dominio en Host y Mailpit la rechaza con 403. Sin esta variable,
+      # Mailpit avisa al arrancar ("without --ui-auth-file or --allowed-hosts").
+      MP_ALLOWED_HOSTS: "localhost,127.0.0.1"
+    # Endurecimiento, como en los demás servicios. La imagen arranca como
+    # root, pero no lo necesita: escucha en puertos altos (1025 y 8025) y solo
+    # escribe su base de datos temporal en /tmp. Se arranca como "nobody"
+    # (UID 65534 de Alpine), sin ninguna capacidad del kernel.
+    user: "65534:65534"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    ports:
+      # Solo la web (8025), y SIEMPRE en 127.0.0.1, sin variable para
+      # abrirla a la red como la de nginx: no tiene contraseña y muestra
+      # todos los correos, con enlaces de verificación válidos. El SMTP
+      # (1025) no se publica: solo lo usa el backend, por mail-network.
+      - "127.0.0.1:${MAILPIT_PORT:-8025}:8025"
+    networks:
+      # mail-network: el backend le envía los correos (SMTP, puerto 1025).
+      # mail-ui: red no interna, solo para poder publicar la web (Docker no
+      # publica puertos en redes internas). Mailpit no está en db-network ni
+      # en app-network: no puede hablar con la base ni con nginx.
+      - mail-network
+      - mail-ui
+    # El HEALTHCHECK lo define la imagen: "/mailpit readyz" cada 15 s.
+
+  # ---------------------------------------------------------------
   # Backend Spring Boot (imagen construida con streambox/Dockerfile).
   # Escucha en el puerto 8080 DENTRO de la red de Docker.
   # ---------------------------------------------------------------
@@ -118,6 +189,11 @@ services:
       db:
         # Espera a que el healthcheck de PostgreSQL dé OK, no solo a que el
         # contenedor exista: si no, Flyway fallaría al no poder conectar.
+        condition: service_healthy
+      mailpit:
+        # El backend arrancaría sin él (un envío fallido solo deja un WARN
+        # en el log), pero el correo de quien se registrase en ese momento
+        # se perdería. Se espera a que Mailpit esté listo.
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: prod
@@ -142,6 +218,25 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Correo: el SMTP de pruebas de arriba ("mailpit" es el nombre del
+      # servicio), sin usuario, contraseña ni TLS. Valores fijos y no del
+      # .env a propósito: con estas redes internas el backend no llega a
+      # ningún otro servidor (ver el comentario del servicio mailpit).
+      SPRING_MAIL_HOST: mailpit
+      SPRING_MAIL_PORT: "1025"
+      # El perfil prod exige STARTTLS (application-prod.properties): un
+      # correo con un enlace de verificación no debe viajar en claro por
+      # Internet. Mailpit no tiene TLS, y aquí el correo no sale de la red
+      # interna mail-network (backend → mailpit, sin acceso a Internet), así
+      # que se desactiva solo para él. Con un SMTP real, quita esta línea.
+      STREAMBOX_MAIL_STARTTLS_REQUIRED: "false"
+      # URL de la web con la que se construyen los enlaces de los correos
+      # (http://localhost:8088/verificar-email#token=...). Por defecto, la de
+      # nginx en este equipo con el STREAMBOX_PORT elegido. NUNCA se deduce de
+      # la petición (la cabecera Host la escribe el cliente).
+      STREAMBOX_PUBLIC_URL: ${STREAMBOX_PUBLIC_URL:-http://localhost:${STREAMBOX_PORT:-8088}}
+      # Remitente de los correos.
+      STREAMBOX_EMAIL_FROM: ${STREAMBOX_EMAIL_FROM:-StreamBox <no-reply@streambox.local>}
     # Límite de memoria del contenedor. La JVM ajusta su heap a él
     # (-XX:MaxRAMPercentage=75 en el Dockerfile → ~768 MB de heap); sin
     # límite, lo calcularía sobre toda la memoria de la máquina.
@@ -163,6 +258,7 @@ services:
     networks:
       - db-network
       - app-network
+      - mail-network
     # Sin "ports" a propósito (ver la cabecera). El HEALTHCHECK lo define
     # el Dockerfile: /actuator/health/readiness.
 
@@ -228,6 +324,13 @@ networks:
   # Red de entrada, solo para nginx. Docker solo publica puertos en redes
   # no internas: por eso nginx necesita esta además de app-network.
   edge: {}
+  # Red solo entre backend y Mailpit (SMTP). Interna, como las otras dos del
+  # backend: le sigue sin dar salida a Internet.
+  mail-network:
+    internal: true
+  # Red propia de Mailpit para publicar su web, por el mismo motivo que
+  # "edge". Separada de "edge" para que nginx y Mailpit no se vean.
+  mail-ui: {}
 
 volumes:
   db-data:

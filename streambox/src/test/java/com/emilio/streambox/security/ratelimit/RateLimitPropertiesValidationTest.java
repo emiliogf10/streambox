@@ -38,6 +38,10 @@ class RateLimitPropertiesValidationTest {
                     "streambox.security.rate-limit.register.window=1h",
                     "streambox.security.rate-limit.refresh.max-requests=30",
                     "streambox.security.rate-limit.refresh.window=1m",
+                    "streambox.security.rate-limit.email-verification.max-requests=20",
+                    "streambox.security.rate-limit.email-verification.window=15m",
+                    "streambox.security.rate-limit.email-verification-resend.max-requests=5",
+                    "streambox.security.rate-limit.email-verification-resend.window=1h",
                     "streambox.security.rate-limit.lockout.max-failures=5",
                     "streambox.security.rate-limit.lockout.window=15m",
                     "streambox.security.rate-limit.lockout.max-known-ips=5",
@@ -62,6 +66,35 @@ class RateLimitPropertiesValidationTest {
         runner.withPropertyValues(
                         "streambox.security.rate-limit.max-keys=100000",
                         "streambox.security.rate-limit.refresh.max-requests=0")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    /** Los límites de la verificación del correo se enlazan con sus nombres. */
+    @Test
+    void enlazaLosLimitesDeLaVerificacionDelCorreo() {
+        runner.withPropertyValues("streambox.security.rate-limit.max-keys=100000").run(context -> {
+            assertThat(context).hasNotFailed();
+            RateLimitProperties properties = context.getBean(RateLimitProperties.class);
+            assertThat(properties.emailVerification().maxRequests()).isEqualTo(20);
+            assertThat(properties.emailVerification().window()).isEqualTo(Duration.ofMinutes(15));
+            assertThat(properties.emailVerificationResend().maxRequests()).isEqualTo(5);
+            assertThat(properties.emailVerificationResend().window()).isEqualTo(Duration.ofHours(1));
+        });
+    }
+
+    /**
+     * Son obligatorios y positivos, como los demás: sin ellos (o a 0) la
+     * aplicación no arranca, en vez de dejar las rutas sin límite.
+     */
+    @Test
+    void unLimiteDeVerificacionDelCorreoNoPositivoImpideArrancar() {
+        runner.withPropertyValues(
+                        "streambox.security.rate-limit.max-keys=100000",
+                        "streambox.security.rate-limit.email-verification.max-requests=0")
+                .run(context -> assertThat(context).hasFailed());
+        runner.withPropertyValues(
+                        "streambox.security.rate-limit.max-keys=100000",
+                        "streambox.security.rate-limit.email-verification-resend.max-requests=0")
                 .run(context -> assertThat(context).hasFailed());
     }
 

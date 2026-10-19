@@ -116,6 +116,7 @@ class RefreshAndLogoutDatabaseFailureIntegrationTest {
     @Test
     void conLaBaseDeDatosCaidaElLogoutAllDa500YNoBorraLasCookies() throws Exception {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername("logoutall-bd-caida");
         user.setEmail("logoutall@bd-caida.test");
         user.setPassword("no-se-usa");

@@ -1,5 +1,6 @@
 package com.emilio.streambox.security;
 
+import java.time.Clock;
 import java.util.Locale;
 import java.util.Optional;
 
@@ -10,6 +11,8 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
@@ -47,6 +50,9 @@ import com.emilio.streambox.security.password.PasswordPolicy;
  *       arranca y el error dice qué regla falla: es mejor que un administrador
  *       con una contraseña de diccionario, que es la cuenta más valiosa.</li>
  *   <li>La contraseña no se escribe en los logs ni en el código.</li>
+ *   <li>El administrador <b>nace con el correo verificado</b>
+ *       ({@code email_verified_at}); si ya existía y estaba pendiente, se
+ *       verifica (ver {@code verifyIfPending}).</li>
  * </ul>
  *
  * <p>
@@ -71,20 +77,31 @@ public class AdminAccountInitializer implements ApplicationRunner {
     private final AdminProperties properties;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final Clock clock;
+    private final TransactionTemplate transactionTemplate;
 
     /**
-     * @param properties      datos del administrador (pueden estar vacíos)
-     * @param userRepository  repositorio de usuarios
-     * @param passwordEncoder codificador con el que se cifra la contraseña
+     * @param properties         datos del administrador (pueden estar vacíos)
+     * @param userRepository     repositorio de usuarios
+     * @param passwordEncoder    codificador con el que se cifra la contraseña
+     * @param clock              reloj de la aplicación (fecha de verificación del correo)
+     * @param transactionManager gestor de transacciones: el {@code UPDATE} que
+     *                           verifica a un administrador pendiente
+     *                           ({@link UserRepository#markEmailVerified}) necesita
+     *                           una, y este arranque no se ejecuta dentro de ninguna
      */
     public AdminAccountInitializer(
             AdminProperties properties,
             UserRepository userRepository,
-            PasswordEncoder passwordEncoder) {
+            PasswordEncoder passwordEncoder,
+            Clock clock,
+            PlatformTransactionManager transactionManager) {
 
         this.properties = properties;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.clock = clock;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     @Override
@@ -116,6 +133,7 @@ public class AdminAccountInitializer implements ApplicationRunner {
             // la instalación sin administrador sin avisar (y promover la
             // cuenta sería peor: se la daría a quien llegó primero).
             requireAdmin(existing.get(), email);
+            verifyIfPending(existing.get());
 
             // Ya existe: la contraseña configurada no se usa, así que no se
             // valida (ver el Javadoc de la clase); como mucho, se avisa. El
@@ -144,6 +162,12 @@ public class AdminAccountInitializer implements ApplicationRunner {
         admin.setUsername(username);
         admin.setPassword(passwordEncoder.encode(properties.password()));
         admin.setRole(Role.ADMIN);
+        // Nace verificado: no hay enlace que pulsar porque el email no lo ha
+        // escrito un desconocido en el registro, sino quien despliega la
+        // aplicación (ADMIN_EMAIL). Si naciera pendiente, el login lo
+        // rechazaría (401, como una contraseña incorrecta) y la instalación
+        // quedaría sin administrador hasta que funcionara el envío de correo.
+        admin.setEmailVerifiedAt(clock.instant());
         try {
             userRepository.save(admin);
         } catch (DataIntegrityViolationException raceLost) {
@@ -167,6 +191,42 @@ public class AdminAccountInitializer implements ApplicationRunner {
     private static void requireAdmin(User account, String email) {
         if (account.getRole() != Role.ADMIN) {
             throw notAnAdmin(email);
+        }
+    }
+
+    /**
+     * Verifica el correo del administrador de {@code ADMIN_EMAIL} si estaba
+     * pendiente.
+     *
+     * <p>
+     * No debería pasar: la {@code V9} verificó a todos los {@code ADMIN} y el
+     * administrador nuevo nace verificado. Solo ocurre si alguien puso a mano
+     * en la base de datos el rol {@code ADMIN} a una cuenta pendiente (o borró
+     * su fecha). Se verifica, en vez de dejarla así, por dos motivos: (1) la
+     * verificación demuestra que el email es de quien creó la cuenta, y una
+     * cuenta {@code ADMIN} no la crea el registro público, sino quien controla
+     * la base de datos o las variables de entorno, que ya ha demostrado más que
+     * eso; (2) dejarla pendiente dejaría la instalación sin administrador (el
+     * login daría 403) hasta que funcionara el envío de correo. Solo afecta a
+     * esta cuenta, que ya era {@code ADMIN} ({@link #requireAdmin} va antes):
+     * nunca se verifica ni se promueve una cuenta {@code USER}.
+     * </p>
+     *
+     * <p>
+     * Con {@link UserRepository#markEmailVerified}, un {@code UPDATE} de una sola
+     * columna que no pisa nada más de la fila ni la fecha de una verificación
+     * anterior (si otra réplica arranca a la vez, la segunda no cambia nada).
+     * </p>
+     */
+    private void verifyIfPending(User admin) {
+        if (admin.isEmailVerified()) {
+            return;
+        }
+        Integer updated = transactionTemplate.execute(
+                status -> userRepository.markEmailVerified(admin.getId(), clock.instant()));
+        if (updated != null && updated > 0) {
+            LOGGER.warn("El administrador inicial tenía el correo pendiente de verificar (rol ADMIN asignado "
+                    + "a mano); se marca como verificado para que pueda iniciar sesión");
         }
     }
 

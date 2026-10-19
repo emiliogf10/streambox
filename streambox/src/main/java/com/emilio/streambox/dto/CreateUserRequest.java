@@ -3,11 +3,13 @@ package com.emilio.streambox.dto;
 import com.emilio.streambox.security.password.NewPasswordRequest;
 import com.emilio.streambox.security.password.PasswordPolicy;
 import com.emilio.streambox.security.password.ValidPassword;
+import com.emilio.streambox.validation.ControlCharacters;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
@@ -72,8 +74,17 @@ public class CreateUserRequest implements NewPasswordRequest {
      * genérico en lugar de un 400 que dijera qué pasa. Un email demasiado largo
      * <em>y</em> mal formado incumple dos reglas y recibe uno de los dos
      * mensajes (Bean Validation no garantiza el orden); ambos son ciertos.</p>
+     *
+     * <p><b>Sin caracteres de control</b> ({@link ControlCharacters#SINGLE_LINE_TEXT}),
+     * con el mismo mensaje que el formato: {@code @Email} deja pasar los de
+     * {@code U+0080} a {@code U+009F} (p. ej. {@code U+0085}, «siguiente
+     * línea»), que acabarían en la base de datos, en los logs y en la cabecera
+     * {@code To} del correo. Un email con uno no es un email válido, así que
+     * el mensaje es verdad; y al ser el mismo que el de {@code @Email}, da igual
+     * cuál de los dos salte primero.</p>
      */
     @Email(message = EMAIL_FORMAT_MESSAGE)
+    @Pattern(regexp = ControlCharacters.SINGLE_LINE_TEXT, message = EMAIL_FORMAT_MESSAGE)
     @NotBlank(message = EMAIL_REQUIRED_MESSAGE)
     @Size(max = EMAIL_MAX_LENGTH, message = EMAIL_SIZE_MESSAGE)
     private String email;

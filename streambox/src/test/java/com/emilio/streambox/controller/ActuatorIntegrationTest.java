@@ -1,5 +1,7 @@
 package com.emilio.streambox.controller;
 
+import java.time.Instant;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -41,6 +43,7 @@ class ActuatorIntegrationTest {
     @BeforeEach
     void setUp() {
         User admin = new User();
+        admin.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         admin.setUsername("healthadmin");
         admin.setEmail("healthadmin@test.com");
         admin.setPassword(passwordEncoder.encode("password123"));

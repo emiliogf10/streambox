@@ -281,6 +281,9 @@ jobs:
       # Puerto del host en el que nginx publica la aplicación (el mismo
       # valor por defecto que docker-compose.yml).
       STREAMBOX_PORT: '8088'
+      # Puerto del host de la web (y la API) de Mailpit, la bandeja de
+      # pruebas donde la prueba de humo lee el correo de verificación.
+      MAILPIT_PORT: '8025'
     steps:
       - name: Descargar el código
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -349,18 +352,23 @@ jobs:
             echo "ADMIN_USERNAME=admin"
             echo "ADMIN_PASSWORD=$admin_password"
             echo "STREAMBOX_PORT=$STREAMBOX_PORT"
+            echo "MAILPIT_PORT=$MAILPIT_PORT"
           } > "$env_file"
           echo "STREAMBOX_ENV_FILE=$env_file" >> "$GITHUB_ENV"
 
       # --no-build: usa las imágenes de los pasos anteriores.
-      # --wait: no termina hasta que los tres contenedores están "healthy"
-      # (healthchecks de compose y de los Dockerfiles); si alguno no llega a
-      # estarlo en 3 minutos, el paso falla.
-      - name: Levantar el stack (db, backend y nginx)
+      # --wait: no termina hasta que los cuatro contenedores están "healthy"
+      # (healthchecks de compose y de las imágenes); si alguno no llega a
+      # estarlo en 3 minutos, el paso falla. La imagen de Mailpit no se
+      # construye: compose la descarga del registro (versión fijada).
+      # El perfil prod del backend exige un SMTP (SPRING_MAIL_HOST) y
+      # STREAMBOX_PUBLIC_URL: los pone el propio docker-compose.yml (Mailpit
+      # y http://localhost:<STREAMBOX_PORT>), así que el .env no los necesita.
+      - name: Levantar el stack (db, Mailpit, backend y nginx)
         run: docker compose --env-file "$STREAMBOX_ENV_FILE" up -d --no-build --wait --wait-timeout 180
 
-      # Cuatro comprobaciones con curl contra nginx, la única puerta de
-      # entrada, igual que un navegador:
+      # Cinco comprobaciones con curl contra nginx, la puerta de entrada de
+      # la aplicación, igual que un navegador (la quinta lee además Mailpit):
       #   1. "/" sirve la SPA (200) con la cabecera Content-Security-Policy,
       #      cuyo frame-src solo admite el reproductor de tráileres
       #      (https://www.youtube-nocookie.com).
@@ -374,6 +382,15 @@ jobs:
       #   4. Refresh: POST /api/auth/refresh con la cookie del refresh responde
       #      204 con las dos cookies rotadas (la tabla refresh_tokens de V4
       #      funciona en PostgreSQL) y la sesión sigue valiendo.
+      #   5. Registro con verificación del correo: el alta responde 202, el
+      #      login antes de confirmar da 401 INVALID_CREDENTIALS con
+      #      remainingAttempts (la misma respuesta que una contraseña
+      #      incorrecta, para no revelar que ese email está registrado; cuenta
+      #      como intento, pero el login correcto del final lo pone a cero),
+      #      el correo llega a Mailpit por SMTP (el envío es asíncrono: se espera hasta
+      #      30 s) con un enlace a STREAMBOX_PUBLIC_URL, su token confirma la
+      #      cuenta (204; tabla account_tokens de V9 en PostgreSQL) y después
+      #      el login funciona (204).
       # Sin jq a propósito (grep y sed): el mismo script funciona en el
       # Git Bash de Windows para reproducir la prueba en local.
       - name: Prueba de humo con curl
@@ -395,7 +412,7 @@ jobs:
             echo "$line" | grep -qE "; *Path=$3(;|$)" || fail "$4: la cookie $2 no tiene Path=$3"
           }
 
-          echo "1/4 Portada"
+          echo "1/5 Portada"
           status="$(curl -sS -o /dev/null -D "$tmp/home.headers" -w '%{http_code}' "$base_url/")"
           [ "$status" = "200" ] || fail "GET / devolvió $status (se esperaba 200)"
           csp="$(grep -i '^content-security-policy:' "$tmp/home.headers" | tr -d '\r' || true)"
@@ -406,7 +423,7 @@ jobs:
           echo "$csp" | grep -qE "; *frame-src https://www\.youtube-nocookie\.com *(;|$)" \
             || fail "La CSP no permite solo https://www.youtube-nocookie.com en frame-src"
 
-          echo "2/4 API sin token"
+          echo "2/5 API sin token"
           status="$(curl -sS -o "$tmp/movies.json" -D "$tmp/movies.headers" -w '%{http_code}' "$base_url/api/movies")"
           [ "$status" = "401" ] || fail "GET /api/movies sin token devolvió $status (se esperaba 401)"
           grep -qi '^content-type: application/json' "$tmp/movies.headers" \
@@ -414,7 +431,7 @@ jobs:
           grep -q '"code":"INVALID_CREDENTIALS"' "$tmp/movies.json" \
             || fail "El 401 de /api/movies no trae el código de error esperado"
 
-          echo "3/4 Login del administrador"
+          echo "3/5 Login del administrador"
           admin_email="$(sed -n 's/^ADMIN_EMAIL=//p' "$STREAMBOX_ENV_FILE")"
           admin_password="$(sed -n 's/^ADMIN_PASSWORD=//p' "$STREAMBOX_ENV_FILE")"
           status="$(curl -sS -o /dev/null -D "$tmp/login.headers" -c "$tmp/cookies.txt" -w '%{http_code}' \
@@ -429,7 +446,7 @@ jobs:
           [ "$status" = "200" ] || fail "GET /api/users/me con la cookie devolvió $status (se esperaba 200)"
           grep -q '"role":"ADMIN"' "$tmp/me.json" || fail "El usuario de la sesión no es ADMIN"
 
-          echo "4/4 Renovación de sesión con el refresh token"
+          echo "4/5 Renovación de sesión con el refresh token"
           # curl solo envía streambox_refresh a /api/auth/* (Path de la cookie),
           # igual que el navegador; -c guarda las cookies rotadas.
           status="$(curl -sS -o /dev/null -D "$tmp/refresh.headers" -b "$tmp/cookies.txt" -c "$tmp/cookies.txt" \
@@ -439,6 +456,62 @@ jobs:
           check_cookie "$tmp/refresh.headers" streambox_refresh '/api/auth' "El refresh"
           status="$(curl -sS -o /dev/null -b "$tmp/cookies.txt" -w '%{http_code}' "$base_url/api/users/me")"
           [ "$status" = "200" ] || fail "GET /api/users/me tras el refresh devolvió $status (se esperaba 200)"
+
+          echo "5/5 Registro y confirmación del correo (SMTP con Mailpit)"
+          # Cuenta de usar y tirar: el nombre y el email llevan el mismo sufijo
+          # aleatorio (así el script se puede repetir sobre una base que ya
+          # tiene la cuenta de una ejecución anterior: un nombre repetido daría
+          # 409) y la contraseña (hexadecimal, 32 caracteres) cumple la política
+          # y no contiene ni el nombre ni el email ("humo" no es hexadecimal).
+          user_suffix="$(openssl rand -hex 4)"
+          user_name="humo-ci-$user_suffix"
+          user_email="humo-ci-$user_suffix@streambox.local"
+          user_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$user_password"
+          credentials="{\"email\":\"$user_email\",\"password\":\"$user_password\"}"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'Content-Type: application/json' -H 'X-Requested-With: StreamBox' \
+            --data "{\"username\":\"$user_name\",\"email\":\"$user_email\",\"password\":\"$user_password\"}" \
+            "$base_url/api/users")"
+          [ "$status" = "202" ] || fail "El registro devolvió $status (se esperaba 202)"
+          status="$(curl -sS -o "$tmp/pending-login.json" -w '%{http_code}' \
+            -H 'Content-Type: application/json' -H 'X-Requested-With: StreamBox' \
+            --data "$credentials" "$base_url/api/auth/login")"
+          [ "$status" = "401" ] || fail "El login sin confirmar el correo devolvió $status (se esperaba 401)"
+          grep -q '"code":"INVALID_CREDENTIALS"' "$tmp/pending-login.json" \
+            || fail "El 401 del login sin confirmar no trae el código INVALID_CREDENTIALS"
+          # remainingAttempts es lo que lleva el 401 de una contraseña incorrecta:
+          # sin él, las dos respuestas se distinguirían.
+          grep -qE '"remainingAttempts":[0-9]+' "$tmp/pending-login.json" \
+            || fail "El 401 del login sin confirmar no trae remainingAttempts"
+          # API de Mailpit: el último correo enviado a ese email (JSON con el
+          # cuerpo en "Text"). El backend lo envía en un hilo aparte tras
+          # guardar la cuenta: puede tardar un poco en llegar.
+          mailpit_url="http://127.0.0.1:${MAILPIT_PORT}"
+          token=""
+          for _ in $(seq 1 30); do
+            status="$(curl -sS -o "$tmp/mail.json" -w '%{http_code}' --get \
+              --data-urlencode "query=to:\"$user_email\"" \
+              "$mailpit_url/api/v1/message/latest" || true)"
+            if [ "$status" = "200" ]; then
+              token="$(grep -oE '/verificar-email#token=[A-Za-z0-9_-]+' "$tmp/mail.json" \
+                | head -n 1 | sed 's/.*#token=//' || true)"
+            fi
+            [ -n "$token" ] && break
+            sleep 1
+          done
+          [ -n "$token" ] || fail "No llegó a Mailpit ningún correo con el enlace de verificación"
+          echo "::add-mask::$token"
+          # El enlace apunta a la web (STREAMBOX_PUBLIC_URL), no a otro host.
+          grep -qF "http://localhost:${STREAMBOX_PORT}/verificar-email#token=" "$tmp/mail.json" \
+            || fail "El enlace del correo no apunta a http://localhost:${STREAMBOX_PORT}"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+            --data "{\"token\":\"$token\"}" "$base_url/api/auth/email-verification")"
+          [ "$status" = "204" ] || fail "La confirmación del correo devolvió $status (se esperaba 204)"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'Content-Type: application/json' -H 'X-Requested-With: StreamBox' \
+            --data "$credentials" "$base_url/api/auth/login")"
+          [ "$status" = "204" ] || fail "El login tras confirmar el correo devolvió $status (se esperaba 204)"
 
           echo "Prueba de humo superada."
 

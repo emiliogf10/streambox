@@ -77,7 +77,8 @@ public class SecurityConfig {
         }
 
         /**
-         * Crea el filtro que limita por IP los intentos de login y registro.
+         * Crea el filtro que limita por IP los intentos de login y registro, la
+         * renovación de sesión y la verificación del correo.
          *
          * <p>
          * Recibe el mismo {@link PathPatternRequestMatcher.Builder} que usa
@@ -200,6 +201,11 @@ public class SecurityConfig {
          * <li>Permite el acceso sin autenticación a los endpoints
          * de usuarios y autenticación, a las comprobaciones de salud
          * ({@code /actuator/health}) y a la documentación OpenAPI.</li>
+         * <li>La confirmación del correo y su reenvío
+         * ({@value RateLimitingFilter#EMAIL_VERIFICATION_PATH} y
+         * {@value RateLimitingFilter#EMAIL_VERIFICATION_RESEND_PATH}) son
+         * públicas solo con {@code POST} y sin exigir {@code X-Requested-With}
+         * (no tienen sesión que proteger, igual que login y registro).</li>
          * <li>Las vistas de gestión ({@code /api/admin/**}) quedan reservadas a
          * {@code ADMIN} con cualquier método, también la lectura: muestran
          * datos que los usuarios no deben ver (p. ej. series sin
@@ -285,6 +291,24 @@ public class SecurityConfig {
                                                 // podria borrar las cookies de la victima.
                                                 .requestMatchers(HttpMethod.POST,
                                                                 JwtAuthenticationFilter.LOGOUT_PATH)
+                                                .permitAll()
+
+                                                // Confirmar el correo y pedir otro enlace: publicos
+                                                // (quien los usa aun no puede iniciar sesion) y
+                                                // limitados por IP en RateLimitingFilter, de donde
+                                                // salen las rutas. Solo POST: cualquier otro metodo
+                                                // (GET, HEAD, OPTIONS...) cae en anyRequest() y pide
+                                                // token. Sin la cabecera CSRF obligatoria, como login
+                                                // y registro: no hay sesion que proteger ni cookies
+                                                // que cambiar, el token o el email los pone quien
+                                                // envia la peticion (una web ajena no gana nada
+                                                // enviandolos en nombre de la victima) y, sin CORS,
+                                                // solo puede enviar POST "simples" (text/plain,
+                                                // formulario), que el controlador rechaza con 415 y
+                                                // que no gastan el limite por IP.
+                                                .requestMatchers(HttpMethod.POST,
+                                                                RateLimitingFilter.EMAIL_VERIFICATION_PATH,
+                                                                RateLimitingFilter.EMAIL_VERIFICATION_RESEND_PATH)
                                                 .permitAll()
 
                                                 // Cerrar sesion en todos los dispositivos y cambiar la

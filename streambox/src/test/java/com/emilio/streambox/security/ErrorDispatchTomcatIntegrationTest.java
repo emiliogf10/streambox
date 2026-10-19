@@ -165,6 +165,7 @@ class ErrorDispatchTomcatIntegrationTest {
     void createUser() {
         deleteUsersOfThisSuite();
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername("errordispatchuser");
         user.setEmail("errordispatchuser" + DOMAIN);
         user.setPassword(passwordEncoder.encode("Contraseña-Larga-Correcta-2026"));

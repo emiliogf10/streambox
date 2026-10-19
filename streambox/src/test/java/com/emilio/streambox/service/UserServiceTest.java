@@ -6,12 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 
 import org.hibernate.exception.ConstraintViolationException;
@@ -20,30 +24,34 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.security.crypto.password.PasswordEncoder;
 
-import com.emilio.streambox.dto.CreateUserRequest;
 import com.emilio.streambox.dto.UpdateProfileRequest;
+import com.emilio.streambox.email.EmailProperties;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.exception.UserAlreadyExistsException;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.security.ratelimit.RateLimitProperties;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.NullNode;
 
 /**
- * Tests unitarios de {@link UserService#updateProfile}, de la carrera en
- * {@link UserService#registerUser} y de la normalización del nombre de
- * usuario, con el repositorio simulado.
+ * Tests unitarios de {@link UserService#updateProfile} y de la normalización
+ * del nombre de usuario y del email, con el repositorio simulado. La carrera
+ * del registro está en {@code RegistrationServiceTest}.
  *
  * <p>
  * Cubren lo que una petición HTTP no puede provocar a voluntad: que otra
  * petición se quede el nombre entre la comprobación y el {@code UPDATE}
- * (la restricción {@code UNIQUE} salta y debe acabar en el mismo 409).
+ * (la restricción {@code UNIQUE} salta y debe acabar en el mismo 409), o
+ * que la cuenta pendiente dueña del nombre cambie mientras se espera su
+ * bloqueo.
  * </p>
  */
 class UserServiceTest {
@@ -52,12 +60,22 @@ class UserServiceTest {
 
     private UserRepository userRepository;
     private UserService service;
+    private UsernameReservations reservations;
+    private EmailVerificationService emailVerificationService;
     private User user;
 
     @BeforeEach
     void setUp() {
         userRepository = mock(UserRepository.class);
-        service = new UserService(userRepository, mock(PasswordEncoder.class));
+        RateLimitProperties rateLimit = mock(RateLimitProperties.class);
+        when(rateLimit.maxKeys()).thenReturn(1000);
+        reservations = new UsernameReservations(new EmailProperties("a@b.test", Duration.ofHours(24), false,
+                new EmailProperties.Resend(3, Duration.ofHours(1), Duration.ZERO)), rateLimit, Clock.systemUTC());
+        emailVerificationService = mock(EmailVerificationService.class);
+        // Por defecto, el bloqueo devuelve la misma cuenta (nadie la cambió entre medias).
+        when(emailVerificationService.lockForUpdate(any()))
+                .thenAnswer(invocation -> Optional.of(invocation.getArgument(0)));
+        service = new UserService(userRepository, reservations, emailVerificationService);
 
         user = new User();
         user.setId(USER_ID);
@@ -69,7 +87,7 @@ class UserServiceTest {
 
     @Test
     void unaCarreraQueChocaConLaUnicidadDa409YNoUnErrorDeIntegridadGenerico() {
-        when(userRepository.existsByUsername("bea")).thenReturn(false);
+        when(userRepository.findByUsername("bea")).thenReturn(Optional.empty());
         when(userRepository.saveAndFlush(any())).thenThrow(violation("23505"));
 
         assertThrows(UserAlreadyExistsException.class,
@@ -79,7 +97,7 @@ class UserServiceTest {
     @Test
     void otraViolacionAlGuardarNoSeDisfrazaDeNombreEnUso() {
         DataIntegrityViolationException notNull = violation("23502");
-        when(userRepository.existsByUsername("bea")).thenReturn(false);
+        when(userRepository.findByUsername("bea")).thenReturn(Optional.empty());
         when(userRepository.saveAndFlush(any())).thenThrow(notNull);
 
         assertSame(notNull, assertThrows(DataIntegrityViolationException.class,
@@ -90,7 +108,7 @@ class UserServiceTest {
     void elMismoNombreNoConsultaNiEscribe() {
         assertEquals("ana", service.updateProfile(USER_ID, request(" ana ")).username());
 
-        verify(userRepository, never()).existsByUsername(anyString());
+        verify(userRepository, never()).findByUsername(anyString());
         verify(userRepository, never()).saveAndFlush(any());
     }
 
@@ -103,6 +121,134 @@ class UserServiceTest {
         assertEquals("bea", user.getUsername());
         assertEquals("ana@test.com", user.getEmail());
         assertEquals(Role.USER, user.getRole());
+    }
+
+    /**
+     * Oráculo del nombre por «Editar perfil»: registrarse con el email de otro
+     * y el nombre {@code bea} reserva {@code bea} si ese email ya tenía cuenta;
+     * cambiarse después el nombre a {@code bea} con una cuenta propia debe dar
+     * el mismo 409 que si la cuenta pendiente se hubiera creado.
+     */
+    @Test
+    void unNombreReservadoPorOtroEmailDa409() {
+        reservations.reserve("bea", "otra@test.com");
+
+        UserAlreadyExistsException error = assertThrows(UserAlreadyExistsException.class,
+                () -> service.updateProfile(USER_ID, request("bea")));
+
+        assertEquals("El nombre de usuario ya está en uso", error.getMessage());
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    /** La cuenta del email de la reserva sí puede usar el nombre: la reserva no la estorba. */
+    @Test
+    void elDuenoDelEmailDeLaReservaSiPuedeUsarElNombre() {
+        reservations.reserve("bea", "ana@test.com");
+        when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertEquals("bea", service.updateProfile(USER_ID, request("bea")).username());
+    }
+
+    // ------------------------------------------------------------------
+    // QA-2: el nombre de una cuenta pendiente sustituible se libera
+    // ------------------------------------------------------------------
+
+    /**
+     * El nombre lo tiene una pendiente sustituible (la creó el registro y su
+     * enlace caducó): se borra con la misma regla que el registro y el cambio
+     * sale bien. Las dos filas se bloquean de menor a mayor id (la pendiente,
+     * id 3, antes que la propia, id 5) y el borrado va después de los dos
+     * bloqueos.
+     */
+    @Test
+    void elNombreDeUnaPendienteSustituibleSeLiberaBloqueandoEnOrdenDeId() {
+        User stale = pending(3L, "bea");
+        when(userRepository.findByUsername("bea")).thenReturn(Optional.of(stale));
+        when(emailVerificationService.deleteIfReplaceable(stale)).thenReturn(true);
+        when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertEquals("bea", service.updateProfile(USER_ID, request("bea")).username());
+
+        InOrder order = inOrder(emailVerificationService, userRepository);
+        order.verify(emailVerificationService).lockForUpdate(stale);
+        order.verify(emailVerificationService).lockForUpdate(user);
+        order.verify(emailVerificationService).deleteIfReplaceable(stale);
+        order.verify(userRepository).saveAndFlush(user);
+    }
+
+    /** Con la propia cuenta de id menor, se bloquea primero la propia. */
+    @Test
+    void siLaPropiaCuentaTieneElIdMenorSeBloqueaPrimero() {
+        User stale = pending(9L, "bea");
+        when(userRepository.findByUsername("bea")).thenReturn(Optional.of(stale));
+        when(emailVerificationService.deleteIfReplaceable(stale)).thenReturn(true);
+        when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateProfile(USER_ID, request("bea"));
+
+        InOrder order = inOrder(emailVerificationService);
+        order.verify(emailVerificationService).lockForUpdate(user);
+        order.verify(emailVerificationService).lockForUpdate(stale);
+    }
+
+    /**
+     * Una pendiente que no se puede sustituir (enlace vigente o heredada) da
+     * el 409 de siempre y no se guarda nada.
+     */
+    @Test
+    void elNombreDeUnaPendienteQueNoSePuedeSustituirDa409() {
+        User legacy = pending(3L, "bea");
+        when(userRepository.findByUsername("bea")).thenReturn(Optional.of(legacy));
+        when(emailVerificationService.deleteIfReplaceable(legacy)).thenReturn(false);
+
+        UserAlreadyExistsException error = assertThrows(UserAlreadyExistsException.class,
+                () -> service.updateProfile(USER_ID, request("bea")));
+
+        assertEquals("El nombre de usuario ya está en uso", error.getMessage());
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    /** El nombre de una cuenta confirmada da 409 sin bloquear ni intentar borrar nada. */
+    @Test
+    void elNombreDeUnaCuentaConfirmadaDa409SinBloquear() {
+        User confirmed = pending(3L, "bea");
+        confirmed.setEmailVerifiedAt(Instant.parse("2026-01-01T00:00:00Z"));
+        when(userRepository.findByUsername("bea")).thenReturn(Optional.of(confirmed));
+
+        assertThrows(UserAlreadyExistsException.class, () -> service.updateProfile(USER_ID, request("bea")));
+
+        verify(emailVerificationService, never()).lockForUpdate(any());
+        verify(emailVerificationService, never()).deleteIfReplaceable(any());
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    /**
+     * Si la pendiente desaparece (otro registro la sustituyó) o cambia de
+     * nombre mientras se espera su bloqueo, el nombre se da por libre: no se
+     * intenta borrar nada y el {@code UNIQUE} queda de respaldo. Se guarda la
+     * cuenta releída bajo el bloqueo, no la leída antes.
+     */
+    @Test
+    void siLaPendienteDesapareceAlBloquearlaElNombreSeDaPorLibre() {
+        User vanished = pending(3L, "bea");
+        User lockedUser = new User();
+        lockedUser.setId(USER_ID);
+        lockedUser.setUsername("ana");
+        lockedUser.setEmail("ana@test.com");
+        lockedUser.setRole(Role.USER);
+        when(userRepository.findByUsername("bea")).thenReturn(Optional.of(vanished));
+        when(emailVerificationService.lockForUpdate(vanished)).thenReturn(Optional.empty());
+        when(emailVerificationService.lockForUpdate(user)).thenReturn(Optional.of(lockedUser));
+        when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertEquals("bea", service.updateProfile(USER_ID, request("bea")).username());
+
+        verify(emailVerificationService, never()).deleteIfReplaceable(any());
+        // User compara por id: se comprueba la instancia, no la igualdad.
+        ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).saveAndFlush(saved.capture());
+        assertSame(lockedUser, saved.getValue());
+        assertEquals("ana", user.getUsername(), "La instancia leída antes del bloqueo no se toca");
     }
 
     @ParameterizedTest
@@ -140,7 +286,7 @@ class UserServiceTest {
 
         assertEquals("cat", user.getAvatar());
         assertEquals("ana", user.getUsername());
-        verify(userRepository, never()).existsByUsername(anyString());
+        verify(userRepository, never()).findByUsername(anyString());
     }
 
     @Test
@@ -181,7 +327,7 @@ class UserServiceTest {
 
         assertEquals("star", user.getAvatar());
         assertEquals("ana", user.getUsername());
-        verify(userRepository, never()).existsByUsername(anyString());
+        verify(userRepository, never()).findByUsername(anyString());
     }
 
     /** Ni nombre ni avatar: 400 sin consultar la base de datos (un 200 vacío engañaría al cliente). */
@@ -223,99 +369,21 @@ class UserServiceTest {
         assertEquals("ana.lopez@test.com", UserService.normalizeEmail("  Ana.Lopez@TEST.com "));
     }
 
-    /**
-     * Pasar a minúsculas puede alargar el texto ({@code İ}, U+0130, son dos
-     * caracteres en minúscula): un email de 100 caracteres, que pasa
-     * {@code @Size}, quedaría con 160 y fallaría en la base de datos. El
-     * servicio lo rechaza con el mismo campo y mensaje que {@code @Size} y sin
-     * llegar a consultar ni guardar nada.
-     */
-    @Test
-    void unEmailQueCreceAlPasarloAMinusculasSeRechazaSinTocarLaBase() {
-        String email = "İ".repeat(60) + "@" + "d".repeat(35) + ".com";
-        assertEquals(100, email.length());
-
-        CreateUserRequest request = new CreateUserRequest();
-        request.setUsername("ana_nueva");
-        request.setEmail(email);
-        request.setPassword("un paseo por el retiro en otoño");
-
-        InvalidParameterException error = assertThrows(InvalidParameterException.class,
-                () -> service.registerUser(request));
-
-        assertEquals("email", error.getParameter());
-        assertEquals("El correo electrónico no puede tener más de 100 caracteres", error.getMessage());
-        verify(userRepository, never()).existsByEmail(anyString());
-        verify(userRepository, never()).saveAndFlush(any());
-    }
-
-    // ------------------------------------------------------------------
-    // Carrera en el registro (la restricción UNIQUE como respaldo)
-    // ------------------------------------------------------------------
-
-    /**
-     * Dos registros simultáneos pasan los dos {@code existsBy...} y el segundo
-     * choca con el {@code UNIQUE} del email. Antes la violación llegaba sin
-     * traducir a {@code GlobalExceptionHandler} (409 genérico; hoy sería un
-     * 500): debe ser el mismo {@link UserAlreadyExistsException} que da la
-     * comprobación previa, con el mensaje del email.
-     */
-    @Test
-    void unaCarreraEnElRegistroPorElEmailDaElMismo409QueLaComprobacionPrevia() {
-        when(userRepository.saveAndFlush(any())).thenThrow(uniqueViolation("uk_users_email"));
-
-        UserAlreadyExistsException error = assertThrows(UserAlreadyExistsException.class,
-                () -> service.registerUser(registration()));
-
-        assertEquals("El correo electrónico ya está en uso", error.getMessage());
-    }
-
-    /** Igual con el nombre de usuario; en H2 el nombre llega con esquema y sufijo. */
-    @Test
-    void unaCarreraEnElRegistroPorElNombreDaElMensajeDelNombre() {
-        when(userRepository.saveAndFlush(any()))
-                .thenThrow(uniqueViolation("PUBLIC.UK_USERS_USERNAME_INDEX_4 ON PUBLIC.USERS(USERNAME)"));
-
-        UserAlreadyExistsException error = assertThrows(UserAlreadyExistsException.class,
-                () -> service.registerUser(registration()));
-
-        assertEquals("El nombre de usuario ya está en uso", error.getMessage());
-    }
-
-    /** Si el motor no dice qué restricción falló, el mensaje cubre las dos (y sigue siendo cierto). */
-    @Test
-    void unaCarreraEnElRegistroSinNombreDeRestriccionDaUnMensajeQueCubreLasDos() {
-        when(userRepository.saveAndFlush(any())).thenThrow(violation("23505"));
-
-        UserAlreadyExistsException error = assertThrows(UserAlreadyExistsException.class,
-                () -> service.registerUser(registration()));
-
-        assertEquals("El nombre de usuario o el correo electrónico ya están en uso", error.getMessage());
-    }
-
-    /** Lo que no es unicidad no se disfraza de "ya está en uso": se relanza (500 y log). */
-    @Test
-    void otraViolacionEnElRegistroSeRelanzaTalCual() {
-        DataIntegrityViolationException check = violation("23514");
-        when(userRepository.saveAndFlush(any())).thenThrow(check);
-
-        assertSame(check, assertThrows(DataIntegrityViolationException.class,
-                () -> service.registerUser(registration())));
-    }
-
-    private static CreateUserRequest registration() {
-        CreateUserRequest request = new CreateUserRequest();
-        request.setUsername("ana_nueva");
-        request.setEmail("ana.nueva@test.com");
-        request.setPassword("un paseo por el retiro en otoño");
-        return request;
-    }
-
     /** Violación de unicidad con el nombre de la restricción, como la entrega Hibernate. */
     private static DataIntegrityViolationException uniqueViolation(String constraintName) {
         SQLException driver = new SQLException("violación de integridad", "23505");
         return new DataIntegrityViolationException("could not execute statement",
                 new ConstraintViolationException("could not execute statement", driver, constraintName));
+    }
+
+    /** Cuenta pendiente (sin verificar) dueña de un nombre. */
+    private static User pending(Long id, String username) {
+        User pending = new User();
+        pending.setId(id);
+        pending.setUsername(username);
+        pending.setEmail(username + "@otro.test");
+        pending.setRole(Role.USER);
+        return pending;
     }
 
     private static UpdateProfileRequest request(String username) {

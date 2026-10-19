@@ -6,11 +6,14 @@ import { AuthLayout } from '../components/AuthLayout';
 import { Button } from '../components/Button';
 import { FormAlert } from '../components/FormAlert';
 import { FormField } from '../components/FormField';
+import { ResendNotice } from '../components/ResendVerification';
 import { useAuth } from '../context/AuthContext';
 import { useCountdown } from '../hooks/useCountdown';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { useResendVerification } from '../hooks/useResendVerification';
 import { ApiError, getErrorMessage } from '../lib/api';
 import { formatWaitTime } from '../lib/utils';
+import { emailError } from '../lib/validation';
 
 /**
  * Minutos que dura el bloqueo de una cuenta tras demasiados fallos.
@@ -73,19 +76,115 @@ function RemainingAttemptsNotice({ remaining }: { remaining: number }) {
 }
 
 /**
+ * Pista «¿aún no has confirmado tu correo?» bajo el aviso de credenciales
+ * incorrectas (401) o de cuenta bloqueada (429 `ACCOUNT_LOCKED`), con el botón
+ * para pedir el correo de confirmación a la dirección con la que se intentó entrar.
+ *
+ * **Por qué sale en TODOS esos errores.** Para no revelar qué correos tienen
+ * cuenta, el servidor responde a una cuenta pendiente de confirmar, aunque la
+ * contraseña sea correcta, exactamente lo mismo que a una contraseña incorrecta
+ * (el mismo 401, que además cuenta como intento). La interfaz no puede saber
+ * cuál de los dos casos es, así que la pista va siempre y está escrita para ser
+ * verdad en los tres: contraseña incorrecta de una cuenta confirmada, cuenta
+ * pendiente y correo sin cuenta. Por eso es una pregunta («¿Te acabas de
+ * registrar…?») y nunca afirma que la cuenta exista ni que se haya enviado
+ * nada; el aviso del reenvío tampoco (el 202 es igual siempre).
+ *
+ * **Es una pista, no un error:** tono neutro (superficie y borde suaves, sin el
+ * rojo del aviso ni el ámbar del acento) y DEBAJO del aviso, para que el orden
+ * de lectura sea error (con los intentos que quedan) → pista → botón y no tape
+ * ni compita con `remainingAttempts`.
+ *
+ * **Accesibilidad.** El texto va en una región `role="status"` (cortés): el
+ * lector lee primero la alerta del error y después la pista, sin interrumpirla.
+ * Esa región y el contenedor se pintan SIEMPRE (vacíos si no hay pista), porque
+ * los lectores solo anuncian con fiabilidad los cambios de una región viva que
+ * ya estaba en la página; el botón queda fuera (un control dentro de una región
+ * viva se leería como parte del mensaje). Contraste: blanco y `gray-300` sobre
+ * `surface`, más de 12:1.
+ *
+ * **Por qué el componente no se desmonta.** El estado del reenvío
+ * (`useResendVerification`: la espera de un minuto y su aviso) vive aquí. Si se
+ * desmontara en cada envío del formulario, volver a intentar entrar reactivaría
+ * el botón al momento, y otro reenvío invalidaría el enlace que acaba de salir.
+ *
+ * El texto no da por hecho que exista un correo: las cuentas heredadas (de antes
+ * de la verificación) están pendientes y nunca recibieron ninguno. Por eso la
+ * salida es «si no tienes ninguno o ha caducado», no «si no lo encuentras».
+ *
+ * @param email correo (recortado y con formato válido) con el que se intentó
+ *              entrar, o `null` para no mostrar la pista
+ */
+function UnconfirmedEmailHint({ email }: { email: string | null }) {
+  const { resend, sending, remaining, notice } = useResendVerification();
+  const waiting = remaining > 0;
+  return (
+    <div className={email ? 'mb-5 rounded-lg border border-line bg-surface px-4 py-3 text-sm text-gray-300' : undefined}>
+      <div role="status">
+        {email && (
+          <>
+            <p className="font-medium text-white">¿Te acabas de registrar o aún no has confirmado tu correo?</p>
+            <p className="mt-1">
+              Hasta que lo confirmes no podrás entrar, aunque la contraseña sea correcta. Pulsa el enlace del correo
+              de confirmación de StreamBox (mira también en spam); si no tienes ninguno o ha caducado, pide uno nuevo
+              para <span className="break-all text-white">{email}</span>.
+            </p>
+          </>
+        )}
+      </div>
+      {email && (
+        <div>
+          <Button
+            variant="outline"
+            className="mt-3 w-full"
+            disabled={sending || waiting}
+            onClick={() => void resend(email)}
+          >
+            {sending
+              ? 'Enviando...'
+              : waiting
+                ? `Reenviar en ${formatWaitTime(remaining)}`
+                : 'Reenviar el correo de confirmación'}
+          </Button>
+          <ResendNotice notice={notice} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Correo para la pista de {@link UnconfirmedEmailHint}, o `null` si no tiene
+ * sentido ofrecerla: con un correo vacío o mal formado no puede haber ninguna
+ * cuenta que confirmar, y el botón no debe enviar nada.
+ *
+ * @param email correo ya recortado con el que se intentó entrar
+ */
+function hintEmailFor(email: string): string | null {
+  return emailError(email) ? null : email;
+}
+
+/**
  * Pantalla de inicio de sesión (`POST /api/auth/login`).
  *
  * Errores tratados de forma distinta según `status`, `code` y campos del cuerpo
  * (nunca según el texto del mensaje):
  * - 401: credenciales incorrectas (mensaje genérico: no revela si falla el
  *   correo o la contraseña). Si el servidor envía `remainingAttempts`, se avisa
- *   de cuántos intentos quedan antes del bloqueo de la cuenta.
+ *   de cuántos intentos quedan antes del bloqueo de la cuenta. Una cuenta que
+ *   aún no ha confirmado su correo recibe ESTE MISMO 401 aunque la contraseña
+ *   sea correcta (así el login no revela qué correos tienen cuenta), de modo que
+ *   debajo siempre va la pista {@link UnconfirmedEmailHint}.
  * - 429 `ACCOUNT_LOCKED`: la cuenta está bloqueada (también con la contraseña
- *   correcta). Mensaje específico y el botón bloqueado con una cuenta atrás en
- *   minutos y segundos (`Retry-After`).
+ *   correcta). Mensaje específico, el botón bloqueado con una cuenta atrás en
+ *   minutos y segundos (`Retry-After`) y la misma pista: una cuenta pendiente
+ *   que reintenta con la contraseña correcta acaba aquí.
  * - 429 por otro motivo (`RATE_LIMIT_EXCEEDED`, límite por IP): "demasiados
- *   intentos" y cuenta atrás en el botón.
- * - Red caída / 5xx / otros: el mensaje que ya prepara `apiFetch`.
+ *   intentos" y cuenta atrás en el botón (sin pista: no dice nada de la cuenta).
+ * - 403: el mensaje genérico de «sin permisos» de `apiFetch` (p. ej.
+ *   `CSRF_REJECTED`); el login ya no tiene ningún 403 propio.
+ * - Red caída / 5xx / otros: el mensaje que ya prepara `apiFetch`, sin pista
+ *   (el fallo no tiene que ver con la cuenta).
  *
  * `login()` del contexto hace la llamada y abre la sesión: `RedirectIfAuthenticated`
  * (en `App.tsx`) se encarga de llevar al usuario a la portada.
@@ -97,29 +196,42 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [remainingAttempts, setRemainingAttempts] = useState<number | undefined>(undefined);
+  /**
+   * Correo de la pista «¿aún no has confirmado tu correo?» (el del intento, no
+   * el que haya ahora en el campo, para que el texto diga a quién se enviaría).
+   */
+  const [hintEmail, setHintEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // Al acabar la espera se retira el aviso de "demasiados intentos" o de cuenta bloqueada.
-  const { remaining, start } = useCountdown(() => setError(''));
+  // Al acabar la espera se retira el aviso de "demasiados intentos" o de cuenta bloqueada (y su pista).
+  const { remaining, start } = useCountdown(() => {
+    setError('');
+    setHintEmail(null);
+  });
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError('');
     setRemainingAttempts(undefined);
-    if (!email.trim() || !password) {
+    setHintEmail(null);
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
       setError('Introduce tu correo electrónico y tu contraseña.');
       return;
     }
     setLoading(true);
     try {
       // El servidor fija la cookie de sesión (HttpOnly); no hay token que guardar.
-      await login(email.trim(), password);
+      await login(trimmedEmail, password);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setError('Correo o contraseña incorrectos.');
         setRemainingAttempts(err.remainingAttempts);
+        setHintEmail(hintEmailFor(trimmedEmail));
       } else if (err instanceof ApiError && err.status === 429) {
         if (err.retryAfterSeconds) start(err.retryAfterSeconds);
-        setError(err.code === 'ACCOUNT_LOCKED' ? accountLockedMessage(err.retryAfterSeconds) : err.message);
+        const locked = err.code === 'ACCOUNT_LOCKED';
+        setError(locked ? accountLockedMessage(err.retryAfterSeconds) : err.message);
+        if (locked) setHintEmail(hintEmailFor(trimmedEmail));
       } else {
         setError(getErrorMessage(err));
       }
@@ -146,6 +258,7 @@ export function LoginPage() {
       <FormAlert message={error}>
         {remainingAttempts !== undefined && <RemainingAttemptsNotice remaining={remainingAttempts} />}
       </FormAlert>
+      <UnconfirmedEmailHint email={error ? hintEmail : null} />
 
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
         <FormField

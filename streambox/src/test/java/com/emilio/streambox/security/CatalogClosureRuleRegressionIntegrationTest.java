@@ -37,6 +37,7 @@ import com.emilio.streambox.entity.User;
 import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.support.TestAccounts;
 
 /**
  * Regresión de la "regla de cierre" del catálogo de {@link SecurityConfig}
@@ -138,7 +139,10 @@ class CatalogClosureRuleRegressionIntegrationTest {
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"closurenew\",\"email\":\"closurenew@test.com\","
                                 + "\"password\":\"Closure-Pass-2026\"}"))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
+        // El registro deja la cuenta pendiente (V9); aquí solo importa que
+        // las rutas sigan siendo públicas.
+        TestAccounts.markEmailVerified(userRepository, "closurenew@test.com");
 
         mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"closurenew@test.com\",\"password\":\"Closure-Pass-2026\"}"))
@@ -220,6 +224,7 @@ class CatalogClosureRuleRegressionIntegrationTest {
 
     private User saveUser(String name, Role role) {
         User u = new User();
+        u.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         u.setUsername(name);
         u.setEmail(name + "@test.com");
         u.setPassword(passwordEncoder.encode("password123"));

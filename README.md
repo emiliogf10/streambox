@@ -19,6 +19,7 @@
   - Emisión y validación de tokens JWT mediante `io.jsonwebtoken (JJWT 0.13.0)`.
   - Control de acceso basado en roles (**`USER`** y **`ADMIN`**).
   - Manejadores de excepción personalizados para `401 Unauthorized` y `403 Forbidden` en formato JSON estructurado.
+  - **Verificación del correo al registrarse**: enlace de un solo uso (24 h, en la base solo su SHA-256) y registro que responde siempre igual, para que nadie pueda ocupar un email ajeno ni averiguar qué emails tienen cuenta.
 - **🎥 Catálogo y Búsqueda Dinámica**:
   - Paginación y ordenación nativa con `Pageable` y DTOs envolventes (`MoviePageResponse`).
   - Filtrado multicriterio combinable (título insensible a mayúsculas, género y año de lanzamiento) implementado mediante **Spring Data JPA `Specification`**.
@@ -102,8 +103,10 @@ La base de todos los endpoints es `/api`.
 ### 1. Autenticación y Usuarios
 | Método | Endpoint | Acceso | Descripción |
 | :--- | :--- | :---: | :--- |
-| `POST` | `/api/users` | Público | Registro de nuevos usuarios (contraseña de 12 a 64 caracteres, no común y sin el usuario ni el email; 400 con el motivo en `validationErrors.password`) |
-| `POST` | `/api/auth/login` | Público | Autenticación mediante email y contraseña; 204 sin cuerpo con dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min) y `streambox_refresh` (refresh token, `Path=/api/auth`). Un fallo responde 401 con `remainingAttempts`; al 5.º, 429 `ACCOUNT_LOCKED` |
+| `POST` | `/api/users` | Público | Registro: responde **202 siempre con el mismo cuerpo**, exista o no el email (no revela qué emails tienen cuenta); la cuenta queda pendiente y llega un correo con el enlace `<STREAMBOX_PUBLIC_URL>/verificar-email#token=…` (24 h). Solo un nombre de usuario ocupado da 409. Contraseña de 12 a 64 caracteres, no común y sin el usuario ni el email (400 con el motivo en `validationErrors.password`) |
+| `POST` | `/api/auth/email-verification` | Público | Confirma el correo con el token del enlace (`{"token"}`): 204 (no inicia sesión); 400 `INVALID_VERIFICATION_TOKEN` si no existe, caducó o ya se usó; 429 por IP |
+| `POST` | `/api/auth/email-verification/resend` | Público | Pide otro enlace (`{"email"}`): 202 siempre igual; solo envía si la cuenta está pendiente (3 correos/h y 1/min por cuenta, en silencio); 429 por IP |
+| `POST` | `/api/auth/login` | Público | Autenticación mediante email y contraseña; 204 sin cuerpo con dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min) y `streambox_refresh` (refresh token, `Path=/api/auth`). Un fallo responde 401 con `remainingAttempts`; al 5.º, 429 `ACCOUNT_LOCKED`. Una cuenta con el correo sin confirmar recibe **el mismo 401** aunque la contraseña sea correcta (y cuenta como intento), para no revelar qué emails tienen cuenta; la interfaz muestra entonces la pista de confirmar el correo |
 | `POST` | `/api/auth/refresh` | Público (cookie `streambox_refresh`) | Renueva la sesión sin contraseña: 204 con un JWT nuevo y el refresh token rotado. Exige `X-Requested-With: StreamBox` (403 `CSRF_REJECTED`); 401 `SESSION_EXPIRED` si el refresh no sirve (reutilizar uno ya rotado revoca la sesión); 429 por IP |
 | `POST` | `/api/auth/logout` | Público | Revoca la sesión del refresh token de la cookie y borra las dos cookies; 204 (403 `CSRF_REJECTED` sin `X-Requested-With: StreamBox`) |
 | `GET` | `/api/users/me` | `USER`, `ADMIN` | Consulta los datos del usuario autenticado (incluido `avatar`: la clave de su icono o `null`) |
@@ -169,7 +172,7 @@ La base de todos los endpoints es `/api`.
 
 ## 🐳 Arrancar con Docker (recomendado)
 
-Levanta **la aplicación completa** (PostgreSQL + backend + frontend) con un solo comando. Solo necesitas [Docker Desktop](https://www.docker.com/products/docker-desktop/); no hace falta tener Java, Node ni PostgreSQL instalados.
+Levanta **la aplicación completa** (PostgreSQL + Mailpit + backend + frontend) con un solo comando. Solo necesitas [Docker Desktop](https://www.docker.com/products/docker-desktop/); no hace falta tener Java, Node ni PostgreSQL instalados.
 
 ```bash
 cp .env.example .env          # en PowerShell: Copy-Item .env.example .env
@@ -181,7 +184,7 @@ Abre **http://localhost:8088**. Comandos útiles:
 
 | Comando | Para qué |
 | :--- | :--- |
-| `docker compose ps` | Estado de los tres servicios (deben salir `healthy`) |
+| `docker compose ps` | Estado de los cuatro servicios (deben salir `healthy`) |
 | `docker compose logs -f backend` | Ver los logs del backend (también `frontend` o `db`) |
 | `docker compose down` | Parar todo **conservando** los datos |
 | `docker compose down -v` | Parar todo y **borrar** la base de datos |
@@ -189,9 +192,10 @@ Abre **http://localhost:8088**. Comandos útiles:
 
 Cómo está montado:
 
-- **Tres contenedores.** `db` (PostgreSQL 16), `backend` (Spring Boot, perfil `prod`) y `frontend` (nginx, que sirve la SPA y reenvía `/api` al backend).
-- **Un único puerto publicado**, el de nginx, y solo en tu propio equipo (`127.0.0.1:8088`). La base de datos y el backend no se publican.
-- **Seguridad.** Los tres contenedores se ejecutan sin root, con el sistema de archivos de solo lectura. nginx añade la CSP y las cabeceras de seguridad.
+- **Cuatro contenedores.** `db` (PostgreSQL 16), `backend` (Spring Boot, perfil `prod`), `frontend` (nginx, que sirve la SPA y reenvía `/api` al backend) y `mailpit` (bandeja de correo de pruebas: los correos del registro se ven en **http://localhost:8025**).
+- **Para entrar con una cuenta nueva:** regístrate, abre http://localhost:8025, abre el enlace del correo y pulsa «Confirmar mi correo».
+- **Dos puertos publicados**, ambos solo en tu propio equipo: `127.0.0.1:8088` (la app) y `127.0.0.1:8025` (Mailpit). La base de datos y el backend no se publican.
+- **Seguridad.** Los cuatro contenedores se ejecutan sin root, con el sistema de archivos de solo lectura. nginx añade la CSP y las cabeceras de seguridad.
 - **Puerto ocupado:** cámbialo con `STREAMBOX_PORT` en el `.env`.
 - **Tus credenciales de desarrollo no entran.** Las imágenes nunca incluyen `application-local.properties`, así que Docker no se conecta a tu base de Supabase: usa su propia base, que vive en el volumen `streambox_db-data`.
 
@@ -218,13 +222,18 @@ Configura las siguientes variables de entorno en tu sistema o en tu IDE:
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Opcionales. Si ambas están definidas, al arrancar se crea el primer administrador (si no existe ya). Al crearlo, la contraseña debe cumplir la política del registro (12–64 caracteres, no común, sin el usuario ni el email) o la aplicación no arranca; si ya existe, no se valida | — |
 | `ADMIN_USERNAME` | Opcional. Nombre de usuario del administrador inicial | `admin` |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | Solo perfil `prod`: conexión a PostgreSQL | — |
+| `STREAMBOX_PUBLIC_URL` | URL de la web para los enlaces de los correos (obligatoria en `prod`; nunca se toma de la cabecera `Host`) | `http://localhost:5173` (Docker: `http://localhost:8088`) |
+| `SPRING_MAIL_HOST`, `SPRING_MAIL_PORT` (y `SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD`) | Servidor SMTP. Obligatorio en `prod` (sin él no arranca); en `dev`, si falta, los correos (con el enlace de confirmación) se escriben en la consola del backend (línea de `LoggingEmailSender`) | — (Docker: Mailpit, `mailpit:1025`) |
+| `STREAMBOX_EMAIL_FROM` | Remitente de los correos | `StreamBox <no-reply@streambox.local>` |
+| `STREAMBOX_MAIL_STARTTLS_REQUIRED` | Solo `prod`: exige STARTTLS al hablar con el SMTP (la contraseña SMTP y los enlaces no viajan en claro). El `docker-compose.yml` la pone a `false` porque Mailpit no tiene TLS y el correo no sale de su red interna | `true` |
+| `MAILPIT_PORT` | Solo Docker: puerto de la web de Mailpit (siempre en `127.0.0.1`) | `8025` |
 
 ### Perfiles de Spring
 
 | Perfil | Cuándo | Qué hace |
 | :--- | :--- | :--- |
 | `dev` (por defecto) | Desarrollo local | Esquema gestionado por Flyway (Hibernate solo valida), SQL visible en el log, Swagger activado |
-| `prod` | Producción (`SPRING_PROFILES_ACTIVE=prod`) | logs en formato JSON (ECS), sin SQL en logs, Swagger desactivado, errores sin detalles. Requiere `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` y `JWT_SECRET` |
+| `prod` | Producción (`SPRING_PROFILES_ACTIVE=prod`) | logs en formato JSON (ECS), sin SQL en logs, Swagger desactivado, errores sin detalles. Requiere `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`, `STREAMBOX_PUBLIC_URL` y `SPRING_MAIL_HOST` |
 | `test` | Lo activan los tests (`@ActiveProfiles("test")`) | H2 en memoria y un secreto JWT fijo de pruebas: **no necesitas definir `JWT_SECRET` para ejecutar los tests** |
 
 > **Conexión a la base de datos.** Copia `streambox/src/main/resources/application-local.properties.example` como `application-local.properties` (en la misma carpeta, ignorado en Git) y rellénalo con tu conexión: **PostgreSQL local** (opción A, la URL por defecto es `localhost:5432/streambox`) o **Supabase** (opción B, con la cadena *Session pooler*; después ejecuta `docs/supabase-seguridad.sql`, ver el [manual](docs/MANUAL_PROGRAMADOR.md), sección 4.5). Ahí también puedes fijar el secreto JWT. Los tests no usan ese archivo: tienen su propia base H2 en memoria.
@@ -233,7 +242,7 @@ Configura las siguientes variables de entorno en tu sistema o en tu IDE:
 
 El esquema lo gestiona **Flyway** (`streambox/src/main/resources/db/migration`). Al arrancar se aplican las migraciones pendientes y Hibernate solo **valida** que las entidades coinciden con las tablas (`ddl-auto=validate`).
 
-- Para cambiar el modelo: modifica la entidad **y** añade una migración nueva (`V<N+1>__descripcion.sql`, hoy la última es `V3`). Nunca edites una migración ya aplicada: Flyway lo detecta y no arranca.
+- Para cambiar el modelo: modifica la entidad **y** añade una migración nueva (`V<N+1>__descripcion.sql`, hoy la última es `V9`). Nunca edites una migración ya aplicada: Flyway lo detecta y no arranca.
 - Una base de datos creada antes de Flyway (con `ddl-auto=update`) se adopta automáticamente: `V1` es idempotente.
 - Para crear el primer administrador define `ADMIN_EMAIL` y `ADMIN_PASSWORD` (el registro público siempre crea usuarios `USER`).
 
@@ -253,6 +262,8 @@ Solo se exponen `health` e `info`; el resto de endpoints de Actuator (`env`, `be
 | :--- | :--- | :--- |
 | Intentos de login por IP | 10 por minuto | `429` `RATE_LIMIT_EXCEEDED` + `Retry-After` |
 | Registros por IP | 5 por hora | `429` `RATE_LIMIT_EXCEEDED` + `Retry-After` |
+| Confirmaciones del correo por IP | 20 cada 15 min | `429` `RATE_LIMIT_EXCEEDED` + `Retry-After` |
+| Reenvíos del correo por IP | 5 por hora | `429` `RATE_LIMIT_EXCEEDED` + `Retry-After` |
 | Cuenta bloqueada tras logins fallidos | 5 fallos en 15 min (los fallos previos responden 401 con `remainingAttempts`: 4, 3, 2, 1) | `429` `ACCOUNT_LOCKED` + `Retry-After` |
 
 **IP conocida.** Para que nadie pueda mantener bloqueada la cuenta de otra persona (ni la del administrador) fallando su login a propósito, el bloqueo no se aplica a una IP desde la que ya se inició sesión con éxito con esa cuenta: esa IP tiene su propio contador de 5 fallos en 15 minutos y sus fallos no bloquean a nadie más. Se recuerdan hasta 5 IPs por cuenta durante 30 días (`lockout.max-known-ips`, `lockout.known-ip-ttl`). Los contadores tienen un tope de claves (`streambox.security.rate-limit.max-keys`, 100 000 por contador; al llenarse se olvida la clave más antigua) y las direcciones IPv6 se agrupan por `/64`. Detalle y limitaciones en el capítulo 11 del manual.

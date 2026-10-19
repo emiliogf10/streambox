@@ -7,6 +7,7 @@
  * esperado, para que un fallo de preparación no se confunda con un fallo de la app.
  */
 import { randomUUID } from 'node:crypto';
+import { expect } from '@playwright/test';
 import type { APIRequestContext, APIResponse } from '@playwright/test';
 import { ADMIN_EMAIL, ADMIN_PASSWORD, BACKEND_URL, USER_PASSWORD } from './config';
 
@@ -46,13 +47,144 @@ export function newTestUser(): TestUser {
   return { username: `user_${id}`, email: `e2e-${id}@streambox.local`, password: USER_PASSWORD };
 }
 
-/** Registra un usuario por API (`POST /api/users`, público; siempre rol USER). */
+/**
+ * Registra un usuario por API (`POST /api/users`, público; siempre rol USER).
+ *
+ * Responde **202** con un texto que es siempre el mismo, exista o no el correo (así el registro no revela
+ * quién tiene cuenta). La cuenta queda PENDIENTE: no puede iniciar sesión hasta que se confirma el correo (el
+ * login le responde el mismo 401 `INVALID_CREDENTIALS` que a una contraseña incorrecta, y cuenta como
+ * intento). Para una cuenta lista para entrar, {@link registerVerifiedUser}.
+ */
 export async function registerUser(request: APIRequestContext, user: TestUser): Promise<void> {
   const response = await request.post(`${BACKEND_URL}/api/users`, {
     data: user,
     headers: { 'X-Requested-With': 'StreamBox' }, // el backend la exige a toda petición no segura
   });
   await expectOk(response, `Registrar a ${user.email}`);
+  if (response.status() !== 202) {
+    throw new Error(`Registrar a ${user.email} debía responder 202 y respondió ${response.status()}`);
+  }
+}
+
+/** Asunto del correo con el enlace de confirmación (`AccountEmails.VERIFICATION_SUBJECT` del backend). */
+export const VERIFICATION_SUBJECT = 'Confirma tu correo en StreamBox';
+
+/** Asunto del correo que recibe quien se registra con un correo que ya tiene cuenta confirmada. */
+export const ALREADY_REGISTERED_SUBJECT = 'Ya tienes una cuenta en StreamBox';
+
+/** Un correo de la bandeja en memoria del backend E2E (`SentEmailResponse`). */
+export interface SentEmail {
+  to: string;
+  subject: string;
+  /** Texto plano; el de confirmación lleva `<STREAMBOX_PUBLIC_URL>/verificar-email#token=…`. */
+  body: string;
+  /** Instante ISO del envío. */
+  sentAt: string;
+}
+
+/**
+ * Sesión del administrador para leer la bandeja, reutilizada dentro de cada proceso de Playwright (cada
+ * *worker* tiene su copia del módulo): sin esto, leer el buzón supondría un login más en cada test. El JWT
+ * dura 15 min; si caduca (401), se inicia sesión otra vez.
+ */
+let adminInboxSession: Promise<string> | undefined;
+
+/**
+ * Correos enviados a `to`, del más reciente al más antiguo (`GET /api/admin/e2e/emails`).
+ *
+ * Ese endpoint solo existe con el perfil `e2e` (el del backend de esta suite) y solo lo puede leer un
+ * administrador: con él los tests leen el enlace del correo como haría la persona desde su buzón.
+ */
+export async function emailsTo(request: APIRequestContext, to: string): Promise<SentEmail[]> {
+  for (let attempt = 1; ; attempt += 1) {
+    adminInboxSession ??= loginAdmin(request);
+    let token: string;
+    try {
+      token = await adminInboxSession;
+    } catch (error) {
+      adminInboxSession = undefined; // que un login fallido no deje la promesa rechazada para siempre
+      throw error;
+    }
+    const response = await request.get(`${BACKEND_URL}/api/admin/e2e/emails`, {
+      headers: authHeaders(token),
+      params: { to },
+    });
+    if (response.status() === 401 && attempt === 1) {
+      adminInboxSession = undefined; // sesión caducada: se renueva una vez
+      continue;
+    }
+    await expectOk(response, `Leer la bandeja de ${to}`);
+    return (await response.json()) as SentEmail[];
+  }
+}
+
+/**
+ * Espera a que llegue a `to` un correo NUEVO con ese asunto y lo devuelve.
+ *
+ * El backend envía los correos en otro hilo, después de responder: justo tras el registro el correo puede
+ * no estar aún en la bandeja. Por eso se consulta hasta que aparece (con `expect.poll`, nunca con una
+ * espera fija). «Nuevo» = hay más de `alreadySeen` correos con ese asunto; así, tras un reenvío, se espera
+ * al correo del reenvío y no se devuelve el anterior, que ya estaba.
+ *
+ * @param alreadySeen correos con ese asunto que ya había antes de la acción (0 por defecto)
+ */
+export async function waitForEmail(
+  request: APIRequestContext,
+  to: string,
+  subject: string,
+  alreadySeen = 0,
+): Promise<SentEmail> {
+  let matching: SentEmail[] = [];
+  await expect
+    .poll(
+      async () => {
+        matching = (await emailsTo(request, to)).filter((email) => email.subject === subject);
+        return matching.length;
+      },
+      { message: `Debía llegar a ${to} un correo «${subject}» (ya había ${alreadySeen})`, timeout: 10_000 },
+    )
+    .toBeGreaterThan(alreadySeen);
+  return matching[0]; // el más reciente
+}
+
+/** Número de correos con ese asunto que ha recibido `to` hasta ahora. */
+export async function countEmails(request: APIRequestContext, to: string, subject: string): Promise<number> {
+  return (await emailsTo(request, to)).filter((email) => email.subject === subject).length;
+}
+
+/**
+ * Enlace de confirmación de un correo (`<origen del Vite E2E>/verificar-email#token=<43 caracteres>`). El
+ * token son 32 bytes aleatorios en Base64URL sin relleno; si el formato cambia, falla aquí con el cuerpo
+ * del correo a la vista y no en un test lejano.
+ */
+export function verificationLink(email: SentEmail): string {
+  const match = /https?:\/\/\S+?\/verificar-email#token=[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/.exec(email.body);
+  if (!match) throw new Error(`El correo «${email.subject}» no trae un enlace de confirmación:\n${email.body}`);
+  return match[0];
+}
+
+/** Token del enlace de confirmación de un correo (ver {@link verificationLink}). */
+export function verificationToken(email: SentEmail): string {
+  return verificationLink(email).split('#token=')[1];
+}
+
+/** Confirma un correo por API (`POST /api/auth/email-verification`, público): 204 o falla. */
+export async function confirmEmailApi(request: APIRequestContext, token: string): Promise<void> {
+  const response = await request.post(`${BACKEND_URL}/api/auth/email-verification`, {
+    data: { token },
+    headers: { 'X-Requested-With': 'StreamBox' }, // la misma que manda la app (aquí el backend no la exige)
+  });
+  await expectOk(response, 'Confirmar el correo');
+}
+
+/**
+ * Registra un usuario y confirma su correo por API, como haría una persona desde su buzón: lee el enlace
+ * de la bandeja del backend E2E y lo «pulsa». Deja una cuenta que ya puede iniciar sesión.
+ */
+export async function registerVerifiedUser(request: APIRequestContext, user: TestUser): Promise<void> {
+  await registerUser(request, user);
+  const email = await waitForEmail(request, user.email, VERIFICATION_SUBJECT);
+  await confirmEmailApi(request, verificationToken(email));
 }
 
 /** Nombre de la cookie de sesión que fija el backend (HttpOnly, SameSite=Strict, Path=/api). */
@@ -113,10 +245,13 @@ export async function loginAdmin(request: APIRequestContext): Promise<string> {
   }
 }
 
-/** Crea un usuario nuevo y devuelve sus datos junto con el valor de su cookie de sesión (el JWT). */
+/**
+ * Crea un usuario nuevo CON EL CORREO CONFIRMADO (registro → enlace de la bandeja → confirmación) e inicia
+ * sesión por API. Devuelve sus datos junto con el valor de su cookie de sesión (el JWT).
+ */
 export async function createUserWithToken(request: APIRequestContext): Promise<TestUser & { token: string }> {
   const user = newTestUser();
-  await registerUser(request, user);
+  await registerVerifiedUser(request, user);
   const token = await loginApi(request, user.email, user.password);
   return { ...user, token };
 }

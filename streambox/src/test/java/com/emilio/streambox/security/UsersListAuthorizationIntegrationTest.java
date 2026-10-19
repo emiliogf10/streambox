@@ -68,6 +68,7 @@ class UsersListAuthorizationIntegrationTest {
 
     private User save(String name, Role role) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + "@nv1.test");
         user.setPassword(passwordEncoder.encode("Contraseña-Segura-2026"));
@@ -174,8 +175,10 @@ class UsersListAuthorizationIntegrationTest {
                 {"username":"nv1-nuevo","email":"nv1-nuevo@nv1.test","password":"Contraseña-Segura-2026"}
                 """;
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.role").value("USER"));
+                .andExpect(status().isAccepted());
+        // El 202 no devuelve la cuenta (no revela qué emails existen): el rol
+        // se comprueba en la base de datos.
+        assertEquals(Role.USER, userRepository.findByEmail("nv1-nuevo@nv1.test").orElseThrow().getRole());
     }
 
     @Test

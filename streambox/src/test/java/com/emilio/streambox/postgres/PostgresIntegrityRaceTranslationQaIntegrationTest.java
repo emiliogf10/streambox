@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
@@ -29,6 +30,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.emilio.streambox.dto.AcceptedResponse;
 import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.entity.Role;
@@ -187,28 +189,28 @@ class PostgresIntegrityRaceTranslationQaIntegrationTest extends PostgresIntegrat
     }
 
     /**
-     * Dos registros con el mismo email: el segundo recibe el 409 con el mensaje
-     * del <b>email</b>. El servicio elige el mensaje por el nombre de la
-     * restricción ({@code uk_users_email}), que en PostgreSQL llega sin el
-     * prefijo de esquema ni el sufijo de índice de H2: si la extracción fallara,
-     * el mensaje sería el genérico «nombre o email».
+     * Dos registros con el mismo email: el segundo recibe el <b>mismo 202</b>
+     * que cualquier registro (no revela que el email acaba de registrarse). El
+     * servicio lo decide por el nombre de la restricción
+     * ({@code uk_users_email}), que en PostgreSQL llega sin el prefijo de
+     * esquema ni el sufijo de índice de H2: si la extracción fallara, la
+     * violación se relanzaría (500).
      */
     @Test
-    void registroConEmailEnCarreraDa409DeEmail() throws Exception {
+    void registroConEmailEnCarreraDaElMismo202() throws Exception {
         saveUser("primera", Role.USER);
-        doReturn(false).when(spiedUsers).existsByEmail("primera@test.com");
+        doReturn(Optional.empty()).when(spiedUsers).findByEmail("primera@test.com");
 
         mockMvc.perform(json(post("/api/users"), registration("segunda", "primera@test.com"), null))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("USER_ALREADY_EXISTS"))
-                .andExpect(jsonPath("$.message").value("El correo electrónico ya está en uso"));
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.message").value(AcceptedResponse.REGISTRATION_MESSAGE));
     }
 
     /** Dos registros con el mismo nombre: 409 con el mensaje del <b>nombre</b> ({@code uk_users_username}). */
     @Test
     void registroConNombreEnCarreraDa409DeNombre() throws Exception {
         saveUser("disputado", Role.USER);
-        doReturn(false).when(spiedUsers).existsByUsername("disputado");
+        doReturn(Optional.empty()).when(spiedUsers).findByUsername("disputado");
 
         mockMvc.perform(json(post("/api/users"), registration("disputado", "otra@test.com"), null))
                 .andExpect(status().isConflict())

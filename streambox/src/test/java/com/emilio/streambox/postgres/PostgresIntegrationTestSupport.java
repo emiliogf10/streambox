@@ -1,5 +1,7 @@
 package com.emilio.streambox.postgres;
 
+import java.time.Instant;
+
 import java.sql.SQLException;
 import java.util.HashSet;
 import java.util.List;
@@ -131,6 +133,7 @@ public abstract class PostgresIntegrationTestSupport {
     /** Crea un usuario con rol dado; el email es {@code nombre@test.com}. */
     protected User saveUser(String name, Role role) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode("password123"));

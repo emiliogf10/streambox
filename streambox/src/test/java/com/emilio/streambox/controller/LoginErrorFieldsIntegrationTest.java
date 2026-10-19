@@ -106,9 +106,11 @@ class LoginErrorFieldsIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"QA\"}")));
         errors.put("404 ruta inexistente", perform(get("/api/no-existe").header("Authorization", token)));
         errors.put("405 GET en el login", perform(get("/api/auth/login").header("Authorization", token)));
-        errors.put("409 email duplicado", perform(post("/api/users").with(ip(nextIp()))
+        // El email duplicado ya no da error (202, para no revelar qué emails
+        // existen): el 409 del registro es ahora el del nombre de usuario.
+        errors.put("409 nombre duplicado", perform(post("/api/users").with(ip(nextIp()))
                 .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(
-                        Map.of("username", "qafields1b", "email", "qafields1@test.com", "password", PASSWORD)))));
+                        Map.of("username", "qafields1", "email", "qafields1b@test.com", "password", PASSWORD)))));
         errors.put("400 política de contraseñas", perform(post("/api/users").with(ip(nextIp()))
                 .contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(
                         Map.of("username", "qafields1c", "email", "qafields1c@test.com", "password", "corta")))));
@@ -132,7 +134,7 @@ class LoginErrorFieldsIntegrationTest {
         assertEquals(403, errors.get("403 USER en un endpoint de ADMIN").getStatus());
         assertEquals(404, errors.get("404 ruta inexistente").getStatus());
         assertEquals(405, errors.get("405 GET en el login").getStatus());
-        assertEquals(409, errors.get("409 email duplicado").getStatus());
+        assertEquals(409, errors.get("409 nombre duplicado").getStatus());
         assertEquals(400, errors.get("400 política de contraseñas").getStatus());
         assertEquals(429, errors.get("429 límite por IP").getStatus());
         assertEquals(429, errors.get("429 cuenta bloqueada").getStatus());
@@ -195,6 +197,7 @@ class LoginErrorFieldsIntegrationTest {
 
     private User createUser(String name) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode(PASSWORD));

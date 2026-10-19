@@ -31,7 +31,8 @@ import lombok.Setter;
  *
  * <p>
  * Contiene la información necesaria para identificar y autenticar
- * a un usuario, así como su rol, su icono de perfil y su fecha de creación.
+ * a un usuario, así como su rol, su icono de perfil, si su email está
+ * verificado y su fecha de creación.
  * </p>
  *
  * <p>
@@ -133,6 +134,25 @@ public class User {
     private String avatar;
 
     /**
+     * Instante desde el que el email de la cuenta cuenta como verificado, o
+     * {@code null} si la cuenta está <strong>pendiente</strong> (se registró y
+     * aún no ha pulsado el enlace del correo).
+     *
+     * <p>
+     * Columna {@code email_verified_at} de la {@code V9}. De las cuentas que ya
+     * existían antes de esa migración, solo las ADMIN quedaron verificadas (con
+     * el instante en que se aplicó); las USER quedaron pendientes por decisión
+     * del autor, para probar el flujo con cuentas reales. No tiene valor por defecto ni lo asigna Hibernate: una
+     * cuenta nueva nace pendiente salvo que el código la marque a propósito
+     * (el ADMIN de {@code AdminAccountInitializer}). Para marcarla tras el clic
+     * en el enlace se usa {@code UserRepository.markEmailVerified}, que es
+     * idempotente y no pisa la fecha de una verificación anterior.
+     * </p>
+     */
+    @Column(name = "email_verified_at")
+    private Instant emailVerifiedAt;
+
+    /**
      * Instante en el que se creó el registro.
      *
      * <p>
@@ -160,6 +180,22 @@ public class User {
             joinColumns = @JoinColumn(name = "user_id"),
             inverseJoinColumns = @JoinColumn(name = "movie_id"))
     private Set<Movie> favoriteMovies = new HashSet<>();
+
+    /**
+     * Indica si el email de la cuenta está verificado.
+     *
+     * <p>
+     * Es solo una lectura de {@link #emailVerifiedAt} (no hay columna booleana:
+     * la fecha ya lo dice y dos columnas podrían contradecirse). Hibernate no lo
+     * confunde con un atributo porque la entidad usa acceso por campo (el
+     * {@code @Id} está en el campo).
+     * </p>
+     *
+     * @return {@code true} si la cuenta ya no está pendiente de verificar
+     */
+    public boolean isEmailVerified() {
+        return emailVerifiedAt != null;
+    }
 
     /**
      * Dos usuarios son iguales si tienen el mismo identificador.

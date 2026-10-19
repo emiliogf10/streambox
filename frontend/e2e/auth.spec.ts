@@ -1,5 +1,7 @@
 /**
- * E2E de la sesión: registro, login, cierre de sesión (también cuando el servidor
+ * E2E de la sesión: registro (pantalla «Revisa tu correo», idéntica para un correo
+ * nuevo y para uno que ya tiene cuenta; el flujo de confirmar el correo está en
+ * `email-verification.spec.ts`), login, cierre de sesión (también cuando el servidor
  * no responde: la sesión sigue abierta y se avisa), rutas protegidas,
  * rol del usuario en el menú, sesión caducada (401), renovación con el refresh token
  * (sin aviso, también al recargar y con dos pestañas), aviso de intentos restantes
@@ -9,8 +11,19 @@
  * el login no distingue credenciales buenas de malas, o la sesión caducada deja
  * la app en un bucle, esta suite lo detecta con navegador y backend reales.
  */
-import type { Page } from '@playwright/test';
-import { REFRESH_COOKIE, SESSION_COOKIE, loginAdmin, newTestUser, registerUser } from './support/api';
+import type { APIRequestContext, Page } from '@playwright/test';
+import {
+  ALREADY_REGISTERED_SUBJECT,
+  REFRESH_COOKIE,
+  SESSION_COOKIE,
+  VERIFICATION_SUBJECT,
+  countEmails,
+  loginAdmin,
+  newTestUser,
+  registerVerifiedUser,
+  loginApi,
+  waitForEmail,
+} from './support/api';
 import { ADMIN_USERNAME, LOCKOUT_MAX_FAILURES, BACKEND_URL } from './support/config';
 import { HERO_TITLE, SERIES_HERO } from './support/catalog';
 import { expect, formAlert, sessionCookie, test } from './support/fixtures';
@@ -30,9 +43,9 @@ const SESSION_EXPIRED_TOAST = 'Tu sesión ha caducado. Inicia sesión de nuevo.'
  * las dos cookies reales del login (`streambox_token` y `streambox_refresh`), que es lo que necesitan los
  * tests de la renovación (`signIn` solo siembra la de acceso).
  */
-async function loginWithForm(page: Page, request: Parameters<typeof registerUser>[0]): Promise<void> {
+async function loginWithForm(page: Page, request: APIRequestContext): Promise<void> {
   const user = newTestUser();
-  await registerUser(request, user);
+  await registerVerifiedUser(request, user);
   await page.goto('/login');
   await page.getByLabel('Correo electrónico').fill(user.email);
   await page.getByLabel('Contraseña').fill(user.password);
@@ -96,7 +109,7 @@ async function submitLogin(page: Page): Promise<{ status: number; body: ErrorBod
 
 /** Provoca un login fallido por API (rápido) y devuelve su estado y cuerpo. */
 async function failLoginByApi(
-  request: Parameters<typeof registerUser>[0],
+  request: APIRequestContext,
   email: string,
 ): Promise<{ status: number; body: ErrorBody; retryAfter: string | undefined }> {
   const response = await request.post(`${BACKEND_URL}/api/auth/login`, {
@@ -107,8 +120,26 @@ async function failLoginByApi(
   return { status: response.status(), body, retryAfter: response.headers()['retry-after'] };
 }
 
+/**
+ * Texto de la pantalla «Revisa tu correo» con el correo escrito sustituido por `<correo>`: lo que tiene que
+ * ser IDÉNTICO se registre un correo nuevo o uno que ya tiene cuenta (si cambiara algo, el registro
+ * volvería a revelar quién está dado de alta).
+ */
+async function checkYourEmailScreen(page: Page, email: string): Promise<string> {
+  await expect(page.getByRole('heading', { level: 1, name: 'Revisa tu correo' })).toBeVisible();
+  return (
+    (await page.getByRole('main').innerText())
+      .replaceAll(email, '<correo>')
+      // El botón de reenviar empieza en espera y su cuenta atrás («Reenviar en 58 s») cambia cada segundo.
+      .replace(/Reenviar en [^\n]+/, 'Reenviar en <espera>')
+  );
+}
+
 test.describe('Registro', () => {
-  test('valida cada campo y, con datos correctos, crea la cuenta y lleva al login con un aviso', async ({ page }) => {
+  test('valida cada campo y, con datos correctos, enseña «Revisa tu correo» (sin sesión) y llega el enlace al buzón', async ({
+    page,
+    request,
+  }) => {
     const user = newTestUser();
     await page.goto('/registro');
     await expect(page.getByRole('heading', { level: 1, name: 'Crea tu cuenta' })).toBeVisible();
@@ -134,26 +165,59 @@ test.describe('Registro', () => {
     await expect(page.getByText('Introduce un correo electrónico válido.')).toBeVisible();
     await expect(page.getByText('La contraseña debe tener entre 12 y 64 caracteres.')).toBeVisible();
 
-    // Datos válidos: éxito, redirección al login y aviso visible.
+    // Datos válidos: «Revisa tu correo» en la misma ruta (sin login automático ni sesión) con el correo
+    // escrito, y el enlace llega al buzón.
     await page.getByLabel('Correo electrónico').fill(user.email);
     await page.getByLabel('Contraseña').fill(user.password);
     await page.getByRole('button', { name: 'Crear cuenta' }).click();
-    await expect(page).toHaveURL(/\/login$/);
-    await expect(page.getByText('Cuenta creada, ya puedes iniciar sesión.')).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Revisa tu correo' })).toBeFocused();
+    await expect(page.getByRole('main')).toContainText(user.email);
+    await expect(page).toHaveURL(/\/registro$/);
+    expect(await sessionCookie(page)).toBeUndefined();
+    await waitForEmail(request, user.email, VERIFICATION_SUBJECT);
   });
 
-  test('un correo ya registrado muestra el error del servidor sin salir del formulario', async ({ page, request }) => {
+  test('un correo que ya tiene cuenta ve la MISMA pantalla que uno nuevo; al buzón le llega «Ya tienes una cuenta» y la contraseña no cambia', async ({
+    page,
+    request,
+  }) => {
     const existing = newTestUser();
-    await registerUser(request, existing);
+    await registerVerifiedUser(request, existing);
 
+    // Primero, un registro de verdad con un correo nuevo, para tener la pantalla con la que comparar.
+    const fresh = newTestUser();
+    await page.goto('/registro');
+    await page.getByLabel('Nombre de usuario').fill(fresh.username);
+    await page.getByLabel('Correo electrónico').fill(fresh.email);
+    await page.getByLabel('Contraseña').fill(fresh.password);
+    await page.getByRole('button', { name: 'Crear cuenta' }).click();
+    const freshScreen = await checkYourEmailScreen(page, fresh.email);
+
+    // Ahora con el correo de la cuenta existente, otro nombre y OTRA contraseña.
+    const otherPassword = 'Otra-Clave-Distinta-93';
     await page.goto('/registro');
     await page.getByLabel('Nombre de usuario').fill(`otro_${existing.username}`.slice(0, 50));
     await page.getByLabel('Correo electrónico').fill(existing.email);
-    await page.getByLabel('Contraseña').fill(existing.password);
+    await page.getByLabel('Contraseña').fill(otherPassword);
     await page.getByRole('button', { name: 'Crear cuenta' }).click();
 
-    await expect(formAlert(page).filter({ hasText: /\S/ })).toBeVisible();
+    // Nada en la pantalla distingue los dos casos: ni un error, ni otro texto.
+    expect(await checkYourEmailScreen(page, existing.email)).toBe(freshScreen);
+    await expect(formAlert(page)).toHaveCount(0);
     await expect(page).toHaveURL(/\/registro$/);
+
+    // La diferencia solo la ve el dueño del buzón: un aviso de que ya tiene cuenta, no otro enlace.
+    const notice = await waitForEmail(request, existing.email, ALREADY_REGISTERED_SUBJECT);
+    expect(notice.body).not.toContain('/verificar-email');
+    expect(await countEmails(request, existing.email, VERIFICATION_SUBJECT), 'solo el enlace del alta original').toBe(1);
+
+    // Y la cuenta sigue igual: entra con su contraseña de siempre y no con la que se acaba de escribir.
+    await loginApi(request, existing.email, existing.password);
+    const withOther = await request.post(`${BACKEND_URL}/api/auth/login`, {
+      data: { email: existing.email, password: otherPassword },
+      headers: { 'X-Requested-With': 'StreamBox' },
+    });
+    expect(withOther.status()).toBe(401);
   });
 });
 
@@ -161,7 +225,7 @@ test.describe('Login y cierre de sesión', () => {
   test('credenciales erróneas: mensaje genérico, intentos que quedan y sin sesión', async ({ page, request }) => {
     // Email único: los fallos cuentan por cuenta y no se suman a los de otros tests.
     const user = newTestUser();
-    await registerUser(request, user);
+    await registerVerifiedUser(request, user);
 
     await page.goto('/login');
     await page.getByLabel('Correo electrónico').fill(user.email);
@@ -179,13 +243,19 @@ test.describe('Login y cierre de sesión', () => {
     // intentos quedan: el número que ha dicho el servidor, no uno supuesto.
     await expect(formAlert(page)).toContainText('Correo o contraseña incorrectos.');
     await expect(formAlert(page)).toContainText(attemptsMessage(remaining));
+    // También a una cuenta ya confirmada le sale la pista de confirmar el correo: el 401 de una cuenta
+    // pendiente es idéntico, así que la pantalla no puede (ni debe) distinguirlos.
+    await expect(
+      page.getByRole('status').filter({ hasText: '¿Te acabas de registrar o aún no has confirmado tu correo?' }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reenviar el correo de confirmación' })).toBeEnabled();
     await expect(page).toHaveURL(/\/login$/);
     expect(await sessionCookie(page)).toBeUndefined();
   });
 
   test('con el último intento el aviso pasa a singular («Te queda 1 intento»)', async ({ page, request }) => {
     const user = newTestUser();
-    await registerUser(request, user);
+    await registerVerifiedUser(request, user);
 
     // Se gastan intentos por API hasta que el servidor diga que quedan 2 (sin suponer el límite configurado).
     let remaining = Number.POSITIVE_INFINITY;
@@ -217,7 +287,7 @@ test.describe('Login y cierre de sesión', () => {
     request,
   }) => {
     const user = newTestUser();
-    await registerUser(request, user);
+    await registerVerifiedUser(request, user);
 
     await page.goto('/login');
     await page.getByLabel('Correo electrónico').fill(user.email);
@@ -541,7 +611,7 @@ test.describe('Demasiados intentos (429)', () => {
     request,
   }) => {
     const user = newTestUser();
-    await registerUser(request, user);
+    await registerVerifiedUser(request, user);
 
     // Los fallos se provocan por API (rápido); el bloqueo se comprueba después en la UI. Los anteriores al
     // límite son 401 con los intentos que quedan (cada vez uno menos); el que lo alcanza ya es un 429.
@@ -572,6 +642,10 @@ test.describe('Demasiados intentos (429)', () => {
     await expect(formAlert(page)).toContainText(/Podrás volver a intentarlo en \d+ min( \d+ s)?\./);
     await expect(formAlert(page)).not.toContainText('Demasiados intentos.');
     await expect(page.getByRole('button', { name: /^Reintentar en \d+ min( \d+ s)?$/ })).toBeDisabled();
+    // Una cuenta pendiente que reintenta con la contraseña correcta acaba bloqueada: la pista sale también aquí.
+    await expect(
+      page.getByRole('status').filter({ hasText: '¿Te acabas de registrar o aún no has confirmado tu correo?' }),
+    ).toBeVisible();
     await expect(page).toHaveURL(/\/login$/);
     expect(await sessionCookie(page)).toBeUndefined();
   });

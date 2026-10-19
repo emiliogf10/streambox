@@ -348,6 +348,7 @@ class UserProfileUpdateIntegrationTest {
 
     private User newUser(String username, String email, Role role) {
         User u = new User();
+        u.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         u.setUsername(username);
         u.setEmail(email);
         u.setPassword(passwordEncoder.encode("irrelevante-en-este-test"));

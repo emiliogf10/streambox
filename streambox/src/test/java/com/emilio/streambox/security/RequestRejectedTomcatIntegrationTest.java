@@ -90,6 +90,7 @@ class RequestRejectedTomcatIntegrationTest {
     void createAdmin() {
         deleteUsersOfThisSuite();
         User admin = new User();
+        admin.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         admin.setUsername("firewalladmin");
         admin.setEmail("firewalladmin" + DOMAIN);
         admin.setPassword(passwordEncoder.encode("Contraseña-Larga-Correcta-2026"));

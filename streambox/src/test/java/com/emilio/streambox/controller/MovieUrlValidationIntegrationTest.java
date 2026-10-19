@@ -90,6 +90,7 @@ class MovieUrlValidationIntegrationTest {
     @BeforeEach
     void setUp() {
         User admin = new User();
+        admin.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         admin.setUsername("urladmin");
         admin.setEmail("urladmin@test.com");
         admin.setPassword(passwordEncoder.encode("adminpass1"));

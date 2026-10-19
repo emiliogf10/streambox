@@ -564,6 +564,7 @@ class GenreEdgeCasesIntegrationTest {
 
     private User saveUser(String name, Role role) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(name);
         user.setEmail(name + "@test.com");
         user.setPassword(passwordEncoder.encode("password123"));

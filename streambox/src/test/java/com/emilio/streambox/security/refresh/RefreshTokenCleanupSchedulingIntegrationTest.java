@@ -55,6 +55,7 @@ class RefreshTokenCleanupSchedulingIntegrationTest {
     void laTareaProgramadaBorraLosTokensDeFamiliasCaducadas() throws Exception {
         assertTrue(context.getBeanNamesForType(RefreshTokenCleanupConfig.class).length == 1);
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername("limpieza-programada");
         user.setEmail(EMAIL);
         user.setPassword(passwordEncoder.encode("Contraseña-Limpieza-2026"));

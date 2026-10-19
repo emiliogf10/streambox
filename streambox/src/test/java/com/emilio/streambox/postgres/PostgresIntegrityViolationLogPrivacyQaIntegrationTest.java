@@ -1,17 +1,19 @@
 package com.emilio.streambox.postgres;
 
+import java.time.Instant;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -116,7 +118,8 @@ class PostgresIntegrityViolationLogPrivacyQaIntegrationTest extends PostgresInte
 
     /**
      * Carrera de registro real (dos altas con el mismo email; la comprobación
-     * previa no ve la otra): la API responde el 409 correcto, pero <b>ningún</b>
+     * previa no ve la otra): la API responde el 202 de siempre (desde la
+     * verificación del correo, el email duplicado ya no es un 409), pero <b>ningún</b>
      * log debería contener el email de la víctima.
      *
      * <p>
@@ -137,14 +140,13 @@ class PostgresIntegrityViolationLogPrivacyQaIntegrationTest extends PostgresInte
     @Test
     void unaCarreraDeRegistroNoDejaElEmailEnNingunLog() throws Exception {
         saveUserWithEmail("primera", PERSONAL_EMAIL);
-        doReturn(false).when(spiedUsers).existsByEmail(PERSONAL_EMAIL);
+        doReturn(Optional.empty()).when(spiedUsers).findByEmail(PERSONAL_EMAIL);
         appender.list.clear();
 
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
                         .content(("{\"username\":\"segunda\",\"email\":\"" + PERSONAL_EMAIL + "\","
                                 + "\"password\":\"tres gatos pardos en el tejado\"}").getBytes(StandardCharsets.UTF_8)))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("USER_ALREADY_EXISTS"));
+                .andExpect(status().isAccepted());
 
         List<String> leaks = new ArrayList<>();
         for (ILoggingEvent event : appender.list) {
@@ -166,6 +168,7 @@ class PostgresIntegrityViolationLogPrivacyQaIntegrationTest extends PostgresInte
 
     private User newUser(String username, String email) {
         User user = new User();
+        user.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         user.setUsername(username);
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode("password123"));

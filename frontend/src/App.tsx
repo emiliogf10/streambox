@@ -24,11 +24,15 @@ import { ProfilePage } from './pages/ProfilePage';
 import { RegisterPage } from './pages/RegisterPage';
 import { SeriesDetailPage } from './pages/SeriesDetailPage';
 import { SeriesPage } from './pages/SeriesPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
 
 /**
  * Mapa de rutas de la aplicación.
  *
  * - `/login` y `/registro`: públicas; si ya hay sesión redirigen a `/`.
+ * - `/verificar-email` (`#token=…`): pública y SIN guarda, para que el enlace
+ *   del correo de confirmación funcione igual con o sin sesión abierta (quien
+ *   ya ha entrado con otra cuenta en este navegador no debe acabar en `/`).
  * - `/`, `/peliculas` (con `?genero=&anio=&orden=`), `/peliculas/:id` (la página
  *   de una película), `/series`, `/series/:id` (con `?temporada=N`), `/favorites` y
  *   `/perfil` (datos de la cuenta y resumen de la lista): privadas, dentro de `AppShell` (barra + contenido). A `/perfil` se
@@ -64,6 +68,7 @@ export function AppRoutes() {
           </RedirectIfAuthenticated>
         }
       />
+      <Route path="/verificar-email" element={<VerifyEmailPage />} />
       <Route
         element={
           <RequireAuth>

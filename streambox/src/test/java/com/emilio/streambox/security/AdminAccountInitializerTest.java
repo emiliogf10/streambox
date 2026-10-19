@@ -14,11 +14,16 @@ import static org.mockito.Mockito.when;
 
 import java.util.Optional;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import com.emilio.streambox.entity.Role;
@@ -29,6 +34,12 @@ import com.emilio.streambox.repository.UserRepository;
 class AdminAccountInitializerTest {
 
     private static final String PASSWORD = "una-contraseña-larga-123";
+
+    /** Instante de las cuentas que ya existían verificadas. */
+    private static final Instant VERIFIED_AT = Instant.parse("2026-01-01T00:00:00Z");
+
+    /** Reloj fijo: la fecha de verificación del administrador nuevo sale de él. */
+    private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-18T10:00:00Z"), ZoneOffset.UTC);
 
     private UserRepository userRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
@@ -41,12 +52,16 @@ class AdminAccountInitializerTest {
     private static User account(Role role) {
         User user = new User();
         user.setRole(role);
+        // Cuenta ya existente y verificada, como las que deja la V9 (los
+        // ADMIN quedan verificados): el caso pendiente se prueba aparte.
+        user.setEmailVerifiedAt(VERIFIED_AT);
         return user;
     }
 
     private AdminAccountInitializer initializer(String email, String username, String password) {
         return new AdminAccountInitializer(
-                new AdminProperties(email, username, password), userRepository, passwordEncoder);
+                new AdminProperties(email, username, password), userRepository, passwordEncoder,
+                CLOCK, mock(PlatformTransactionManager.class));
     }
 
     @Test
@@ -70,6 +85,68 @@ class AdminAccountInitializerTest {
         assertEquals("admin", saved.getUsername());
         assertNotEquals(PASSWORD, saved.getPassword());
         assertTrue(passwordEncoder.matches(PASSWORD, saved.getPassword()));
+    }
+
+    // ------------------------------------------------------------------
+    // Verificación del correo (V9)
+    // ------------------------------------------------------------------
+
+    /**
+     * El administrador nace con el correo verificado (con el instante del
+     * reloj): si naciera pendiente, el login lo rechazaría (401, como una
+     * contraseña incorrecta) y la instalación quedaría sin administrador.
+     */
+    @Test
+    void creaElAdministradorConElCorreoYaVerificado() {
+        initializer("admin@test.com", "admin", PASSWORD).run(null);
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(captor.capture());
+        assertTrue(captor.getValue().isEmailVerified());
+        assertEquals(CLOCK.instant(), captor.getValue().getEmailVerifiedAt());
+    }
+
+    /**
+     * Un ADMIN ya existente con el correo pendiente (rol puesto a mano en la
+     * base de datos) se verifica con el UPDATE condicional, sin reescribir la
+     * fila (nunca save).
+     */
+    @Test
+    void siElAdministradorExistenteEstaPendienteLoVerificaSinTocarNadaMas() {
+        User pending = account(Role.ADMIN);
+        pending.setId(7L);
+        pending.setEmailVerifiedAt(null);
+        when(userRepository.findByEmail("admin@test.com")).thenReturn(Optional.of(pending));
+        when(userRepository.markEmailVerified(7L, CLOCK.instant())).thenReturn(1);
+
+        initializer("admin@test.com", "admin", PASSWORD).run(null);
+
+        verify(userRepository).markEmailVerified(7L, CLOCK.instant());
+        verify(userRepository, never()).save(any());
+    }
+
+    /** Un ADMIN ya verificado no se toca (se conserva la fecha de su verificación). */
+    @Test
+    void siElAdministradorExistenteYaEstaVerificadoNoLoVerificaOtraVez() {
+        when(userRepository.findByEmail("admin@test.com")).thenReturn(Optional.of(account(Role.ADMIN)));
+
+        initializer("admin@test.com", "admin", PASSWORD).run(null);
+
+        verify(userRepository, never()).markEmailVerified(any(), any());
+    }
+
+    /** Una cuenta USER pendiente con ADMIN_EMAIL aborta el arranque y no se verifica. */
+    @Test
+    void unaCuentaUserPendienteConElCorreoDelAdministradorNoSeVerifica() {
+        User pending = account(Role.USER);
+        pending.setEmailVerifiedAt(null);
+        when(userRepository.findByEmail("admin@test.com")).thenReturn(Optional.of(pending));
+
+        assertThrows(IllegalStateException.class,
+                () -> initializer("admin@test.com", "admin", PASSWORD).run(null));
+
+        verify(userRepository, never()).markEmailVerified(any(), any());
+        assertFalse(pending.isEmailVerified());
     }
 
     @Test

@@ -34,6 +34,14 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter.Reservation;
  * </ol>
  *
  * <p>
+ * Una cuenta pendiente de confirmar el correo con la contraseña correcta se
+ * cierra con {@link #recordFailure(LoginAttempt)}, como una contraseña
+ * incorrecta: no hay un tercer desenlace. Así el login responde lo mismo que
+ * a un fallo (y no delata que el registro creó esa cuenta con la contraseña
+ * de quien lo intenta; ver {@code AuthenticationService}).
+ * </p>
+ *
+ * <p>
  * <b>Por qué se reserva antes de comprobar la contraseña.</b> Antes se
  * consultaba si la cuenta estaba bloqueada y, tras comprobar la contraseña
  * (unos 100 ms de BCrypt), se apuntaba el fallo. En ese hueco, cien peticiones

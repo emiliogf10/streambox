@@ -157,6 +157,11 @@ class OpenApiErrorResponseDocumentationIntegrationTest {
         assertEquals(ERROR_REF, schemaRef(paths, "/api/movies/{id}", "get", "404"));
         assertEquals(ERROR_REF, schemaRef(paths, "/api/genres/{id}", "delete", "409"));
         assertEquals(ERROR_REF, schemaRef(paths, "/api/users", "get", "403"));
+        assertEquals(ERROR_REF, schemaRef(paths, "/api/users", "post", "409"));
+        for (String path : List.of("/api/auth/email-verification", "/api/auth/email-verification/resend")) {
+            assertEquals(ERROR_REF, schemaRef(paths, path, "post", "400"), path);
+            assertEquals(ERROR_REF, schemaRef(paths, path, "post", "429"), path);
+        }
     }
 
     /**
@@ -170,7 +175,14 @@ class OpenApiErrorResponseDocumentationIntegrationTest {
         assertTrue(paths.at("/~1api~1auth~1login/post/responses/204").isObject());
         assertTrue(paths.at("/~1api~1auth~1login/post/responses/204/content").isMissingNode());
         assertTrue(paths.at("/~1api~1auth~1login/post/responses/200").isMissingNode());
-        assertEquals("#/components/schemas/UserResponse", schemaRef(paths, "/api/users", "post", "201"));
+        // El registro y el reenvío responden 202 con un cuerpo fijo
+        // (AcceptedResponse), igual exista o no la cuenta; ya no hay 201.
+        assertEquals("#/components/schemas/AcceptedResponse", schemaRef(paths, "/api/users", "post", "202"));
+        assertTrue(paths.at("/~1api~1users/post/responses/201").isMissingNode());
+        assertEquals("#/components/schemas/AcceptedResponse",
+                schemaRef(paths, "/api/auth/email-verification/resend", "post", "202"));
+        assertTrue(paths.at("/~1api~1auth~1email-verification/post/responses/204").isObject());
+        assertTrue(paths.at("/~1api~1auth~1email-verification/post/responses/204/content").isMissingNode());
         assertEquals("#/components/schemas/MovieResponse", schemaRef(paths, "/api/movies/{id}", "get", "200"));
         assertEquals("#/components/schemas/MoviePageResponse", schemaRef(paths, "/api/movies", "get", "200"));
         assertEquals("#/components/schemas/GenreResponse", paths.path("/api/genres").path("get")
@@ -188,7 +200,8 @@ class OpenApiErrorResponseDocumentationIntegrationTest {
     void los429DocumentanLaCabeceraRetryAfter() throws Exception {
         JsonNode paths = apiDocs().path("paths");
 
-        for (String path : List.of("/api/auth/login", "/api/users")) {
+        for (String path : List.of("/api/auth/login", "/api/users", "/api/auth/email-verification",
+                "/api/auth/email-verification/resend")) {
             JsonNode header = paths.path(path).path("post").path("responses").path("429")
                     .path("headers").path("Retry-After");
 

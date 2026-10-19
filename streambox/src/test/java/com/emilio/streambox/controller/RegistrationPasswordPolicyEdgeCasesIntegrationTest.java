@@ -57,7 +57,7 @@ class RegistrationPasswordPolicyEdgeCasesIntegrationTest {
     private static final String COMMON = "La contraseña es demasiado común. Elige otra más difícil de adivinar.";
     private static final String PERSONAL = "La contraseña no puede contener tu nombre de usuario ni tu email.";
 
-    /** Sufijo único por registro para que los casos que dan 201 no choquen entre sí. */
+    /** Sufijo único por registro para que los casos que dan 202 no choquen entre sí. */
     private static final AtomicInteger SEQUENCE = new AtomicInteger();
 
     @Autowired private MockMvc mockMvc;
@@ -96,7 +96,7 @@ class RegistrationPasswordPolicyEdgeCasesIntegrationTest {
                 .andExpect(jsonPath("$.validationErrors.password").value(COMMON));
 
         register("distinct5", "distinct5@qa.test", "vwxyzvwxyzvw")
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
     }
 
     /** Las mayúsculas no cuentan como caracteres distintos: "WxYz" son 4, no 8. */
@@ -135,7 +135,7 @@ class RegistrationPasswordPolicyEdgeCasesIntegrationTest {
     @Test
     void unUsuarioYUnaParteLocalDe3CaracteresYaNoSeComprueban() throws Exception {
         register("ana", "ana@qa.test", "mañana iremos al cine")
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
     }
 
     /**
@@ -231,7 +231,7 @@ class RegistrationPasswordPolicyEdgeCasesIntegrationTest {
      * de bytes. Se envían con escapes JSON ({@code \\uXXXX}) para que lleguen
      * al servidor exactamente así (incluido un surrogate suelto, que no se
      * puede codificar en UTF-8 y Java sustituye por {@code ?}, igual en la
-     * política que en BCrypt). Pueden acabar en 201 o en 400, pero nunca en
+     * política que en BCrypt). Pueden acabar en 202 (aceptada) o en 400, pero nunca en
      * un 5xx, y si es 400 el mensaje es uno de los del contrato.
      */
     @ParameterizedTest
@@ -255,7 +255,7 @@ class RegistrationPasswordPolicyEdgeCasesIntegrationTest {
                 .andReturn().getResponse();
 
         int status = response.getStatus();
-        assertTrue(status == 201 || status == 400,
+        assertTrue(status == 202 || status == 400,
                 () -> "Estado inesperado " + status + ": " + contentOf(response));
         if (status == 400) {
             JsonNode body = objectMapper.readTree(contentOf(response));

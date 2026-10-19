@@ -2,7 +2,8 @@
 # Imagen del backend de StreamBox (Spring Boot 4.1, Java 21)
 #
 # Construcción multietapa:
-#   1. "build":   compila con Maven + JDK 21 y genera el JAR.
+#   1. "build":   compila con Maven 3.9 + JDK 26 (con release 21, así que el
+#                 bytecode es de Java 21; ver la etapa 1) y genera el JAR.
 #   2. "runtime": solo el JRE 21 y la aplicación. Maven, el JDK, el código
 #                 fuente y la caché de dependencias se quedan en la etapa 1
 #                 y NO llegan a la imagen final (más pequeña y con menos

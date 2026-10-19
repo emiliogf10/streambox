@@ -72,6 +72,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final RequestMatcher registerRequest;
     private final RequestMatcher logoutRequest;
     private final RequestMatcher refreshRequest;
+    private final RequestMatcher emailVerificationRequest;
+    private final RequestMatcher emailVerificationResendRequest;
 
     /** Mensaje del 403 {@code CSRF_REJECTED}. */
     static final String CSRF_REJECTED_MESSAGE = "Petición rechazada: falta la cabecera de protección "
@@ -100,6 +102,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.registerRequest = matchers.matcher(HttpMethod.POST, RateLimitingFilter.REGISTER_PATH);
         this.logoutRequest = matchers.matcher(HttpMethod.POST, LOGOUT_PATH);
         this.refreshRequest = matchers.matcher(HttpMethod.POST, RateLimitingFilter.REFRESH_PATH);
+        this.emailVerificationRequest = matchers.matcher(HttpMethod.POST,
+                RateLimitingFilter.EMAIL_VERIFICATION_PATH);
+        this.emailVerificationResendRequest = matchers.matcher(HttpMethod.POST,
+                RateLimitingFilter.EMAIL_VERIFICATION_RESEND_PATH);
     }
 
     /**
@@ -217,8 +223,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // Token válido de un usuario que ya no existe (cuenta borrada): no es
         // un error del servidor, la petición sigue como anónima (401 si la ruta
-        // es protegida), igual que con un token no válido.
-        if (user != null) {
+        // es protegida), igual que con un token no válido. Lo mismo si la
+        // cuenta está pendiente de confirmar el correo (ver
+        // canUseSession): su JWT, emitido antes de la V9, no abre la API.
+        if (canUseSession(user)) {
 
             // Defensa CSRF: el navegador adjunta la cookie solo, así que una
             // petición no segura autenticada por cookie debe traer una cabecera
@@ -308,6 +316,39 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
     }
 
+    /**
+     * Indica si el dueño de un token válido puede usar la API: debe existir y
+     * tener el correo confirmado.
+     *
+     * <p>
+     * <b>Por qué se mira aquí la verificación.</b> El login ya no da sesión a
+     * una cuenta pendiente (la trata como un intento fallido), pero las cuentas
+     * {@code USER} que existían antes de la {@code V9} quedaron pendientes con
+     * sesiones abiertas: un JWT de acceso de hasta 15 minutos en su cookie (o
+     * en un {@code Authorization: Bearer}). Como este filtro ya carga el usuario
+     * de la base de datos en cada petición, comprobarlo no cuesta ninguna
+     * consulta más y el efecto es inmediato, igual que un cambio de rol.
+     * </p>
+     *
+     * <p>
+     * <b>Por qué anónimo (401) y no un 403.</b> Se trata como un token cuyo
+     * dueño ya no puede usarlo, igual que una cuenta borrada: el frontend,
+     * ante el 401, intenta renovar; el refresh también rechaza a la cuenta
+     * pendiente (401 {@code SESSION_EXPIRED}, y revoca sus sesiones), así que
+     * el usuario vuelve al login, donde la interfaz le recuerda confirmar el
+     * correo y le ofrece reenviarlo. Un 403 aquí dejaría al
+     * frontend dentro de la aplicación con todas las peticiones fallando (el
+     * 403 no cierra la sesión). En las rutas públicas la petición sigue como
+     * anónima, sin cambios.
+     * </p>
+     *
+     * @param user usuario del {@code subject} del token, o {@code null} si no existe
+     * @return {@code true} si la petición debe quedar autenticada como ese usuario
+     */
+    static boolean canUseSession(User user) {
+        return user != null && user.isEmailVerified();
+    }
+
     /** Valor de la cookie de sesión, o {@code null} si no viene o está vacía. */
     private static String readCookie(HttpServletRequest request) {
         Cookie[] cookies = request.getCookies();
@@ -374,9 +415,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * ignoran la cookie de acceso, pero se tratan aparte en
      * {@link #doFilterInternal} porque sí exigen la cabecera CSRF (ver
      * {@link #isRefreshCookieEndpoint}).
+     *
+     * <p>
+     * La confirmación del correo y su reenvío
+     * ({@value RateLimitingFilter#EMAIL_VERIFICATION_PATH} y
+     * {@value RateLimitingFilter#EMAIL_VERIFICATION_RESEND_PATH}) están en el
+     * mismo caso: públicos, sin sesión y sin efecto sobre las cookies. Si no se
+     * ignorara la cookie, quien tenga una sesión abierta y confirme el correo
+     * de otra cuenta en el mismo navegador recibiría un 403 CSRF si su cliente
+     * no manda la cabecera. Por qué no exigen {@code X-Requested-With}: ver
+     * {@code SecurityConfig}.
+     * </p>
      */
     private boolean isCookieExempt(HttpServletRequest request) {
-        return loginRequest.matches(request) || registerRequest.matches(request);
+        return loginRequest.matches(request) || registerRequest.matches(request)
+                || emailVerificationRequest.matches(request) || emailVerificationResendRequest.matches(request);
     }
 
     private static boolean isSafeMethod(String method) {

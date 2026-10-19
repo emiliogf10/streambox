@@ -75,6 +75,20 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
 <groupId>org.springframework.boot</groupId>
 <artifactId>spring-boot-starter-actuator</artifactId>
 </dependency>
+<!--
+  Envio de correo (verificacion del email al registrarse, 2026-10-18). Es el
+  starter oficial de Spring: trae Jakarta Mail (Angus Mail) y autoconfigura un
+  JavaMailSender a partir de spring.mail.* solo si spring.mail.host esta
+  definido. Escribir SMTP a mano seria reinventar un protocolo con TLS y
+  autenticacion; una libreria de un proveedor (SendGrid, Resend...) ataria el
+  proyecto a ese proveedor, mientras que SMTP vale para todos (y para Mailpit
+  en docker compose). Version gestionada por el padre (sin sobrescrituras).
+  Uso: email/SmtpEmailSender (ver email/EmailSenderConfig).
+-->
+<dependency>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-mail</artifactId>
+</dependency>
 <dependency>
 <groupId>org.springframework.boot</groupId>
 <artifactId>spring-boot-devtools</artifactId>

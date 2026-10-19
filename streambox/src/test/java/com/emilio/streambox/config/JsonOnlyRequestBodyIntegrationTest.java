@@ -109,6 +109,7 @@ class JsonOnlyRequestBodyIntegrationTest {
     @BeforeEach
     void setUp() {
         User admin = new User();
+        admin.setEmailVerifiedAt(Instant.now()); // cuenta verificada (V9)
         admin.setUsername("jsononlyadmin");
         admin.setEmail("jsononlyadmin@test.com");
         admin.setPassword(passwordEncoder.encode("Contraseña-Larga-Correcta-2026"));
