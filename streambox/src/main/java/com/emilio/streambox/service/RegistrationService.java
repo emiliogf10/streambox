@@ -56,8 +56,12 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter;
  *       tener favoritos y años de uso) <b>nunca</b> se borra.</li>
  *   <li><b>Nombre de usuario ocupado</b>: 409 «El nombre de usuario ya está en
  *       uso», como siempre (el nombre no es secreto: se ve en la app), salvo
- *       que sea de una cuenta sustituible, que se borra y lo libera (igual
- *       que en «Editar perfil»). El 409
+ *       que sea de una pendiente creada por el registro hace 24 h o más, que
+ *       se borra y lo libera (igual que en «Editar perfil»). Esta <b>regla por
+ *       nombre</b> no mira los enlaces pedidos después del alta, a diferencia
+ *       de la regla por email ({@link EmailVerificationService#releasesUsername},
+ *       incidencia MEDIA-1). Si el nombre es de la misma cuenta que el email,
+ *       no se borra por el nombre: decide la regla por email. El 409
  *       depende <b>solo del nombre</b>, nunca del email: si el registro con el
  *       nombre de alguien respondiera distinto según el email enviado, se
  *       podría adivinar el email de cada nombre.</li>
@@ -108,10 +112,15 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter;
  * email (su registro solo le reenvía el enlace de esa cuenta). Mitigación
  * actual: el correo de verificación dice el <b>nombre de usuario</b> de la
  * cuenta y pide no abrir el enlace si no lo reconoce
- * ({@code AccountEmails#verification}). La solución completa llegará con «He
- * olvidado mi contraseña» (anotada en {@code docs/PLAN_DE_ACCION.md}): el
- * dueño del buzón podrá fijar su propia contraseña, lo que deja fuera al
- * atacante.
+ * ({@code AccountEmails#verification}). La solución es «He olvidado mi
+ * contraseña» ({@link PasswordResetService}): el dueño del buzón fija su
+ * propia contraseña con un enlace que solo llega a su correo, la cuenta queda
+ * verificada y se cierran todas sus sesiones, lo que deja fuera al atacante.
+ * Mientras ese enlace esté vigente, la cuenta pendiente no se puede sustituir
+ * con otro registro con su email ({@link EmailVerificationService#isReplaceable});
+ * pasadas 24 h desde el alta, quien pida su <b>nombre</b> sí la borra
+ * ({@link EmailVerificationService#releasesUsername}), lo que a la víctima le
+ * deja el email libre para registrarse.
  * </p>
  */
 @Service
@@ -250,10 +259,11 @@ public class RegistrationService {
         Optional<User> holder = locked.holder();
 
         if (holder.isPresent()) {
-            freeUsernameOrFail(holder.get());
-            if (owner.isPresent() && owner.get().getId().equals(holder.get().getId())) {
-                // Era la misma cuenta (pendiente y caducada): ya está borrada.
-                owner = Optional.empty();
+            boolean sameAccount = owner.isPresent() && owner.get().getId().equals(holder.get().getId());
+            if (sameAccount) {
+                checkOwnUsernameReleased(holder.get());
+            } else {
+                freeUsernameOrFail(holder.get());
             }
         }
         if (usernameReservations.isReserved(username)) {
@@ -298,12 +308,38 @@ public class RegistrationService {
     }
 
     /**
-     * El nombre de usuario lo tiene otra cuenta (o la del propio email): si es
-     * sustituible se borra y el nombre queda libre; si no, 409. La regla es la
-     * misma que en «Editar perfil» ({@link EmailVerificationService#deleteIfReplaceable}).
+     * El nombre de usuario lo tiene <b>otra</b> cuenta: si ya no le pertenece
+     * (pendiente creada por el registro hace 24 h o más) se borra y el nombre
+     * queda libre; si no, 409. La regla es la misma que en «Editar perfil»
+     * ({@link EmailVerificationService#deleteIfUsernameReleased}) y no mira los
+     * enlaces pedidos después del alta (incidencia MEDIA-1, ver
+     * {@link EmailVerificationService#releasesUsername}).
      */
     private void freeUsernameOrFail(User holder) {
-        if (!emailVerificationService.deleteIfReplaceable(holder)) {
+        if (!emailVerificationService.deleteIfUsernameReleased(holder)) {
+            throw new UserAlreadyExistsException(UserService.USERNAME_TAKEN_MESSAGE);
+        }
+    }
+
+    /**
+     * El nombre lo tiene la <b>misma</b> cuenta que el email (se repite el
+     * registro con los dos). La respuesta depende solo del nombre, como con
+     * cualquier otro email: 409 si la cuenta lo conserva
+     * ({@link EmailVerificationService#releasesUsername}) y, si no, sigue el
+     * camino del email.
+     *
+     * <p>
+     * Aquí no se borra nada: lo decide la <b>regla por email</b> más abajo
+     * ({@link EmailVerificationService#isReplaceable}). Si la cuenta tiene un
+     * enlace vigente (p. ej. uno de «He olvidado mi contraseña» que el titular
+     * pidió pasadas las 24 h), se conserva y se le reenvía el enlace; borrarla
+     * aquí dejaría sin valor ese enlace con solo repetir el registro con su
+     * email. Para el resto de emails el nombre ya está libre (se respondería
+     * 202), así que tampoco aquí se responde 409.
+     * </p>
+     */
+    private void checkOwnUsernameReleased(User account) {
+        if (!emailVerificationService.releasesUsername(account)) {
             throw new UserAlreadyExistsException(UserService.USERNAME_TAKEN_MESSAGE);
         }
     }

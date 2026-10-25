@@ -15,6 +15,7 @@ import { ADMIN_MOVIES_PATH } from './pages/admin/adminPaths';
 import { AdminSeriesPage } from './pages/admin/AdminSeriesPage';
 import { MovieFormPage } from './pages/admin/MovieFormPage';
 import { SeriesFormPage } from './pages/admin/SeriesFormPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { MovieDetailPage } from './pages/MovieDetailPage';
@@ -22,6 +23,7 @@ import { MoviesPage } from './pages/MoviesPage';
 import { MyListPage } from './pages/MyListPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { RegisterPage } from './pages/RegisterPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { SeriesDetailPage } from './pages/SeriesDetailPage';
 import { SeriesPage } from './pages/SeriesPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
@@ -33,6 +35,10 @@ import { VerifyEmailPage } from './pages/VerifyEmailPage';
  * - `/verificar-email` (`#token=…`): pública y SIN guarda, para que el enlace
  *   del correo de confirmación funcione igual con o sin sesión abierta (quien
  *   ya ha entrado con otra cuenta en este navegador no debe acabar en `/`).
+ * - `/recuperar-contrasena` («He olvidado mi contraseña»: pedir el enlace) y
+ *   `/restablecer-contrasena` (`#token=…`, elegir la contraseña nueva): públicas
+ *   y SIN guarda por lo mismo; quien tiene la sesión abierta pero no recuerda la
+ *   contraseña también puede usarlas.
  * - `/`, `/peliculas` (con `?genero=&anio=&orden=`), `/peliculas/:id` (la página
  *   de una película), `/series`, `/series/:id` (con `?temporada=N`), `/favorites` y
  *   `/perfil` (datos de la cuenta y resumen de la lista): privadas, dentro de `AppShell` (barra + contenido). A `/perfil` se
@@ -69,6 +75,8 @@ export function AppRoutes() {
         }
       />
       <Route path="/verificar-email" element={<VerifyEmailPage />} />
+      <Route path="/recuperar-contrasena" element={<ForgotPasswordPage />} />
+      <Route path="/restablecer-contrasena" element={<ResetPasswordPage />} />
       <Route
         element={
           <RequireAuth>

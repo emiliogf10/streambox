@@ -1,6 +1,7 @@
 package com.emilio.streambox.repository;
 
 import static com.emilio.streambox.entity.AccountTokenPurpose.EMAIL_VERIFICATION;
+import static com.emilio.streambox.entity.AccountTokenPurpose.PASSWORD_RESET;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -43,10 +44,11 @@ import com.emilio.streambox.entity.User;
  * </p>
  *
  * <p>
- * Hoy solo existe el propósito {@code EMAIL_VERIFICATION} (y el {@code CHECK}
- * de la base de datos no admite otro), así que no se puede guardar un token de
- * otro propósito para comprobar que no se confunden. Cuando se añada
- * {@code PASSWORD_RESET}, añadir aquí ese caso a cada consulta.
+ * Desde la {@code V10} hay dos propósitos ({@code EMAIL_VERIFICATION} y
+ * {@code PASSWORD_RESET}); el apartado «Propósitos» comprueba que cada
+ * consulta solo ve los tokens del suyo: un enlace de verificación nunca sirve
+ * para cambiar la contraseña, ni gastarlo por error con el propósito
+ * equivocado lo inutiliza.
  * </p>
  */
 @SpringBootTest
@@ -56,6 +58,8 @@ class AccountTokenRepositoryIntegrationTest {
     /** Instante fijo (como el {@code Clock} de un test del servicio). */
     private static final Instant NOW = Instant.parse("2026-10-18T10:00:00Z");
     private static final Duration TTL = Duration.ofHours(24);
+    /** Caducidad de un enlace de restablecimiento (la del contrato: 1 hora). */
+    private static final Duration RESET_TTL = Duration.ofHours(1);
 
     @Autowired private AccountTokenRepository accountTokenRepository;
     @Autowired private UserRepository userRepository;
@@ -286,6 +290,137 @@ class AccountTokenRepositoryIntegrationTest {
     }
 
     // ------------------------------------------------------------------
+    // Propósitos (V10): cada consulta solo ve los tokens del suyo
+    // ------------------------------------------------------------------
+
+    /** El propósito se guarda y se lee por su nombre también para {@code PASSWORD_RESET}. */
+    @Test
+    void guardaYLeeUnTokenDeRestablecimiento() {
+        save(alice, PASSWORD_RESET, hash(1), NOW, NOW.plus(RESET_TTL));
+
+        AccountToken read = accountTokenRepository.findByTokenHashAndPurpose(hash(1), PASSWORD_RESET).orElseThrow();
+
+        assertEquals(PASSWORD_RESET, read.getPurpose());
+        assertEquals("PASSWORD_RESET", jdbc.queryForObject("SELECT purpose FROM account_tokens", String.class));
+        assertTrue(accountTokenRepository.findByTokenHashAndPurpose(hash(1), EMAIL_VERIFICATION).isEmpty());
+    }
+
+    /**
+     * Presentar un token con el propósito equivocado no lo consume ni revela
+     * su cuenta, en las dos direcciones; con el suyo, después, sí vale. Es lo
+     * que impide usar un enlace de verificación para cambiar la contraseña.
+     */
+    @Test
+    void consumirConElPropositoEquivocadoNoGastaElToken() {
+        save(alice, EMAIL_VERIFICATION, hash(1), NOW, NOW.plus(TTL));
+        save(alice, PASSWORD_RESET, hash(2), NOW, NOW.plus(RESET_TTL));
+
+        assertEquals(0, consume(hash(1), PASSWORD_RESET, NOW));
+        assertEquals(0, consume(hash(2), EMAIL_VERIFICATION, NOW));
+        assertTrue(tx.execute(status ->
+                accountTokenRepository.findUserIdByTokenHashAndPurpose(hash(1), PASSWORD_RESET)).isEmpty());
+        assertTrue(tx.execute(status ->
+                accountTokenRepository.findUserIdByTokenHashAndPurpose(hash(2), EMAIL_VERIFICATION)).isEmpty());
+        assertNull(usedAt(hash(1)), "el de verificación sigue sin usar");
+        assertNull(usedAt(hash(2)), "el de restablecimiento sigue sin usar");
+
+        assertEquals(1, consume(hash(1), EMAIL_VERIFICATION, NOW.plusSeconds(1)));
+        assertEquals(1, consume(hash(2), PASSWORD_RESET, NOW.plusSeconds(2)));
+        assertEquals(Optional.of(alice.getId()), tx.execute(status ->
+                accountTokenRepository.findUserIdByTokenHashAndPurpose(hash(2), PASSWORD_RESET)));
+    }
+
+    /**
+     * Pedir otro enlace de un tipo invalida solo los de ese tipo: reenviar la
+     * verificación no anula un restablecimiento en curso, ni al revés.
+     */
+    @Test
+    void invalidarLosDeUnPropositoNoTocaLosDelOtro() {
+        save(alice, EMAIL_VERIFICATION, hash(1), NOW, NOW.plus(TTL));
+        save(alice, PASSWORD_RESET, hash(2), NOW, NOW.plus(RESET_TTL));
+        save(alice, PASSWORD_RESET, hash(3), NOW, NOW.plus(RESET_TTL));
+
+        assertEquals(2, (int) tx.execute(status ->
+                accountTokenRepository.invalidateActiveTokens(alice.getId(), PASSWORD_RESET, NOW.plusSeconds(5))));
+        assertNull(usedAt(hash(1)), "el de verificación sigue vigente");
+        assertEquals(NOW.plusSeconds(5), usedAt(hash(2)));
+        assertEquals(NOW.plusSeconds(5), usedAt(hash(3)));
+
+        save(alice, PASSWORD_RESET, hash(4), NOW.plusSeconds(10), NOW.plusSeconds(10).plus(RESET_TTL));
+        assertEquals(1, (int) tx.execute(status ->
+                accountTokenRepository.invalidateActiveTokens(alice.getId(), EMAIL_VERIFICATION, NOW.plusSeconds(20))));
+        assertEquals(NOW.plusSeconds(20), usedAt(hash(1)));
+        assertNull(usedAt(hash(4)), "el de restablecimiento sigue vigente");
+    }
+
+    /**
+     * «¿Tiene uno vigente?», el recuento de la ventana y «¿se le emitió alguno
+     * hasta…?» son por propósito: un restablecimiento pedido por una cuenta
+     * pendiente no la hace parecer «con su enlace de verificación vigente» ni
+     * «creada por el registro» (lo que decide si el registro puede sustituirla),
+     * ni gasta el cupo de reenvíos de la verificación.
+     */
+    @Test
+    void vigenteRecuentoYEmisionSonPorProposito() {
+        save(alice, PASSWORD_RESET, hash(1), NOW.minusSeconds(60), NOW.minusSeconds(60).plus(RESET_TTL));
+        save(alice, PASSWORD_RESET, hash(2), NOW.minusSeconds(30), NOW.minusSeconds(30).plus(RESET_TTL));
+        save(alice, EMAIL_VERIFICATION, hash(3), NOW.minus(Duration.ofDays(2)), NOW.minus(Duration.ofDays(1)));
+
+        assertTrue(accountTokenRepository.hasActiveToken(alice.getId(), PASSWORD_RESET, NOW));
+        assertFalse(accountTokenRepository.hasActiveToken(alice.getId(), EMAIL_VERIFICATION, NOW),
+                "su enlace de verificación caducó; el de restablecimiento no cuenta");
+        assertEquals(2, accountTokenRepository.countIssuedSince(alice.getId(), PASSWORD_RESET, NOW.minus(RESET_TTL)));
+        assertEquals(0, accountTokenRepository.countIssuedSince(alice.getId(), EMAIL_VERIFICATION, NOW.minus(RESET_TTL)));
+
+        save(bob, PASSWORD_RESET, hash(4), NOW.minusSeconds(10), NOW.minusSeconds(10).plus(RESET_TTL));
+        assertFalse(accountTokenRepository.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(
+                bob.getId(), EMAIL_VERIFICATION, NOW), "un restablecimiento no es un primer enlace de verificación");
+        assertTrue(accountTokenRepository.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(
+                bob.getId(), PASSWORD_RESET, NOW));
+    }
+
+    /**
+     * {@code invalidateAllActiveTokens}: al cambiar la contraseña caen los
+     * vigentes de la cuenta de <b>los dos</b> propósitos; los usados conservan
+     * su fecha, los caducados no se tocan y los de otra cuenta tampoco.
+     */
+    @Test
+    void invalidarTodosLosVigentesDeLaCuentaAbarcaLosDosPropositos() {
+        save(alice, EMAIL_VERIFICATION, hash(1), NOW, NOW.plus(TTL));
+        save(alice, PASSWORD_RESET, hash(2), NOW, NOW.plus(RESET_TTL));
+        save(alice, PASSWORD_RESET, hash(3), NOW.minusSeconds(60), NOW.minusSeconds(60).plus(RESET_TTL));
+        assertEquals(1, consume(hash(3), PASSWORD_RESET, NOW.minusSeconds(30)));
+        save(alice, PASSWORD_RESET, hash(4), NOW.minus(RESET_TTL).minusSeconds(1), NOW.minusSeconds(1));
+        save(bob, PASSWORD_RESET, hash(5), NOW, NOW.plus(RESET_TTL));
+        save(bob, EMAIL_VERIFICATION, hash(6), NOW, NOW.plus(TTL));
+
+        int invalidated = tx.execute(status -> accountTokenRepository.invalidateAllActiveTokens(alice.getId(), NOW));
+
+        assertEquals(2, invalidated);
+        assertEquals(NOW, usedAt(hash(1)));
+        assertEquals(NOW, usedAt(hash(2)));
+        assertEquals(NOW.minusSeconds(30), usedAt(hash(3)), "el usado conserva su fecha");
+        assertNull(usedAt(hash(4)), "el caducado no se toca");
+        assertNull(usedAt(hash(5)), "los de otra cuenta siguen vigentes");
+        assertNull(usedAt(hash(6)), "los de otra cuenta siguen vigentes");
+        assertFalse(accountTokenRepository.hasActiveToken(alice.getId(), EMAIL_VERIFICATION, NOW));
+        assertFalse(accountTokenRepository.hasActiveToken(alice.getId(), PASSWORD_RESET, NOW));
+        assertEquals(0, (int) tx.execute(status -> accountTokenRepository.invalidateAllActiveTokens(alice.getId(), NOW)),
+                "idempotente");
+    }
+
+    /** La limpieza borra los caducados sea cual sea su propósito. */
+    @Test
+    void laLimpiezaBorraLosCaducadosDeLosDosPropositos() {
+        save(alice, EMAIL_VERIFICATION, hash(1), NOW.minus(Duration.ofDays(3)), NOW.minus(Duration.ofDays(2)));
+        save(alice, PASSWORD_RESET, hash(2), NOW.minus(Duration.ofDays(3)), NOW.minus(Duration.ofDays(3)).plus(RESET_TTL));
+        save(alice, PASSWORD_RESET, hash(3), NOW, NOW.plus(RESET_TTL));
+
+        assertEquals(2, accountTokenRepository.deleteExpired(NOW.minus(Duration.ofDays(1))));
+        assertEquals(List.of(hash(3)), jdbc.queryForList("SELECT token_hash FROM account_tokens", String.class));
+    }
+
+    // ------------------------------------------------------------------
     // Limpieza y cascada
     // ------------------------------------------------------------------
 
@@ -391,7 +526,11 @@ class AccountTokenRepositoryIntegrationTest {
     }
 
     private int consume(String hash, Instant now) {
-        return tx.execute(status -> accountTokenRepository.consume(hash, EMAIL_VERIFICATION, now));
+        return consume(hash, EMAIL_VERIFICATION, now);
+    }
+
+    private int consume(String hash, AccountTokenPurpose purpose, Instant now) {
+        return tx.execute(status -> accountTokenRepository.consume(hash, purpose, now));
     }
 
     private boolean hasActive(User user, Instant now) {

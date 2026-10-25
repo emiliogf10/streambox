@@ -1,0 +1,64 @@
+-- ===================================================================
+-- V10: enlaces de «He olvidado mi contraseña» en account_tokens.
+--
+-- POR QUÉ
+--   Quien olvida su contraseña (o no puede entrar porque otra persona
+--   registró su email con una contraseña que no conoce) recibe por correo un
+--   enlace de un solo uso para elegir una contraseña nueva. Ese enlace es un
+--   token de cuenta exactamente igual que el de verificación del correo (V9):
+--   valor aleatorio del que solo se guarda el SHA-256, caducidad, un único
+--   uso y consumo atómico con un UPDATE condicional. Por eso NO se crea otra
+--   tabla: se reutiliza account_tokens con un propósito nuevo,
+--   'PASSWORD_RESET' (enum AccountTokenPurpose de Java).
+--
+-- QUÉ CAMBIA
+--   Solo la restricción ck_account_tokens_purpose: pasa de admitir
+--   'EMAIL_VERIFICATION' a admitir 'EMAIL_VERIFICATION' y 'PASSWORD_RESET'.
+--   Sigue siendo una LISTA CERRADA a propósito (al contrario que el avatar de
+--   V7): el propósito decide para qué sirve un token, y un valor mal escrito
+--   ('password_reset', 'PASSWORD_RESET ') guardaría tokens que ninguna
+--   consulta encontraría. Cada propósito futuro exige otra migración igual
+--   que esta; nunca se edita esta ni la V9.
+--
+--   Se sustituye la restricción conservando su nombre (DROP + ADD): así los
+--   errores siguen nombrando ck_account_tokens_purpose y los tests que la
+--   buscan por nombre no cambian. Son dos sentencias y no un único ALTER TABLE
+--   con las dos acciones separadas por comas porque H2 no admite esa forma.
+--
+-- POR QUÉ NO HACE FALTA NADA MÁS
+--   - Índices: idx_account_tokens_user_purpose (user_id, purpose) de la V9 ya
+--     sirve a lo que hará el restablecimiento: invalidar los enlaces vigentes
+--     de una cuenta, contar los emitidos en una ventana (límite de correos por
+--     cuenta) y la cascada al borrar el usuario. Consumir un token va por
+--     uk_account_tokens_token_hash. Invalidar los de TODOS los propósitos de
+--     una cuenta (al cambiar la contraseña) filtra solo por user_id, que es la
+--     primera columna del índice: también lo usa.
+--   - Columnas: ninguna. La caducidad (1 hora frente a 24 h de la
+--     verificación) la decide la aplicación al emitir el token; los CHECK de
+--     fechas de la V9 valen para cualquier duración.
+--
+-- RIESGOS PARA DATOS EXISTENTES (incluida la base de desarrollo en Supabase)
+--   - NO MODIFICA NI BORRA NINGUNA FILA. El ADD CONSTRAINT comprueba las filas
+--     que ya hay, y todas cumplen la restricción nueva porque la anterior solo
+--     admitía 'EMAIL_VERIFICATION', que sigue en la lista.
+--   - Bloqueos: en PostgreSQL ALTER TABLE toma un bloqueo exclusivo de
+--     account_tokens mientras recorre la tabla una vez para validar el CHECK.
+--     Es una tabla pequeña (enlaces de las últimas horas): milisegundos.
+--   - Atomicidad: en PostgreSQL Flyway ejecuta la migración en una
+--     transacción, así que nunca queda la tabla sin restricción si la segunda
+--     sentencia falla. En H2 (solo tests) cada DDL se confirma por separado.
+--   - Una base adoptada (anterior a Flyway) recibe exactamente lo mismo: la
+--     tabla y la restricción las creó la V9 en todos los casos.
+--   - Vuelta atrás: una versión ANTERIOR de la aplicación sigue arrancando
+--     (Hibernate no valida restricciones CHECK). Sus consultas filtran por
+--     propósito y nunca cargarían una fila 'PASSWORD_RESET'; solo un findAll
+--     de AccountToken fallaría al no conocer ese valor del enum. Lo correcto
+--     sería borrar antes esos tokens (caducan en una hora de todos modos).
+--
+-- SQL estándar: funciona igual en PostgreSQL y en H2 (modo PostgreSQL).
+-- ===================================================================
+
+ALTER TABLE account_tokens DROP CONSTRAINT ck_account_tokens_purpose;
+
+ALTER TABLE account_tokens ADD CONSTRAINT ck_account_tokens_purpose
+    CHECK (purpose IN ('EMAIL_VERIFICATION', 'PASSWORD_RESET'));

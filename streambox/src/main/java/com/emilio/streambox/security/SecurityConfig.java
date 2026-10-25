@@ -78,7 +78,8 @@ public class SecurityConfig {
 
         /**
          * Crea el filtro que limita por IP los intentos de login y registro, la
-         * renovación de sesión y la verificación del correo.
+         * renovación de sesión, la verificación del correo y el restablecimiento
+         * de la contraseña.
          *
          * <p>
          * Recibe el mismo {@link PathPatternRequestMatcher.Builder} que usa
@@ -206,6 +207,32 @@ public class SecurityConfig {
          * {@value RateLimitingFilter#EMAIL_VERIFICATION_RESEND_PATH}) son
          * públicas solo con {@code POST} y sin exigir {@code X-Requested-With}
          * (no tienen sesión que proteger, igual que login y registro).</li>
+         * <li>«He olvidado mi contraseña»: pedir el enlace
+         * ({@value RateLimitingFilter#PASSWORD_RESET_PATH}) y confirmarlo
+         * ({@value RateLimitingFilter#PASSWORD_RESET_CONFIRM_PATH}) son
+         * públicas solo con {@code POST}, también sin exigir
+         * {@code X-Requested-With}. Qué ganaría otra web enviándolas desde el
+         * navegador de la víctima (CSRF), aunque pudiera (sin CORS solo puede
+         * enviar {@code POST} «simples», {@code text/plain} o formulario, que
+         * el controlador rechaza con 415 sin leerlas ni gastar el límite por
+         * IP):
+         * <ul>
+         * <li><b>Pedir el enlace:</b> nada. El email lo elige quien envía la
+         * petición, así que el atacante puede hacerlo directamente; el correo
+         * solo llega al buzón del titular, y pedir otro no cambia la
+         * contraseña ni cierra sesiones.</li>
+         * <li><b>Confirmar:</b> nada. Fijar una contraseña elegida por el
+         * atacante exige el token, que solo está en el buzón de la víctima (va
+         * en el fragmento {@code #token=} del enlace, que el navegador nunca
+         * envía a ningún servidor ni en el {@code Referer}). Si el atacante
+         * usa un token suyo (de su propia cuenta), solo cambia su propia
+         * contraseña: la confirmación no inicia sesión ni toca las cookies de
+         * quien la envía, así que tampoco sirve para un «login CSRF».</li>
+         * </ul>
+         * La cabecera no protegería nada y, en cambio, obligaría a todo cliente
+         * a añadirla; además {@link JwtAuthenticationFilter} ignora la cookie
+         * de sesión en las dos rutas, para que tener una sesión abierta no
+         * provoque un 403.</li>
          * <li>Las vistas de gestión ({@code /api/admin/**}) quedan reservadas a
          * {@code ADMIN} con cualquier método, también la lectura: muestran
          * datos que los usuarios no deben ver (p. ej. series sin
@@ -309,6 +336,18 @@ public class SecurityConfig {
                                                 .requestMatchers(HttpMethod.POST,
                                                                 RateLimitingFilter.EMAIL_VERIFICATION_PATH,
                                                                 RateLimitingFilter.EMAIL_VERIFICATION_RESEND_PATH)
+                                                .permitAll()
+
+                                                // "He olvidado mi contraseña": pedir el enlace y
+                                                // confirmar con el token y la contraseña nueva.
+                                                // Publicos (quien los usa no puede iniciar sesion),
+                                                // solo POST y limitados por IP en RateLimitingFilter,
+                                                // de donde salen las rutas. Sin la cabecera CSRF
+                                                // obligatoria, por lo mismo que la verificacion: ver
+                                                // el Javadoc de este metodo.
+                                                .requestMatchers(HttpMethod.POST,
+                                                                RateLimitingFilter.PASSWORD_RESET_PATH,
+                                                                RateLimitingFilter.PASSWORD_RESET_CONFIRM_PATH)
                                                 .permitAll()
 
                                                 // Cerrar sesion en todos los dispositivos y cambiar la

@@ -111,6 +111,10 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter.Reservation;
  * conserva solo la IP de quien lo hace): quien entró con la contraseña robada
  * no se lleva 30 días de IP conocida. Ver {@link #forgetKnownIps(String)} y
  * {@link #forgetKnownIpsExcept(String, String)}.</li>
+ * <li>Restablecer la contraseña con el enlace del correo olvida las IPs
+ * conocidas y además <b>borra todos los fallos</b> de la cuenta
+ * ({@link #clearFailures(String)}): el titular que se quedó fuera entra en
+ * seguida con la contraseña nueva.</li>
  * </ul>
  *
  * <p>
@@ -344,6 +348,69 @@ public class LoginAttemptService {
      */
     public void forgetKnownIpsExcept(String email, String ip) {
         knownIps.forgetAllBut(normalize(email), ClientAddress.counterKey(ip));
+    }
+
+    /**
+     * Borra todos los fallos de login de la cuenta: los del contador de la
+     * cuenta (el bloqueo que sufren las IPs desconocidas) y los de
+     * <b>todas</b> sus IPs, conocidas o ya olvidadas. Se llama tras un
+     * <b>restablecimiento de contraseña confirmado</b> («He olvidado mi
+     * contraseña»), junto con {@link #forgetKnownIpsExcept(String, String)}
+     * (se conserva la IP de quien confirmó, como en el cambio de contraseña).
+     *
+     * <p>
+     * <b>Por qué.</b> Quien confirma el restablecimiento ha demostrado que
+     * controla el buzón de la cuenta (el token solo viaja en ese correo) y
+     * acaba de fijar la contraseña. Es justo el caso del titular que se ha
+     * quedado fuera: a menudo llega aquí <i>después</i> de agotar sus
+     * intentos, o porque un intruso le bloquea la cuenta a propósito. Si los
+     * fallos siguieran contando, la contraseña nueva le daría un 429
+     * {@code ACCOUNT_LOCKED} durante la ventana (15 minutos), y como el
+     * restablecimiento olvida sus IPs conocidas, tampoco se libraría desde
+     * ellas.
+     * </p>
+     *
+     * <p>
+     * <b>Por qué no abre nada a un atacante.</b> Solo lo provoca un token
+     * válido del correo, de un solo uso, cuya emisión está limitada por IP y,
+     * en silencio, por cuenta. Quien lo tiene ya controla el buzón y puede
+     * fijar la contraseña que quiera: devolverle intentos de login no le da
+     * nada que no tenga. Las reservas de intentos que estén en curso se
+     * borran también; si alguna falla después,
+     * {@link #recordFailure(LoginAttempt)} la vuelve a apuntar como un fallo
+     * posterior (igual que tras un login correcto).
+     * </p>
+     *
+     * <p>
+     * <b>Por qué también los contadores (email, IP)</b>, a diferencia de
+     * {@link #forgetKnownIps(String)}. Una IP olvidada deja de usar su
+     * contador, pero si el titular vuelve a iniciar sesión desde ella dentro de
+     * la ventana, la IP vuelve a ser conocida y se encontraría con los fallos
+     * antiguos (p. ej. los del intruso desde esa misma red): bloqueado en
+     * cuanto falle una vez. Tras un restablecimiento la cuenta empieza de cero.
+     * No depende de las IPs que se recuerden ahora, así que el orden respecto a
+     * {@link #forgetKnownIps(String)} da igual.
+     * </p>
+     *
+     * <p>
+     * <b>Coste.</b> Los contadores (email, IP) se buscan recorriendo sus claves
+     * ({@link SlidingWindowCounter#resetMatching}), como mucho
+     * {@code max-keys}: aceptable para una operación así de rara. La clave de
+     * cada una es el email, el separador y la IP; como la IP no puede contener
+     * el separador, se compara hasta el <b>último</b> separador, y el email de
+     * otra cuenta que contenga este como prefijo (p. ej.
+     * {@code a@x.test|b@x.test}) no se ve afectado.
+     * </p>
+     *
+     * @param email email de la cuenta (se normaliza como en el login)
+     */
+    public void clearFailures(String email) {
+        String key = normalize(email);
+        failures.reset(key);
+        knownIpFailures.resetMatching(counterKey -> {
+            int separator = counterKey.lastIndexOf(KEY_SEPARATOR);
+            return separator == key.length() && counterKey.startsWith(key);
+        });
     }
 
     private SlidingWindowCounter counterOf(LoginAttempt attempt) {

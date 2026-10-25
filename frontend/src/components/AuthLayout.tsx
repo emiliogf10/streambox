@@ -18,8 +18,9 @@ interface AuthLayoutProps {
 }
 
 /**
- * Estructura común de las pantallas públicas (login, registro y confirmación
- * del correo en `/verificar-email`): logotipo, título, formulario y pie. Así
+ * Estructura común de las pantallas públicas (login, registro, confirmación
+ * del correo en `/verificar-email` y recuperación de la contraseña en
+ * `/recuperar-contrasena` y `/restablecer-contrasena`): logotipo, título, formulario y pie. Así
  * todas son idénticas por construcción y no duplican marcado. El `<main>` es el destino del enlace
  * "Saltar al contenido" (`id="contenido"`).
  *

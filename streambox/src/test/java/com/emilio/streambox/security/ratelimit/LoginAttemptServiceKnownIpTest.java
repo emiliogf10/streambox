@@ -48,7 +48,7 @@ class LoginAttemptServiceKnownIpTest {
     private LoginAttemptService service(int maxKeys, int maxKnownIps) {
         RateLimitProperties.Rule rule = new RateLimitProperties.Rule(100, Duration.ofMinutes(1));
         return new LoginAttemptService(
-                new RateLimitProperties(rule, rule, rule, rule, rule,
+                new RateLimitProperties(rule, rule, rule, rule, rule, rule, rule,
                         new RateLimitProperties.Lockout(5, Duration.ofMinutes(15), maxKnownIps, Duration.ofDays(30)),
                         maxKeys),
                 clock);
@@ -474,6 +474,100 @@ class LoginAttemptServiceKnownIpTest {
         service.forgetKnownIps(OWNER);
 
         assertEquals(true, canReserve(OTHER_ACCOUNT, HOME));
+    }
+
+    // ------------------------------------------------------------------
+    // Borrar los fallos (restablecimiento de contraseña confirmado)
+    // ------------------------------------------------------------------
+
+    /**
+     * El caso que motiva el método: la cuenta está bloqueada para las IPs
+     * desconocidas y el restablecimiento olvida las conocidas. Sin borrar los
+     * fallos, el titular seguiría recibiendo el 429 con la contraseña nueva
+     * desde cualquier IP; con ellos borrados, vuelve a tener todos sus
+     * intentos. El email se normaliza como en el login.
+     */
+    @Test
+    void trasBorrarLosFallosLaCuentaBloqueadaVuelveATenerTodosSusIntentos() {
+        ownerLogsIn(HOME);
+        lockAndCatch(OWNER, ATTACKER);
+        service.forgetKnownIps(OWNER);
+        assertEquals(false, canReserve(OWNER, HOME), "Bloqueada también desde la IP que era conocida");
+
+        service.clearFailures("  ADMIN@Example.TEST ");
+
+        assertEquals(4, fail(OWNER, HOME));
+        assertEquals(3, fail(OWNER, NEW_NETWORK), "Mismo contador de la cuenta, empezado de cero");
+    }
+
+    /**
+     * También borra los contadores de las IPs, aunque ya no sean conocidas: si
+     * el titular vuelve a entrar desde una IP olvidada, se encuentra su
+     * contador vacío. Sin borrarlo, los 5 fallos antiguos de esa IP seguirían
+     * en la ventana y, en cuanto vuelve a ser conocida, ni siquiera podría
+     * reservar un intento.
+     */
+    @Test
+    void tambienBorraLosContadoresDeLasIpsAunqueYaNoSeanConocidas() {
+        ownerLogsIn(HOME);
+        lockAndCatch(OWNER, HOME);                     // contador (email, HOME) lleno
+        service.forgetKnownIps(OWNER);
+
+        service.clearFailures(OWNER);
+        ownerLogsIn(HOME);                             // HOME vuelve a ser conocida
+
+        assertEquals(4, fail(OWNER, HOME), "El contador de HOME empezó de cero");
+    }
+
+    /** El orden respecto a {@code forgetKnownIps} da igual: no depende de las IPs recordadas. */
+    @Test
+    void borrarAntesDeOlvidarLasIpsDaElMismoResultado() {
+        ownerLogsIn(HOME);
+        lockAndCatch(OWNER, HOME);
+        lockAndCatch(OWNER, ATTACKER);
+
+        service.clearFailures(OWNER);
+        service.forgetKnownIps(OWNER);
+
+        assertEquals(4, fail(OWNER, HOME), "HOME ahora es desconocida y usa el contador de la cuenta, vacío");
+        ownerLogsIn(HOME);
+        assertEquals(4, fail(OWNER, HOME), "Y su contador propio también está vacío");
+    }
+
+    /**
+     * Solo toca la cuenta indicada: ni otra cuenta, ni una cuyo email empieza
+     * por el de esta seguido del separador de las claves ({@code |}), que
+     * comparte el prefijo de la clave (email|IP) pero es otra cuenta.
+     */
+    @Test
+    void noTocaLosFallosDeOtrasCuentasAunqueCompartanPrefijo() {
+        String lookalike = OWNER + "|otro@example.test";
+        service.recordSuccess(service.reserveAttempt(lookalike, HOME));
+        lockAndCatch(lookalike, HOME);
+        lockAndCatch(OTHER_ACCOUNT, ATTACKER);
+        lockAndCatch(OWNER, ATTACKER);
+
+        service.clearFailures(OWNER);
+
+        assertEquals(4, fail(OWNER, ATTACKER));
+        assertEquals(false, canReserve(OTHER_ACCOUNT, ATTACKER), "Otra cuenta sigue bloqueada");
+        assertEquals(false, canReserve(lookalike, HOME), "El contador (email|IP) de la otra cuenta sigue lleno");
+    }
+
+    /**
+     * Borra también las reservas en curso; si una de ellas falla después, se
+     * vuelve a apuntar como un fallo posterior (igual que tras un login
+     * correcto) y no se pierde.
+     */
+    @Test
+    void unaReservaEnCursoQueFallaDespuesSeVuelveAApuntar() {
+        LoginAttempt inFlight = service.reserveAttempt(OWNER, ATTACKER);
+        fail(OWNER, ATTACKER);
+
+        service.clearFailures(OWNER);
+
+        assertEquals(4, service.recordFailure(inFlight), "El fallo en curso cuenta como el primero");
+        assertEquals(3, fail(OWNER, ATTACKER));
     }
 
     // ------------------------------------------------------------------

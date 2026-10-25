@@ -1,20 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { AuthLayout } from '../components/AuthLayout';
 import { Button } from '../components/Button';
 import { buttonClasses } from '../components/buttonStyles';
 import { FormAlert } from '../components/FormAlert';
-import { FormField } from '../components/FormField';
-import { ResendNotice } from '../components/ResendVerification';
+import { RequestLinkForm } from '../components/RequestLinkForm';
 import { useAuth } from '../context/AuthContext';
 import { useCountdown } from '../hooks/useCountdown';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import { useResendVerification } from '../hooks/useResendVerification';
+import { useHashLinkToken } from '../hooks/useHashLinkToken';
 import { ApiError, getErrorMessage } from '../lib/api';
-import { VERIFICATION_LINK_TTL_HOURS, confirmEmail, readVerificationToken } from '../lib/emailVerification';
+import {
+  RESEND_DONE_MESSAGE,
+  VERIFICATION_LINK_TTL_HOURS,
+  confirmEmail,
+  requestVerificationEmail,
+} from '../lib/emailVerification';
 import { formatWaitTime } from '../lib/utils';
-import { emailError } from '../lib/validation';
 
 /**
  * Estado de la página:
@@ -35,107 +37,18 @@ const RESEND_EMAIL_ID = 'verify-resend-email';
 const TEXT_LINK = 'focus-ring font-semibold text-accent underline-offset-2 hover:underline';
 
 /**
- * Formulario «pedir un enlace nuevo» del estado de enlace no válido: aquí no se
- * conoce el correo (el enlace solo trae el token), así que hay que escribirlo.
- * Mismas reglas de espera y avisos que el botón del registro y el login
- * (`useResendVerification`).
- */
-function RequestNewLinkForm() {
-  const [email, setEmail] = useState('');
-  const [fieldError, setFieldError] = useState<string | undefined>(undefined);
-  const { resend, sending, remaining, notice } = useResendVerification();
-  const waiting = remaining > 0;
-
-  const handleSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    const value = email.trim();
-    const problem = emailError(value);
-    setFieldError(problem);
-    if (problem) {
-      document.getElementById(RESEND_EMAIL_ID)?.focus();
-      return;
-    }
-    void resend(value);
-  };
-
-  return (
-    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
-      <FormField
-        id={RESEND_EMAIL_ID}
-        label="Correo electrónico"
-        type="email"
-        autoComplete="email"
-        placeholder="tu@correo.com"
-        required
-        error={fieldError}
-        value={email}
-        onChange={(e) => {
-          setEmail(e.target.value);
-          setFieldError(undefined);
-        }}
-      />
-      <div>
-        <Button type="submit" variant="outline" disabled={sending || waiting} className="w-full">
-          {sending ? 'Enviando...' : waiting ? `Pedir otro en ${formatWaitTime(remaining)}` : 'Enviar un enlace nuevo'}
-        </Button>
-        <ResendNotice notice={notice} />
-      </div>
-    </form>
-  );
-}
-
-/**
  * Página `/verificar-email`, a la que lleva el enlace del correo de
  * confirmación (`/verificar-email#token=…`). Es pública y funciona igual con o
  * sin sesión abierta (no tiene guarda: no redirige a nadie).
  *
- * **El token, en el fragmento y fuera de la barra de direcciones.** Se lee de
- * `location.hash` y enseguida se quita de la URL (`navigate(..., { replace:
- * true })`, que en el navegador es un `history.replaceState`): así no queda en
- * el historial ni a la vista de quien mire la pantalla. Se usa el enrutador y no
- * `window.history` directamente para que React Router sepa que la URL ha
- * cambiado. El fragmento nunca viaja al servidor, así que tampoco acaba en los
- * logs ni en el `Referer`.
- *
- * **Un enlace nuevo en la misma pestaña cuenta como un enlace nuevo.** Si el
- * usuario pega otro `…#token=…` con la página ya abierta (lo normal tras pedir
- * un enlace nuevo desde «enlace no válido»), el navegador no recarga: solo
- * cambia el fragmento (navegación dentro del mismo documento, que React Router
- * recibe como un `popstate`). Por eso el fragmento se vigila en cada render y
- * no solo al montar: cada fragmento no vacío distinto del anterior monta de
- * cero {@link VerificationFlow} (con otra `key`), que vuelve a «Confirma tu
+ * El token se lee del fragmento y se quita de la barra de direcciones con
+ * {@link useHashLinkToken} (común con `/restablecer-contrasena`), que también
+ * reconoce un enlace nuevo abierto con la página ya en pantalla: cada uno monta
+ * de cero {@link VerificationFlow} (con otra `key`), que vuelve a «Confirma tu
  * correo» con el token nuevo, sin errores ni cuentas atrás del enlace anterior.
- * Quitar el fragmento de la URL también lo cambia (a vacío), y eso **no** es un
- * enlace nuevo: el token ya leído se conserva.
  */
 export function VerifyEmailPage() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  // `hash`: último fragmento visto; `token`: el del último enlace; `id`: cuántos enlaces van (es la `key`).
-  const [link, setLink] = useState(() => ({
-    hash: location.hash,
-    token: readVerificationToken(location.hash),
-    id: 0,
-  }));
-
-  // Ajuste durante el render (patrón recomendado por React para derivar estado
-  // de un cambio de props/contexto): sin un efecto intermedio, el formulario
-  // del enlace anterior no llega a pintarse con el token nuevo.
-  if (location.hash !== link.hash) {
-    setLink(
-      location.hash
-        ? { hash: location.hash, token: readVerificationToken(location.hash), id: link.id + 1 }
-        : { ...link, hash: '' },
-    );
-  }
-
-  // Quita el `#token=…` de la barra de direcciones (y del historial) en cuanto se ha leído.
-  useEffect(() => {
-    if (location.hash) {
-      navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: location.state });
-    }
-  }, [location, navigate]);
-
+  const link = useHashLinkToken();
   return <VerificationFlow key={link.id} token={link.token} announce={link.id > 0} />;
 }
 
@@ -269,11 +182,12 @@ function VerificationFlow({ token, announce }: VerificationFlowProps) {
             </p>
           )}
           <p>
-            Si no, escribe tu correo y te enviaremos un enlace nuevo. Si copiaste el enlace a mano, comprueba también
-            que esté completo.
+            {/* Sin prometer el envío: el 202 es siempre igual y no se manda nada sin cuenta pendiente o tras el límite silencioso por cuenta. */}
+            Si no, escribe tu correo y, si hay una cuenta pendiente de confirmar con él, te llegará un enlace nuevo. Si
+            copiaste el enlace a mano, comprueba también que esté completo.
           </p>
         </div>
-        <RequestNewLinkForm />
+        <RequestLinkForm id={RESEND_EMAIL_ID} send={requestVerificationEmail} doneMessage={RESEND_DONE_MESSAGE} />
       </AuthLayout>
     );
   }

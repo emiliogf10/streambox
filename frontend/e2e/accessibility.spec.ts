@@ -355,7 +355,15 @@ test.describe('Estructura accesible del panel de administración (humo)', () => 
 test.describe('Estructura accesible (humo)', () => {
   // `/verificar-email` sin token es el estado «enlace no válido» (con su formulario para pedir otro); con un
   // token de formato válido, el de «Confirma tu correo» (no se confirma al cargar: no gasta nada).
-  const PUBLIC_PAGES = ['/login', '/registro', '/verificar-email', `/verificar-email#token=${'A'.repeat(43)}`];
+  const PUBLIC_PAGES = [
+    '/login',
+    '/registro',
+    '/verificar-email',
+    `/verificar-email#token=${'A'.repeat(43)}`,
+    '/recuperar-contrasena',
+    '/restablecer-contrasena',
+    `/restablecer-contrasena#token=${'A'.repeat(43)}`,
+  ];
   const PRIVATE_PAGES = ['/', '/favorites'];
 
   for (const path of PUBLIC_PAGES) {

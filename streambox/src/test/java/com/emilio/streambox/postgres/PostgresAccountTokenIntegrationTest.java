@@ -1,6 +1,7 @@
 package com.emilio.streambox.postgres;
 
 import static com.emilio.streambox.entity.AccountTokenPurpose.EMAIL_VERIFICATION;
+import static com.emilio.streambox.entity.AccountTokenPurpose.PASSWORD_RESET;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,6 +35,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.emilio.streambox.entity.AccountToken;
+import com.emilio.streambox.entity.AccountTokenPurpose;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.repository.AccountTokenRepository;
@@ -68,6 +70,8 @@ class PostgresAccountTokenIntegrationTest extends PostgresIntegrationTestSupport
 
     private static final Instant NOW = Instant.parse("2026-10-18T10:00:00Z");
     private static final Duration TTL = Duration.ofHours(24);
+    /** Caducidad de un enlace de restablecimiento (la del contrato: 1 hora). */
+    private static final Duration RESET_TTL = Duration.ofHours(1);
 
     @Autowired private AccountTokenRepository accountTokenRepository;
     @Autowired private JdbcTemplate jdbc;
@@ -169,7 +173,9 @@ class PostgresAccountTokenIntegrationTest extends PostgresIntegrationTestSupport
     @Test
     void cadaRestriccionCheckRechazaLoSuyo() {
         long userId = alice.getId();
-        assertCheck("ck_account_tokens_purpose", () -> insert(userId, "PASSWORD_RESET", hash(1), NOW, NOW.plus(TTL), null));
+        assertCheck("ck_account_tokens_purpose", () -> insert(userId, "LOGIN_LINK", hash(1), NOW, NOW.plus(TTL), null));
+        assertCheck("ck_account_tokens_purpose", () -> insert(userId, "password_reset", hash(1), NOW, NOW.plus(TTL), null));
+        assertCheck("ck_account_tokens_purpose", () -> insert(userId, "PASSWORD_RESET ", hash(1), NOW, NOW.plus(TTL), null));
         assertCheck("ck_account_tokens_purpose", () -> insert(userId, "email_verification", hash(1), NOW, NOW.plus(TTL), null));
         assertCheck("ck_account_tokens_token_hash_format", () -> insert(userId, "EMAIL_VERIFICATION", "a".repeat(63), NOW, NOW.plus(TTL), null));
         assertCheck("ck_account_tokens_token_hash_format", () -> insert(userId, "EMAIL_VERIFICATION", "A".repeat(64), NOW, NOW.plus(TTL), null));
@@ -180,6 +186,31 @@ class PostgresAccountTokenIntegrationTest extends PostgresIntegrationTestSupport
                 () -> insert(userId, null, hash(1), NOW, NOW.plus(TTL), null));
         assertEquals(NOT_NULL_VIOLATION, sqlState(noPurpose));
         assertEquals(0, count());
+    }
+
+    /**
+     * V10: el CHECK del propósito, sustituido conservando su nombre, admite
+     * exactamente los dos propósitos (su definición real en
+     * {@code pg_constraint}, no solo que acepte dos inserciones) y está
+     * validado sobre las filas existentes.
+     */
+    @Test
+    void elCheckDePropositoAdmiteLosDosPropositosDeLaV10() {
+        Map<String, Object> constraint = jdbc.queryForMap("SELECT pg_get_constraintdef(oid) AS def, convalidated"
+                + " FROM pg_constraint WHERE conname = 'ck_account_tokens_purpose'"
+                + " AND conrelid = 'public.account_tokens'::regclass");
+        String definition = (String) constraint.get("def");
+
+        assertTrue(definition.contains("'EMAIL_VERIFICATION'") && definition.contains("'PASSWORD_RESET'"), definition);
+        // PostgreSQL reescribe el IN como «= ANY (ARRAY[...])» con conversiones de
+        // tipo: se cuentan los literales entre comillas, sea cual sea esa forma
+        assertEquals(2, java.util.regex.Pattern.compile("'[^']*'").matcher(definition).results().count(),
+                "exactamente dos valores: " + definition);
+        assertEquals(Boolean.TRUE, constraint.get("convalidated"));
+
+        insert(alice.getId(), "EMAIL_VERIFICATION", hash(1), NOW, NOW.plus(TTL), null);
+        insert(alice.getId(), "PASSWORD_RESET", hash(2), NOW, NOW.plus(RESET_TTL), null);
+        assertEquals(2, count());
     }
 
     @Test
@@ -254,6 +285,39 @@ class PostgresAccountTokenIntegrationTest extends PostgresIntegrationTestSupport
 
         assertEquals(2, accountTokenRepository.deleteExpired(NOW.plus(Duration.ofDays(30))));
         assertEquals(0, count());
+    }
+
+    /**
+     * V10 en PostgreSQL: las consultas separan los dos propósitos (el enum se
+     * compara como {@code varchar} con el valor guardado) e
+     * {@code invalidateAllActiveTokens} abarca los dos de una cuenta y nada más.
+     */
+    @Test
+    void lasConsultasSeparanLosPropositosEInvalidarTodosAbarcaLosDos() {
+        User bob = saveUser("bob", Role.USER);
+        save(alice, EMAIL_VERIFICATION, hash(1), NOW, NOW.plus(TTL));
+        save(alice, PASSWORD_RESET, hash(2), NOW, NOW.plus(RESET_TTL));
+        save(bob, PASSWORD_RESET, hash(3), NOW, NOW.plus(RESET_TTL));
+
+        assertEquals(0, consume(hash(1), PASSWORD_RESET, NOW), "un enlace de verificación no cambia contraseñas");
+        assertEquals(0, consume(hash(2), EMAIL_VERIFICATION, NOW));
+        assertNull(usedAt(hash(1)));
+        assertNull(usedAt(hash(2)));
+        assertEquals(1, accountTokenRepository.countIssuedSince(alice.getId(), PASSWORD_RESET, NOW.minusSeconds(1)));
+        assertTrue(accountTokenRepository.hasActiveToken(alice.getId(), PASSWORD_RESET, NOW));
+        assertFalse(accountTokenRepository.hasActiveToken(alice.getId(), PASSWORD_RESET, NOW.plus(RESET_TTL)));
+
+        assertEquals(1, (int) tx.execute(status ->
+                accountTokenRepository.invalidateActiveTokens(alice.getId(), PASSWORD_RESET, NOW.plusSeconds(5))));
+        assertNull(usedAt(hash(1)), "invalidar los de restablecimiento no toca la verificación");
+
+        save(alice, PASSWORD_RESET, hash(4), NOW.plusSeconds(10), NOW.plusSeconds(10).plus(RESET_TTL));
+        assertEquals(2, (int) tx.execute(status ->
+                accountTokenRepository.invalidateAllActiveTokens(alice.getId(), NOW.plusSeconds(20))));
+        assertEquals(NOW.plusSeconds(20), usedAt(hash(1)));
+        assertEquals(NOW.plusSeconds(5), usedAt(hash(2)), "el ya invalidado conserva su fecha");
+        assertEquals(NOW.plusSeconds(20), usedAt(hash(4)));
+        assertNull(usedAt(hash(3)), "los de otra cuenta siguen vigentes");
     }
 
     // ------------------------------------------------------------------
@@ -383,7 +447,11 @@ class PostgresAccountTokenIntegrationTest extends PostgresIntegrationTestSupport
     }
 
     private int consume(String hash, Instant now) {
-        return tx.execute(status -> accountTokenRepository.consume(hash, EMAIL_VERIFICATION, now));
+        return consume(hash, EMAIL_VERIFICATION, now);
+    }
+
+    private int consume(String hash, AccountTokenPurpose purpose, Instant now) {
+        return tx.execute(status -> accountTokenRepository.consume(hash, purpose, now));
     }
 
     /** Espera (máx. 10 s) a que alguna conexión de esta base esté bloqueada esperando una fila de account_tokens. */
@@ -429,9 +497,14 @@ class PostgresAccountTokenIntegrationTest extends PostgresIntegrationTestSupport
     }
 
     private AccountToken save(User user, String hash, Instant createdAt, Instant expiresAt) {
+        return save(user, EMAIL_VERIFICATION, hash, createdAt, expiresAt);
+    }
+
+    private AccountToken save(User user, AccountTokenPurpose purpose, String hash, Instant createdAt,
+            Instant expiresAt) {
         AccountToken token = new AccountToken();
         token.setUser(user);
-        token.setPurpose(EMAIL_VERIFICATION);
+        token.setPurpose(purpose);
         token.setTokenHash(hash);
         token.setCreatedAt(createdAt);
         token.setExpiresAt(expiresAt);

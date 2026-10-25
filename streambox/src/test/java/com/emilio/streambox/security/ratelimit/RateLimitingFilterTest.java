@@ -46,6 +46,8 @@ class RateLimitingFilterTest {
                     new RateLimitProperties.Rule(1, Duration.ofMinutes(1)),
                     new RateLimitProperties.Rule(1, Duration.ofMinutes(15)),
                     new RateLimitProperties.Rule(1, Duration.ofHours(1)),
+                    new RateLimitProperties.Rule(1, Duration.ofHours(1)),
+                    new RateLimitProperties.Rule(1, Duration.ofMinutes(15)),
                     new RateLimitProperties.Lockout(5, Duration.ofMinutes(15), 5, Duration.ofDays(30)),
                     100_000),
             new MutableClock(),
@@ -422,6 +424,89 @@ class RateLimitingFilterTest {
             "POST, /api/auth/email-verification/otra"
     })
     void otrosMetodosORutasDeLaVerificacionNoSeLimitan(String method, String rawPath) throws Exception {
+        assertPassed(request(method, rawPath));
+        assertPassed(request(method, rawPath));
+    }
+
+    // ------------------------------------------------------------------
+    // Restablecer la contraseña: pedir el enlace y confirmar
+    // ------------------------------------------------------------------
+
+    private static final String RESET = "/api/auth/password-reset";
+    private static final String RESET_CONFIRM = "/api/auth/password-reset/confirm";
+
+    /**
+     * Las dos rutas están limitadas por IP, también con sus variantes
+     * codificadas o con parámetros de matriz (mismo
+     * {@code PathPatternRequestMatcher} que la regla {@code permitAll}).
+     */
+    @ParameterizedTest
+    @CsvSource({
+            "/api/auth/password-reset, /api/auth/%70assword-reset",
+            "/api/auth/password-reset, /api/auth/password-reset;x=1",
+            "/api/auth/password-reset/confirm, /api/auth/password-reset/%63onfirm",
+            "/api/auth/password-reset/confirm, /%61pi/auth/password-reset/confirm"
+    })
+    void lasRutasDelRestablecimientoSeLimitanTambienConSusVariantes(String path, String variant)
+            throws Exception {
+        assertPassed(post(path));
+
+        assertRejected(post(variant));
+    }
+
+    /**
+     * Cada ruta tiene su contador: agotar las peticiones del enlace no impide
+     * confirmar con el que ya llegó, ni gasta el login, el reenvío de la
+     * verificación ni el registro.
+     */
+    @Test
+    void pedirElEnlaceConfirmarYLasDemasRutasNoCompartenContador() throws Exception {
+        assertPassed(post(RESET));
+        assertRejected(post(RESET));
+
+        assertPassed(post(RESET_CONFIRM));
+        assertPassed(post("/api/auth/login"));
+        assertPassed(post(RESEND));
+        assertPassed(post("/api/users"));
+        assertRejected(post(RESET_CONFIRM));
+        assertRejected(post(RESET));
+    }
+
+    /**
+     * Mismo criterio que login, registro y verificación: lo que otra web puede
+     * enviar sin preflight (o un {@code Content-Type} mal formado) no gasta el
+     * presupuesto de la víctima.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = { "text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x",
+            "", "json" })
+    void enElRestablecimientoLoQueOtraWebPuedeEnviarNoGastaElHueco(String contentType) throws Exception {
+        for (String path : new String[] { RESET, RESET_CONFIRM }) {
+            for (int i = 0; i < 3; i++) {
+                MockHttpServletRequest request = post(path);
+                request.setContentType(contentType);
+                assertPassed(request);
+            }
+            MockHttpServletRequest withoutType = post(path);
+            withoutType.setContentType(null);
+            assertPassed(withoutType);
+
+            assertPassed(post(path));
+            assertRejected(post(path));
+        }
+    }
+
+    /** Solo se limita el {@code POST} exacto: el resto no es público (401 en la cadena). */
+    @ParameterizedTest
+    @CsvSource({
+            "GET, /api/auth/password-reset",
+            "PUT, /api/auth/password-reset",
+            "GET, /api/auth/password-reset/confirm",
+            "PATCH, /api/auth/password-reset/confirm",
+            "POST, /api/auth/password-reset/otra",
+            "POST, /api/auth/password-reset/confirm/otra"
+    })
+    void otrosMetodosORutasDelRestablecimientoNoSeLimitan(String method, String rawPath) throws Exception {
         assertPassed(request(method, rawPath));
         assertPassed(request(method, rawPath));
     }

@@ -74,6 +74,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final RequestMatcher refreshRequest;
     private final RequestMatcher emailVerificationRequest;
     private final RequestMatcher emailVerificationResendRequest;
+    private final RequestMatcher passwordResetRequest;
+    private final RequestMatcher passwordResetConfirmRequest;
 
     /** Mensaje del 403 {@code CSRF_REJECTED}. */
     static final String CSRF_REJECTED_MESSAGE = "Petición rechazada: falta la cabecera de protección "
@@ -106,6 +108,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 RateLimitingFilter.EMAIL_VERIFICATION_PATH);
         this.emailVerificationResendRequest = matchers.matcher(HttpMethod.POST,
                 RateLimitingFilter.EMAIL_VERIFICATION_RESEND_PATH);
+        this.passwordResetRequest = matchers.matcher(HttpMethod.POST, RateLimitingFilter.PASSWORD_RESET_PATH);
+        this.passwordResetConfirmRequest = matchers.matcher(HttpMethod.POST,
+                RateLimitingFilter.PASSWORD_RESET_CONFIRM_PATH);
     }
 
     /**
@@ -426,10 +431,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * no manda la cabecera. Por qué no exigen {@code X-Requested-With}: ver
      * {@code SecurityConfig}.
      * </p>
+     *
+     * <p>
+     * Igual el restablecimiento de la contraseña
+     * ({@value RateLimitingFilter#PASSWORD_RESET_PATH} y
+     * {@value RateLimitingFilter#PASSWORD_RESET_CONFIRM_PATH}): quien lo usa
+     * suele no tener sesión, pero puede tenerla en ese navegador (otra cuenta,
+     * o la suya en otra pestaña). Sin la exención recibiría un 403 CSRF sin
+     * cabecera y, con ella, la petición quedaría autenticada como el dueño de
+     * la cookie, que no tiene nada que ver con la cuenta del enlace. La
+     * confirmación identifica la cuenta <b>solo por el token</b>; la sesión del
+     * navegador no debe influir.
+     * </p>
      */
     private boolean isCookieExempt(HttpServletRequest request) {
         return loginRequest.matches(request) || registerRequest.matches(request)
-                || emailVerificationRequest.matches(request) || emailVerificationResendRequest.matches(request);
+                || emailVerificationRequest.matches(request) || emailVerificationResendRequest.matches(request)
+                || passwordResetRequest.matches(request) || passwordResetConfirmRequest.matches(request);
     }
 
     private static boolean isSafeMethod(String method) {

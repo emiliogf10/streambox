@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "36f1cc7d-d712-5ceb-bd83-b75fec0d4c79",
     "name": "StreamBox API",
-    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend. Son necesarios: además de las peticiones de administrador, la carpeta 1 lee como ADMIN el correo de verificación de la bandeja del perfil `e2e` (arranca el backend con ese perfil; si no, pon el token del enlace a mano en `verificationToken`).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9 y en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos, sus «me gusta» y ve sus recomendaciones; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Verificación del correo.** El registro responde 202 siempre igual y deja la cuenta pendiente: el login con la contraseña correcta responde el mismo 401 INVALID_CREDENTIALS que una contraseña incorrecta (no revela que el email está registrado) hasta confirmar el correo con `POST /api/auth/email-verification` (token del enlace; 204, o 400 INVALID_VERIFICATION_TOKEN). `POST /api/auth/email-verification/resend` pide otro enlace (202 siempre igual). Las dos son públicas.\n\n**Límites**: login, registro, refresh, confirmación y reenvío tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 2 de los 5 reenvíos por hora, 8 de los 10 logins por minuto y 6 de las 30 renovaciones por minuto: a la tercera ejecución en una hora el registro y el reenvío responden 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` (y `..._EMAIL_VERIFICATION_RESEND_MAX_REQUESTS`) más altos. No la ejecutes en bucle contra un entorno real.",
+    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend. Son necesarios: además de las peticiones de administrador, la carpeta 1 lee como ADMIN el correo de verificación de la bandeja del perfil `e2e` (arranca el backend con ese perfil; si no, pon el token del enlace a mano en `verificationToken`).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9, en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones, en la 11 la restablece con «He olvidado mi contraseña» (y la restaura) y en la 12 cierra la sesión del ADMIN. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos, sus «me gusta» y ve sus recomendaciones; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Verificación del correo.** El registro responde 202 siempre igual y deja la cuenta pendiente: el login con la contraseña correcta responde el mismo 401 INVALID_CREDENTIALS que una contraseña incorrecta (no revela que el email está registrado) hasta confirmar el correo con `POST /api/auth/email-verification` (token del enlace; 204, o 400 INVALID_VERIFICATION_TOKEN). `POST /api/auth/email-verification/resend` pide otro enlace (202 siempre igual). Las dos son públicas.\n\n**He olvidado mi contraseña.** `POST /api/auth/password-reset` (`{\"email\"}`) responde 202 siempre igual y, si hay cuenta, envía un enlace `<STREAMBOX_PUBLIC_URL>/restablecer-contrasena#token=...` (1 h, un solo uso). `POST /api/auth/password-reset/confirm` (`{\"token\", \"newPassword\"}`) fija la contraseña nueva: 204 (sin iniciar sesión; cierra todas las sesiones y confirma el correo), 400 INVALID_RESET_TOKEN o 400 VALIDATION_ERROR en `newPassword` (el token no se gasta). Las dos son públicas; la carpeta 11 lee el correo de la bandeja del perfil `e2e`.\n\n**Límites**: login, registro, refresh, verificación del correo y restablecimiento de la contraseña tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 2 de los 5 reenvíos por hora, 2 de las 5 peticiones de restablecimiento por hora, **los 10 logins por minuto** y 6 de las 30 renovaciones por minuto: entre dos ejecuciones hay que esperar un minuto (también por el límite silencioso de un correo de restablecimiento por minuto y cuenta) y a la tercera ejecución en una hora el registro, el reenvío y el restablecimiento responden 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` (y `..._LOGIN_`, `..._EMAIL_VERIFICATION_RESEND_` y `..._PASSWORD_RESET_MAX_REQUESTS`) más altos y `STREAMBOX_EMAIL_RESEND_MIN_INTERVAL=0s`. No la ejecutes en bucle contra un entorno real.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -80,6 +80,22 @@
     {
       "key": "inboxAttempts",
       "value": "0"
+    },
+    {
+      "key": "resetRequestedAt",
+      "value": ""
+    },
+    {
+      "key": "resetAcceptedBody",
+      "value": ""
+    },
+    {
+      "key": "resetToken",
+      "value": ""
+    },
+    {
+      "key": "userResetPassword",
+      "value": "otra frase larga elegida al recuperar la cuenta"
     }
   ],
   "item": [
@@ -4402,7 +4418,7 @@
     },
     {
       "name": "9. Sesión: refresh y logout",
-      "description": "Va al final porque el logout cierra la sesión del USER. Comprueba la renovación con el refresh token (y su rotación), la defensa CSRF de refresh y logout, que el logout borra las cookies y que el refresh token queda revocado en el servidor. Termina cerrando también la sesión del ADMIN.",
+      "description": "Va al final porque el logout cierra la sesión del USER. Comprueba la renovación con el refresh token (y su rotación), la defensa CSRF de refresh y logout, que el logout borra las cookies y que el refresh token queda revocado en el servidor. La sesión del ADMIN se cierra en la carpeta 12 (su Bearer aún hace falta en la 11).",
       "item": [
         {
           "name": "Refresh sin X-Requested-With (403)",
@@ -4690,96 +4706,6 @@
                   "  pm.expect(setCookie(\"streambox_token\")).to.match(/Max-Age=0/);",
                   "  pm.expect(setCookie(\"streambox_refresh\")).to.match(/Max-Age=0/);",
                   "});"
-                ]
-              }
-            }
-          ],
-          "protocolProfileBehavior": {
-            "disableCookies": true
-          }
-        },
-        {
-          "name": "Logout del administrador (204)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Cookie",
-                "value": "streambox_refresh={{adminRefreshToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/logout",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "logout"
-              ]
-            },
-            "description": "El ADMIN no usa el jar, así que su refresh token (guardado en el login) se manda a mano en la cabecera `Cookie`. Logout y refresh solo leen la cookie `streambox_refresh`: el Bearer no cierra nada."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
-                  "function setCookie(name) {",
-                  "  return pm.response.headers.all()",
-                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
-                  "    .map(function (h) { return h.value; })[0];",
-                  "}",
-                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
-                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
-                  "pm.test(\"Borra las dos cookies (Set-Cookie con Max-Age=0)\", function () {",
-                  "  pm.expect(setCookie(\"streambox_token\")).to.match(/Max-Age=0/);",
-                  "  pm.expect(setCookie(\"streambox_refresh\")).to.match(/Max-Age=0/);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "protocolProfileBehavior": {
-            "disableCookies": true
-          }
-        },
-        {
-          "name": "Refresh del administrador tras su logout (401)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Cookie",
-                "value": "streambox_refresh={{adminRefreshToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/refresh",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "refresh"
-              ]
-            },
-            "description": "La sesión del ADMIN también queda revocada en el servidor."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
-                  "pm.test(\"Cuerpo de error con code SESSION_EXPIRED\", function () { pm.expect(pm.response.json().code).to.eql(\"SESSION_EXPIRED\"); });"
                 ]
               }
             }
@@ -5454,6 +5380,889 @@
               ]
             },
             "description": "La otra sesión de la cuenta también queda cerrada: eso distingue `logout-all` de `logout`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Cuerpo de error con code SESSION_EXPIRED\", function () { pm.expect(pm.response.json().code).to.eql(\"SESSION_EXPIRED\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Recuperar la contraseña («He olvidado mi contraseña»)",
+      "description": "Va al final porque restablecer la contraseña **cierra todas las sesiones** del USER. Las seis peticiones a `/api/auth/password-reset` y `/password-reset/confirm` se envían **sin** `X-Requested-With` (cada una la quita en su pre-request) para demostrar que estas rutas públicas no la exigen. Pide el enlace (`POST /api/auth/password-reset`: 202 con el mismo cuerpo exista o no la cuenta), lee el correo «Restablece tu contraseña de StreamBox» en la bandeja del perfil `e2e` (como ADMIN, con el Bearer del login de la carpeta 1) y saca el token de `#token=`, confirma (`POST /api/auth/password-reset/confirm`) con un token inventado (400 `INVALID_RESET_TOKEN`), con una contraseña que no cumple la política (400 `VALIDATION_ERROR` en `newPassword`: **el token no se gasta**) y con una válida (204, sin cookies: no inicia sesión), repite la confirmación (el mismo 400 `INVALID_RESET_TOKEN`: un solo uso), entra con la contraseña nueva (204) y no con la vieja (401), comprueba que llega el aviso «Tu contraseña de StreamBox ha cambiado» y **restaura la contraseña original** con `PUT /api/users/me/password` para que la colección se pueda repetir. Si cortas la ejecución entre la confirmación y la restauración, la contraseña del USER queda en `userResetPassword`. Sin el perfil `e2e`, copia a mano el token del correo (log del backend en `dev`, Mailpit con Docker) en `resetToken` y omite las dos lecturas de la bandeja.",
+      "item": [
+        {
+          "name": "Pedir el restablecimiento (202)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/password-reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "password-reset"
+              ]
+            },
+            "description": "Pública y sin `X-Requested-With` (su pre-request quita la que añadiría el de la colección, y un test comprueba que no se envió). Responde **202 siempre con el mismo cuerpo**, exista o no una cuenta con ese correo (así no revela quién está registrado), y tarda lo mismo: buscar la cuenta, emitir el token y mandar el correo se hace en segundo plano. Si hay cuenta (confirmada, pendiente o ADMIN), le llega un enlace `<STREAMBOX_PUBLIC_URL>/restablecer-contrasena#token=...` (1 h, un solo uso; pedir otro invalida el anterior). Límites: 5 por hora por IP (429 `RATE_LIMIT_EXCEEDED`) y, por cuenta, 3 correos por hora y uno por minuto **en silencio** (el mismo 202, sin enviar nada).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Instante de referencia para reconocer en la bandeja los correos de ESTA ejecución",
+                  "// (30 s antes de ahora, por si el reloj del backend no coincide con el de Newman).",
+                  "pm.collectionVariables.set(\"resetRequestedAt\", String(Date.now() - 30000));",
+                  "// El pre-request de la colección añade X-Requested-With a toda petición no segura sin Bearer; esta ruta",
+                  "// es pública y no la exige (no hay sesión que proteger: la cookie se ignora en ella), así que se quita",
+                  "// para que la colección demuestre que funciona sin ella. Se ejecuta después del de la colección.",
+                  "pm.request.headers.remove(\"X-Requested-With\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 202\", function () { pm.response.to.have.status(202); });",
+                  "pm.test(\"Cuerpo fijo: solo message\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(Object.keys(b)).to.eql([\"message\"]);",
+                  "  pm.expect(b.message).to.eql(\"Si hay una cuenta con ese correo, te llegará un enlace para elegir una contraseña nueva.\");",
+                  "});",
+                  "pm.test(\"No toca las cookies\", function () {",
+                  "  pm.expect(pm.response.headers.has(\"Set-Cookie\")).to.eql(false);",
+                  "});",
+                  "pm.collectionVariables.set(\"resetAcceptedBody\", pm.response.text());",
+                  "pm.test(\"Se envía sin X-Requested-With (la ruta pública no la exige)\", function () {",
+                  "  pm.expect(pm.request.headers.has(\"X-Requested-With\")).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Pedir el restablecimiento para un email sin cuenta (202, mismo cuerpo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/password-reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "password-reset"
+              ]
+            },
+            "description": "Un email que no es de nadie (con un sufijo aleatorio en cada ejecución) recibe **exactamente** la misma respuesta: desde fuera no se distingue si el email tiene cuenta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"no-existe-reset-{{$randomUUID}}@streambox.local\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// El pre-request de la colección añade X-Requested-With a toda petición no segura sin Bearer; esta ruta",
+                  "// es pública y no la exige (no hay sesión que proteger: la cookie se ignora en ella), así que se quita",
+                  "// para que la colección demuestre que funciona sin ella. Se ejecuta después del de la colección.",
+                  "pm.request.headers.remove(\"X-Requested-With\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 202\", function () { pm.response.to.have.status(202); });",
+                  "pm.test(\"Cuerpo idéntico, byte a byte, al de un email con cuenta\", function () {",
+                  "  pm.expect(pm.response.text()).to.eql(pm.collectionVariables.get(\"resetAcceptedBody\"));",
+                  "});",
+                  "pm.test(\"Se envía sin X-Requested-With (la ruta pública no la exige)\", function () {",
+                  "  pm.expect(pm.request.headers.has(\"X-Requested-With\")).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Leer el correo «Restablece tu contraseña de StreamBox» (bandeja del perfil e2e)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/e2e/emails?to={{userEmail}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "e2e",
+                "emails"
+              ],
+              "query": [
+                {
+                  "key": "to",
+                  "value": "{{userEmail}}"
+                }
+              ]
+            },
+            "description": "**Solo con el perfil `e2e`** y como ADMIN (el JWT del login de la carpeta 1 sigue valiendo: su sesión se cierra en la carpeta 12). Busca el correo de restablecimiento enviado en esta ejecución y guarda el token del enlace (lo que va tras `#token=`) en `resetToken`. Si aún no ha llegado, se repite (hasta 10 veces, cada medio segundo).",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// En los reintentos, espera medio segundo antes de volver a leer la bandeja.",
+                  "if (Number(pm.collectionVariables.get(\"inboxAttempts\") || 0) > 0) {",
+                  "  setTimeout(function () {}, 500);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const attempts = Number(pm.collectionVariables.get(\"inboxAttempts\") || 0);",
+                  "// Solo cuentan los correos de esta ejecución: los enviados después de pedir el restablecimiento",
+                  "// (con 30 s de margen por si los relojes no coinciden; el límite por cuenta deja al menos 60 s",
+                  "// entre dos correos de restablecimiento, así que uno de una ejecución anterior siempre queda fuera).",
+                  "const since = Number(pm.collectionVariables.get(\"resetRequestedAt\") || 0);",
+                  "const emails = pm.response.code === 200 ? pm.response.json() : [];",
+                  "// El más reciente que encaje (la lista viene del más reciente al más antiguo).",
+                  "const found = emails.find(function (e) {",
+                  "  return e.subject === \"Restablece tu contraseña de StreamBox\" && Date.parse(e.sentAt) >= since && /\\/restablecer-contrasena#token=[A-Za-z0-9_-]+/.test(e.body);",
+                  "});",
+                  "if (pm.response.code === 200 && !found && attempts < 10) {",
+                  "  pm.collectionVariables.set(\"inboxAttempts\", String(attempts + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "} else {",
+                  "  pm.collectionVariables.set(\"inboxAttempts\", \"0\");",
+                  "  pm.test(\"Responde 200 (si da 404, el backend no tiene el perfil e2e)\", function () { pm.response.to.have.status(200); });",
+                  "  pm.test(\"Llegó «Restablece tu contraseña de StreamBox» al correo del USER\", function () {",
+                  "    pm.expect(found, \"no llegó el correo\").to.be.an(\"object\");",
+                  "    pm.expect(found.to).to.eql(pm.variables.get(\"userEmail\"));",
+                  "  });",
+                  "  if (found) {",
+                  "    pm.collectionVariables.set(\"resetToken\", found.body.match(/\\/restablecer-contrasena#token=([A-Za-z0-9_-]+)/)[1]);",
+                  "  }",
+                  "  pm.test(\"El enlace lleva un token de 43 caracteres Base64URL\", function () {",
+                  "    pm.expect(pm.collectionVariables.get(\"resetToken\")).to.match(/^[A-Za-z0-9_-]{43}$/);",
+                  "  });",
+                  "  pm.test(\"Dice el nombre de la cuenta, que caduca en 1 hora y que, si no lo pidió él, no cambia nada\", function () {",
+                  "    pm.expect(found.body).to.include(\"la cuenta «\" + pm.variables.get(\"userUsername\") + \"»\");",
+                  "    pm.expect(found.body).to.include(\"caduca en 1 hora\");",
+                  "    pm.expect(found.body).to.include(\"tu contraseña no cambia\");",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Confirmar con un token inventado (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/password-reset/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "password-reset",
+                "confirm"
+              ]
+            },
+            "description": "Un token con la forma correcta (43 caracteres Base64URL) que no existe. Inexistente, caducado, ya usado, invalidado o con otra forma: **el mismo 400 `INVALID_RESET_TOKEN`** en todos los casos, y la contraseña no cambia.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\n  \"newPassword\": \"{{userResetPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// El pre-request de la colección añade X-Requested-With a toda petición no segura sin Bearer; esta ruta",
+                  "// es pública y no la exige (no hay sesión que proteger: la cookie se ignora en ella), así que se quita",
+                  "// para que la colección demuestre que funciona sin ella. Se ejecuta después del de la colección.",
+                  "pm.request.headers.remove(\"X-Requested-With\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400 INVALID_RESET_TOKEN\", function () {",
+                  "  pm.response.to.have.status(400);",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"INVALID_RESET_TOKEN\");",
+                  "  pm.expect(b.message).to.eql(\"El enlace para restablecer la contraseña no es válido o ha caducado.\");",
+                  "});",
+                  "pm.test(\"Se envía sin X-Requested-With (la ruta pública no la exige)\", function () {",
+                  "  pm.expect(pm.request.headers.has(\"X-Requested-With\")).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Confirmar con una contraseña que no cumple la política (400, el token no se gasta)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/password-reset/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "password-reset",
+                "confirm"
+              ]
+            },
+            "description": "La contraseña nueva contiene el nombre de usuario de **la cuenta del enlace** (el servidor la compara con los datos de esa cuenta, que no vienen en la petición). Responde 400 `VALIDATION_ERROR` con el mensaje en `validationErrors.newPassword` y **el token sigue valiendo**: la siguiente petición lo usa.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"newPassword\": \"{{userUsername}} nueva clave\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// El pre-request de la colección añade X-Requested-With a toda petición no segura sin Bearer; esta ruta",
+                  "// es pública y no la exige (no hay sesión que proteger: la cookie se ignora en ella), así que se quita",
+                  "// para que la colección demuestre que funciona sin ella. Se ejecuta después del de la colección.",
+                  "pm.request.headers.remove(\"X-Requested-With\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400 VALIDATION_ERROR solo en newPassword\", function () {",
+                  "  pm.response.to.have.status(400);",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(Object.keys(b.validationErrors)).to.eql([\"newPassword\"]);",
+                  "  pm.expect(b.validationErrors.newPassword).to.eql(\"La contraseña no puede contener tu nombre de usuario ni tu email.\");",
+                  "});",
+                  "pm.test(\"Se envía sin X-Requested-With (la ruta pública no la exige)\", function () {",
+                  "  pm.expect(pm.request.headers.has(\"X-Requested-With\")).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Confirmar el restablecimiento (204)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/password-reset/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "password-reset",
+                "confirm"
+              ]
+            },
+            "description": "Con el mismo token de antes (no se gastó) y una contraseña válida. Responde 204 **sin cuerpo y sin cookies**: no inicia sesión. En la misma transacción la cuenta queda con el correo confirmado, dejan de servir todos sus enlaces pendientes y se revocan **todas** sus sesiones (esta colección no lo comprueba: lo cubren los tests del backend, p. ej. `PasswordResetIntegrationTest#restablecerRevocaTodasLasSesionesAnteriores`); después se borran sus intentos fallidos de login y se envía el aviso «Tu contraseña de StreamBox ha cambiado».",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"newPassword\": \"{{userResetPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// El pre-request de la colección añade X-Requested-With a toda petición no segura sin Bearer; esta ruta",
+                  "// es pública y no la exige (no hay sesión que proteger: la cookie se ignora en ella), así que se quita",
+                  "// para que la colección demuestre que funciona sin ella. Se ejecuta después del de la colección.",
+                  "pm.request.headers.remove(\"X-Requested-With\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "pm.test(\"Responde 204 sin cuerpo\", function () {",
+                  "  pm.response.to.have.status(204);",
+                  "  pm.expect(pm.response.text()).to.eql(\"\");",
+                  "});",
+                  "pm.test(\"No inicia sesión (ninguna cookie de sesión)\", function () {",
+                  "  pm.expect(setCookie(\"streambox_token\")).to.eql(undefined);",
+                  "  pm.expect(setCookie(\"streambox_refresh\")).to.eql(undefined);",
+                  "});",
+                  "pm.test(\"Se envía sin X-Requested-With (la ruta pública no la exige)\", function () {",
+                  "  pm.expect(pm.request.headers.has(\"X-Requested-With\")).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Repetir la confirmación con el mismo token (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/password-reset/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "password-reset",
+                "confirm"
+              ]
+            },
+            "description": "Cada token sirve **una sola vez**: el segundo uso responde el mismo 400 que un token inventado.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetToken}}\",\n  \"newPassword\": \"{{userResetPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// El pre-request de la colección añade X-Requested-With a toda petición no segura sin Bearer; esta ruta",
+                  "// es pública y no la exige (no hay sesión que proteger: la cookie se ignora en ella), así que se quita",
+                  "// para que la colección demuestre que funciona sin ella. Se ejecuta después del de la colección.",
+                  "pm.request.headers.remove(\"X-Requested-With\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400 INVALID_RESET_TOKEN, igual que un token inventado\", function () {",
+                  "  pm.response.to.have.status(400);",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"INVALID_RESET_TOKEN\");",
+                  "  pm.expect(b.message).to.eql(\"El enlace para restablecer la contraseña no es válido o ha caducado.\");",
+                  "});",
+                  "pm.test(\"Se envía sin X-Requested-With (la ruta pública no la exige)\", function () {",
+                  "  pm.expect(pm.request.headers.has(\"X-Requested-With\")).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Login con la contraseña nueva (204)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Con el cookie jar: la sesión que abre sirve para restaurar la contraseña al final de la carpeta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userResetPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Entrega las dos cookies de sesión\", function () {",
+                  "  pm.expect(setCookie(\"streambox_token\"), \"falta Set-Cookie streambox_token\").to.be.a(\"string\");",
+                  "  pm.expect(setCookie(\"streambox_refresh\"), \"falta Set-Cookie streambox_refresh\").to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login con la contraseña vieja (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "La contraseña de antes del restablecimiento ya no vale. Con el jar desactivado para no tocar la sesión abierta.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Cuerpo de error con code INVALID_CREDENTIALS\", function () { pm.expect(pm.response.json().code).to.eql(\"INVALID_CREDENTIALS\"); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Leer el aviso «Tu contraseña de StreamBox ha cambiado» (bandeja del perfil e2e)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/e2e/emails?to={{userEmail}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "e2e",
+                "emails"
+              ],
+              "query": [
+                {
+                  "key": "to",
+                  "value": "{{userEmail}}"
+                }
+              ]
+            },
+            "description": "El aviso por si no fue el dueño: dice cuándo pasó y enlaza a `/recuperar-contrasena` para pedir otro enlace. No lleva ningún token.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// En los reintentos, espera medio segundo antes de volver a leer la bandeja.",
+                  "if (Number(pm.collectionVariables.get(\"inboxAttempts\") || 0) > 0) {",
+                  "  setTimeout(function () {}, 500);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const attempts = Number(pm.collectionVariables.get(\"inboxAttempts\") || 0);",
+                  "// Solo cuentan los correos de esta ejecución: los enviados después de pedir el restablecimiento",
+                  "// (con 30 s de margen por si los relojes no coinciden; el límite por cuenta deja al menos 60 s",
+                  "// entre dos correos de restablecimiento, así que uno de una ejecución anterior siempre queda fuera).",
+                  "const since = Number(pm.collectionVariables.get(\"resetRequestedAt\") || 0);",
+                  "const emails = pm.response.code === 200 ? pm.response.json() : [];",
+                  "// El más reciente que encaje (la lista viene del más reciente al más antiguo).",
+                  "const found = emails.find(function (e) {",
+                  "  return e.subject === \"Tu contraseña de StreamBox ha cambiado\" && Date.parse(e.sentAt) >= since;",
+                  "});",
+                  "if (pm.response.code === 200 && !found && attempts < 10) {",
+                  "  pm.collectionVariables.set(\"inboxAttempts\", String(attempts + 1));",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "} else {",
+                  "  pm.collectionVariables.set(\"inboxAttempts\", \"0\");",
+                  "  pm.test(\"Responde 200 (si da 404, el backend no tiene el perfil e2e)\", function () { pm.response.to.have.status(200); });",
+                  "  pm.test(\"Llegó «Tu contraseña de StreamBox ha cambiado» al correo del USER\", function () {",
+                  "    pm.expect(found, \"no llegó el correo\").to.be.an(\"object\");",
+                  "    pm.expect(found.to).to.eql(pm.variables.get(\"userEmail\"));",
+                  "  });",
+                  "  pm.test(\"Enlaza a /recuperar-contrasena y no lleva ningún token\", function () {",
+                  "    pm.expect(found.body).to.include(\"/recuperar-contrasena\");",
+                  "    pm.expect(found.body).to.not.include(\"#token=\");",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Restaurar la contraseña original (204)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "password"
+              ]
+            },
+            "description": "Deja la contraseña como estaba (`userPassword`) para poder repetir la ejecución, con la sesión del login con la contraseña nueva.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{userResetPassword}}\",\n  \"newPassword\": \"{{userPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "12. Cierre: sesión del administrador",
+      "description": "Cierra la sesión del ADMIN, que se abrió en la carpeta 1 y se ha usado hasta la 11 (para leer la bandeja del perfil `e2e`).",
+      "item": [
+        {
+          "name": "Logout del administrador (204)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "streambox_refresh={{adminRefreshToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "El ADMIN no usa el jar, así que su refresh token (guardado en el login) se manda a mano en la cabecera `Cookie`. Logout y refresh solo leen la cookie `streambox_refresh`: el Bearer no cierra nada."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Cabecera Set-Cookie completa de la cookie `name` (o undefined) y su valor.",
+                  "function setCookie(name) {",
+                  "  return pm.response.headers.all()",
+                  "    .filter(function (h) { return h.key.toLowerCase() === \"set-cookie\" && h.value.indexOf(name + \"=\") === 0; })",
+                  "    .map(function (h) { return h.value; })[0];",
+                  "}",
+                  "function cookieValue(header) { return header.split(\";\")[0].split(\"=\").slice(1).join(\"=\"); }",
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Borra las dos cookies (Set-Cookie con Max-Age=0)\", function () {",
+                  "  pm.expect(setCookie(\"streambox_token\")).to.match(/Max-Age=0/);",
+                  "  pm.expect(setCookie(\"streambox_refresh\")).to.match(/Max-Age=0/);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Refresh del administrador tras su logout (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "streambox_refresh={{adminRefreshToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "La sesión del ADMIN también queda revocada en el servidor."
           },
           "response": [],
           "event": [

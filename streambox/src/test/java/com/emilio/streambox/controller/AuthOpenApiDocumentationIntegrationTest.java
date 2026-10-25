@@ -117,7 +117,7 @@ class AuthOpenApiDocumentationIntegrationTest {
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath(SCHEMAS + ".ErrorResponse.properties.code.description").value(
-                        containsString("RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login, registro o "
+                        containsString("RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login, registro, "
                                 + "renovación de sesión (POST /api/auth/refresh)")));
     }
 
@@ -162,5 +162,50 @@ class AuthOpenApiDocumentationIntegrationTest {
                 // La portada es obligatoria; el vídeo y el tráiler, opcionales desde la V6
                 .andExpect(jsonPath(SCHEMAS + ".MovieRequest.required").value(allOf(
                         hasItem("imageUrl"), not(hasItem("videoUrl")), not(hasItem("trailerUrl")))));
+    }
+
+    /**
+     * «He olvidado mi contraseña» documenta sus códigos reales: el 202 fijo,
+     * los dos 400 distintos de la confirmación ({@code INVALID_RESET_TOKEN},
+     * que obliga a pedir otro enlace, y {@code VALIDATION_ERROR} en
+     * {@code newPassword}, con el que el token sigue valiendo) y el 429 por IP.
+     *
+     * <p>
+     * Comprueba además los {@code operationId}. Al regenerar
+     * {@code docs/api/openapi.yaml} con el método llamado {@code confirm}, el
+     * de la confirmación del correo pasó de {@code confirm} a
+     * {@code confirm_1} (springdoc desambigua así los nombres repetidos), un
+     * cambio de contrato para cualquier cliente generado. Este test falla si
+     * vuelve a pasar.
+     * </p>
+     */
+    @Test
+    void elRestablecimientoDocumentaSusCodigosYNoCambiaElOperationIdDeLaVerificacion() throws Exception {
+        String request = "$.paths['/api/auth/password-reset'].post";
+        String confirm = "$.paths['/api/auth/password-reset/confirm'].post";
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(request + ".operationId").value("requestPasswordReset"))
+                .andExpect(jsonPath(confirm + ".operationId").value("confirmPasswordReset"))
+                .andExpect(jsonPath("$.paths['/api/auth/email-verification'].post.operationId").value("confirm"))
+                .andExpect(jsonPath(request + ".responses['202'].description").value(
+                        containsString("Si hay una cuenta con ese correo")))
+                .andExpect(jsonPath(request + ".responses['400'].description").value(
+                        containsString("validationErrors.email")))
+                .andExpect(jsonPath(request + ".responses['429'].description").value(allOf(
+                        containsString("RATE_LIMIT_EXCEEDED"), containsString("Retry-After"))))
+                .andExpect(jsonPath(confirm + ".responses['204'].description").exists())
+                .andExpect(jsonPath(confirm + ".responses['400'].description").value(allOf(
+                        containsString("INVALID_RESET_TOKEN"),
+                        containsString("validationErrors.newPassword"),
+                        containsString("el token sigue valiendo"))))
+                .andExpect(jsonPath(confirm + ".responses['429'].description").value(allOf(
+                        containsString("RATE_LIMIT_EXCEEDED"), containsString("Retry-After"))))
+                .andExpect(jsonPath(SCHEMAS + ".PasswordResetConfirmRequest.properties.newPassword.minLength")
+                        .value(12))
+                .andExpect(jsonPath(SCHEMAS + ".PasswordResetConfirmRequest.properties.newPassword.maxLength")
+                        .value(64))
+                .andExpect(jsonPath(SCHEMAS + ".ErrorResponse.properties.code.enum")
+                        .value(hasItem("INVALID_RESET_TOKEN")));
     }
 }

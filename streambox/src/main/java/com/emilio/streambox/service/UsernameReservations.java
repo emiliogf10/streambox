@@ -27,11 +27,12 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter;
  * <h2>Cuánto dura</h2>
  * <p>
  * {@code streambox.email.verification-ttl} (24 h) desde el <b>primer</b>
- * registro que la creó, igual que una cuenta pendiente nueva: cuando caduca su
- * enlace, la cuenta sigue en la base de datos, pero es <b>sustituible</b> y
- * su nombre queda libre tanto para otro registro como para «Editar perfil»
- * (los dos la borran al pedir ese nombre, con la misma regla:
- * {@link EmailVerificationService#deleteIfReplaceable}). Si solo la borrara el
+ * registro que la creó, igual que el nombre de una cuenta pendiente nueva:
+ * pasadas 24 h desde su alta, la cuenta sigue en la base de datos, pero su
+ * nombre queda libre tanto para otro registro como para «Editar perfil» (los
+ * dos la borran al pedir ese nombre, con la misma regla:
+ * {@link EmailVerificationService#deleteIfUsernameReleased}), aunque haya pedido
+ * otro enlace después (incidencia MEDIA-1). Si solo la borrara el
  * registro, pasadas 24 h «Editar perfil» daría 409 con el nombre de un
  * registro con email nuevo y 200 con el de uno cuya reserva ya caducó: el
  * mismo oráculo. Repetir el registro no alarga la reserva: en el caso del
@@ -58,10 +59,15 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter;
  *   <li><b>Tope de claves</b> ({@code streambox.security.rate-limit.max-keys}):
  *       al llenarse se olvida la reserva más antigua. Llenarlo exige ese
  *       número de registros (con BCrypt y el límite por IP de cada uno).</li>
- *   <li>Los reenvíos del enlace alargan la vida de una cuenta pendiente nueva
- *       (y la de su nombre), pero no la de una reserva. Distinguirlo exige
- *       esperar 24 h por cada email probado.</li>
  * </ul>
+ *
+ * <p>
+ * Antes había una tercera: un reenvío del enlace (o uno de «He olvidado mi
+ * contraseña») alargaba la vida del nombre de una pendiente nueva, pero no la
+ * de una reserva, y pedirlo pasadas 24 h distinguía los dos casos (MEDIA-1).
+ * Ya no: el nombre de la pendiente caduca a las 24 h de su alta, pida los
+ * enlaces que pida ({@link EmailVerificationService#releasesUsername}).
+ * </p>
  */
 @Component
 public class UsernameReservations {

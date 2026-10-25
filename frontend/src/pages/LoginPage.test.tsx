@@ -15,6 +15,7 @@ import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiCalls, errorResponse, jsonResponse, makeUser, noContentResponse, renderWithProviders, routeFetch } from '../test/helpers';
+import { AppRoutes } from '../App';
 import { LoginPage } from './LoginPage';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -520,5 +521,84 @@ describe('LoginPage', () => {
       expect(await screen.findByText(/Inténtalo de nuevo en unos instantes/)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Iniciar sesión' })).toBeEnabled();
     });
+  });
+});
+
+/**
+ * «¿Has olvidado tu contraseña?»: el enlace a `/recuperar-contrasena` bajo el
+ * formulario y en la pista del 401. Lleva el correo ya escrito si tiene buen
+ * formato, en el `state` de la navegación y NUNCA en la URL (una dirección de
+ * correo en la barra acabaría en el historial, los logs y el `Referer`). Se
+ * montan las rutas reales para seguir el enlace hasta la página de destino.
+ */
+describe('LoginPage: «¿Has olvidado tu contraseña?»', () => {
+  const FORGOT_LINK = '¿Has olvidado tu contraseña?';
+
+  /** Monta las rutas reales en `/login` y espera a que el arranque diga que no hay sesión. */
+  async function renderLoginRoute() {
+    renderWithProviders(<AppRoutes />, { route: '/login' });
+    return screen.findByRole('heading', { level: 1, name: 'Bienvenido de nuevo' });
+  }
+
+  it('está bajo el formulario, después del botón (el Tab va de la contraseña a «Iniciar sesión»)', async () => {
+    routeFetch(fetchMock, {});
+    await renderLoginRoute();
+
+    const link = screen.getByRole('link', { name: FORGOT_LINK });
+    expect(link).toHaveAttribute('href', '/recuperar-contrasena');
+    const submit = screen.getByRole('button', { name: 'Iniciar sesión' });
+    expect(submit.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  it('lleva el correo ya escrito a la página siguiente, sin ponerlo en la URL', async () => {
+    routeFetch(fetchMock, {});
+    const user = userEvent.setup();
+    await renderLoginRoute();
+    await user.type(screen.getByLabelText('Correo electrónico'), '  ana@example.com ');
+
+    await user.click(screen.getByRole('link', { name: FORGOT_LINK }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: '¿Has olvidado tu contraseña?' })).toBeInTheDocument();
+    expect(screen.getByText('ruta:/recuperar-contrasena')).toBeInTheDocument();
+    expect(screen.getByLabelText('Correo electrónico')).toHaveValue('ana@example.com');
+    expect(screen.getByRole('link', { name: 'Inicia sesión' })).toHaveAttribute('href', '/login');
+    expect(apiCalls(fetchMock)).toEqual([]);
+  });
+
+  it('con un correo vacío o mal formado no arrastra nada', async () => {
+    routeFetch(fetchMock, {});
+    const user = userEvent.setup();
+    await renderLoginRoute();
+    await user.type(screen.getByLabelText('Correo electrónico'), 'ana');
+
+    await user.click(screen.getByRole('link', { name: FORGOT_LINK }));
+
+    await screen.findByRole('heading', { level: 1, name: '¿Has olvidado tu contraseña?' });
+    expect(screen.getByLabelText('Correo electrónico')).toHaveValue('');
+  });
+
+  it('la pista del 401 también lo ofrece (fuera de la región viva), con el correo del intento', async () => {
+    routeFetch(fetchMock, { 'POST /api/auth/login': () => errorResponse(401, 'INVALID_CREDENTIALS', 'x') });
+    const user = userEvent.setup();
+    await renderLoginRoute();
+    await fillAndSubmit(user, 'ana@example.com');
+    const hint = (await screen.findByText('¿Te acabas de registrar o aún no has confirmado tu correo?')).closest(
+      '[role="status"]',
+    );
+
+    const link = screen.getByRole('link', { name: 'Restablécela' });
+    expect(link).toHaveAttribute('href', '/recuperar-contrasena');
+    expect(link.parentElement).toHaveTextContent(
+      '¿No recuerdas la contraseña? Restablécela: al hacerlo, tu correo también queda confirmado.',
+    );
+    expect(hint?.contains(link)).toBe(false);
+    // Lo que se ha escrito en el campo después del intento no cambia a qué correo se refiere la pista.
+    await user.clear(screen.getByLabelText('Correo electrónico'));
+    await user.type(screen.getByLabelText('Correo electrónico'), 'otro@example.com');
+
+    await user.click(link);
+
+    await screen.findByRole('heading', { level: 1, name: '¿Has olvidado tu contraseña?' });
+    expect(screen.getByLabelText('Correo electrónico')).toHaveValue('ana@example.com');
   });
 });

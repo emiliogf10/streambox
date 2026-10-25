@@ -55,8 +55,12 @@ import com.emilio.streambox.entity.AccountTokenPurpose;
  * </p>
  *
  * <p>
- * Todas las consultas filtran por {@link AccountTokenPurpose}: un token de un
- * propósito nunca sirve para otro.
+ * Todas las consultas filtran por {@link AccountTokenPurpose} salvo dos que no
+ * lo necesitan a propósito: la limpieza {@link #deleteExpired} (un caducado no
+ * sirve, sea del propósito que sea) e {@link #invalidateAllActiveTokens} (que
+ * existe justo para invalidarlos todos). Así, un token de un propósito nunca
+ * sirve para otro, e invalidar los de un propósito no toca los del otro. Lo prueba {@code AccountTokenRepositoryIntegrationTest}
+ * con tokens de {@code EMAIL_VERIFICATION} y {@code PASSWORD_RESET} (V10).
  * </p>
  */
 public interface AccountTokenRepository extends JpaRepository<AccountToken, Long> {
@@ -153,6 +157,32 @@ public interface AccountTokenRepository extends JpaRepository<AccountToken, Long
             + " and t.usedAt is null and t.expiresAt > :now")
     int invalidateActiveTokens(@Param("userId") Long userId, @Param("purpose") AccountTokenPurpose purpose,
             @Param("now") Instant now);
+
+    /**
+     * Invalida (marca como usados) los tokens <strong>vigentes</strong> de una
+     * cuenta <strong>de todos los propósitos</strong>.
+     *
+     * <p>
+     * Es para cuando cambia quién controla la cuenta, p. ej. al fijar una
+     * contraseña nueva con «He olvidado mi contraseña»: cualquier enlace que
+     * siguiera vivo (otro de restablecimiento, uno de verificación pedido por
+     * quien registró ese email) deja de servir. Un único {@code UPDATE} en vez
+     * de llamar a {@link #invalidateActiveTokens} por cada propósito: así un
+     * propósito que se añada en el futuro también queda cubierto sin tocar el
+     * servicio. Mismas reglas que aquel (los usados conservan su fecha y los
+     * caducados no se tocan) y también usa {@code idx_account_tokens_user_purpose},
+     * cuya primera columna es {@code user_id}.
+     * </p>
+     *
+     * @param userId id de la cuenta
+     * @param now    instante actual (del {@code Clock} del servicio)
+     * @return número de tokens invalidados ahora
+     */
+    @Transactional
+    @Modifying(flushAutomatically = true)
+    @Query("update AccountToken t set t.usedAt = :now"
+            + " where t.user.id = :userId and t.usedAt is null and t.expiresAt > :now")
+    int invalidateAllActiveTokens(@Param("userId") Long userId, @Param("now") Instant now);
 
     /**
      * Indica si la cuenta tiene algún token vigente (sin usar y sin caducar)

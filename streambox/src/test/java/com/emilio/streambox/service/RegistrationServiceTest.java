@@ -81,7 +81,7 @@ class RegistrationServiceTest {
                 .thenAnswer(invocation -> Optional.of(invocation.getArgument(0)));
 
         EmailProperties emailProperties = new EmailProperties("StreamBox <no-reply@streambox.local>",
-                Duration.ofHours(24), false,
+                Duration.ofHours(24), Duration.ofHours(1), false,
                 new EmailProperties.Resend(3, Duration.ofHours(1), Duration.ofSeconds(60)));
         Clock clock = Clock.fixed(Instant.parse("2026-05-01T10:00:00Z"), ZoneOffset.UTC);
         reservations = new UsernameReservations(emailProperties, rateLimit, clock);
@@ -278,42 +278,90 @@ class RegistrationServiceTest {
         verify(emailDispatcher, never()).sendAfterCommit(any());
     }
 
-    /** El nombre de una pendiente sustituible se libera: se borra esa cuenta y se crea la nueva. */
+    /**
+     * El nombre de una pendiente que ya no lo conserva se libera: se borra esa
+     * cuenta y se crea la nueva. Se usa la regla por nombre (la común con
+     * «Editar perfil»), nunca la regla por email.
+     */
     @Test
-    void elNombreDeUnaPendienteSustituibleSeLibera() {
+    void elNombreDeUnaPendienteQueYaNoLoConservaSeLibera() {
         User stale = user(3L, "otra@test.com", "ana_nueva");
         when(userRepository.findByUsername("ana_nueva")).thenReturn(Optional.of(stale));
-        // La regla común con «Editar perfil» (isReplaceable + borrado condicional).
-        when(emailVerificationService.deleteIfReplaceable(stale)).thenReturn(true);
+        when(emailVerificationService.deleteIfUsernameReleased(stale)).thenReturn(true);
         when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.register(registration());
 
         InOrder order = inOrder(emailVerificationService, userRepository);
-        order.verify(emailVerificationService).deleteIfReplaceable(stale);
+        order.verify(emailVerificationService).deleteIfUsernameReleased(stale);
         order.verify(userRepository).saveAndFlush(any());
+        verify(emailVerificationService, never()).isReplaceable(stale);
     }
 
     /**
-     * Misma cuenta dueña del email y del nombre, sustituible: se borra una sola
-     * vez y se crea la nueva (no se intenta borrar dos veces ni se trata como
-     * existente).
+     * Misma cuenta dueña del email y del nombre, que ya no conserva el nombre y
+     * es sustituible por email: se borra una sola vez (por la regla del email)
+     * y se crea la nueva.
      */
     @Test
     void siElEmailYElNombreSonDeLaMismaPendienteSustituibleSeBorraUnaVez() {
         User stale = user(7L, "ana.nueva@test.com", "ana_nueva");
         when(userRepository.findByEmail("ana.nueva@test.com")).thenReturn(Optional.of(stale));
         when(userRepository.findByUsername("ana_nueva")).thenReturn(Optional.of(stale));
-        when(emailVerificationService.deleteIfReplaceable(stale)).thenReturn(true);
+        when(emailVerificationService.releasesUsername(stale)).thenReturn(true);
+        when(emailVerificationService.isReplaceable(stale)).thenReturn(true);
+        when(userRepository.deleteIfEmailNotVerified(7L)).thenReturn(1);
         when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.register(registration());
 
-        // Se borra como dueña del nombre; como dueña del email ya no se mira.
-        verify(emailVerificationService, times(1)).deleteIfReplaceable(stale);
-        verify(userRepository, never()).deleteIfEmailNotVerified(anyLong());
+        verify(emailVerificationService, never()).deleteIfUsernameReleased(any());
+        verify(userRepository, times(1)).deleteIfEmailNotVerified(7L);
         verify(emailVerificationService, times(1)).lockForUpdate(stale);
         verify(userRepository).saveAndFlush(any());
+    }
+
+    /**
+     * Misma cuenta dueña del email y del nombre, creada hace más de 24 h pero
+     * con un enlace vigente pedido después (p. ej. «He olvidado mi
+     * contraseña»). Por el nombre no hay 409 (con cualquier otro email el
+     * nombre ya estaría libre: MEDIA-1), pero tampoco se borra: decide la
+     * regla por email, que la conserva y solo le reenvía el enlace. Si el
+     * nombre la borrara, repetir el registro con su email y su nombre dejaría
+     * sin valor el enlace del titular.
+     */
+    @Test
+    void siElEmailYElNombreSonDeLaMismaPendienteConUnEnlaceVigenteSeConservaYSoloRecibeOtroEnlace() {
+        User pending = user(7L, "ana.nueva@test.com", "ana_nueva");
+        when(userRepository.findByEmail("ana.nueva@test.com")).thenReturn(Optional.of(pending));
+        when(userRepository.findByUsername("ana_nueva")).thenReturn(Optional.of(pending));
+        when(emailVerificationService.releasesUsername(pending)).thenReturn(true);
+        when(emailVerificationService.isReplaceable(pending)).thenReturn(false);
+
+        assertSame(AcceptedResponse.REGISTRATION, service.register(registration()));
+
+        verify(emailVerificationService).issueIfAllowed(pending);
+        verify(emailVerificationService, never()).deleteIfUsernameReleased(any());
+        verify(userRepository, never()).deleteIfEmailNotVerified(anyLong());
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    /**
+     * Misma cuenta dueña del email y del nombre, que aún conserva el nombre
+     * (creada hace menos de 24 h, o heredada): el mismo 409 que daría el nombre
+     * con cualquier otro email, sin borrar nada.
+     */
+    @Test
+    void siElEmailYElNombreSonDeLaMismaCuentaQueConservaElNombreDa409() {
+        User pending = user(7L, "ana.nueva@test.com", "ana_nueva");
+        when(userRepository.findByEmail("ana.nueva@test.com")).thenReturn(Optional.of(pending));
+        when(userRepository.findByUsername("ana_nueva")).thenReturn(Optional.of(pending));
+        when(emailVerificationService.releasesUsername(pending)).thenReturn(false);
+
+        assertThrows(UserAlreadyExistsException.class, () -> service.register(registration()));
+
+        verify(userRepository, never()).deleteIfEmailNotVerified(anyLong());
+        verify(emailVerificationService, never()).issueIfAllowed(any());
     }
 
     /**

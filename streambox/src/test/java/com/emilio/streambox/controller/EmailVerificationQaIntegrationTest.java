@@ -19,12 +19,15 @@ import java.util.Map;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -78,6 +81,10 @@ import jakarta.servlet.http.Cookie;
  *       las primeras 24 h y pasadas 24 h (incidencia QA-2: pasadas 24 h la
  *       reserva caduca, pero la cuenta pendiente creada con un email nuevo
  *       sigue ocupando el nombre).</li>
+ *   <li><b>Pedir otro enlace pasadas 24 h</b> (reenvío o «He olvidado mi
+ *       contraseña») y después registrar o ponerse el nombre del registro
+ *       (incidencia MEDIA-1: el enlace nuevo alargaba la vida del nombre de la
+ *       pendiente, pero no la de la reserva).</li>
  *   <li><b>Cuentas heredadas</b> con favoritos y «me gusta»: pedir un enlace
  *       con el reenvío y dejarlo caducar no las vuelve sustituibles; confirman
  *       con el último enlace y después entran.</li>
@@ -126,6 +133,9 @@ class EmailVerificationQaIntegrationTest {
 
     /** Cuenta que ya puede tener el email de un registro. */
     enum ExistingAccount { VERIFIED, PENDING, LEGACY }
+
+    /** Cómo pide el atacante otro enlace para un email (MEDIA-1): los dos responden 202 a cualquiera. */
+    enum NewLink { RESEND, PASSWORD_RESET }
 
     @BeforeEach
     void setUp() {
@@ -242,6 +252,82 @@ class EmailVerificationQaIntegrationTest {
 
         assertEquals(fresh, taken, "Pasadas 24 h, «Editar perfil» delata si el email ya tenía cuenta: email nuevo → "
                 + fresh + ", email con cuenta → " + taken);
+    }
+
+    /**
+     * <b>Incidencia MEDIA-1 (revisión de seguridad de «He olvidado mi
+     * contraseña»), en el registro.</b> El atacante registra (E, U) con un U
+     * aleatorio, espera 24 h, pide otro enlace para E (reenvío o
+     * restablecimiento: los dos responden 202 a cualquiera) y, antes de que
+     * caduque, registra U con otro email. Antes: si E era nuevo, la pendiente
+     * (E, U) tenía un enlace vigente y no era «sustituible», así que U daba
+     * 409; si E ya tenía cuenta, U solo estaba reservado 24 h y daba 202. Ahora
+     * el nombre de una pendiente dura lo mismo que la reserva (24 h desde el
+     * alta) y los dos dan el mismo 202 con el mismo cuerpo.
+     */
+    @ParameterizedTest
+    @MethodSource("newLinkAndExistingAccount")
+    void pedirOtroEnlacePasadas24HorasNoDelataElEmailAlRegistrarseConElNombre(NewLink link, ExistingAccount kind)
+            throws Exception {
+        String suffix = "_r" + link.ordinal() + kind.ordinal();
+        String victimEmail = "victima" + suffix + DOMAIN;
+        createExisting(kind, "titular" + suffix, victimEmail);
+        String freshEmail = "libre" + suffix + DOMAIN;
+
+        register("enl_a" + suffix, freshEmail, ATTACKER_PASSWORD).andExpect(status().isAccepted());
+        register("enl_b" + suffix, victimEmail, ATTACKER_PASSWORD).andExpect(status().isAccepted());
+        CLOCK.advance(Duration.ofHours(25));
+        requestLink(link, freshEmail).andExpect(status().isAccepted());
+        requestLink(link, victimEmail).andExpect(status().isAccepted());
+
+        MockHttpServletResponse fresh = register("enl_a" + suffix, "otro_a" + suffix + DOMAIN, ATTACKER_PASSWORD)
+                .andReturn().getResponse();
+        MockHttpServletResponse taken = register("enl_b" + suffix, "otro_b" + suffix + DOMAIN, ATTACKER_PASSWORD)
+                .andReturn().getResponse();
+
+        assertEquals(202, fresh.getStatus(), "Pedir otro enlace alarga la vida del nombre de la pendiente: "
+                + fresh.getContentAsString(StandardCharsets.UTF_8));
+        assertEquals(fresh.getStatus(), taken.getStatus(), taken.getContentAsString(StandardCharsets.UTF_8));
+        assertEquals(withoutVolatileFields(fresh), withoutVolatileFields(taken));
+        assertEquals(headers(fresh), headers(taken));
+    }
+
+    /**
+     * MEDIA-1 en «Editar perfil»: la misma secuencia, pero el atacante se pone
+     * U en su propia cuenta confirmada. Mismo 200 en los dos casos y mismo
+     * cuerpo salvo el nombre pedido (que es distinto en cada caso).
+     */
+    @ParameterizedTest
+    @MethodSource("newLinkAndExistingAccount")
+    void pedirOtroEnlacePasadas24HorasNoDelataElEmailAlCambiarseElNombre(NewLink link, ExistingAccount kind)
+            throws Exception {
+        String suffix = "_s" + link.ordinal() + kind.ordinal();
+        String victimEmail = "victima" + suffix + DOMAIN;
+        createExisting(kind, "titular" + suffix, victimEmail);
+        String freshEmail = "libre" + suffix + DOMAIN;
+        User attacker = createUser("atacante" + suffix, "atacante" + suffix + DOMAIN, true, null);
+
+        register("per_a" + suffix, freshEmail, ATTACKER_PASSWORD).andExpect(status().isAccepted());
+        register("per_b" + suffix, victimEmail, ATTACKER_PASSWORD).andExpect(status().isAccepted());
+        CLOCK.advance(Duration.ofHours(25));
+        requestLink(link, freshEmail).andExpect(status().isAccepted());
+        requestLink(link, victimEmail).andExpect(status().isAccepted());
+
+        MockHttpServletResponse fresh = renameTo(attacker, "per_a" + suffix).andReturn().getResponse();
+        MockHttpServletResponse taken = renameTo(attacker, "per_b" + suffix).andReturn().getResponse();
+
+        assertEquals(200, fresh.getStatus(), "Pedir otro enlace alarga la vida del nombre de la pendiente: "
+                + fresh.getContentAsString(StandardCharsets.UTF_8));
+        assertEquals(fresh.getStatus(), taken.getStatus(), taken.getContentAsString(StandardCharsets.UTF_8));
+        assertEquals("per_a" + suffix, bodyAsMap(fresh).get("username"));
+        assertEquals("per_b" + suffix, bodyAsMap(taken).get("username"));
+        assertEquals(withoutVolatileFields(fresh, "username"), withoutVolatileFields(taken, "username"));
+    }
+
+    /** Las 6 combinaciones de cómo se pide el enlace nuevo y qué cuenta tenía ya el email. */
+    static Stream<Arguments> newLinkAndExistingAccount() {
+        return Stream.of(NewLink.values())
+                .flatMap(link -> Stream.of(ExistingAccount.values()).map(kind -> Arguments.of(link, kind)));
     }
 
     /**
@@ -382,6 +468,15 @@ class EmailVerificationQaIntegrationTest {
                 .content(objectMapper.writeValueAsString(Map.of("email", email))));
     }
 
+    private ResultActions requestLink(NewLink link, String email) throws Exception {
+        if (link == NewLink.RESEND) {
+            return resend(email);
+        }
+        return mockMvc.perform(post("/api/auth/password-reset")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("email", email))));
+    }
+
     private ResultActions confirm(String token) throws Exception {
         return mockMvc.perform(post("/api/auth/email-verification")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -448,10 +543,17 @@ class EmailVerificationQaIntegrationTest {
         return body.isEmpty() ? Map.of() : objectMapper.readValue(body, Map.class);
     }
 
-    /** Cuerpo del error sin la hora, lo único que cambia entre dos respuestas iguales. */
-    private Map<?, ?> withoutVolatileFields(MockHttpServletResponse response) throws Exception {
+    /**
+     * Cuerpo sin la hora, lo único que cambia entre dos respuestas iguales, ni
+     * los campos indicados (que el test comprueba aparte).
+     */
+    private Map<?, ?> withoutVolatileFields(MockHttpServletResponse response, String... alsoIgnored)
+            throws Exception {
         Map<?, ?> body = new HashMap<>(bodyAsMap(response));
         body.remove("timestamp");
+        for (String field : alsoIgnored) {
+            body.remove(field);
+        }
         return body;
     }
 

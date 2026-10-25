@@ -12,6 +12,7 @@ import { useCountdown } from '../hooks/useCountdown';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useResendVerification } from '../hooks/useResendVerification';
 import { ApiError, getErrorMessage } from '../lib/api';
+import { forgotPasswordState } from '../lib/passwordReset';
 import { formatWaitTime } from '../lib/utils';
 import { emailError } from '../lib/validation';
 
@@ -24,6 +25,12 @@ import { emailError } from '../lib/validation';
  * la espera exacta sale de la cabecera `Retry-After`.
  */
 const LOCKOUT_MINUTES = 15;
+
+/** Ruta de «He olvidado mi contraseña». */
+const FORGOT_PASSWORD_PATH = '/recuperar-contrasena';
+
+/** Clases de los enlaces de texto, iguales que los de registro y `/verificar-email`. */
+const TEXT_LINK = 'focus-ring font-semibold text-accent underline-offset-2 hover:underline';
 
 /**
  * Texto del aviso de intentos restantes, con singular y plural.
@@ -112,6 +119,13 @@ function RemainingAttemptsNotice({ remaining }: { remaining: number }) {
  * de la verificación) están pendientes y nunca recibieron ninguno. Por eso la
  * salida es «si no tienes ninguno o ha caducado», no «si no lo encuentras».
  *
+ * **La otra salida: restablecer la contraseña.** Debajo del botón, un enlace a
+ * `/recuperar-contrasena` con el correo del intento (en el `state` de la
+ * navegación, nunca en la URL). Es verdad en los tres casos: a quien se equivocó
+ * de contraseña le sirve para elegir otra, y a una cuenta pendiente (o heredada)
+ * también le confirma el correo, porque quien abre el enlace demuestra que el
+ * buzón es suyo. Va fuera de la región `role="status"`, como el botón.
+ *
  * @param email correo (recortado y con formato válido) con el que se intentó
  *              entrar, o `null` para no mostrar la pista
  */
@@ -147,6 +161,13 @@ function UnconfirmedEmailHint({ email }: { email: string | null }) {
                 : 'Reenviar el correo de confirmación'}
           </Button>
           <ResendNotice notice={notice} />
+          <p className="mt-3">
+            ¿No recuerdas la contraseña?{' '}
+            <Link to={FORGOT_PASSWORD_PATH} state={forgotPasswordState(email)} className={TEXT_LINK}>
+              Restablécela
+            </Link>
+            : al hacerlo, tu correo también queda confirmado.
+          </p>
         </div>
       )}
     </div>
@@ -188,6 +209,10 @@ function hintEmailFor(email: string): string | null {
  *
  * `login()` del contexto hace la llamada y abre la sesión: `RedirectIfAuthenticated`
  * (en `App.tsx`) se encarga de llevar al usuario a la portada.
+ *
+ * Bajo el formulario, «¿Has olvidado tu contraseña?» lleva a `/recuperar-contrasena`
+ * con el correo ya escrito si tiene buen formato (en el `state` de la navegación,
+ * nunca en la URL: ver `forgotPasswordState`), para no tener que reescribirlo.
  */
 export function LoginPage() {
   useDocumentTitle('Iniciar sesión');
@@ -249,7 +274,7 @@ export function LoginPage() {
       footer={
         <>
           ¿No tienes cuenta?{' '}
-          <Link to="/registro" className="focus-ring font-semibold text-accent underline-offset-2 hover:underline">
+          <Link to="/registro" className={TEXT_LINK}>
             Regístrate
           </Link>
         </>
@@ -284,6 +309,12 @@ export function LoginPage() {
           {loading ? 'Entrando...' : blocked ? `Reintentar en ${formatWaitTime(remaining)}` : 'Iniciar sesión'}
         </Button>
       </form>
+      {/* Tras el botón y no entre la contraseña y el botón: así el Tab va de la contraseña a «Iniciar sesión». */}
+      <p className="mt-5 text-sm">
+        <Link to={FORGOT_PASSWORD_PATH} state={forgotPasswordState(email)} className={TEXT_LINK}>
+          ¿Has olvidado tu contraseña?
+        </Link>
+      </p>
     </AuthLayout>
   );
 }

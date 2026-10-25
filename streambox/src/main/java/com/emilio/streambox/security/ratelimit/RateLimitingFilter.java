@@ -29,9 +29,11 @@ import jakarta.servlet.http.HttpServletResponse;
  * Limita por IP cuántas veces se puede llamar a los endpoints públicos más
  * sensibles: el inicio de sesión ({@code POST /api/auth/login}), el registro
  * ({@code POST /api/users}), la renovación de sesión
- * ({@code POST /api/auth/refresh}) y la verificación del correo
+ * ({@code POST /api/auth/refresh}), la verificación del correo
  * ({@code POST /api/auth/email-verification} y
- * {@code POST /api/auth/email-verification/resend}).
+ * {@code POST /api/auth/email-verification/resend}) y el restablecimiento de
+ * la contraseña ({@code POST /api/auth/password-reset} y
+ * {@code POST /api/auth/password-reset/confirm}).
  *
  * <p>
  * Al superar el límite responde {@code 429 Too Many Requests} con la cabecera
@@ -194,6 +196,26 @@ import jakarta.servlet.http.HttpServletResponse;
  * 202 de siempre, sin enviar nada): un 429 por email delataría que ese email
  * tiene una cuenta pendiente, justo lo que el 202 constante quiere ocultar.
  * </p>
+ *
+ * <h2>Restablecer la contraseña («He olvidado mi contraseña»)</h2>
+ * <p>
+ * Las mismas reglas que la verificación del correo, por los mismos motivos:
+ * públicas, con cuerpo JSON, un contador por IP para cada ruta y el mismo
+ * criterio del {@code Content-Type}.
+ * </p>
+ * <ul>
+ * <li><b>Pedir el enlace</b> ({@value #PASSWORD_RESET_PATH},
+ * {@code rate-limit.password-reset}, 5 por hora), como el reenvío: cada
+ * petición puede mandar un correo. El límite por email es del servicio y
+ * silencioso (202 siempre), porque un 429 por email revelaría que el email
+ * tiene cuenta.</li>
+ * <li><b>Confirmar</b> ({@value #PASSWORD_RESET_CONFIRM_PATH},
+ * {@code rate-limit.password-reset-confirm}, 20 cada 15 minutos), como la
+ * confirmación del correo: el token de 256 bits no se puede adivinar, así que
+ * el límite es contra el abuso (cada intento consulta la base de datos y, con
+ * un token válido, calcula un BCrypt) y deja margen para quien corrige una
+ * contraseña que no cumple la política (con el token aún válido).</li>
+ * </ul>
  */
 public class RateLimitingFilter extends OncePerRequestFilter {
 
@@ -226,6 +248,20 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     public static final String EMAIL_VERIFICATION_RESEND_PATH = "/api/auth/email-verification/resend";
 
     /**
+     * Ruta de la petición del enlace para restablecer la contraseña («He
+     * olvidado mi contraseña»; pública y limitada, como {@link #LOGIN_PATH};
+     * ver «Restablecer la contraseña» en la clase).
+     */
+    public static final String PASSWORD_RESET_PATH = "/api/auth/password-reset";
+
+    /**
+     * Ruta de la confirmación del restablecimiento con el token del enlace y la
+     * contraseña nueva (pública y limitada, como {@link #LOGIN_PATH}; ver
+     * «Restablecer la contraseña» en la clase).
+     */
+    public static final String PASSWORD_RESET_CONFIRM_PATH = "/api/auth/password-reset/confirm";
+
+    /**
      * Tipos de la lista CORS-safelisted del estándar Fetch: los únicos con
      * los que otra web puede enviar un {@code POST} sin preflight.
      */
@@ -237,16 +273,22 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     private final RequestMatcher refreshRequest;
     private final RequestMatcher emailVerificationRequest;
     private final RequestMatcher emailVerificationResendRequest;
+    private final RequestMatcher passwordResetRequest;
+    private final RequestMatcher passwordResetConfirmRequest;
     private final RateLimitProperties.Rule loginRule;
     private final RateLimitProperties.Rule registerRule;
     private final RateLimitProperties.Rule refreshRule;
     private final RateLimitProperties.Rule emailVerificationRule;
     private final RateLimitProperties.Rule emailVerificationResendRule;
+    private final RateLimitProperties.Rule passwordResetRule;
+    private final RateLimitProperties.Rule passwordResetConfirmRule;
     private final SlidingWindowCounter loginCounter;
     private final SlidingWindowCounter registerCounter;
     private final SlidingWindowCounter refreshCounter;
     private final SlidingWindowCounter emailVerificationCounter;
     private final SlidingWindowCounter emailVerificationResendCounter;
+    private final SlidingWindowCounter passwordResetCounter;
+    private final SlidingWindowCounter passwordResetConfirmCounter;
     private final SecurityErrorResponseWriter errorWriter;
 
     /**
@@ -282,6 +324,14 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                 emailVerificationRule.window(), clock, properties.maxKeys());
         this.emailVerificationResendCounter = new SlidingWindowCounter(
                 emailVerificationResendRule.window(), clock, properties.maxKeys());
+        this.passwordResetRequest = matchers.matcher(HttpMethod.POST, PASSWORD_RESET_PATH);
+        this.passwordResetConfirmRequest = matchers.matcher(HttpMethod.POST, PASSWORD_RESET_CONFIRM_PATH);
+        this.passwordResetRule = properties.passwordReset();
+        this.passwordResetConfirmRule = properties.passwordResetConfirm();
+        this.passwordResetCounter = new SlidingWindowCounter(
+                passwordResetRule.window(), clock, properties.maxKeys());
+        this.passwordResetConfirmCounter = new SlidingWindowCounter(
+                passwordResetConfirmRule.window(), clock, properties.maxKeys());
         this.errorWriter = errorWriter;
     }
 
@@ -318,6 +368,18 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         } else if (emailVerificationResendRequest.matches(request)) {
             if (!acquire(request, response, emailVerificationResendCounter, emailVerificationResendRule,
+                    countsTowardsLimit(request.getContentType()))) {
+                return;
+            }
+        } else if (passwordResetRequest.matches(request)) {
+            // También con cuerpo JSON: mismo criterio del Content-Type (ver
+            // «Restablecer la contraseña» en la clase).
+            if (!acquire(request, response, passwordResetCounter, passwordResetRule,
+                    countsTowardsLimit(request.getContentType()))) {
+                return;
+            }
+        } else if (passwordResetConfirmRequest.matches(request)) {
+            if (!acquire(request, response, passwordResetConfirmCounter, passwordResetConfirmRule,
                     countsTowardsLimit(request.getContentType()))) {
                 return;
             }

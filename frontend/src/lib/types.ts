@@ -180,6 +180,26 @@ export interface ResendVerificationRequest {
 }
 
 /**
+ * Cuerpo de `POST /api/auth/password-reset` («He olvidado mi contraseña»):
+ * pide el correo con el enlace para elegir una contraseña nueva. Responde 202
+ * con el mismo {@link AcceptedResponse} exista o no la cuenta.
+ */
+export interface PasswordResetRequest {
+  email: string;
+}
+
+/**
+ * Cuerpo de `POST /api/auth/password-reset/confirm`: el token del enlace y la
+ * contraseña nueva (204 si se cambia; 400 `INVALID_RESET_TOKEN` si el enlace no
+ * vale; 400 `VALIDATION_ERROR` con `validationErrors.newPassword` si la
+ * contraseña no cumple la política, y entonces el token NO se gasta).
+ */
+export interface PasswordResetConfirmRequest {
+  token: string;
+  newPassword: string;
+}
+
+/**
  * Cuerpo de `PATCH /api/users/me` (editar mi perfil). Cada campo es opcional:
  * ausente = no cambia. `avatar: null` vuelve a la inicial. Enviar `email`,
  * `role` o `password` da 400.

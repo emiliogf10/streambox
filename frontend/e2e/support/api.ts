@@ -168,6 +168,56 @@ export function verificationToken(email: SentEmail): string {
   return verificationLink(email).split('#token=')[1];
 }
 
+/** Asunto del correo con el enlace para elegir una contraseña nueva («He olvidado mi contraseña»). */
+export const PASSWORD_RESET_SUBJECT = 'Restablece tu contraseña de StreamBox';
+
+/** Asunto del aviso que se envía después de cambiar la contraseña con ese enlace (por si no fue el titular). */
+export const PASSWORD_CHANGED_SUBJECT = 'Tu contraseña de StreamBox ha cambiado';
+
+/**
+ * Enlace para restablecer la contraseña de un correo (`<origen del Vite E2E>/restablecer-contrasena#token=<43
+ * caracteres>`). Mismo formato de token que el de confirmación; si cambia, falla aquí con el cuerpo a la vista.
+ */
+export function passwordResetLink(email: SentEmail): string {
+  const match = /https?:\/\/\S+?\/restablecer-contrasena#token=[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/.exec(email.body);
+  if (!match) throw new Error(`El correo «${email.subject}» no trae un enlace para restablecer la contraseña:\n${email.body}`);
+  return match[0];
+}
+
+/** Token del enlace para restablecer la contraseña de un correo (ver {@link passwordResetLink}). */
+export function passwordResetToken(email: SentEmail): string {
+  return passwordResetLink(email).split('#token=')[1];
+}
+
+/**
+ * Pide por API el correo para restablecer la contraseña (`POST /api/auth/password-reset`, público). Responde
+ * 202 con el mismo cuerpo exista o no la cuenta; el correo sale después, en otro hilo (ver {@link waitForEmail}).
+ */
+export async function requestPasswordResetApi(request: APIRequestContext, email: string): Promise<void> {
+  const response = await request.post(`${BACKEND_URL}/api/auth/password-reset`, {
+    data: { email },
+    headers: { 'X-Requested-With': 'StreamBox' },
+  });
+  if (response.status() !== 202) {
+    throw new Error(`Pedir el restablecimiento de ${email} debía responder 202: ${response.status()} ${await response.text()}`);
+  }
+}
+
+/**
+ * Cambia la contraseña por API con el token del enlace (`POST /api/auth/password-reset/confirm`, público) y
+ * devuelve la respuesta tal cual, para que el test compruebe el 204 o el 400 que espera.
+ */
+export async function confirmPasswordResetApi(
+  request: APIRequestContext,
+  token: string,
+  newPassword: string,
+): Promise<APIResponse> {
+  return request.post(`${BACKEND_URL}/api/auth/password-reset/confirm`, {
+    data: { token, newPassword },
+    headers: { 'X-Requested-With': 'StreamBox' },
+  });
+}
+
 /** Confirma un correo por API (`POST /api/auth/email-verification`, público): 204 o falla. */
 export async function confirmEmailApi(request: APIRequestContext, token: string): Promise<void> {
   const response = await request.post(`${BACKEND_URL}/api/auth/email-verification`, {

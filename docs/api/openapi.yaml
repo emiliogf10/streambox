@@ -782,8 +782,8 @@ paths:
         401 INVALID_CREDENTIALS que con una contraseña incorrecta, para no revelar si la cuenta se creó); si el correo ya
         tiene una cuenta confirmada, llega un aviso de que ya existe y no cambia nada; si tiene una pendiente, se reenvía
         su enlace (como mucho 3 correos por hora y uno por minuto por cuenta; pasado el límite no se envía nada, sin error).
-        Una cuenta pendiente cuyo enlace caducó sin usarse se sustituye por la nueva. La contraseña se valida igual en todos
-        los casos.'
+        Una cuenta pendiente cuyos enlaces caducaron sin usarse (de confirmación y de restablecer la contraseña) se sustituye
+        por la nueva. La contraseña se valida igual en todos los casos.'
       operationId: createUser
       requestBody:
         content:
@@ -812,9 +812,9 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: 'El nombre de usuario ya está en uso (código USER_ALREADY_EXISTS). Depende solo del nombre, nunca del
-            correo: también lo tiene una cuenta pendiente con su enlace aún vigente, y lo reserva durante 24 horas un registro
-            anterior con ese nombre cuyo correo ya tenía cuenta (para que el 409 no revele si el correo estaba registrado).
-            El correo nunca da 409'
+            correo: también lo conserva durante 24 horas desde su alta una cuenta pendiente creada por el registro (aunque
+            después pida otro enlace), y lo reserva durante 24 horas un registro anterior con ese nombre cuyo correo ya tenía
+            cuenta (los dos duran lo mismo para que el 409 no revele si el correo estaba registrado). El correo nunca da 409'
           content:
             application/json:
               schema:
@@ -1519,6 +1519,101 @@ paths:
           description: 'Código RATE_LIMIT_EXCEEDED: demasiadas renovaciones desde esta IP (30 por minuto por defecto); la
             cabecera Retry-After indica los segundos que hay que esperar. Solo cuentan las peticiones con la cabecera X-Requested-With
             y con la cookie streambox_refresh: sin cookie (visita sin sesión) la respuesta es siempre el 401 SESSION_EXPIRED'
+          headers:
+            Retry-After:
+              description: Segundos que hay que esperar antes de volver a intentarlo (entero, mínimo 1).
+              required: true
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/auth/password-reset:
+    post:
+      tags:
+      - password-reset-controller
+      summary: Pide el enlace para restablecer la contraseña
+      description: 'Si el correo es de una cuenta (confirmada o pendiente de confirmar, de usuario o de administrador), le
+        envía un enlace <STREAMBOX_PUBLIC_URL>/restablecer-contrasena#token=... para elegir una contraseña nueva; los enlaces
+        de restablecimiento anteriores dejan de servir. El enlace caduca en 1 hora y sirve una sola vez. No requiere autenticación
+        ni la cabecera X-Requested-With. Responde SIEMPRE 202 con el mismo cuerpo, exista o no la cuenta, para no revelar
+        qué correos están registrados. Límite silencioso por cuenta: como mucho 3 correos por hora y uno por minuto (aparte
+        de los de confirmación del correo); pasado el límite se responde igual, pero no se envía nada.'
+      operationId: requestPasswordReset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+        required: true
+      responses:
+        '202':
+          description: Petición aceptada; el cuerpo es siempre el mismo (message = "Si hay una cuenta con ese correo, te llegará
+            un enlace para elegir una contraseña nueva.")
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/AcceptedResponse'
+        '400':
+          description: 'Código VALIDATION_ERROR con el detalle en validationErrors.email: correo vacío, con formato incorrecto
+            o de más de 100 caracteres (depende solo del texto enviado, no de si existe la cuenta)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 'Código RATE_LIMIT_EXCEEDED: demasiadas peticiones desde esta IP (5 por hora por defecto), exista o
+            no la cuenta; la cabecera Retry-After indica los segundos que hay que esperar'
+          headers:
+            Retry-After:
+              description: Segundos que hay que esperar antes de volver a intentarlo (entero, mínimo 1).
+              required: true
+              schema:
+                type: integer
+                format: int32
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/auth/password-reset/confirm:
+    post:
+      tags:
+      - password-reset-controller
+      summary: Restablece la contraseña
+      description: 'Fija una contraseña nueva con el token del enlace del correo (lo que va tras #token= en <STREAMBOX_PUBLIC_URL>/restablecer-contrasena).
+        No requiere autenticación ni la cabecera X-Requested-With. Al cambiarla, el correo de la cuenta queda confirmado,
+        dejan de servir todos los enlaces pendientes de la cuenta (de restablecimiento y de confirmación), se cierran TODAS
+        sus sesiones (los refresh tokens quedan revocados; los JWT de acceso ya emitidos valen hasta caducar, como mucho 15
+        minutos), se borran los intentos fallidos de login de la cuenta y se envía un aviso al correo. No inicia sesión: después
+        hay que entrar con la contraseña nueva. Si la contraseña nueva no cumple la política, el token NO se gasta.'
+      operationId: confirmPasswordReset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetConfirmRequest'
+        required: true
+      responses:
+        '204':
+          description: Contraseña cambiada; sin cuerpo y sin cookies
+        '400':
+          description: 'Código INVALID_RESET_TOKEN (mensaje «El enlace para restablecer la contraseña no es válido o ha caducado.»):
+            el token no existe, ha caducado, ya se usó, se invalidó al pedir otro enlace, falta o no tiene el formato de un
+            token; mismo cuerpo en todos los casos y la contraseña no cambia. Código VALIDATION_ERROR con el detalle en validationErrors.newPassword:
+            la contraseña nueva falta o no cumple la política (12 a 64 caracteres, como mucho 72 bytes, no común, sin el nombre
+            de usuario ni la parte del email anterior a la @ de la cuenta del enlace); el token sigue valiendo. Un token que
+            no es texto (p. ej. un número) da MALFORMED_REQUEST'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 'Código RATE_LIMIT_EXCEEDED: demasiadas peticiones desde esta IP (20 cada 15 minutos por defecto);
+            la cabecera Retry-After indica los segundos que hay que esperar'
           headers:
             Retry-After:
               description: Segundos que hay que esperar antes de volver a intentarlo (entero, mínimo 1).
@@ -2773,6 +2868,38 @@ components:
           example: Si el correo es correcto, te llegará un enlace para confirmar tu cuenta.
       required:
       - message
+    PasswordResetRequest:
+      type: object
+      description: Correo de la cuenta a la que se pide el enlace para elegir una contraseña nueva.
+      properties:
+        email:
+          type: string
+          format: email
+          description: Correo de la cuenta (como mucho 100 caracteres).
+          example: ana@example.com
+          maxLength: 100
+          minLength: 0
+          pattern: '[^\p{Cc}]*'
+      required:
+      - email
+    PasswordResetConfirmRequest:
+      type: object
+      description: Token del enlace de «He olvidado mi contraseña» y la contraseña nueva.
+      properties:
+        token:
+          type: string
+          description: 'Token que va tras #token= en el enlace del correo: 43 caracteres de Base64URL (A-Z, a-z, 0-9, - y
+            _).'
+          example: q8Vb3c0mZ1yJx7pQ2rT5uW9aE4fH6kL1nB3dS8gV0iY
+        newPassword:
+          type: string
+          description: 'Contraseña nueva: entre 12 y 64 caracteres y como máximo 72 bytes en UTF-8, no común ni trivial y
+            sin el nombre de usuario ni la parte del email anterior a la @ de la cuenta del enlace.'
+          example: tres palabras al azar 2026
+          maxLength: 64
+          minLength: 12
+      required:
+      - newPassword
     LoginRequest:
       type: object
       properties:
@@ -3045,6 +3172,10 @@ components:
             ya se usó (o se invalidó al pedir otro correo) o no tiene el formato de un token; mismo mensaje en todos los casos:
             hay que pedir otro enlace.
 
+            - INVALID_RESET_TOKEN (400): POST /api/auth/password-reset/confirm con un token que no existe, ha caducado, ya
+            se usó (o se invalidó al pedir otro enlace) o no tiene el formato de un token; mismo mensaje en todos los casos:
+            hay que pedir otro enlace. La contraseña no ha cambiado.
+
             - MALFORMED_REQUEST (400 y otros 4xx genéricos): la petición no se puede interpretar (JSON mal formado, tipos
             incorrectos).
 
@@ -3063,9 +3194,9 @@ components:
             - NOT_ACCEPTABLE (406): la cabecera Accept pide un formato que la API no produce; la API solo responde en JSON
             (este error también va en JSON).
 
-            - RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login, registro o renovación de sesión (POST /api/auth/refresh)
-            desde la misma IP, o demasiados intentos con la contraseña actual incorrecta en PUT /api/users/me/password (por
-            cuenta: 5 cada 15 minutos); ver la cabecera Retry-After.
+            - RATE_LIMIT_EXCEEDED (429): demasiadas peticiones de login, registro, renovación de sesión (POST /api/auth/refresh),
+            verificación del correo o restablecimiento de la contraseña desde la misma IP, o demasiados intentos con la contraseña
+            actual incorrecta en PUT /api/users/me/password (por cuenta: 5 cada 15 minutos); ver la cabecera Retry-After.
 
             - ACCOUNT_LOCKED (429): la cuenta está bloqueada temporalmente por logins fallidos; ver la cabecera Retry-After.
 
@@ -3096,6 +3227,7 @@ components:
           - SESSION_EXPIRED
           - CURRENT_PASSWORD_INCORRECT
           - INVALID_VERIFICATION_TOKEN
+          - INVALID_RESET_TOKEN
           example: RESOURCE_NOT_FOUND
         message:
           type: string

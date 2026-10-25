@@ -67,7 +67,7 @@ class TrailerUrlMigrationH2Test {
     /** Sobre una base vacía la V6 se aplica igual (es lo que hacen los tests y el E2E al arrancar). */
     @Test
     void laV6SeAplicaSobreUnaBaseSinDatos() throws IOException {
-        assertEquals(9, flyway().load().migrate().migrationsExecuted, "V1 a V9 (la V5, la de H2)");
+        assertEquals(10, flyway().load().migrate().migrationsExecuted, "V1 a V10 (la V5, la de H2)");
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM movies", Integer.class));
     }
 

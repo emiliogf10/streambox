@@ -30,7 +30,8 @@ import com.emilio.streambox.migration.UserAvatarSchemaCases;
  * verificación del correo en {@code V9}, cuyas consultas se prueban en
  * {@code repository.AccountTokenRepositoryIntegrationTest} y cuyo efecto sobre
  * las cuentas existentes (solo las ADMIN quedan verificadas), en
- * {@code migration.EmailVerificationMigrationH2Test}).
+ * {@code migration.EmailVerificationMigrationH2Test}; el propósito
+ * {@code PASSWORD_RESET} de «He olvidado mi contraseña», en {@code V10}).
  * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
  * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
  * de PostgreSQL.
@@ -799,21 +800,77 @@ class FlywaySchemaIntegrationTest {
     }
 
     /**
-     * {@code ck_account_tokens_purpose}: hoy solo {@code EMAIL_VERIFICATION},
-     * exactamente así (ni en minúsculas, ni con espacios, ni un propósito
-     * futuro que aún no tiene su migración).
+     * {@code ck_account_tokens_purpose} (V9, ampliada en V10): solo
+     * {@code EMAIL_VERIFICATION} y {@code PASSWORD_RESET}, exactamente así (ni
+     * en minúsculas, ni con espacios, ni un propósito que aún no tiene su
+     * migración). Los dos válidos conviven en la misma cuenta.
      */
     @Test
     void elPropositoDelTokenSoloAdmiteLosValoresDelCheck() {
         long userId = insertUser("tokencuentaproposito");
 
-        for (String invalid : java.util.Arrays.asList("PASSWORD_RESET", "email_verification", "EMAIL_VERIFICATION ",
-                "", null)) {
+        for (String invalid : java.util.Arrays.asList("password_reset", "PASSWORD_RESET ", " PASSWORD_RESET",
+                "PASSWORD-RESET", "email_verification", "EMAIL_VERIFICATION ", "LOGIN_LINK", "", null)) {
             assertThrows(DataIntegrityViolationException.class,
                     () -> insertAccountToken(userId, invalid, HASH_A, T0, T0.plusDays(1), null), String.valueOf(invalid));
         }
         insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, T0, T0.plusDays(1), null);
-        assertEquals(1, count("account_tokens"));
+        insertAccountToken(userId, "PASSWORD_RESET", HASH_B, T0, T0.plusHours(1), null);
+        assertEquals(List.of("EMAIL_VERIFICATION", "PASSWORD_RESET"),
+                jdbc.queryForList("SELECT purpose FROM account_tokens ORDER BY purpose", String.class));
+    }
+
+    // --- V10: «He olvidado mi contraseña» (propósito PASSWORD_RESET) ---
+
+    @Test
+    void v10EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '10' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * La V10 sustituye el CHECK del propósito conservando su nombre: queda
+     * exactamente una restricción {@code ck_account_tokens_purpose} (no la
+     * antigua y la nueva a la vez, que juntas seguirían rechazando
+     * {@code PASSWORD_RESET}) y las demás de la V9 siguen en su sitio.
+     */
+    @Test
+    void laV10DejaUnSoloCheckDePropositoYConservaLosDemas() {
+        List<String> checks = jdbc.queryForList("SELECT LOWER(CONSTRAINT_NAME) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS"
+                + " WHERE LOWER(TABLE_NAME) = 'account_tokens' AND CONSTRAINT_TYPE = 'CHECK'"
+                + " ORDER BY LOWER(CONSTRAINT_NAME)", String.class);
+
+        assertEquals(List.of("ck_account_tokens_expires_at", "ck_account_tokens_purpose",
+                "ck_account_tokens_token_hash_format", "ck_account_tokens_used_before_expiry"), checks);
+    }
+
+    /**
+     * Un token de restablecimiento cumple las mismas reglas que uno de
+     * verificación: hash único en toda la tabla (aunque el propósito sea otro),
+     * formato SHA-256, fechas coherentes y cascada al borrar la cuenta.
+     */
+    @Test
+    void unTokenDeRestablecimientoCumpleLasMismasReglasQueElDeVerificacion() {
+        long userId = insertUser("tokenreset");
+        insertAccountToken(userId, "EMAIL_VERIFICATION", HASH_A, T0, T0.plusDays(1), null);
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(userId, "PASSWORD_RESET", HASH_A, T0, T0.plusHours(1), null),
+                "el mismo hash con otro propósito");
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(userId, "PASSWORD_RESET", "A".repeat(64), T0, T0.plusHours(1), null));
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(userId, "PASSWORD_RESET", HASH_B, T0, T0, null), "caduca al nacer");
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertAccountToken(userId, "PASSWORD_RESET", HASH_B, T0, T0.plusHours(1), T0.plusHours(1)),
+                "usado justo al caducar");
+
+        insertAccountToken(userId, "PASSWORD_RESET", HASH_B, T0, T0.plusHours(1), null);
+        jdbc.update("DELETE FROM users WHERE id = ?", userId);
+        assertEquals(0, count("account_tokens"));
     }
 
     /**

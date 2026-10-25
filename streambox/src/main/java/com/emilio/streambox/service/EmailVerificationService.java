@@ -1,16 +1,9 @@
 package com.emilio.streambox.service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Base64;
-import java.util.HexFormat;
 import java.util.Optional;
-import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +18,6 @@ import com.emilio.streambox.email.AccountEmails;
 import com.emilio.streambox.email.EmailDispatcher;
 import com.emilio.streambox.email.EmailProperties;
 import com.emilio.streambox.email.PublicUrlProperties;
-import com.emilio.streambox.entity.AccountToken;
 import com.emilio.streambox.entity.AccountTokenPurpose;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.InvalidVerificationTokenException;
@@ -41,21 +33,11 @@ import jakarta.persistence.PersistenceContext;
  * Verificación del correo: emite los tokens de los enlaces, los confirma y
  * reenvía el correo.
  *
- * <h2>Los tokens</h2>
- * <ul>
- *   <li><b>32 bytes de {@link SecureRandom}</b> (256 bits) en Base64URL sin
- *       relleno: 43 caracteres que van tal cual en una URL. Adivinar uno es
- *       imposible en la práctica, con o sin límite de intentos.</li>
- *   <li>En la base de datos <b>solo su SHA-256</b> (hexadecimal en minúsculas),
- *       como los refresh tokens: con una copia de la tabla no se puede
- *       verificar ninguna cuenta. Un hash rápido basta porque el token es
- *       aleatorio y largo, no una contraseña.</li>
- *   <li>{@code createdAt} y {@code expiresAt} salen del mismo {@link Clock}
- *       (la tabla exige {@code expires_at > created_at}).</li>
- *   <li>Emitir uno <b>invalida los anteriores</b> de la cuenta, con la fila
- *       del usuario bloqueada ({@code PESSIMISTIC_WRITE}): dos reenvíos a la
- *       vez esperan uno al otro y no pueden dejar dos enlaces vigentes.</li>
- * </ul>
+ * <p>
+ * Cómo se generan, guardan e invalidan los tokens (32 bytes aleatorios, solo
+ * su SHA-256 en la base de datos, emitir uno invalida los anteriores) está en
+ * {@link AccountTokens}, compartido con «He olvidado mi contraseña».
+ * </p>
  *
  * <h2>Límite silencioso por cuenta</h2>
  * <p>
@@ -65,22 +47,15 @@ import jakarta.persistence.PersistenceContext;
  * límite no se envía nada, pero la respuesta es el mismo 202: un 429 por email
  * revelaría que ese email tiene una cuenta pendiente. Se cuenta con los tokens
  * de la base de datos ({@code countIssuedSince}), así que sobrevive a los
- * reinicios.
+ * reinicios. Solo cuentan los tokens de verificación: los de «He olvidado mi
+ * contraseña» tienen su propio cupo con los mismos límites
+ * ({@link PasswordResetService}).
  * </p>
  */
 @Service
 public class EmailVerificationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(EmailVerificationService.class);
-
-    /** Bytes aleatorios de cada token. */
-    static final int TOKEN_BYTES = 32;
-
-    /** Longitud del token en Base64URL sin relleno (32 bytes → 43 caracteres). */
-    static final int TOKEN_LENGTH = 43;
-
-    /** Forma exacta de un token propio: lo demás se rechaza sin ir a la base de datos. */
-    private static final Pattern TOKEN_FORMAT = Pattern.compile("[A-Za-z0-9_-]{" + TOKEN_LENGTH + "}");
 
     /**
      * Margen entre la creación de una cuenta y su primer token para considerar
@@ -93,9 +68,8 @@ public class EmailVerificationService {
 
     private static final AccountTokenPurpose PURPOSE = AccountTokenPurpose.EMAIL_VERIFICATION;
 
-    private static final SecureRandom RANDOM = new SecureRandom();
-
     private final AccountTokenRepository accountTokenRepository;
+    private final AccountTokens accountTokens;
     private final UserRepository userRepository;
     private final RefreshTokenService refreshTokenService;
     private final LoginAttemptService loginAttemptService;
@@ -112,6 +86,7 @@ public class EmailVerificationService {
      * Crea el servicio.
      *
      * @param accountTokenRepository tokens de un solo uso
+     * @param accountTokens          emisión de los tokens y límite silencioso
      * @param userRepository         cuentas
      * @param refreshTokenService    cierra las sesiones anteriores a la verificación
      * @param loginAttemptService    olvida las «IPs conocidas» de la cuenta al verificarla
@@ -123,6 +98,7 @@ public class EmailVerificationService {
      */
     public EmailVerificationService(
             AccountTokenRepository accountTokenRepository,
+            AccountTokens accountTokens,
             UserRepository userRepository,
             RefreshTokenService refreshTokenService,
             LoginAttemptService loginAttemptService,
@@ -133,6 +109,7 @@ public class EmailVerificationService {
             PlatformTransactionManager transactionManager) {
 
         this.accountTokenRepository = accountTokenRepository;
+        this.accountTokens = accountTokens;
         this.userRepository = userRepository;
         this.refreshTokenService = refreshTokenService;
         this.loginAttemptService = loginAttemptService;
@@ -167,11 +144,11 @@ public class EmailVerificationService {
      */
     public void confirm(String token) {
 
-        if (token == null || !TOKEN_FORMAT.matcher(token).matches()) {
+        if (!AccountTokens.isWellFormed(token)) {
             // Sin consultar la base de datos: no puede ser un token propio.
             throw new InvalidVerificationTokenException();
         }
-        String hash = sha256Hex(token);
+        String hash = AccountTokens.sha256Hex(token);
 
         String email = transactionTemplate.execute(status -> {
             Instant now = clock.instant();
@@ -291,12 +268,7 @@ public class EmailVerificationService {
 
         Long userId = user.getId();
         Instant now = clock.instant();
-        EmailProperties.Resend limits = emailProperties.resend();
-        boolean tooSoon = !limits.minInterval().isZero()
-                && accountTokenRepository.countIssuedSince(userId, PURPOSE, now.minus(limits.minInterval())) > 0;
-        boolean tooMany = accountTokenRepository.countIssuedSince(userId, PURPOSE, now.minus(limits.window()))
-                >= limits.maxPerWindow();
-        if (tooSoon || tooMany) {
+        if (!accountTokens.withinSilentLimit(userId, PURPOSE, now, emailProperties.resend())) {
             LOGGER.info("Reenvío del correo de verificación de la cuenta {} omitido: límite por cuenta", userId);
             return false;
         }
@@ -305,10 +277,16 @@ public class EmailVerificationService {
     }
 
     /**
-     * Indica si una cuenta pendiente se puede <b>sustituir</b> por un registro
-     * nuevo con su email o su nombre: la creó el registro con verificación
-     * (su primer token es de cuando se creó) y ya no tiene ningún enlace
-     * vigente (todos caducaron).
+     * <b>Regla por email</b>: indica si una cuenta pendiente se puede
+     * <b>sustituir</b> por un registro nuevo <b>con su mismo email</b>: la creó
+     * el registro con verificación (su primer token es de cuando se creó) y ya
+     * no tiene ningún enlace vigente (todos caducaron).
+     *
+     * <p>
+     * Quien pide el <b>nombre</b> de la cuenta (otro registro, o «Editar
+     * perfil») no usa esta regla sino {@link #releasesUsername}, que no mira
+     * los enlaces emitidos después del alta (ver allí el porqué).
+     * </p>
      *
      * <p>
      * <b>Por qué no basta con «pendiente y sin enlace vigente».</b> Las cuentas
@@ -322,25 +300,88 @@ public class EmailVerificationService {
      * el fallo va hacia el lado seguro (no se borra).
      * </p>
      *
+     * <p>
+     * <b>Tampoco si tiene un enlace de «He olvidado mi contraseña» vigente</b>
+     * ({@link AccountTokenPurpose#PASSWORD_RESET}). Ese enlace lo ha pedido
+     * alguien que dice ser el dueño del buzón, y al usarlo la cuenta queda
+     * verificada y con su contraseña (es lo que recupera un email que otro
+     * registró primero). Si un registro nuevo pudiera borrar la cuenta
+     * mientras tanto, cualquiera podría dejar sin valor el enlace que el
+     * titular tiene en su buzón solo con volver a registrarse con su email.
+     * </p>
+     *
      * @param user cuenta (con la fila ya bloqueada en esta transacción)
      * @return {@code true} si se puede borrar para registrar otra en su lugar
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public boolean isReplaceable(User user) {
 
-        if (user.isEmailVerified() || user.getCreatedAt() == null) {
+        if (!isPendingCreatedByRegistration(user)) {
             return false;
         }
-        boolean createdByRegistration = accountTokenRepository.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(
-                user.getId(), PURPOSE, user.getCreatedAt().plus(REGISTRATION_TOKEN_WINDOW));
-        return createdByRegistration && !accountTokenRepository.hasActiveToken(user.getId(), PURPOSE, clock.instant());
+        Instant now = clock.instant();
+        return !accountTokenRepository.hasActiveToken(user.getId(), PURPOSE, now)
+                && !accountTokenRepository.hasActiveToken(user.getId(), AccountTokenPurpose.PASSWORD_RESET, now);
     }
 
     /**
-     * Borra una cuenta pendiente <b>si es sustituible</b> ({@link #isReplaceable})
-     * para liberar su nombre de usuario. Es la regla común de los dos sitios
-     * donde se puede pedir un nombre: el registro
-     * ({@link RegistrationService}) y «Editar perfil»
+     * <b>Regla por nombre</b>: indica si una cuenta pendiente debe dejar libre
+     * su nombre de usuario para quien lo pide (otro registro con otro email, o
+     * «Editar perfil»): la creó el registro con verificación (la misma
+     * condición que {@link #isReplaceable}: una heredada nunca la cumple) y
+     * han pasado {@code streambox.email.verification-ttl} (24 h) desde su alta
+     * ({@code createdAt + verificationTtl <= now}), <b>sin mirar los enlaces
+     * emitidos después</b>.
+     *
+     * <h2>Por qué no usa la regla por email (incidencia MEDIA-1)</h2>
+     * <p>
+     * Un registro con un email que ya tenía cuenta no crea nada: solo reserva
+     * el nombre enviado durante 24 h ({@link UsernameReservations}), y esa
+     * reserva no se alarga nunca. Si el nombre de una pendiente siguiera
+     * ocupado mientras tenga algún enlace vigente, bastaría con: registrar
+     * (E, U), esperar 24 h, pedir otro enlace para E (reenvío o «He olvidado
+     * mi contraseña», que responden 202 a cualquiera) y pedir U antes de que
+     * caduque. Si E no tenía cuenta, la pendiente (E, U) tendría un enlace
+     * nuevo y U daría 409; si ya la tenía, U solo estaba reservado, la reserva
+     * ya caducó y daría 202 o 200: un oráculo de emails registrados. Con esta
+     * regla el nombre de la pendiente dura <b>exactamente lo mismo que la
+     * reserva</b> (24 h desde el registro) y los dos caminos responden igual.
+     * </p>
+     *
+     * <h2>Coste asumido</h2>
+     * <p>
+     * A quien se registró, no confirmó el correo en 24 h y pidió otro enlace
+     * (o uno de «He olvidado mi contraseña») le pueden quitar el nombre: si
+     * alguien lo pide, su cuenta pendiente se borra y el enlace deja de valer.
+     * No pierde datos (una pendiente no ha podido iniciar sesión, así que no
+     * tiene favoritos ni «me gusta») y puede volver a registrarse con su
+     * email. Las verificadas y las heredadas nunca se borran.
+     * </p>
+     *
+     * <p>
+     * La fecha de alta la pone Hibernate ({@code @CreationTimestamp}, hora del
+     * sistema) en la misma transacción en la que se guardaría la reserva, así
+     * que las dos caducan con milisegundos de diferencia; la latencia de la
+     * red ya es mayor que eso.
+     * </p>
+     *
+     * @param user cuenta (con la fila ya bloqueada en esta transacción)
+     * @return {@code true} si su nombre ya no le pertenece
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean releasesUsername(User user) {
+
+        if (!isPendingCreatedByRegistration(user)) {
+            return false;
+        }
+        Instant releasedAt = user.getCreatedAt().plus(emailProperties.verificationTtl());        return !releasedAt.isAfter(clock.instant());
+    }
+
+    /**
+     * Borra una cuenta pendiente <b>si su nombre ya no le pertenece</b>
+     * ({@link #releasesUsername}) para dárselo a quien lo pide. Es la regla
+     * común de los dos sitios donde se puede pedir el nombre de otra cuenta:
+     * el registro ({@link RegistrationService}) y «Editar perfil»
      * ({@link UserService#updateProfile}).
      *
      * <p>
@@ -359,15 +400,29 @@ public class EmailVerificationService {
      * Hibernate: lo que quien llama tuviera cargado queda desacoplado.
      * </p>
      *
-     * @param user cuenta (con la fila ya bloqueada en esta transacción,
-     *             {@link #lockForUpdate})
+     * @param user cuenta que tiene el nombre (con la fila ya bloqueada en esta
+     *             transacción, {@link #lockForUpdate})
      * @return {@code true} si se ha borrado y su nombre queda libre;
-     *         {@code false} si no es sustituible (verificada, con un enlace
-     *         vigente o heredada) o ya no estaba pendiente
+     *         {@code false} si lo conserva (verificada, heredada o con menos de
+     *         24 h) o ya no estaba pendiente
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public boolean deleteIfReplaceable(User user) {
-        return isReplaceable(user) && userRepository.deleteIfEmailNotVerified(user.getId()) == 1;
+    public boolean deleteIfUsernameReleased(User user) {
+        return releasesUsername(user) && userRepository.deleteIfEmailNotVerified(user.getId()) == 1;
+    }
+
+    /**
+     * Pendiente creada por el registro con verificación: su primer token de
+     * verificación es de cuando se dio de alta ({@link #REGISTRATION_TOKEN_WINDOW}).
+     * Una heredada no lo cumple nunca (ver {@link #isReplaceable}).
+     */
+    private boolean isPendingCreatedByRegistration(User user) {
+
+        if (user.isEmailVerified() || user.getCreatedAt() == null) {
+            return false;
+        }
+        return accountTokenRepository.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(
+                user.getId(), PURPOSE, user.getCreatedAt().plus(REGISTRATION_TOKEN_WINDOW));
     }
 
     /**
@@ -408,50 +463,8 @@ public class EmailVerificationService {
      */
     private void issue(User user, Instant now) {
 
-        Long userId = user.getId();
-        accountTokenRepository.invalidateActiveTokens(userId, PURPOSE, now);
-
-        String token = newToken();
-        AccountToken entity = new AccountToken();
-        // Referencia sin cargar el usuario (ni depender de que la entidad que
-        // tenga quien llama siga en la sesión de Hibernate).
-        entity.setUser(userRepository.getReferenceById(userId));
-        entity.setPurpose(PURPOSE);
-        entity.setTokenHash(sha256Hex(token));
-        entity.setCreatedAt(now);
-        entity.setExpiresAt(now.plus(emailProperties.verificationTtl()));
-        accountTokenRepository.save(entity);
-
+        String token = accountTokens.issue(user.getId(), PURPOSE, now, emailProperties.verificationTtl());
         emailDispatcher.sendAfterCommit(AccountEmails.verification(user.getEmail(), user.getUsername(), publicUrl,
                 token, emailProperties.verificationTtl()));
-    }
-
-    /**
-     * Genera un token: {@value #TOKEN_BYTES} bytes aleatorios en Base64URL sin
-     * relleno.
-     *
-     * @return token de {@value #TOKEN_LENGTH} caracteres
-     */
-    static String newToken() {
-        byte[] bytes = new byte[TOKEN_BYTES];
-        RANDOM.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    /**
-     * SHA-256 de un token en hexadecimal en minúsculas (lo que guarda
-     * {@code account_tokens.token_hash}).
-     *
-     * @param token token en claro
-     * @return 64 caracteres hexadecimales
-     */
-    static String sha256Hex(String token) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.US_ASCII));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException e) {
-            // Toda JVM está obligada a tener SHA-256.
-            throw new IllegalStateException("SHA-256 no disponible", e);
-        }
     }
 }

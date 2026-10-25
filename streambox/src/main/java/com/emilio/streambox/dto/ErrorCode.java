@@ -172,5 +172,22 @@ public enum ErrorCode {
      * sesión.
      * </p>
      */
-    INVALID_VERIFICATION_TOKEN
+    INVALID_VERIFICATION_TOKEN,
+
+    /**
+     * {@code POST /api/auth/password-reset/confirm}: el token del enlace de
+     * «He olvidado mi contraseña» no sirve (400). No existe, ha caducado, ya
+     * se usó, se invalidó al pedir otro enlace (o al cambiar la contraseña) o
+     * no tiene el formato de un token.
+     *
+     * <p>
+     * Distinto de {@link #INVALID_VERIFICATION_TOKEN} porque la interfaz ofrece
+     * otra salida (pedir otro enlace de restablecimiento, no de confirmación).
+     * Igual que aquel, un único código y un único mensaje para todos los casos.
+     * Si el token vale pero la contraseña nueva no cumple la política, la
+     * respuesta es {@link #VALIDATION_ERROR} en {@code newPassword} y el token
+     * <b>no</b> se gasta.
+     * </p>
+     */
+    INVALID_RESET_TOKEN
 }

@@ -166,8 +166,9 @@ public class UserController {
             + "incorrecta, para no revelar si la cuenta se creó); si el correo ya tiene una cuenta "
             + "confirmada, llega un aviso de que ya existe y no cambia nada; si tiene una pendiente, se "
             + "reenvía su enlace (como mucho 3 correos por hora y uno por minuto por cuenta; pasado el "
-            + "límite no se envía nada, sin error). Una cuenta pendiente cuyo enlace caducó sin usarse se "
-            + "sustituye por la nueva. La contraseña se valida igual en todos los casos.")
+            + "límite no se envía nada, sin error). Una cuenta pendiente cuyos enlaces caducaron sin usarse "
+            + "(de confirmación y de restablecer la contraseña) se sustituye por la nueva. La contraseña se "
+            + "valida igual en todos los casos.")
     @ApiResponses({
             @ApiResponse(responseCode = "202", description = "Petición aceptada; el cuerpo es siempre el mismo "
                     + "(message = \"" + AcceptedResponse.REGISTRATION_MESSAGE + "\")"),
@@ -180,10 +181,11 @@ public class UserController {
                     + "vez pasado a minúsculas). Un campo con un valor de otro tipo (p. ej. la contraseña "
                     + "como número) no se convierte: 400 MALFORMED_REQUEST"),
             @ApiResponse(responseCode = "409", description = "El nombre de usuario ya está en uso (código "
-                    + "USER_ALREADY_EXISTS). Depende solo del nombre, nunca del correo: también lo tiene una "
-                    + "cuenta pendiente con su enlace aún vigente, y lo reserva durante 24 horas un registro "
-                    + "anterior con ese nombre cuyo correo ya tenía cuenta (para que el 409 no revele si el "
-                    + "correo estaba registrado). El correo nunca da 409"),
+                    + "USER_ALREADY_EXISTS). Depende solo del nombre, nunca del correo: también lo conserva "
+                    + "durante 24 horas desde su alta una cuenta pendiente creada por el registro (aunque "
+                    + "después pida otro enlace), y lo reserva durante 24 horas un registro anterior con ese "
+                    + "nombre cuyo correo ya tenía cuenta (los dos duran lo mismo para que el 409 no revele si "
+                    + "el correo estaba registrado). El correo nunca da 409"),
             @ApiResponse(responseCode = "429", description = "Demasiados registros desde esta IP; "
                     + "ver cabecera Retry-After")
     })

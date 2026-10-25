@@ -23,8 +23,9 @@ import lombok.Setter;
 
 /**
  * Token de un solo uso ligado a una cuenta (tabla {@code account_tokens},
- * migración {@code V9}): hoy, el enlace de verificación del correo; mañana,
- * también el de «He olvidado mi contraseña» ({@link AccountTokenPurpose}).
+ * migración {@code V9}): el enlace de verificación del correo y el de «He
+ * olvidado mi contraseña» ({@code V10}), distinguidos por
+ * {@link AccountTokenPurpose}.
  *
  * <h2>Ciclo de vida</h2>
  * <ul>

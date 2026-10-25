@@ -143,3 +143,38 @@ export function validatePasswordChange(values: PasswordChangeValues): PasswordCh
 
   return errors;
 }
+
+/** Datos del formulario «Elige una contraseña nueva» (`/restablecer-contrasena`): la nueva y su repetición, que no se envía. */
+export interface PasswordResetValues {
+  newPassword: string;
+  confirmPassword: string;
+}
+
+/** Errores por campo de ese formulario; un campo sin error no aparece. */
+export type PasswordResetErrors = Partial<Record<keyof PasswordResetValues, string>>;
+
+/**
+ * Comprueba el formulario «Elige una contraseña nueva» antes de enviarlo.
+ *
+ * Solo lo que se sabe sin el servidor: la longitud (la misma regla que el
+ * registro) y que la repetición coincida. Lo demás de la política (que no sea
+ * común, que no contenga el usuario ni el correo de la cuenta) solo lo sabe él,
+ * porque aquí ni siquiera se conoce de qué cuenta es el enlace: llega en
+ * `validationErrors.newPassword` y se pinta junto al campo, y entonces el enlace
+ * sigue valiendo para volver a intentarlo.
+ *
+ * Las contraseñas nunca se recortan: los espacios cuentan.
+ *
+ * @param values los dos campos del formulario
+ * @returns los errores encontrados; objeto vacío si todo es válido
+ */
+export function validatePasswordReset(values: PasswordResetValues): PasswordResetErrors {
+  const errors: PasswordResetErrors = {};
+  const lengthProblem = newPasswordLengthError(values.newPassword);
+  if (lengthProblem) errors.newPassword = lengthProblem;
+
+  if (!values.confirmPassword) errors.confirmPassword = 'Repite la contraseña nueva.';
+  else if (values.confirmPassword !== values.newPassword) errors.confirmPassword = 'Las contraseñas no coinciden.';
+
+  return errors;
+}

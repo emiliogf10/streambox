@@ -282,7 +282,8 @@ jobs:
       # valor por defecto que docker-compose.yml).
       STREAMBOX_PORT: '8088'
       # Puerto del host de la web (y la API) de Mailpit, la bandeja de
-      # pruebas donde la prueba de humo lee el correo de verificación.
+      # pruebas donde la prueba de humo lee los correos de verificación y de
+      # restablecimiento de la contraseña.
       MAILPIT_PORT: '8025'
     steps:
       - name: Descargar el código
@@ -367,8 +368,9 @@ jobs:
       - name: Levantar el stack (db, Mailpit, backend y nginx)
         run: docker compose --env-file "$STREAMBOX_ENV_FILE" up -d --no-build --wait --wait-timeout 180
 
-      # Cinco comprobaciones con curl contra nginx, la puerta de entrada de
-      # la aplicación, igual que un navegador (la quinta lee además Mailpit):
+      # Seis comprobaciones con curl contra nginx, la puerta de entrada de
+      # la aplicación, igual que un navegador (la quinta y la sexta leen además
+      # Mailpit):
       #   1. "/" sirve la SPA (200) con la cabecera Content-Security-Policy,
       #      cuyo frame-src solo admite el reproductor de tráileres
       #      (https://www.youtube-nocookie.com).
@@ -391,6 +393,11 @@ jobs:
       #      30 s) con un enlace a STREAMBOX_PUBLIC_URL, su token confirma la
       #      cuenta (204; tabla account_tokens de V9 en PostgreSQL) y después
       #      el login funciona (204).
+      #   6. "He olvidado mi contraseña" con esa cuenta: la petición responde
+      #      202, el correo con el enlace /restablecer-contrasena#token= llega
+      #      a Mailpit, su token fija una contraseña nueva (204; el propósito
+      #      PASSWORD_RESET que admite el CHECK de V10 en PostgreSQL), el login
+      #      con la nueva funciona (204) y con la vieja ya no (401).
       # Sin jq a propósito (grep y sed): el mismo script funciona en el
       # Git Bash de Windows para reproducir la prueba en local.
       - name: Prueba de humo con curl
@@ -412,7 +419,7 @@ jobs:
             echo "$line" | grep -qE "; *Path=$3(;|$)" || fail "$4: la cookie $2 no tiene Path=$3"
           }
 
-          echo "1/5 Portada"
+          echo "1/6 Portada"
           status="$(curl -sS -o /dev/null -D "$tmp/home.headers" -w '%{http_code}' "$base_url/")"
           [ "$status" = "200" ] || fail "GET / devolvió $status (se esperaba 200)"
           csp="$(grep -i '^content-security-policy:' "$tmp/home.headers" | tr -d '\r' || true)"
@@ -423,7 +430,7 @@ jobs:
           echo "$csp" | grep -qE "; *frame-src https://www\.youtube-nocookie\.com *(;|$)" \
             || fail "La CSP no permite solo https://www.youtube-nocookie.com en frame-src"
 
-          echo "2/5 API sin token"
+          echo "2/6 API sin token"
           status="$(curl -sS -o "$tmp/movies.json" -D "$tmp/movies.headers" -w '%{http_code}' "$base_url/api/movies")"
           [ "$status" = "401" ] || fail "GET /api/movies sin token devolvió $status (se esperaba 401)"
           grep -qi '^content-type: application/json' "$tmp/movies.headers" \
@@ -431,7 +438,7 @@ jobs:
           grep -q '"code":"INVALID_CREDENTIALS"' "$tmp/movies.json" \
             || fail "El 401 de /api/movies no trae el código de error esperado"
 
-          echo "3/5 Login del administrador"
+          echo "3/6 Login del administrador"
           admin_email="$(sed -n 's/^ADMIN_EMAIL=//p' "$STREAMBOX_ENV_FILE")"
           admin_password="$(sed -n 's/^ADMIN_PASSWORD=//p' "$STREAMBOX_ENV_FILE")"
           status="$(curl -sS -o /dev/null -D "$tmp/login.headers" -c "$tmp/cookies.txt" -w '%{http_code}' \
@@ -446,7 +453,7 @@ jobs:
           [ "$status" = "200" ] || fail "GET /api/users/me con la cookie devolvió $status (se esperaba 200)"
           grep -q '"role":"ADMIN"' "$tmp/me.json" || fail "El usuario de la sesión no es ADMIN"
 
-          echo "4/5 Renovación de sesión con el refresh token"
+          echo "4/6 Renovación de sesión con el refresh token"
           # curl solo envía streambox_refresh a /api/auth/* (Path de la cookie),
           # igual que el navegador; -c guarda las cookies rotadas.
           status="$(curl -sS -o /dev/null -D "$tmp/refresh.headers" -b "$tmp/cookies.txt" -c "$tmp/cookies.txt" \
@@ -457,7 +464,7 @@ jobs:
           status="$(curl -sS -o /dev/null -b "$tmp/cookies.txt" -w '%{http_code}' "$base_url/api/users/me")"
           [ "$status" = "200" ] || fail "GET /api/users/me tras el refresh devolvió $status (se esperaba 200)"
 
-          echo "5/5 Registro y confirmación del correo (SMTP con Mailpit)"
+          echo "5/6 Registro y confirmación del correo (SMTP con Mailpit)"
           # Cuenta de usar y tirar: el nombre y el email llevan el mismo sufijo
           # aleatorio (así el script se puede repetir sobre una base que ya
           # tiene la cuenta de una ejecución anterior: un nombre repetido daría
@@ -512,6 +519,44 @@ jobs:
             -H 'Content-Type: application/json' -H 'X-Requested-With: StreamBox' \
             --data "$credentials" "$base_url/api/auth/login")"
           [ "$status" = "204" ] || fail "El login tras confirmar el correo devolvió $status (se esperaba 204)"
+
+          echo "6/6 He olvidado mi contraseña (SMTP con Mailpit)"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+            --data "{\"email\":\"$user_email\"}" "$base_url/api/auth/password-reset")"
+          [ "$status" = "202" ] || fail "La petición de restablecimiento devolvió $status (se esperaba 202)"
+          # El último correo a ese email es el de verificación hasta que llega
+          # el de restablecimiento (también sale en otro hilo): se espera a que
+          # el último lleve el enlace de restablecimiento.
+          reset_token=""
+          for _ in $(seq 1 30); do
+            status="$(curl -sS -o "$tmp/reset-mail.json" -w '%{http_code}' --get \
+              --data-urlencode "query=to:\"$user_email\"" \
+              "$mailpit_url/api/v1/message/latest" || true)"
+            if [ "$status" = "200" ]; then
+              reset_token="$(grep -oE '/restablecer-contrasena#token=[A-Za-z0-9_-]+' "$tmp/reset-mail.json" \
+                | head -n 1 | sed 's/.*#token=//' || true)"
+            fi
+            [ -n "$reset_token" ] && break
+            sleep 1
+          done
+          [ -n "$reset_token" ] || fail "No llegó a Mailpit ningún correo con el enlace de restablecimiento"
+          echo "::add-mask::$reset_token"
+          grep -qF "http://localhost:${STREAMBOX_PORT}/restablecer-contrasena#token=" "$tmp/reset-mail.json" \
+            || fail "El enlace de restablecimiento no apunta a http://localhost:${STREAMBOX_PORT}"
+          new_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$new_password"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' \
+            --data "{\"token\":\"$reset_token\",\"newPassword\":\"$new_password\"}" \
+            "$base_url/api/auth/password-reset/confirm")"
+          [ "$status" = "204" ] || fail "La confirmación del restablecimiento devolvió $status (se esperaba 204)"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'Content-Type: application/json' -H 'X-Requested-With: StreamBox' \
+            --data "{\"email\":\"$user_email\",\"password\":\"$new_password\"}" "$base_url/api/auth/login")"
+          [ "$status" = "204" ] || fail "El login con la contraseña nueva devolvió $status (se esperaba 204)"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'Content-Type: application/json' -H 'X-Requested-With: StreamBox' \
+            --data "$credentials" "$base_url/api/auth/login")"
+          [ "$status" = "401" ] || fail "El login con la contraseña vieja devolvió $status (se esperaba 401)"
 
           echo "Prueba de humo superada."
 

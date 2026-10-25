@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **3572** | 3076 con H2 y 496 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **1581** | |
-| E2E (Playwright) | **208** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
+| Backend (JUnit) | **3739** | 3240 con H2 y 499 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
+| Frontend (Vitest) | **1639** | |
+| E2E (Playwright) | **218** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
 
@@ -53,7 +53,7 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 4. ✅ ~~**«Me gusta» y recomendaciones en el inicio**~~ — **hecho el 2026-10-18** (ver el [historial](#4-historial-de-trabajos)).
 5. **Revisión visual humana** del frontend ([2.3](#23-revisión-visual-humana-del-frontend)).
 6. **Antes de publicar la app:** HTTPS, HSTS, cookie `Secure` y CAPTCHA (puntos 9, 12, 18 y 19 de la lista de seguridad).
-7. ✅ ~~**Verificación del correo** al registrarse~~ — **hecho el 2026-10-19**. **Siguiente recomendado:** «He olvidado mi contraseña» ([2.9](#29-funcionalidades-nuevas)), que cierra el riesgo M2.
+7. ✅ ~~**Verificación del correo** al registrarse~~ — **hecho el 2026-10-19**; ✅ ~~**«He olvidado mi contraseña»**~~ — **hecho el 2026-10-24** (ver el [historial](#4-historial-de-trabajos)).
 8. **Géneros favoritos** al empezar y en el perfil, como base de las recomendaciones ([2.9](#29-funcionalidades-nuevas)). Propuesto el 2026-10-18; decidido todo salvo el peso de un género frente a un «me gusta».
 
 ---
@@ -157,6 +157,8 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - ✅ ~~`index.html` con `no-store` (bfcache muestra páginas ya cargadas tras el logout)~~ (hecho el 2026-10-09 en `frontend/nginx/default.conf`, por el `map` y sin perder las cabeceras de seguridad; comprobado con `curl -I`).
   - Tests de la cookie con `POST`/`PUT`/`PATCH`/`HEAD`, cookie + Bearer y cookie duplicada.
   - ✅ ~~WARN sin límite con `e.getMessage()` de jjwt~~ (hecho el 2026-10-08: DEBUG y solo la clase de la excepción).
+- **Revocar al momento el JWT de acceso** (revisión de «He olvidado mi contraseña», 2026-10-19, BAJA-3) — *Baja · BAJA* (`database` + `security`). Tras restablecer o cambiar la contraseña o «cerrar sesión en todos los dispositivos», el JWT de acceso de un intruso sigue valiendo lo que le quede de sus 15 min (el *refresh* sí se revoca). Arreglo barato: columna `users.token_version` (entero) y claim `ver` en el JWT; `JwtAuthenticationFilter`, que ya lee el usuario en cada petición, rechaza el token si no coincide; se incrementa en esos tres flujos. Mejor un número de versión que comparar `iat` (precisión de segundos).
+- **`streambox.public-url` solo `https` en `prod`** (misma revisión, informativa) — con la tarea de HTTPS: con `http`, quien intercepte el tráfico podría inyectar JavaScript en `/restablecer-contrasena` o `/verificar-email` y leer el `#token`.
 - **Notas de endurecimiento de la auditoría 1** — *Baja · BAJA*. Unas 40 mejoras de defensa en profundidad (`run-1/REPORT.md`, apartado 6.1). Entre ellas:
   - fijar el `Dockerfile` (hoy `maven:3.9-eclipse-temurin-26` flotante, frente a su comentario Maven 3.9.16/JDK 21) y `distributionSha256Sum` del wrapper;
   - un rol no superusuario para la app en PostgreSQL;
@@ -294,7 +296,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - **Envío de correo:** interfaz propia `EmailSender`; SMTP con `spring-boot-starter-mail` (**dependencia nueva**, la de Spring para correo) si hay `spring.mail.host`; si no, en `dev` y en los tests el correo se escribe en el log (tu app con Supabase te enseñará el enlace en la consola). En `prod` sin SMTP configurado, el arranque falla. El envío va después del *commit* y fuera del hilo de la petición, para que el tiempo de respuesta no delate si el email existía. `docker-compose.yml` añade **Mailpit** (servidor SMTP de pruebas con bandeja web en `127.0.0.1:8025`).
   - **Revisión de `security` (2026-10-18):** sin críticos ni altos. **M1** (el nombre de usuario reservado por una cuenta pendiente servía de oráculo: 409 si el email era nuevo, 202 si ya tenía cuenta) y los bajos B1–B4 (tiempo de respuesta del reenvío, carreras que daban 500, SMTP sin *timeouts*, STARTTLS en `prod`) **se corrigen en esta misma tarea**. **M2 queda como riesgo conocido:** *pre-account hijacking* — alguien registra tu email con su contraseña; si pulsas el enlace verificas **su** cuenta, y reenviando a diario puede retener tu email para siempre. Mitigación inmediata: el correo dice el nombre de usuario de la cuenta («si no lo reconoces, no confirmes»). Solución: el punto siguiente.
   - **Revisión de `qa` (2026-10-19):** tres fallos con tests que los demostraban, todos corregidos: **QA-1** (el login daba 403 a una pendiente con la contraseña correcta y 401 si el email ya tenía cuenta → ahora el mismo 401, decisión del autor), **QA-2** («Editar perfil» pasadas 24 h revelaba el email) y **QA-3** (`prod` arrancaba con `SPRING_MAIL_HOST` vacío). También textos de la interfaz que no eran verdad en algún caso. Riesgos aceptados: quien prueba a entrar sin confirmar gasta intentos (puede bloquearse 15 min); un JWT de acceso anterior a confirmar vuelve a valer lo que le quede de sus 15 min; si algún día se programa la limpieza de `account_tokens` (`deleteExpired`), una pendiente sin tokens dejaría de ser sustituible; la cola de correos (2 hilos, 500 tareas) es compartida entre registro y reenvío; una USER pendiente con el email de `ADMIN_EMAIL` sigue impidiendo el arranque (podría sustituirse).
-  - **Después (siguiente tarea, recomendada):** «He olvidado mi contraseña» con la misma infraestructura (`account_tokens` con `purpose = PASSWORD_RESET`): quien controla el buzón fija su contraseña, **la cuenta queda verificada** y se revocan las sesiones, así que el atacante de M2 queda fuera. Alternativa más estricta (decisión del autor): pedir la contraseña al confirmar el correo.
+  - ✅ **Hecho el 2026-10-24:** «He olvidado mi contraseña» con la misma infraestructura (`account_tokens` con `purpose = PASSWORD_RESET`): quien controla el buzón fija su contraseña, **la cuenta queda verificada** y se revocan las sesiones, así que el atacante de M2 queda fuera. Alternativa más estricta (decisión del autor): pedir la contraseña al confirmar el correo.
 - **Géneros favoritos («tus gustos»)** (idea del autor, 2026-10-18) — *Media · MEDIA* (`database` + `backend` + `security` + `frontend` + `qa`)
   - **Qué resuelve:** el «arranque en frío». Hoy, una cuenta nueva no tiene «me gusta», así que no ve recomendaciones (`basedOnLikes: false`) hasta que marca algún título. Si al empezar elige sus géneros, recibe recomendaciones desde el primer minuto.
   - **Cuándo se pregunta:** tras el **primer inicio de sesión** de la cuenta (el registro lleva a `/login`, no inicia sesión). Lo decide el **servidor** con un dato de `GET /api/users/me` (p. ej. `genresOnboardingPending`), no `localStorage`: así no se repite en otro dispositivo ni tras borrar el navegador. Se pregunta **una sola vez**, aunque el usuario la salte.
@@ -473,6 +475,17 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-10-24 · «He olvidado mi contraseña»
+
+- **Qué:** enlace «¿Has olvidado tu contraseña?» en el login, `/recuperar-contrasena` (pide el enlace; respuesta siempre igual) y `/restablecer-contrasena` (contraseña nueva con el `#token` del correo). **Cierra el riesgo M2** (*pre-account hijacking*) y el callejón sin salida del correo «Ya tienes una cuenta» («pide ayuda al administrador»).
+- **Base de datos** (`database`): migración **V10** (el CHECK de `account_tokens.purpose` admite `PASSWORD_RESET`; misma tabla de la V9) y `AccountTokenRepository.invalidateAllActiveTokens`.
+- **Seguridad** (`security`): `permitAll` solo `POST` de `/api/auth/password-reset` y `/confirm`, cookie ignorada en esas rutas, límites por IP (5/h y 20/15 min), `LoginAttemptService.clearFailures`.
+- **Negocio** (`backend`): `PasswordResetService` (pedir: 202 siempre igual y trabajo en segundo plano; confirmar: el token **no se gasta** si la contraseña no cumple la política; después, en una transacción, contraseña nueva, **correo verificado**, todos los enlaces invalidados, todas las sesiones revocadas, `forgetKnownIpsExcept` + `clearFailures` y el aviso «Tu contraseña de StreamBox ha cambiado»), `AccountTokens` (generación y hash comunes), enlace de 1 h (`streambox.email.password-reset-ttl`). OpenAPI (52 operaciones), Postman (Newman **125/125** y **253/253**), CI con el paso 6/6 probado con `docker compose` real.
+- **Frontend** (`frontend`): las dos páginas y sus textos, piezas comunes con `/verificar-email` (`useHashLinkToken`, `useEmailLinkRequest`, `RequestLinkForm`), 7 E2E con la bandeja del perfil `e2e`.
+- **Revisiones:** `security` (sin críticos ni altos; **MEDIA-1** —el nombre de usuario de una pendiente delataba el email combinando registro, 24 h y otro enlace— corregido con **dos reglas: por email y por nombre**; BAJA-2 documentada; BAJA-3 —JWT de 15 min tras restablecer— al plan como `token_version`; BAJA-4 —el ADMIN se recupera por correo— documentada en `.env.example` y README) y `qa` (M2 de punta a punta, propósitos de token separados, ADMIN, emails con mayúsculas; un texto falso en dos páginas y dos mejoras de los correos, corregidos; `EmailLinkTtlFrontendParityTest` rompe el build si la duración de los enlaces del backend y los textos del frontend divergen). Un fallo propio encontrado al regenerar el OpenAPI: dos métodos de controlador llamados `confirm` hacían que springdoc renombrara uno a `confirm_1` (rompe clientes generados); corregido y vigilado por un test.
+- **Verificación** (orquestador): backend **3739** (3240 con H2 + 499 contra PostgreSQL), Vitest **1639**, E2E **218** + 24 omitidos, build y lint limpios. En una de las baterías completas falló una vez `password-reset.spec.ts:232` (cierre de sesiones; mucho trabajo en un backend compartido con la máquina cargada); repetido solo 7/7 y 6/6 en paralelo.
+- **Cortes:** dos agentes se cortaron (límite de sesión y límite semanal); se retomó desde `docs/TRABAJO_EN_CURSO.md` sin rehacer nada.
 
 ### 2026-10-19 · Auditoría de 20 puntos y verificación del correo
 

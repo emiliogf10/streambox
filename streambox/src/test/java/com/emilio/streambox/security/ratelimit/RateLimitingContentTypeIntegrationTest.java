@@ -36,7 +36,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter;
 
 import com.emilio.streambox.dto.CreateUserRequest;
+import com.emilio.streambox.dto.EmailVerificationRequest;
 import com.emilio.streambox.dto.LoginRequest;
+import com.emilio.streambox.dto.PasswordResetConfirmRequest;
+import com.emilio.streambox.dto.PasswordResetRequest;
+import com.emilio.streambox.dto.ResendVerificationRequest;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.repository.UserRepository;
@@ -81,6 +85,17 @@ class RateLimitingContentTypeIntegrationTest {
 
     /** Secuencia para IPs (198.51.100.x, TEST-NET-2) y emails únicos por test. */
     private static final AtomicInteger SEQUENCE = new AtomicInteger();
+
+    /**
+     * Cuerpos de todas las rutas con límite por IP que leen JSON: login,
+     * registro, verificación del correo (confirmar y reenviar) y «He olvidado
+     * mi contraseña» (pedir el enlace y confirmar). Si un conversor leyera
+     * alguno desde un tipo que el filtro no cuenta, esa ruta quedaría sin
+     * límite.
+     */
+    private static final List<Class<?>> LIMITED_BODIES = List.of(LoginRequest.class, CreateUserRequest.class,
+            EmailVerificationRequest.class, ResendVerificationRequest.class, PasswordResetRequest.class,
+            PasswordResetConfirmRequest.class);
 
     @Autowired private MockMvc mockMvc;
     @Autowired private UserRepository userRepository;
@@ -294,7 +309,7 @@ class RateLimitingContentTypeIntegrationTest {
         }
 
         List<String> readers = new ArrayList<>();
-        for (Class<?> body : List.of(LoginRequest.class, CreateUserRequest.class)) {
+        for (Class<?> body : LIMITED_BODIES) {
             for (HttpMessageConverter<?> converter : handlerAdapter.getMessageConverters()) {
                 if (converter.canRead(body, mediaType)) {
                     readers.add(body.getSimpleName() + " (" + converter.getClass().getSimpleName() + ")");
@@ -314,7 +329,7 @@ class RateLimitingContentTypeIntegrationTest {
     @Test
     void todoTipoQueLeeUnConversorCuenta() {
         List<String> uncounted = new ArrayList<>();
-        for (Class<?> body : List.of(LoginRequest.class, CreateUserRequest.class)) {
+        for (Class<?> body : LIMITED_BODIES) {
             for (HttpMessageConverter<?> converter : handlerAdapter.getMessageConverters()) {
                 for (MediaType mediaType : converter.getSupportedMediaTypes(body)) {
                     if (converter.canRead(body, mediaType)

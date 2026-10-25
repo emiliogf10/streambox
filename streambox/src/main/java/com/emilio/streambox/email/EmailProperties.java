@@ -16,7 +16,8 @@ import jakarta.mail.internet.InternetAddress;
  * Boot ({@code spring.mail.host}, {@code spring.mail.port},
  * {@code spring.mail.username}...; variables {@code SPRING_MAIL_HOST}...).
  * Variables de entorno de estas: {@code STREAMBOX_EMAIL_FROM},
- * {@code STREAMBOX_EMAIL_VERIFICATION_TTL}, etc.
+ * {@code STREAMBOX_EMAIL_VERIFICATION_TTL},
+ * {@code STREAMBOX_EMAIL_PASSWORD_RESET_TTL}, etc.
  * </p>
  *
  * <p>
@@ -31,15 +32,31 @@ import jakarta.mail.internet.InternetAddress;
  *                        en spam o se rechazan)
  * @param verificationTtl vida del enlace de verificación (24 h por defecto;
  *                        entre 5 minutos y 7 días)
+ * @param passwordResetTtl vida del enlace de «He olvidado mi contraseña» (1 h
+ *                        por defecto; entre 5 minutos y 24 horas). Más corta
+ *                        que la de la verificación porque quien tenga el
+ *                        enlace puede fijar la contraseña y entrar en la
+ *                        cuenta: cuanto menos viva un enlace olvidado en un
+ *                        buzón, menos sirve si alguien lo lee después. El
+ *                        correo usa este valor, pero la interfaz
+ *                        ({@code RESET_LINK_TTL_HOURS} en
+ *                        {@code frontend/src/lib/passwordReset.ts}) y la
+ *                        descripción del OpenAPI de
+ *                        {@code PasswordResetController} dicen «1 hora» con
+ *                        un texto fijo: si se cambia el valor por defecto,
+ *                        hay que cambiarlos a la vez
  * @param async           si el envío va en un hilo aparte (por defecto sí). Los
  *                        tests lo desactivan para que el correo esté en la
  *                        bandeja en cuanto responde la petición
- * @param resend          límite silencioso de correos por cuenta
+ * @param resend          límite silencioso de correos por cuenta (la verificación
+ *                        y «He olvidado mi contraseña» cuentan cada una aparte,
+ *                        con estos mismos valores)
  */
 @ConfigurationProperties(prefix = "streambox.email")
 public record EmailProperties(
         @DefaultValue("StreamBox <no-reply@streambox.local>") String from,
         @DefaultValue("24h") Duration verificationTtl,
+        @DefaultValue("1h") Duration passwordResetTtl,
         @DefaultValue("true") boolean async,
         @DefaultValue Resend resend) {
 
@@ -48,6 +65,13 @@ public record EmailProperties(
 
     /** Vida máxima del enlace: un enlace robado no debe servir indefinidamente. */
     static final Duration MAX_VERIFICATION_TTL = Duration.ofDays(7);
+
+    /**
+     * Vida máxima del enlace de restablecimiento: da acceso a la cuenta, así
+     * que no se admite el máximo de la verificación. Un día cubre cualquier
+     * retraso razonable del correo.
+     */
+    static final Duration MAX_PASSWORD_RESET_TTL = Duration.ofHours(24);
 
     /**
      * Comprueba los valores.
@@ -71,6 +95,11 @@ public record EmailProperties(
                 || verificationTtl.compareTo(MAX_VERIFICATION_TTL) > 0) {
             throw new IllegalArgumentException(
                     "streambox.email.verification-ttl debe estar entre 5m y 7d (por ejemplo 24h)");
+        }
+        if (passwordResetTtl == null || passwordResetTtl.compareTo(MIN_VERIFICATION_TTL) < 0
+                || passwordResetTtl.compareTo(MAX_PASSWORD_RESET_TTL) > 0) {
+            throw new IllegalArgumentException(
+                    "streambox.email.password-reset-ttl debe estar entre 5m y 24h (por ejemplo 1h)");
         }
         if (resend == null) {
             throw new IllegalArgumentException("streambox.email.resend es obligatorio");

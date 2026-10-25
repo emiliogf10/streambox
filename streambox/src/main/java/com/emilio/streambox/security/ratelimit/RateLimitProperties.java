@@ -29,10 +29,22 @@ import jakarta.validation.constraints.Positive;
  *                 gastar el cupo del proveedor de correo. El límite <b>por
  *                 email</b> va aparte, en el servicio, y es silencioso (ver
  *                 {@code RateLimitingFilter})
+ * @param passwordReset límite de peticiones del enlace para restablecer la
+ *                 contraseña ({@code POST /api/auth/password-reset}) por IP. Por
+ *                 el mismo motivo que el reenvío: cada una puede mandar un
+ *                 correo. El límite por email también va en el servicio y es
+ *                 silencioso
+ * @param passwordResetConfirm límite de confirmaciones del restablecimiento
+ *                 ({@code POST /api/auth/password-reset/confirm}) por IP. Como
+ *                 en la confirmación del correo, el token de 256 bits hace
+ *                 imposible la fuerza bruta: limita el abuso (cada intento
+ *                 consulta la base de datos y, con un token válido, calcula un
+ *                 BCrypt)
  * @param lockout  bloqueo temporal de una cuenta tras varios logins fallidos
  * @param maxKeys  tope de claves vivas <b>por contador</b> (cada contador en
  *                 memoria, el de login, el de registro, el de refresh, los dos
- *                 de la verificación del correo, el de bloqueo por
+ *                 de la verificación del correo, los dos del restablecimiento
+ *                 de contraseña, el de bloqueo por
  *                 cuenta y el de IP conocida, lo aplica por separado). Al
  *                 llenarse se purgan las caducadas y, si sigue lleno, se
  *                 expulsa la clave con la actividad más antigua; ver
@@ -46,6 +58,8 @@ public record RateLimitProperties(
         @Valid @NotNull Rule refresh,
         @Valid @NotNull Rule emailVerification,
         @Valid @NotNull Rule emailVerificationResend,
+        @Valid @NotNull Rule passwordReset,
+        @Valid @NotNull Rule passwordResetConfirm,
         @Valid @NotNull Lockout lockout,
         @Positive int maxKeys) {
 

@@ -69,7 +69,7 @@ class UserServiceTest {
         userRepository = mock(UserRepository.class);
         RateLimitProperties rateLimit = mock(RateLimitProperties.class);
         when(rateLimit.maxKeys()).thenReturn(1000);
-        reservations = new UsernameReservations(new EmailProperties("a@b.test", Duration.ofHours(24), false,
+        reservations = new UsernameReservations(new EmailProperties("a@b.test", Duration.ofHours(24), Duration.ofHours(1), false,
                 new EmailProperties.Resend(3, Duration.ofHours(1), Duration.ZERO)), rateLimit, Clock.systemUTC());
         emailVerificationService = mock(EmailVerificationService.class);
         // Por defecto, el bloqueo devuelve la misma cuenta (nadie la cambió entre medias).
@@ -150,21 +150,22 @@ class UserServiceTest {
     }
 
     // ------------------------------------------------------------------
-    // QA-2: el nombre de una cuenta pendiente sustituible se libera
+    // QA-2 / MEDIA-1: el nombre de una pendiente que ya no lo conserva se libera
     // ------------------------------------------------------------------
 
     /**
-     * El nombre lo tiene una pendiente sustituible (la creó el registro y su
-     * enlace caducó): se borra con la misma regla que el registro y el cambio
+     * El nombre lo tiene una pendiente que ya no lo conserva (la creó el
+     * registro hace 24 h o más): se borra con la misma regla que el registro
+     * ({@code deleteIfUsernameReleased}, la regla por nombre) y el cambio
      * sale bien. Las dos filas se bloquean de menor a mayor id (la pendiente,
      * id 3, antes que la propia, id 5) y el borrado va después de los dos
      * bloqueos.
      */
     @Test
-    void elNombreDeUnaPendienteSustituibleSeLiberaBloqueandoEnOrdenDeId() {
+    void elNombreDeUnaPendienteQueYaNoLoConservaSeLiberaBloqueandoEnOrdenDeId() {
         User stale = pending(3L, "bea");
         when(userRepository.findByUsername("bea")).thenReturn(Optional.of(stale));
-        when(emailVerificationService.deleteIfReplaceable(stale)).thenReturn(true);
+        when(emailVerificationService.deleteIfUsernameReleased(stale)).thenReturn(true);
         when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         assertEquals("bea", service.updateProfile(USER_ID, request("bea")).username());
@@ -172,7 +173,7 @@ class UserServiceTest {
         InOrder order = inOrder(emailVerificationService, userRepository);
         order.verify(emailVerificationService).lockForUpdate(stale);
         order.verify(emailVerificationService).lockForUpdate(user);
-        order.verify(emailVerificationService).deleteIfReplaceable(stale);
+        order.verify(emailVerificationService).deleteIfUsernameReleased(stale);
         order.verify(userRepository).saveAndFlush(user);
     }
 
@@ -181,7 +182,7 @@ class UserServiceTest {
     void siLaPropiaCuentaTieneElIdMenorSeBloqueaPrimero() {
         User stale = pending(9L, "bea");
         when(userRepository.findByUsername("bea")).thenReturn(Optional.of(stale));
-        when(emailVerificationService.deleteIfReplaceable(stale)).thenReturn(true);
+        when(emailVerificationService.deleteIfUsernameReleased(stale)).thenReturn(true);
         when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.updateProfile(USER_ID, request("bea"));
@@ -192,14 +193,14 @@ class UserServiceTest {
     }
 
     /**
-     * Una pendiente que no se puede sustituir (enlace vigente o heredada) da
-     * el 409 de siempre y no se guarda nada.
+     * Una pendiente que conserva su nombre (creada hace menos de 24 h, o
+     * heredada) da el 409 de siempre y no se guarda nada.
      */
     @Test
-    void elNombreDeUnaPendienteQueNoSePuedeSustituirDa409() {
+    void elNombreDeUnaPendienteQueLoConservaDa409() {
         User legacy = pending(3L, "bea");
         when(userRepository.findByUsername("bea")).thenReturn(Optional.of(legacy));
-        when(emailVerificationService.deleteIfReplaceable(legacy)).thenReturn(false);
+        when(emailVerificationService.deleteIfUsernameReleased(legacy)).thenReturn(false);
 
         UserAlreadyExistsException error = assertThrows(UserAlreadyExistsException.class,
                 () -> service.updateProfile(USER_ID, request("bea")));
@@ -218,7 +219,7 @@ class UserServiceTest {
         assertThrows(UserAlreadyExistsException.class, () -> service.updateProfile(USER_ID, request("bea")));
 
         verify(emailVerificationService, never()).lockForUpdate(any());
-        verify(emailVerificationService, never()).deleteIfReplaceable(any());
+        verify(emailVerificationService, never()).deleteIfUsernameReleased(any());
         verify(userRepository, never()).saveAndFlush(any());
     }
 
@@ -243,7 +244,7 @@ class UserServiceTest {
 
         assertEquals("bea", service.updateProfile(USER_ID, request("bea")).username());
 
-        verify(emailVerificationService, never()).deleteIfReplaceable(any());
+        verify(emailVerificationService, never()).deleteIfUsernameReleased(any());
         // User compara por id: se comprueba la instancia, no la igualdad.
         ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
         verify(userRepository).saveAndFlush(saved.capture());

@@ -17,6 +17,7 @@
  * (rompe el *fast refresh* de Vite).
  */
 import { apiFetch } from './api';
+import { readLinkToken } from './linkToken';
 import type { AcceptedResponse, EmailVerificationRequest, ResendVerificationRequest } from './types';
 
 /** Horas que dura el enlace de confirmación (`streambox.email.verification-ttl` del backend, 24 h). */
@@ -34,32 +35,13 @@ export const VERIFICATION_LINK_TTL_HOURS = 24;
 export const RESEND_COOLDOWN_SECONDS = 60;
 
 /**
- * Longitud máxima de un token que merece la pena enviar. Los del backend son 32
- * bytes en Base64URL (43 caracteres); el margen es por si cambia el formato.
+ * Lee el token del fragmento del enlace de confirmación (`#token=…`). Es
+ * {@link readLinkToken}, común a todos los enlaces de los correos (también el de
+ * restablecer la contraseña): solo caracteres Base64URL y como mucho 512; con
+ * cualquier otra cosa devuelve `null` y la página enseña «enlace no válido» sin
+ * preguntar al servidor.
  */
-const MAX_TOKEN_LENGTH = 512;
-
-/** Caracteres de Base64URL sin relleno, el formato de los tokens del backend. */
-const TOKEN_PATTERN = /^[A-Za-z0-9_-]+$/;
-
-/**
- * Lee el token del fragmento del enlace (`#token=…`).
- *
- * El token viaja en el **fragmento** (lo que va tras `#`) porque el navegador
- * nunca lo envía al servidor: no queda en los logs de nginx ni en la cabecera
- * `Referer` de ninguna petición.
- *
- * Un valor con caracteres que un token nuestro no puede tener (un enlace que el
- * cliente de correo ha partido o «adornado») se trata como ausente: la página
- * enseña directamente «enlace no válido» sin gastar una petición.
- *
- * @param hash `location.hash`, con o sin la `#` inicial
- * @returns el token, o `null` si no hay uno con formato válido
- */
-export function readVerificationToken(hash: string): string | null {
-  const token = new URLSearchParams(hash.replace(/^#/, '')).get('token')?.trim() ?? '';
-  return token.length > 0 && token.length <= MAX_TOKEN_LENGTH && TOKEN_PATTERN.test(token) ? token : null;
-}
+export const readVerificationToken = readLinkToken;
 
 /**
  * Confirma el correo con el token del enlace (`POST /api/auth/email-verification`).

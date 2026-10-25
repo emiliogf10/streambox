@@ -7,6 +7,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 /**
  * Contador de eventos por clave en una ventana de tiempo deslizante, en memoria.
@@ -223,6 +224,24 @@ public final class SlidingWindowCounter {
      */
     public synchronized void reset(String key) {
         events.remove(key);
+    }
+
+    /**
+     * Olvida todos los eventos de las claves que cumplen la condición.
+     *
+     * <p>
+     * Recorre todas las claves (hasta {@code maxKeys}) bajo el cerrojo, así que
+     * es para operaciones <b>raras</b>: hoy solo la usa
+     * {@link LoginAttemptService#clearFailures(String)} tras restablecer una
+     * contraseña, que exige un token del correo y está limitado por IP. Las
+     * operaciones del camino normal (login, límite por IP) nunca recorren el
+     * mapa.
+     * </p>
+     *
+     * @param keys condición que deben cumplir las claves a reiniciar
+     */
+    public synchronized void resetMatching(Predicate<String> keys) {
+        events.keySet().removeIf(keys);
     }
 
     /**

@@ -121,14 +121,16 @@ public class UserService {
      * registrarse con el email de alguien y después cambiarse el nombre al
      * del registro diría si ese email tenía cuenta. La cuenta del email de la
      * reserva sí puede usarlo.</li>
-     * <li><b>Nombre de una cuenta pendiente sustituible</b> (la creó el
-     * registro y todos sus enlaces caducaron, ver
-     * {@link EmailVerificationService#isReplaceable}): se borra esa cuenta y el
-     * nombre queda libre, igual que en el registro. Si no, pasadas 24 h el
-     * nombre de un registro con un email nuevo daría 409 (la pendiente sigue
-     * en la base de datos) y el de uno con un email que ya tenía cuenta, 200
-     * (su reserva ya caducó): el mismo oráculo de emails. Una cuenta heredada
-     * o con un enlace vigente nunca se borra: 409.</li>
+     * <li><b>Nombre de una cuenta pendiente que ya no lo conserva</b> (la creó
+     * el registro hace 24 h o más, ver
+     * {@link EmailVerificationService#releasesUsername}; no se miran los
+     * enlaces pedidos después del alta): se borra esa cuenta y el nombre
+     * queda libre, igual que en el registro. Si no, pasadas 24 h el nombre de
+     * un registro con un email nuevo daría 409 (la pendiente sigue en la base
+     * de datos, quizá con un enlace recién pedido) y el de uno con un email
+     * que ya tenía cuenta, 200 (su reserva ya caducó): el mismo oráculo de
+     * emails (incidencias QA-2 y MEDIA-1). Una cuenta heredada o creada hace
+     * menos de 24 h nunca se borra: 409.</li>
      * <li><b>Avatar</b>: ya viene validado contra la lista blanca
      * ({@code Avatar}); {@code null} lo quita (la interfaz vuelve a la
      * inicial).</li>
@@ -234,8 +236,8 @@ public class UserService {
 
     /**
      * Comprueba que el nombre está libre para la cuenta y, si lo tiene una
-     * cuenta pendiente <b>sustituible</b>, la borra para liberarlo (misma
-     * regla que el registro: {@link EmailVerificationService#deleteIfReplaceable}).
+     * cuenta pendiente que <b>ya no lo conserva</b>, la borra para liberarlo
+     * (misma regla que el registro: {@link EmailVerificationService#deleteIfUsernameReleased}).
      *
      * <ul>
      *   <li>Nadie lo tiene: se sigue sin bloquear nada (si otra petición se lo
@@ -249,8 +251,8 @@ public class UserService {
      *       de cruzarse con esta petición en un interbloqueo. Bajo el bloqueo se
      *       decide con el estado releído: si la pendiente ya no existe o cambió
      *       de nombre, el nombre se da por libre (el {@code UNIQUE} sigue de
-     *       respaldo); si no es sustituible (enlace vigente, heredada o recién
-     *       verificada), 409.</li>
+     *       respaldo); si lo conserva (creada hace menos de 24 h, heredada o
+     *       recién verificada), 409.</li>
      * </ul>
      *
      * <p>
@@ -290,7 +292,7 @@ public class UserService {
             lockedUser = lockOwn(user);
         }
         Optional<User> stillHolder = lockedHolder.filter(locked -> username.equals(locked.getUsername()));
-        if (stillHolder.isPresent() && !emailVerificationService.deleteIfReplaceable(stillHolder.get())) {
+        if (stillHolder.isPresent() && !emailVerificationService.deleteIfUsernameReleased(stillHolder.get())) {
             throw new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
         }
         return lockedUser;

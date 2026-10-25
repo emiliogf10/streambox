@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -14,11 +15,10 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +36,7 @@ import com.emilio.streambox.email.EmailProperties;
 import com.emilio.streambox.email.EmailSender;
 import com.emilio.streambox.email.PublicUrlProperties;
 import com.emilio.streambox.entity.AccountToken;
+import com.emilio.streambox.entity.AccountTokenPurpose;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.InvalidParameterException;
@@ -48,8 +49,9 @@ import com.emilio.streambox.security.refresh.RefreshTokenService;
 import jakarta.persistence.EntityManager;
 
 /**
- * Tests unitarios de {@link EmailVerificationService}: forma de los tokens,
- * su hash, el rechazo de lo que no puede ser un token propio <b>sin tocar la
+ * Tests unitarios de {@link EmailVerificationService} (la forma de los tokens
+ * y su hash están en {@code AccountTokensTest}): el rechazo de lo que no puede
+ * ser un token propio <b>sin tocar la
  * base de datos</b>, el reenvío fuera de la petición (B1) y la cuenta que
  * desaparece mientras se espera su bloqueo (B2). Los caminos completos están
  * en {@code EmailVerificationIntegrationTest}.
@@ -68,34 +70,20 @@ class EmailVerificationServiceTest {
      */
     private final List<Runnable> queued = new ArrayList<>();
 
-    private final EmailVerificationService service = new EmailVerificationService(tokens, users,
+    /** Hora fija del reloj del servicio (las reglas de sustitución dependen de ella). */
+    private static final Instant NOW = Instant.parse("2026-10-19T12:00:00Z");
+
+    private final EmailVerificationService service = new EmailVerificationService(tokens,
+            new AccountTokens(tokens, users), users,
             mock(RefreshTokenService.class), mock(LoginAttemptService.class), new EmailDispatcher(sender, queued::add),
-            new EmailProperties("a@b.test", Duration.ofHours(24), false,
+            new EmailProperties("a@b.test", Duration.ofHours(24), Duration.ofHours(1), false,
                     new EmailProperties.Resend(3, Duration.ofHours(1), Duration.ofSeconds(60))),
-            new PublicUrlProperties("https://streambox.test"), Clock.systemUTC(), transactionManager);
+            new PublicUrlProperties("https://streambox.test"), Clock.fixed(NOW, ZoneOffset.UTC), transactionManager);
 
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-    }
-
-    /** 32 bytes aleatorios en Base64URL sin relleno: 43 caracteres que van tal cual en una URL. */
-    @Test
-    void cadaTokenTiene43CaracteresDeBase64UrlYNoSeRepite() {
-        Set<String> seen = new HashSet<>();
-        for (int i = 0; i < 1000; i++) {
-            String token = EmailVerificationService.newToken();
-            assertTrue(token.matches("[A-Za-z0-9_-]{43}"), token);
-            assertTrue(seen.add(token), "Token repetido: " + token);
-        }
-    }
-
-    /** En la base de datos va el SHA-256 en hexadecimal en minúsculas (vector conocido de «abc»). */
-    @Test
-    void elHashEsElSha256EnHexadecimalEnMinusculas() {
-        assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-                EmailVerificationService.sha256Hex("abc"));
     }
 
     /**
@@ -211,49 +199,117 @@ class EmailVerificationServiceTest {
     // ------------------------------------------------------------------
 
     /**
-     * Pendiente creada por el registro (primer token de su alta) y sin enlace
-     * vigente: se borra (con el borrado condicional) y se libera el nombre.
+     * Pendiente creada por el registro (primer token de su alta) hace 24 h o
+     * más: se borra (con el borrado condicional) y se libera el nombre.
      */
     @Test
-    void unaPendienteSustituibleSeBorra() {
+    void unaPendienteQueYaNoConservaSuNombreSeBorra() {
         User stale = pendingUser();
-        stale.setCreatedAt(Instant.parse("2026-05-01T10:00:00Z"));
+        stale.setCreatedAt(NOW.minus(Duration.ofHours(25)));
         when(tokens.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(any(), any(), any())).thenReturn(true);
-        when(tokens.hasActiveToken(any(), any(), any())).thenReturn(false);
         when(users.deleteIfEmailNotVerified(7L)).thenReturn(1);
 
-        assertTrue(service.deleteIfReplaceable(stale));
+        assertTrue(service.deleteIfUsernameReleased(stale));
 
         verify(users).deleteIfEmailNotVerified(7L);
     }
 
     /**
-     * Heredada (ningún token de cuando se creó) o con un enlace vigente: no se
-     * llega a borrar. Es lo que protege a las cuentas USER anteriores a la V9.
+     * Heredada (ningún token de cuando se creó), aunque se diera de alta hace
+     * años: nunca se borra por el nombre. Es lo que protege a las cuentas USER
+     * anteriores a la V9.
      */
-    @ParameterizedTest
-    @ValueSource(booleans = { true, false })
-    void unaPendienteQueNoEsSustituibleNoSeBorra(boolean legacy) {
-        User pending = pendingUser();
-        pending.setCreatedAt(Instant.parse("2024-03-01T09:00:00Z"));
-        when(tokens.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(any(), any(), any())).thenReturn(!legacy);
-        when(tokens.hasActiveToken(any(), any(), any())).thenReturn(!legacy);
+    @Test
+    void unaHeredadaNuncaPierdeSuNombre() {
+        User legacy = pendingUser();
+        legacy.setCreatedAt(Instant.parse("2024-03-01T09:00:00Z"));
+        when(tokens.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(any(), any(), any())).thenReturn(false);
 
-        assertEquals(false, service.deleteIfReplaceable(pending));
+        assertEquals(false, service.releasesUsername(legacy));
+        assertEquals(false, service.deleteIfUsernameReleased(legacy));
 
         verify(users, never()).deleteIfEmailNotVerified(any());
+    }
+
+    /** Una cuenta verificada nunca pierde su nombre, por vieja que sea. */
+    @Test
+    void unaVerificadaNuncaPierdeSuNombre() {
+        User verified = pendingUser();
+        verified.setCreatedAt(NOW.minus(Duration.ofDays(30)));
+        verified.setEmailVerifiedAt(NOW.minus(Duration.ofDays(29)));
+
+        assertEquals(false, service.deleteIfUsernameReleased(verified));
+
+        verify(users, never()).deleteIfEmailNotVerified(any());
+    }
+
+    /**
+     * El límite es exacto y es el de la reserva de nombre
+     * ({@code UsernameReservations}, 24 h): un segundo antes, la pendiente aún
+     * conserva su nombre; a las 24 h justas, ya no.
+     */
+    @Test
+    void elNombreSeLiberaJustoALas24HorasDelAlta() {
+        when(tokens.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(any(), any(), any())).thenReturn(true);
+        User almost = pendingUser();
+        almost.setCreatedAt(NOW.minus(Duration.ofHours(24)).plusSeconds(1));
+        User exactly = pendingUser();
+        exactly.setCreatedAt(NOW.minus(Duration.ofHours(24)));
+
+        assertEquals(false, service.releasesUsername(almost));
+        assertTrue(service.releasesUsername(exactly));
+    }
+
+    /**
+     * <b>Incidencia MEDIA-1.</b> Creada por el registro hace más de 24 h, con
+     * un enlace de verificación (reenvío) y otro de «He olvidado mi
+     * contraseña» pedidos después y vigentes. <b>Por email</b> no es
+     * sustituible: un registro nuevo con su email no la borra (protege el
+     * enlace que el titular tiene en su buzón). <b>Por nombre</b> sí lo pierde:
+     * si los enlaces nuevos alargaran la vida del nombre, pedir uno pasadas
+     * 24 h haría que el nombre de un registro con un email nuevo diera 409 y
+     * el de uno con un email que ya tenía cuenta (solo reservado 24 h), 202.
+     */
+    @Test
+    void conEnlacesVigentesNoEsSustituiblePorEmailPeroPierdeSuNombre() {
+        User pending = pendingUser();
+        pending.setCreatedAt(NOW.minus(Duration.ofHours(25)));
+        when(tokens.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(any(), any(), any())).thenReturn(true);
+        when(tokens.hasActiveToken(eq(7L), eq(AccountTokenPurpose.EMAIL_VERIFICATION), any())).thenReturn(true);
+        when(tokens.hasActiveToken(eq(7L), eq(AccountTokenPurpose.PASSWORD_RESET), any())).thenReturn(true);
+        when(users.deleteIfEmailNotVerified(7L)).thenReturn(1);
+
+        assertEquals(false, service.isReplaceable(pending));
+        assertTrue(service.releasesUsername(pending));
+        assertTrue(service.deleteIfUsernameReleased(pending));
+    }
+
+    /**
+     * Regla por email: creada por el registro y con su enlace de verificación
+     * caducado, pero con un enlace de «He olvidado mi contraseña» vigente: un
+     * registro con su email no la sustituye (si lo hiciera, cualquiera podría
+     * dejar sin valor el enlace del titular registrándose otra vez con su email).
+     */
+    @Test
+    void unaPendienteConUnEnlaceDeRestablecimientoVigenteNoEsSustituiblePorEmail() {
+        User pending = pendingUser();
+        pending.setCreatedAt(NOW.minus(Duration.ofHours(25)));
+        when(tokens.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(any(), any(), any())).thenReturn(true);
+        when(tokens.hasActiveToken(eq(7L), eq(AccountTokenPurpose.EMAIL_VERIFICATION), any())).thenReturn(false);
+        when(tokens.hasActiveToken(eq(7L), eq(AccountTokenPurpose.PASSWORD_RESET), any())).thenReturn(true);
+
+        assertEquals(false, service.isReplaceable(pending));
     }
 
     /** Si el borrado condicional no borra nada (se verificó entre medias), no se da el nombre por libre. */
     @Test
     void siElBorradoCondicionalNoBorraNadaNoSeLibera() {
         User stale = pendingUser();
-        stale.setCreatedAt(Instant.parse("2026-05-01T10:00:00Z"));
+        stale.setCreatedAt(NOW.minus(Duration.ofHours(25)));
         when(tokens.existsByUser_IdAndPurposeAndCreatedAtLessThanEqual(any(), any(), any())).thenReturn(true);
-        when(tokens.hasActiveToken(any(), any(), any())).thenReturn(false);
         when(users.deleteIfEmailNotVerified(7L)).thenReturn(0);
 
-        assertEquals(false, service.deleteIfReplaceable(stale));
+        assertEquals(false, service.deleteIfUsernameReleased(stale));
     }
 
     private static User pendingUser() {

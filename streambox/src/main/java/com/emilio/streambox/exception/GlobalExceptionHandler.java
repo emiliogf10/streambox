@@ -186,6 +186,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
+     * Token de «He olvidado mi contraseña» que no sirve: 400
+     * {@code INVALID_RESET_TOKEN}, mismo cuerpo en todos los casos
+     * (inexistente, caducado, usado, sustituido o mal formado).
+     */
+    @ExceptionHandler(InvalidResetTokenException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidResetToken(
+            InvalidResetTokenException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, ErrorCode.INVALID_RESET_TOKEN,
+                exception.getMessage(), request);
+    }
+
+    /**
      * Refresh token que no sirve para renovar la sesión: 401 {@code SESSION_EXPIRED},
      * mismo cuerpo en todos los casos. Las cookies borradas las añade
      * {@code AuthController} antes de relanzar la excepción.

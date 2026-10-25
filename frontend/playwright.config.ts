@@ -152,6 +152,11 @@ export default defineConfig({
         // justo después del registro respondería 202 sin enviar nada y el test esperaría un correo que no llega.
         STREAMBOX_EMAIL_RESEND_MIN_INTERVAL: '0s',
         STREAMBOX_EMAIL_RESEND_MAX_PER_WINDOW: '1000',
+        // «He olvidado mi contraseña» (`e2e/password-reset.spec.ts`): pedir el enlace y cambiar la contraseña
+        // también tienen su límite por IP. Su límite silencioso por cuenta debe quedar quitado como el del
+        // reenvío de arriba: el test del enlace sustituido pide dos seguidos.
+        STREAMBOX_SECURITY_RATE_LIMIT_PASSWORD_RESET_MAX_REQUESTS: '100000',
+        STREAMBOX_SECURITY_RATE_LIMIT_PASSWORD_RESET_CONFIRM_MAX_REQUESTS: '100000',
         // Origen de los enlaces de los correos (`/verificar-email#token=…`): el Vite de ESTA suite, para que
         // el test pueda abrir el enlace tal cual llega al buzón.
         STREAMBOX_PUBLIC_URL: FRONTEND_URL,

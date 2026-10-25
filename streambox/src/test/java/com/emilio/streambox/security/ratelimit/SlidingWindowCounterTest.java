@@ -126,6 +126,22 @@ class SlidingWindowCounterTest {
         assertEquals(0, counter.count("email"));
     }
 
+    /** Olvida solo las claves que cumplen la condición; las demás conservan sus eventos. */
+    @Test
+    void resetMatchingOlvidaSoloLasClavesQueCumplenLaCondicion() {
+        counter.record("a|1");
+        counter.record("a|2");
+        counter.record("b|1");
+        counter.record("b|1");
+
+        counter.resetMatching(key -> key.startsWith("a|"));
+
+        assertEquals(0, counter.count("a|1"));
+        assertEquals(0, counter.count("a|2"));
+        assertEquals(2, counter.count("b|1"));
+        assertEquals(1, counter.size());
+    }
+
     // ------------------------------------------------------------------
     // reserve / confirm
     // ------------------------------------------------------------------
