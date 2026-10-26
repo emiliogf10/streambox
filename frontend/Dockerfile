@@ -20,7 +20,7 @@
 # Vitest 5 exigen Node ^22.12 o ^24 (campo "engines" de sus package.json).
 # Versión fijada hasta el parche de Node y la de Alpine para que la imagen
 # se construya igual hoy que dentro de seis meses.
-FROM node:24.21.0-alpine3.24 AS build
+FROM node:24.22.1-alpine3.24 AS build
 
 WORKDIR /app
 
@@ -60,7 +60,7 @@ RUN npm run build
 #     de archivos de solo lectura y sin ninguna capacidad.
 # Misma versión (1.30, rama estable) y misma Alpine (3.24) que la imagen del
 # backend. Trae busybox con wget para el HEALTHCHECK.
-FROM nginxinc/nginx-unprivileged:1.30.5-alpine3.24 AS runtime
+FROM nginxinc/nginx-unprivileged:1.30.6-alpine3.24 AS runtime
 
 LABEL org.opencontainers.image.title="streambox-frontend" \
       org.opencontainers.image.description="SPA de StreamBox (React 19 + Vite) servida por nginx, con proxy de /api al backend"
