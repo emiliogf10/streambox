@@ -29,6 +29,8 @@ const ENTRIES: Record<string, QueryKey> = {
   generos: queryKeys.genres.all,
   miLista: queryKeys.favorites.all,
   meGusta: queryKeys.likes.all,
+  misGeneros: queryKeys.favoriteGenres.mine,
+  generosElegibles: queryKeys.favoriteGenres.options,
   recomendaciones: queryKeys.recommendations.list(12),
 };
 
@@ -52,6 +54,8 @@ describe('keysAffectedBy', () => {
       'similares',
       'miLista',
       'meGusta',
+      'misGeneros',
+      'generosElegibles',
       'recomendaciones',
     ]);
   });
@@ -64,6 +68,8 @@ describe('keysAffectedBy', () => {
       'panelSeries',
       'miLista',
       'meGusta',
+      'misGeneros',
+      'generosElegibles',
       'recomendaciones',
     ]);
   });
@@ -81,8 +87,18 @@ describe('keysAffectedBy', () => {
       'panelSeries',
       'miLista',
       'meGusta',
+      'misGeneros',
+      'generosElegibles',
       'recomendaciones',
     ]);
+  });
+});
+
+describe('queryKeys.favoriteGenres', () => {
+  it('los géneros favoritos y sus opciones cuelgan de su propia raíz, fuera de la de los géneros del catálogo', () => {
+    expect(queryKeys.favoriteGenres.mine.slice(0, 1)).toEqual(queryKeys.favoriteGenres.all);
+    expect(queryKeys.favoriteGenres.options.slice(0, 1)).toEqual(queryKeys.favoriteGenres.all);
+    expect(queryKeys.favoriteGenres.all).not.toEqual(queryKeys.genres.all);
   });
 });
 

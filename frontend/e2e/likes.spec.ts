@@ -13,7 +13,7 @@
  */
 import type { Locator, Page } from '@playwright/test';
 import { MOVIES, SERIES_HERO, VISIBLE_SERIES } from './support/catalog';
-import { escapeRegExp, expect, movieCard, test } from './support/fixtures';
+import { escapeRegExp, expect, movieCard, openHomeAndWaitForRecommendations, test } from './support/fixtures';
 
 /** Película a la que se da «Me gusta»: Ciencia ficción + Drama. */
 const FILM = MOVIES.find((movie) => movie.title === 'Interstellar');
@@ -67,28 +67,6 @@ async function openShow(page: Page) {
   await page.goto('/series');
   await page.getByRole('region', { name: SHOW.title }).getByRole('link', { name: /^Más información/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: SHOW.title })).toBeVisible();
-}
-
-/**
- * Abre la portada y espera a que el servidor haya respondido a las
- * recomendaciones; devuelve su `basedOnLikes`.
- *
- * Ya no vale esperar a que se vaya su esqueleto: a quien no tiene «Me gusta» no
- * se le pinta ninguno (ver `RecommendedRows`), así que esa espera pasaría antes
- * de la respuesta y un «no hay filas» podría comprobarse demasiado pronto. Se
- * escucha la respuesta ANTES de navegar porque la portada la pide en su primer
- * render, en paralelo con el catálogo. Con `basedOnLikes: false` el componente
- * no pinta nada, así que tras confirmarlo la ausencia de filas es determinista.
- */
-async function openHomeAndWaitForRecommendations(page: Page): Promise<boolean> {
-  const answered = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'GET' && new URL(response.url()).pathname === '/api/users/me/recommendations',
-  );
-  await page.goto('/');
-  const body = (await (await answered).json()) as { basedOnLikes: boolean };
-  await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
-  return body.basedOnLikes;
 }
 
 test.describe('«Me gusta» y recomendaciones', () => {
@@ -155,11 +133,11 @@ test.describe('«Me gusta» y recomendaciones', () => {
     // El perfil vuelve al estado vacío y el inicio, a no tener filas recomendadas.
     await page.goto('/perfil');
     await expect(page.getByRole('region', { name: 'Te gusta' }).getByText('Todavía no te gusta ningún título')).toBeVisible();
-    expect(await openHomeAndWaitForRecommendations(page)).toBe(false);
+    expect(await openHomeAndWaitForRecommendations(page)).toBe('NONE');
     await expect(page.getByRole('region', { name: /recomendadas para ti$/ })).toHaveCount(0);
   });
 
-  test('un usuario nuevo: «Te gusta» explica cómo llenarlo y el inicio no tiene filas recomendadas', async ({ page }) => {
+  test('un usuario nuevo: «Te gusta» explica cómo llenarlo y el inicio no tiene filas recomendadas, sino la invitación a elegir géneros', async ({ page }) => {
     await page.goto('/perfil');
     const likes = page.getByRole('region', { name: 'Te gusta' });
     await expect(likes.getByText('Todavía no te gusta ningún título')).toBeVisible();
@@ -169,10 +147,13 @@ test.describe('«Me gusta» y recomendaciones', () => {
       ),
     ).toBeVisible();
 
-    expect(await openHomeAndWaitForRecommendations(page)).toBe(false);
+    expect(await openHomeAndWaitForRecommendations(page)).toBe('NONE');
     await expect(page.getByRole('region', { name: /recomendadas para ti$/ })).toHaveCount(0);
-    // Ni un hueco ni un aviso de carga que no lleva a nada.
+    // Ni un hueco ni un aviso de carga que no lleva a nada: solo la invitación a elegir géneros.
     await expect(page.getByText('Cargando recomendaciones...')).toHaveCount(0);
+    await expect(
+      page.getByRole('region', { name: 'Dinos qué géneros te gustan y te recomendaremos títulos' }),
+    ).toBeVisible();
   });
 
   test('con el teclado: Espacio da y quita el «Me gusta» y el foco no se mueve del botón', async ({ page }) => {

@@ -34,7 +34,7 @@ import jakarta.persistence.EntityManagerFactory;
  *
  * <p>
  * Que el contexto de Spring arranque ya demuestra dos cosas: que todas las
- * migraciones ({@code V1}..{@code V8}) se aplican en PostgreSQL desde cero y que Hibernate
+ * migraciones ({@code V1}..{@code V11}) se aplican en PostgreSQL desde cero y que Hibernate
  * ({@code ddl-auto=validate}) acepta las entidades contra ese esquema. Aquí se
  * comprueba además lo que H2 no puede garantizar: los tipos reales del catálogo
  * del sistema ({@code information_schema}, {@code pg_catalog}), las políticas de
@@ -79,7 +79,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9 y V10 (sin
+     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10 y V11 (sin
      * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
      * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
@@ -89,7 +89,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -133,8 +133,10 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
      * Longitudes de los {@code VARCHAR} y obligatoriedad de cada columna: solo
      * admiten {@code NULL} el vídeo y el tráiler de la película (opcionales
      * desde la {@code V6}), el avatar del usuario ({@code V7}; {@code NULL} =
-     * se muestra la inicial) y {@code users.email_verified_at} ({@code V9};
-     * {@code NULL} = cuenta pendiente de verificar el correo).
+     * se muestra la inicial), {@code users.email_verified_at} ({@code V9};
+     * {@code NULL} = cuenta pendiente de verificar el correo) y
+     * {@code users.genres_onboarded_at} ({@code V11}; {@code NULL} = aún no se
+     * le ha hecho la pregunta de sus géneros favoritos).
      */
     @Test
     void lasLongitudesYLaObligatoriedadDeLasColumnasSonLasDeLasEntidades() {
@@ -157,10 +159,11 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                     .findFirst().orElseThrow(() -> new AssertionError("falta la columna " + expected.getKey()));
             assertEquals(expected.getValue(), column.get("character_maximum_length"), expected.getKey());
         }
-        // Solo el vídeo y el tráiler de la película, el avatar del usuario y su
-        // fecha de verificación del correo (V9: NULL = cuenta pendiente) admiten NULL
+        // Solo el vídeo y el tráiler de la película, el avatar del usuario, su
+        // fecha de verificación del correo (V9: NULL = cuenta pendiente) y la de
+        // la pregunta de bienvenida (V11: NULL = aún no se le ha hecho) admiten NULL
         assertEquals(java.util.Set.of("movies.video_url", "movies.trailer_url", "users.avatar",
-                "users.email_verified_at"), java.util.Set.copyOf(columns.stream()
+                "users.email_verified_at", "users.genres_onboarded_at"), java.util.Set.copyOf(columns.stream()
                 .filter(c -> !"NO".equals(c.get("is_nullable")))
                 .map(c -> c.get("table_name") + "." + c.get("column_name"))
                 .toList()));
@@ -563,6 +566,87 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                 () -> jdbc.update("INSERT INTO user_liked_movies (user_id, movie_id, created_at) VALUES (?, ?, NULL)",
                         userId, insertMovie("Sin fecha", 2000)))));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM user_liked_movies", Integer.class));
+    }
+
+    // ------------------------------------------------------------------
+    // V11: géneros favoritos (user_favorite_genres, users.genres_onboarded_at)
+    // ------------------------------------------------------------------
+
+    /**
+     * Esquema de la V11 tal como lo ve PostgreSQL: clave primaria
+     * {@code (user_id, genre_id)}, {@code created_at} {@code timestamptz}
+     * obligatorio, las dos claves foráneas en cascada, el índice por
+     * {@code genre_id} y {@code users.genres_onboarded_at} opcional y
+     * <b>sin valor por defecto</b> (una cuenta nueva nace con la pregunta
+     * pendiente). Sus consultas se prueban en
+     * {@code PostgresFavoriteGenresIntegrationTest} y el relleno de las cuentas
+     * existentes en {@code PostgresFavoriteGenresMigrationIntegrationTest}.
+     */
+    @Test
+    void laTablaDeGenerosFavoritosYLaColumnaDeBienvenidaTienenElEsquemaEsperado() {
+        assertEquals(List.of("user_id", "genre_id"), primaryKeyColumns("user_favorite_genres"));
+        Map<String, Object> createdAt = jdbc.queryForMap("SELECT data_type, is_nullable FROM information_schema.columns"
+                + " WHERE table_schema = 'public' AND table_name = 'user_favorite_genres' AND column_name = 'created_at'");
+        assertEquals("timestamp with time zone", createdAt.get("data_type"));
+        assertEquals("NO", createdAt.get("is_nullable"));
+
+        Map<String, Object> onboarded = jdbc.queryForMap("SELECT data_type, is_nullable, column_default"
+                + " FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users'"
+                + " AND column_name = 'genres_onboarded_at'");
+        assertEquals("timestamp with time zone", onboarded.get("data_type"));
+        assertEquals("YES", onboarded.get("is_nullable"));
+        assertEquals(null, onboarded.get("column_default"), "sin DEFAULT: cerraría la pregunta de las cuentas nuevas");
+
+        Map<String, String> rules = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT constraint_name, delete_rule FROM information_schema.referential_constraints"
+                        + " WHERE constraint_schema = 'public'")
+                .forEach(r -> rules.put((String) r.get("constraint_name"), (String) r.get("delete_rule")));
+        assertEquals("CASCADE", rules.get("fk_favorite_genres_user"));
+        assertEquals("CASCADE", rules.get("fk_favorite_genres_genre"));
+
+        Map<String, String> definitions = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public'")
+                .forEach(r -> definitions.put((String) r.get("indexname"), (String) r.get("indexdef")));
+        assertIndex(definitions, "idx_favorite_genres_genre_id",
+                "ON public.user_favorite_genres USING btree (genre_id)");
+
+        long userId = insertUser("recien", "recien@test.com");
+        assertEquals(null, jdbc.queryForObject("SELECT genres_onboarded_at FROM users WHERE id = ?",
+                java.time.OffsetDateTime.class, userId), "una cuenta nueva nace con la pregunta pendiente");
+    }
+
+    /**
+     * Con el código real de PostgreSQL: un género repetido viola la clave
+     * primaria ({@code 23505}), un género o un usuario inexistentes la clave
+     * foránea ({@code 23503}) y la fecha es obligatoria ({@code 23502}).
+     * Borrar un género que solo está en los gustos <b>no falla</b> (a
+     * diferencia de uno que usa una película) y se lleva sus filas.
+     */
+    @Test
+    void laBaseDeDatosRechazaGustosDuplicadosHuerfanosOSinFechaYBorrarElGeneroLosArrastra() {
+        long userId = insertUser("gustos", "gustos@test.com");
+        long drama = insertGenre("Drama");
+        long comedy = insertGenre("Comedia");
+        String insert = "INSERT INTO user_favorite_genres (user_id, genre_id, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)";
+        jdbc.update(insert, userId, drama);
+        jdbc.update(insert, userId, comedy);
+
+        assertEquals(UNIQUE_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(insert, userId, drama))));
+        assertEquals(FOREIGN_KEY_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(insert, userId, Long.MAX_VALUE))));
+        assertEquals(FOREIGN_KEY_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(insert, Long.MAX_VALUE, drama))));
+        assertEquals(NOT_NULL_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("INSERT INTO user_favorite_genres (user_id, genre_id, created_at) VALUES (?, ?, NULL)",
+                        userId, insertGenre("Sin fecha")))));
+
+        jdbc.update("DELETE FROM genres WHERE id = ?", drama);
+
+        assertEquals(List.of(comedy), jdbc.queryForList(
+                "SELECT genre_id FROM user_favorite_genres WHERE user_id = ?", Long.class, userId));
+        jdbc.update("DELETE FROM users WHERE id = ?", userId);
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM user_favorite_genres", Integer.class));
     }
 
     // ------------------------------------------------------------------

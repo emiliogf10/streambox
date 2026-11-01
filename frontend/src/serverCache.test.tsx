@@ -191,7 +191,7 @@ describe('Cambio de usuario: «Me gusta» y recomendaciones', () => {
       'GET /api/users/me/likes/movies': () => jsonResponse(current ? likedOf[current.id] : []),
       'GET /api/users/me/recommendations?limit=12': () => {
         const movies = current ? recommendedOf[current.id] : [];
-        return jsonResponse({ basedOnLikes: movies.length > 0, movies, series: [] });
+        return jsonResponse({ basis: movies.length > 0 ? 'LIKES' : 'NONE', movies, series: [] });
       },
       'POST /api/auth/logout': () => {
         current = null;

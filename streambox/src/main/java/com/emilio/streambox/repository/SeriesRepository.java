@@ -280,12 +280,14 @@ public interface SeriesRepository
 
     /**
      * Devuelve los ids de las series <strong>recomendadas</strong> a un usuario
-     * según los géneros de lo que le gusta, ya ordenados.
+     * según los géneros de lo que le gusta y de sus géneros favoritos, ya
+     * ordenados.
      *
      * <p>
      * Mismo criterio que {@link MovieRepository#findRecommendedMovieIds(Long, int)}
-     * y la misma subconsulta de pesos ({@link MovieRepository#LIKED_GENRE_WEIGHTS}:
-     * cuentan los «me gusta» de películas y de series visibles): puntuación =
+     * y la misma subconsulta de pesos ({@link MovieRepository#GENRE_WEIGHTS}:
+     * cuentan los «me gusta» de películas y de series visibles, y cada género
+     * favorito vale {@value MovieRepository#FAVORITE_GENRE_WEIGHT}): puntuación =
      * suma de los pesos de los géneros de la serie, excluidas las que ya le
      * gustan, desempate por {@code created_at} e {@code id} descendentes. Solo
      * son candidatas las series <strong>con episodios</strong> (las ocultas no
@@ -296,10 +298,10 @@ public interface SeriesRepository
      * @param userId identificador del usuario
      * @param limit  número máximo de ids devueltos (lo valida el servicio)
      * @return ids de las series recomendadas, en orden; vacío si no tiene «me
-     *         gusta» o no hay candidatas
+     *         gusta» ni géneros favoritos, o no hay candidatas
      */
     @Query(value = "SELECT sg.series_id"
-            + " FROM (" + MovieRepository.LIKED_GENRE_WEIGHTS + ") pesos"
+            + " FROM (" + MovieRepository.GENRE_WEIGHTS + ") pesos"
             + " JOIN series_genres sg ON sg.genre_id = pesos.genre_id"
             + " JOIN series s ON s.id = sg.series_id"
             + " WHERE NOT EXISTS (SELECT 1 FROM user_liked_series ya"

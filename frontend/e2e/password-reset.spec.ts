@@ -35,7 +35,7 @@ import {
 import type { TestUser } from './support/api';
 import { HERO_TITLE } from './support/catalog';
 import { BACKEND_URL, FRONTEND_URL } from './support/config';
-import { expect, formAlert, sessionCookie, test } from './support/fixtures';
+import { expect, formAlert, sessionCookie, skipGenresQuestionIfAsked, test } from './support/fixtures';
 
 /** Título de `/restablecer-contrasena` cuando el token no vale (inválido, caducado, usado o sustituido). */
 const INVALID_LINK_TITLE = 'El enlace no es válido o ha caducado';
@@ -62,11 +62,15 @@ async function loginAttempt(
   return { status: response.status(), code: body.code };
 }
 
-/** Inicia sesión con el formulario y espera a la portada. */
+/**
+ * Inicia sesión con el formulario y espera a la portada. La primera vez, una cuenta nueva pasa por la
+ * pregunta de bienvenida, que aquí se salta («Ahora no»).
+ */
 async function loginWithForm(page: Page, email: string, password: string): Promise<void> {
   await page.getByLabel('Correo electrónico').fill(email);
   await page.getByLabel('Contraseña', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await skipGenresQuestionIfAsked(page);
   await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
   expect(await sessionCookie(page)).toBeDefined();
 }

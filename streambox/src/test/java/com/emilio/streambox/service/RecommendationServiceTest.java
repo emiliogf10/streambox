@@ -1,9 +1,7 @@
 package com.emilio.streambox.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -15,9 +13,11 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import com.emilio.streambox.dto.MovieResponse;
+import com.emilio.streambox.dto.RecommendationBasis;
 import com.emilio.streambox.dto.RecommendationsResponse;
 import com.emilio.streambox.dto.SeriesResponse;
 import com.emilio.streambox.entity.Movie;
@@ -62,34 +62,52 @@ class RecommendationServiceTest {
     }
 
     @Test
-    void sinMeGustaNoCargaNingunTitulo() {
-        when(recommender.recommend(USER, 12)).thenReturn(Recommendations.withoutLikes());
+    void sinBaseNoCargaNingunTitulo() {
+        when(recommender.recommend(USER, 12)).thenReturn(Recommendations.none());
 
         RecommendationsResponse response = service.getRecommendations(USER, 12);
 
-        assertFalse(response.basedOnLikes());
+        assertEquals(RecommendationBasis.NONE, response.basis());
         assertEquals(List.of(), response.movies());
         assertEquals(List.of(), response.series());
         verifyNoInteractions(movieRepository, seriesRepository, episodeRepository);
     }
 
-    /** Con «me gusta» pero sin candidatas: {@code basedOnLikes} sigue siendo {@code true}. */
-    @Test
-    void conMeGustaPeroSinCandidatasNoCargaNadaYConservaBasedOnLikes() {
-        when(recommender.recommend(USER, 12)).thenReturn(new Recommendations(true, List.of(), List.of()));
+    /**
+     * Con base pero sin candidatas: el servicio no carga nada y copia la base
+     * del recomendador tal cual (cada uno de los tres valores con señales), para
+     * que el inicio diga en qué se basó aunque no quede nada nuevo.
+     */
+    @ParameterizedTest
+    @EnumSource(value = RecommendationBasis.class, names = { "GENRES", "LIKES", "GENRES_AND_LIKES" })
+    void conBasePeroSinCandidatasNoCargaNadaYConservaLaBase(RecommendationBasis basis) {
+        when(recommender.recommend(USER, 12)).thenReturn(new Recommendations(basis, List.of(), List.of()));
 
         RecommendationsResponse response = service.getRecommendations(USER, 12);
 
-        assertTrue(response.basedOnLikes());
+        assertEquals(basis, response.basis());
         assertEquals(List.of(), response.movies());
         assertEquals(List.of(), response.series());
         verifyNoInteractions(movieRepository, seriesRepository, episodeRepository);
+    }
+
+    /** La base llega intacta también cuando hay títulos que cargar (aquí, solo géneros favoritos). */
+    @Test
+    void conTitulosConservaLaBaseDelRecomendador() {
+        when(recommender.recommend(USER, 12))
+                .thenReturn(new Recommendations(RecommendationBasis.GENRES, List.of(10L), List.of()));
+        when(movieRepository.findAllWithGenresByIdIn(List.of(10L))).thenReturn(List.of(movie(10L)));
+
+        RecommendationsResponse response = service.getRecommendations(USER, 12);
+
+        assertEquals(RecommendationBasis.GENRES, response.basis());
+        assertEquals(List.of(10L), response.movies().stream().map(MovieResponse::id).toList());
     }
 
     @Test
     void reconstruyeElOrdenDeLasPeliculasYOmiteLasBorradas() {
         List<Long> ordered = List.of(30L, 10L, 99L, 20L);
-        when(recommender.recommend(USER, 12)).thenReturn(new Recommendations(true, ordered, List.of()));
+        when(recommender.recommend(USER, 12)).thenReturn(new Recommendations(RecommendationBasis.LIKES, ordered, List.of()));
         // La carga las devuelve en otro orden y sin la 99 (borrada entre las dos consultas).
         when(movieRepository.findAllWithGenresByIdIn(ordered)).thenReturn(List.of(movie(10L), movie(20L), movie(30L)));
 
@@ -107,7 +125,7 @@ class RecommendationServiceTest {
     @Test
     void reconstruyeElOrdenDeLasSeriesYOmiteLasOcultasYLasBorradas() {
         List<Long> ordered = List.of(3L, 1L, 2L, 4L);
-        when(recommender.recommend(USER, 12)).thenReturn(new Recommendations(true, List.of(), ordered));
+        when(recommender.recommend(USER, 12)).thenReturn(new Recommendations(RecommendationBasis.LIKES, List.of(), ordered));
         // La 4 no se encuentra (borrada); la 2 existe pero no tiene episodios.
         when(seriesRepository.findAllWithGenresByIdIn(ordered)).thenReturn(List.of(series(1L), series(2L), series(3L)));
         when(episodeRepository.countBySeriesIds(ordered)).thenReturn(List.of(stats(1L, 1, 3), stats(3L, 2, 10)));
@@ -124,7 +142,7 @@ class RecommendationServiceTest {
     @Test
     void quitaIdsRepetidosYRecortaAlLimiteAunqueElRecomendadorNoLoHaga() {
         when(recommender.recommend(USER, 2))
-                .thenReturn(new Recommendations(true, List.of(5L, 5L, 6L, 7L), List.of()));
+                .thenReturn(new Recommendations(RecommendationBasis.LIKES, List.of(5L, 5L, 6L, 7L), List.of()));
         when(movieRepository.findAllWithGenresByIdIn(List.of(5L, 6L))).thenReturn(List.of(movie(6L), movie(5L)));
 
         RecommendationsResponse response = service.getRecommendations(USER, 2);
@@ -147,7 +165,7 @@ class RecommendationServiceTest {
     @ParameterizedTest
     @ValueSource(ints = { 1, 12, 24 })
     void losLimitesDelRangoSeAceptan(int limit) {
-        when(recommender.recommend(USER, limit)).thenReturn(Recommendations.withoutLikes());
+        when(recommender.recommend(USER, limit)).thenReturn(Recommendations.none());
 
         service.getRecommendations(USER, limit);
 

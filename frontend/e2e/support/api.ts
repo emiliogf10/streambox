@@ -295,15 +295,77 @@ export async function loginAdmin(request: APIRequestContext): Promise<string> {
   }
 }
 
+/** Opciones de {@link createUserWithToken}. */
+export interface CreateUserOptions {
+  /**
+   * Qué hacer con la pregunta de bienvenida («¿qué géneros te gustan?», `/bienvenida`) que el servidor
+   * deja pendiente en toda cuenta nueva:
+   * - `'answered'` (por defecto): se cierra por API con la lista vacía, como si hubiera pulsado «Ahora no».
+   *   Así, al abrir la app con la sesión, el usuario va a donde pide el test y no a la bienvenida. Casi
+   *   ningún test trata de ella.
+   * - `'pending'`: se deja pendiente (lo usa `favorite-genres.spec.ts`).
+   */
+  genresOnboarding?: 'answered' | 'pending';
+}
+
 /**
  * Crea un usuario nuevo CON EL CORREO CONFIRMADO (registro → enlace de la bandeja → confirmación) e inicia
- * sesión por API. Devuelve sus datos junto con el valor de su cookie de sesión (el JWT).
+ * sesión por API. Devuelve sus datos junto con el valor de su cookie de sesión (el JWT). Por defecto deja
+ * CERRADA la pregunta de bienvenida (ver {@link CreateUserOptions}).
  */
-export async function createUserWithToken(request: APIRequestContext): Promise<TestUser & { token: string }> {
+export async function createUserWithToken(
+  request: APIRequestContext,
+  { genresOnboarding = 'answered' }: CreateUserOptions = {},
+): Promise<TestUser & { token: string }> {
   const user = newTestUser();
   await registerVerifiedUser(request, user);
   const token = await loginApi(request, user.email, user.password);
+  if (genresOnboarding === 'answered') await saveFavoriteGenresApi(request, token, []);
   return { ...user, token };
+}
+
+/** Forma de un género en la API (solo lo que usan los tests). */
+interface ApiGenreRef {
+  id: number;
+  name: string;
+}
+
+/**
+ * Guarda los géneros favoritos de un usuario (`PUT /api/users/me/genres`): de 3 a 5 ids, o la lista vacía
+ * («Ahora no»). Cualquier llamada cierra la pregunta de bienvenida. Devuelve la lista guardada.
+ */
+export async function saveFavoriteGenresApi(
+  request: APIRequestContext,
+  token: string,
+  genreIds: number[],
+): Promise<ApiGenreRef[]> {
+  const response = await request.put(`${BACKEND_URL}/api/users/me/genres`, {
+    headers: authHeaders(token),
+    data: { genreIds },
+  });
+  await expectOk(response, `Guardar los géneros favoritos ${JSON.stringify(genreIds)}`);
+  return (await response.json()) as ApiGenreRef[];
+}
+
+/** Géneros favoritos de un usuario (`GET /api/users/me/genres`). */
+export async function favoriteGenresApi(request: APIRequestContext, token: string): Promise<ApiGenreRef[]> {
+  const response = await request.get(`${BACKEND_URL}/api/users/me/genres`, { headers: authHeaders(token) });
+  await expectOk(response, 'Leer los géneros favoritos');
+  return (await response.json()) as ApiGenreRef[];
+}
+
+/** Géneros que se pueden elegir como favoritos (`GET /api/users/me/genres/options`: los que tienen títulos visibles). */
+export async function genreOptionsApi(request: APIRequestContext, token: string): Promise<ApiGenreRef[]> {
+  const response = await request.get(`${BACKEND_URL}/api/users/me/genres/options`, { headers: authHeaders(token) });
+  await expectOk(response, 'Leer los géneros elegibles');
+  return (await response.json()) as ApiGenreRef[];
+}
+
+/** `genresOnboardingPending` del usuario de la sesión (`GET /api/users/me`). */
+export async function genresOnboardingPendingApi(request: APIRequestContext, token: string): Promise<boolean> {
+  const response = await request.get(`${BACKEND_URL}/api/users/me`, { headers: authHeaders(token) });
+  await expectOk(response, 'Leer el usuario de la sesión');
+  return ((await response.json()) as { genresOnboardingPending?: boolean }).genresOnboardingPending === true;
 }
 
 /**

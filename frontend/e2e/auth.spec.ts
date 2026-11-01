@@ -26,7 +26,7 @@ import {
 } from './support/api';
 import { ADMIN_USERNAME, LOCKOUT_MAX_FAILURES, BACKEND_URL } from './support/config';
 import { HERO_TITLE, SERIES_HERO } from './support/catalog';
-import { expect, formAlert, sessionCookie, test } from './support/fixtures';
+import { expect, formAlert, sessionCookie, skipGenresQuestionIfAsked, test } from './support/fixtures';
 
 /** Cuerpo de error de la API (solo lo que miran estos tests). */
 interface ErrorBody {
@@ -50,6 +50,8 @@ async function loginWithForm(page: Page, request: APIRequestContext): Promise<vo
   await page.getByLabel('Correo electrónico').fill(user.email);
   await page.getByLabel('Contraseña').fill(user.password);
   await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  // Cuenta nueva: primero la pregunta de bienvenida (se salta; la prueba `favorite-genres.spec.ts`).
+  await skipGenresQuestionIfAsked(page);
   await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
   expect(await cookieNamed(page, REFRESH_COOKIE), 'el login debe fijar el refresh token').toBeDefined();
 }
@@ -293,6 +295,8 @@ test.describe('Login y cierre de sesión', () => {
     await page.getByLabel('Correo electrónico').fill(user.email);
     await page.getByLabel('Contraseña').fill(user.password);
     await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+    // Es una cuenta nueva: antes de la portada pasa por la pregunta de bienvenida («Ahora no» la cierra).
+    await skipGenresQuestionIfAsked(page);
 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Catálogo de películas' })).toBeAttached();

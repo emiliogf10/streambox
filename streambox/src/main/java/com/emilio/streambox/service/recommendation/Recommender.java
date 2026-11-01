@@ -11,8 +11,19 @@ package com.emilio.streambox.service.recommendation;
  * la interfaz, ese cambio es escribir otra clase que la implemente y marcarla
  * como la que se inyecta; ni el controlador, ni {@code RecommendationService},
  * ni el contrato de la API, ni el frontend cambian. Por eso guarda también
- * <em>cuándo</em> se dio cada «me gusta» ({@code created_at}): es el dato que
- * una IA necesitaría para pesar más lo reciente.
+ * <em>cuándo</em> se dio cada «me gusta» y se eligió cada género favorito
+ * ({@code created_at}): es el dato que una IA necesitaría para pesar más lo
+ * reciente.
+ * </p>
+ *
+ * <p>
+ * <b>Señales disponibles.</b> Los «me gusta» del usuario (V8) y sus géneros
+ * favoritos («Tus gustos», V11). La implementación actual las combina con la
+ * fórmula de {@link GenreBasedRecommender} (peso de un género = «me gusta»
+ * visibles con ese género + 2 si es favorito; puntuación de un título = suma
+ * de los pesos de sus géneros). Otra implementación puede combinarlas como
+ * quiera, pero debe informar con {@link Recommendations#basis()} de cuáles ha
+ * usado, porque el inicio construye su texto con ese valor.
  * </p>
  *
  * <p>
@@ -25,8 +36,8 @@ package com.emilio.streambox.service.recommendation;
  *
  * <p>
  * <b>Privacidad (para quien implemente otra estrategia).</b>
- * {@link GenreBasedRecommender} solo usa los «me gusta» del propio usuario y el
- * catálogo, así que sus resultados no revelan nada de nadie más. Una
+ * {@link GenreBasedRecommender} solo usa los «me gusta» y los géneros favoritos
+ * del propio usuario y el catálogo, así que sus resultados no revelan nada de nadie más. Una
  * implementación que use señales de otros usuarios («a quien le gustó X también
  * le gustó Y») debe usar solo datos <em>agregados</em> y exigir un mínimo de
  * usuarios distintos detrás de cada señal: con pocos usuarios, una
@@ -42,8 +53,8 @@ public interface Recommender {
      * @param userId identificador del usuario autenticado (del token)
      * @param limit  número máximo de películas y, por separado, de series; el
      *               llamante garantiza que está entre 1 y 24
-     * @return ids recomendados, en orden; {@link Recommendations#withoutLikes()}
-     *         si el usuario no tiene en qué basarse
+     * @return ids recomendados, en orden, con la base usada;
+     *         {@link Recommendations#none()} si el usuario no tiene en qué basarse
      */
     Recommendations recommend(Long userId, int limit);
 }

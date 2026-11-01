@@ -12,9 +12,9 @@
  * ver el informe de la tarea 24 para la propuesta.
  */
 import type { Locator, Page } from '@playwright/test';
-import { findSeriesIdAsAdmin, loginAdmin } from './support/api';
+import { createUserWithToken, findSeriesIdAsAdmin, loginAdmin } from './support/api';
 import { EMPTY_SERIES, SERIES_HERO } from './support/catalog';
-import { expect, movieCard, test, waitForMovieForm } from './support/fixtures';
+import { WELCOME_TITLE, expect, movieCard, test, waitForMovieForm } from './support/fixtures';
 
 test.describe('Teclado', () => {
   test('el primer Tab muestra «Saltar al contenido» y Intro lleva el foco al contenido principal', async ({
@@ -386,6 +386,28 @@ test.describe('Estructura accesible (humo)', () => {
       expect(await auditPage(page)).toEqual([]);
     });
   }
+
+  test('/bienvenida (cuenta nueva con la pregunta pendiente): estructura básica correcta y el foco en el título', async ({
+    page,
+    request,
+    signIn,
+  }) => {
+    await signIn(await createUserWithToken(request, { genresOnboarding: 'pending' }));
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/bienvenida$/);
+    await expect(page.getByRole('heading', { level: 1, name: WELCOME_TITLE })).toBeFocused();
+    await expect(page.getByRole('group', { name: 'Tus géneros favoritos' }).getByRole('checkbox').first()).toBeAttached();
+    expect(await auditPage(page)).toEqual([]);
+  });
+
+  test('/perfil con «Tus gustos» abierto en edición: estructura básica correcta', async ({ page, user, signIn }) => {
+    await signIn(user);
+    await page.goto('/perfil');
+    const tastes = page.getByRole('region', { name: 'Tus gustos' });
+    await tastes.getByRole('button', { name: 'Elegir géneros' }).click();
+    await expect(tastes.getByRole('group', { name: 'Elige entre 3 y 5 géneros' }).getByRole('checkbox').first()).toBeAttached();
+    expect(await auditPage(page)).toEqual([]);
+  });
 
   test('/series y la página de una serie: estructura básica correcta', async ({ page, user, signIn }) => {
     await signIn(user);

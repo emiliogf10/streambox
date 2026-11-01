@@ -13,6 +13,12 @@ interface Props<T extends { id: number }> {
    * la portada). Va en la cabecera, no al final: así se ve sin recorrer la fila.
    */
   action?: ReactNode;
+  /**
+   * Frase opcional bajo el título que explica la fila (p. ej. el porqué de las
+   * recomendaciones: «Porque te gustan Acción y Drama.»). Es la descripción
+   * accesible de la sección (`aria-describedby`): se lee al entrar en ella.
+   */
+  description?: string;
 }
 
 /**
@@ -87,8 +93,9 @@ const arrowClass =
  * Es una sección con su título (`<h2>`) como nombre y una lista de tarjetas.
  * Sin elementos no pinta nada.
  */
-export function PosterRow<T extends { id: number }>({ title, items, renderItem, action }: Props<T>) {
+export function PosterRow<T extends { id: number }>({ title, items, renderItem, action, description }: Props<T>) {
   const headingId = useId();
+  const descriptionId = useId();
   const scrollerRef = useRef<HTMLUListElement>(null);
   const arrowsRef = useRef<HTMLDivElement>(null);
   const [scroll, setScroll] = useState<ScrollState>({ overflows: false, atStart: true, atEnd: true });
@@ -131,7 +138,11 @@ export function PosterRow<T extends { id: number }>({ title, items, renderItem, 
   return (
     // Título de fila un paso por encima del texto de las tarjetas (text-lg frente a text-sm) y separación entre
     // filas mayor que la del título a sus tarjetas: así cada fila se lee como un grupo (ley de proximidad).
-    <section aria-labelledby={headingId} className="mb-9 px-4 sm:mb-10 sm:px-6">
+    <section
+      aria-labelledby={headingId}
+      aria-describedby={description ? descriptionId : undefined}
+      className="mb-9 px-4 sm:mb-10 sm:px-6"
+    >
       {/* `md:min-h-10`: la altura de las flechas queda reservada aunque no se pinten (el título no salta). */}
       <div className="mb-3 flex items-center justify-between gap-4 md:min-h-10">
         <div className="flex min-w-0 items-center gap-3">
@@ -165,6 +176,12 @@ export function PosterRow<T extends { id: number }>({ title, items, renderItem, 
           )}
         </div>
       </div>
+
+      {description && (
+        <p id={descriptionId} className="-mt-2 mb-3 text-sm text-muted md:-mt-1">
+          {description}
+        </p>
+      )}
 
       {/* Márgenes negativos: el scroll llega hasta el borde de la pantalla, pero las tarjetas arrancan alineadas con el título. */}
       <ul

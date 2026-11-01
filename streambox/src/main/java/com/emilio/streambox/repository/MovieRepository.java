@@ -277,20 +277,23 @@ public interface MovieRepository
 
     /**
      * Devuelve los ids de las películas <strong>recomendadas</strong> a un
-     * usuario según los géneros de lo que le gusta, ya ordenados de más a menos
-     * recomendable.
+     * usuario según los géneros de lo que le gusta y de sus géneros favoritos,
+     * ya ordenados de más a menos recomendable.
      *
      * <p>
      * <strong>Criterio</strong> (primera versión, sin IA):
      * </p>
      * <ol>
-     * <li>Cada género recibe un <em>peso</em>: cuántos de los títulos que le
-     * gustan al usuario lo tienen. Cuentan sus «me gusta» de películas
-     * <em>y</em> de series, porque el catálogo de géneros es común y un
-     * usuario al que le gustan series de terror querrá ver películas de
+     * <li>Cada género recibe un <em>peso</em> ({@link #GENRE_WEIGHTS}):
+     * cuántos de los títulos que le gustan al usuario lo tienen, <strong>más
+     * {@value #FAVORITE_GENRE_WEIGHT} si es uno de sus géneros
+     * favoritos</strong> («Tus gustos», V11). Cuentan sus «me gusta» de
+     * películas <em>y</em> de series, porque el catálogo de géneros es común y
+     * un usuario al que le gustan series de terror querrá ver películas de
      * terror. De las series solo cuentan las visibles (con episodios), para
      * que la recomendación se base exactamente en lo que el usuario ve en su
-     * sección «Te gusta».</li>
+     * sección «Te gusta». Con solo géneros favoritos (sin ningún «me gusta»)
+     * también hay recomendaciones: es el caso de una cuenta nueva.</li>
      * <li>La puntuación de cada película candidata es la <strong>suma de los
      * pesos de sus géneros</strong>. Por tanto, una película que comparte dos
      * géneros con un título que te gusta suma por los dos (cuenta 2): cuantos
@@ -307,13 +310,16 @@ public interface MovieRepository
      * <p>
      * <strong>Cómo funciona la consulta.</strong> La subconsulta {@code pesos}
      * reúne con {@code UNION ALL} una fila por cada pareja («me gusta»,
-     * género) de películas y de series (clave primaria de las tablas de unión)
-     * y la agrupa por género. Después se une con {@code movie_genres} por
-     * {@code genre_id} (índice {@code idx_movie_genres_genre_id}): cada fila del
-     * join es un género que la candidata comparte, así que {@code SUM(peso)}
-     * por película es la puntuación. El {@code NOT EXISTS} usa la clave primaria
+     * género) de películas y de series (clave primaria de las tablas de unión),
+     * con valor 1, y una por cada género favorito, con valor
+     * {@value #FAVORITE_GENRE_WEIGHT}, y las suma por género. Después se une con
+     * {@code movie_genres} por {@code genre_id} (índice
+     * {@code idx_movie_genres_genre_id}): cada fila del join es un género que la
+     * candidata comparte, así que {@code SUM(peso)} por película es la
+     * puntuación. El {@code NOT EXISTS} usa la clave primaria
      * {@code (user_id, movie_id)} de {@code user_liked_movies}. Sin ningún «me
-     * gusta», {@code pesos} está vacía y el resultado también.
+     * gusta» ni género favorito, {@code pesos} está vacía y el resultado
+     * también.
      * </p>
      *
      * <p>
@@ -330,10 +336,10 @@ public interface MovieRepository
      * @param userId identificador del usuario
      * @param limit  número máximo de ids devueltos (lo valida el servicio)
      * @return ids de las películas recomendadas, en orden; vacío si no tiene
-     *         «me gusta» o no hay candidatas
+     *         «me gusta» ni géneros favoritos, o no hay candidatas
      */
     @Query(value = "SELECT mg.movie_id"
-            + " FROM (" + LIKED_GENRE_WEIGHTS + ") pesos"
+            + " FROM (" + GENRE_WEIGHTS + ") pesos"
             + " JOIN movie_genres mg ON mg.genre_id = pesos.genre_id"
             + " JOIN movies m ON m.id = mg.movie_id"
             + " WHERE NOT EXISTS (SELECT 1 FROM user_liked_movies ya"
@@ -344,27 +350,64 @@ public interface MovieRepository
     List<Long> findRecommendedMovieIds(@Param("userId") Long userId, @Param("limit") int limit);
 
     /**
+     * Cuántos «me gusta» vale un género favorito en {@link #GENRE_WEIGHTS}.
+     *
+     * <p>
+     * <b>Por qué 2</b> (decisión del autor): un género elegido a propósito dice
+     * más de los gustos de alguien que un solo «me gusta» (que suma 1 a cada
+     * género del título, aunque sea secundario), pero no debe tapar lo que el
+     * usuario demuestra con el uso: en cuanto tres títulos que le gustaron
+     * comparten un género que no eligió, ese género ya pesa más que uno
+     * elegido. Para una cuenta nueva, sin «me gusta», da igual el valor: solo
+     * cuentan los favoritos y entre ellos pesan lo mismo.
+     * </p>
+     */
+    int FAVORITE_GENRE_WEIGHT = 2;
+
+    /**
      * Subconsulta común a las recomendaciones de películas y de series
      * ({@code SeriesRepository.findRecommendedSeriesIds}): una fila por género
-     * de los títulos que le gustan al usuario {@code :userId}, con su
-     * {@code peso} (cuántos de esos títulos lo tienen). Las series que le
-     * gustan pero están ocultas (sin episodios) no cuentan: el {@code EXISTS}
-     * se resuelve con el índice único de {@code episodes}, que empieza por
-     * {@code series_id}.
+     * con su {@code peso} para el usuario {@code :userId}.
+     *
+     * <p>
+     * <b>Fórmula:</b> peso de un género = número de títulos <em>visibles</em>
+     * que le gustan al usuario con ese género (películas, y series con al menos
+     * un episodio) + {@value #FAVORITE_GENRE_WEIGHT} si el género es uno de sus
+     * favoritos ({@code user_favorite_genres}, V11). Cada rama del
+     * {@code UNION ALL} aporta una fila por (título que le gusta, género) con
+     * valor 1, o por género favorito con valor {@value #FAVORITE_GENRE_WEIGHT},
+     * y {@code SUM} las junta por género. Tiene que ser {@code UNION ALL}: un
+     * {@code UNION} a secas quitaría las filas repetidas y un género gustado en
+     * dos títulos pesaría como uno.
+     * </p>
+     *
+     * <p>
+     * Las series que le gustan pero están ocultas (sin episodios) no cuentan:
+     * el {@code EXISTS} se resuelve con el índice único de {@code episodes},
+     * que empieza por {@code series_id}. Un género favorito sin títulos tampoco
+     * aporta nada en la práctica (no hay candidatas con él). Un género borrado
+     * deja de contar solo, porque la cascada de la V11 borra sus filas de
+     * favoritos. Las tres ramas parten de una clave primaria que empieza por
+     * {@code user_id}, así que su coste depende de lo que tiene el usuario, no
+     * del número de usuarios.
+     * </p>
      *
      * <p>
      * Es una constante para que las dos recomendaciones no puedan divergir en
-     * cómo pesan los géneros.
+     * cómo pesan los géneros. SQL estándar (portable a H2).
      * </p>
      */
-    String LIKED_GENRE_WEIGHTS = "SELECT gustos.genre_id, COUNT(*) AS peso FROM ("
-            + " SELECT g.genre_id FROM user_liked_movies l"
+    String GENRE_WEIGHTS = "SELECT gustos.genre_id, SUM(gustos.peso) AS peso FROM ("
+            + " SELECT g.genre_id, 1 AS peso FROM user_liked_movies l"
             + "   JOIN movie_genres g ON g.movie_id = l.movie_id"
             + "  WHERE l.user_id = :userId"
             + " UNION ALL"
-            + " SELECT g.genre_id FROM user_liked_series l"
+            + " SELECT g.genre_id, 1 AS peso FROM user_liked_series l"
             + "   JOIN series_genres g ON g.series_id = l.series_id"
             + "  WHERE l.user_id = :userId"
             + "    AND EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = l.series_id)"
+            + " UNION ALL"
+            + " SELECT f.genre_id, " + FAVORITE_GENRE_WEIGHT + " AS peso FROM user_favorite_genres f"
+            + "  WHERE f.user_id = :userId"
             + " ) gustos GROUP BY gustos.genre_id";
 }

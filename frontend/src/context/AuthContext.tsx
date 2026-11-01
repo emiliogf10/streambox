@@ -95,8 +95,14 @@ interface AuthContextValue {
    * (`PATCH /users/me`), sin volver a pedirlo ni pasar por «cargando». Se ignora
    * si es de otra cuenta o no hay usuario cargado (respuesta tardía de una
    * sesión anterior).
+   *
+   * También acepta una función que recibe el usuario MÁS RECIENTE y devuelve el
+   * nuevo (como el actualizador de `useState`). Es la forma correcta de cambiar
+   * un solo campo (p. ej. `genresOnboardingPending`): `{ ...user, campo }` con
+   * el `user` de cuando se pintó la pantalla devolvería a su valor anterior el
+   * nombre o el avatar si cambiaron mientras tanto (revisión de `security`).
    */
-  updateUser: (user: User) => void;
+  updateUser: (next: User | ((current: User) => User)) => void;
 }
 
 /**
@@ -311,10 +317,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySession, toast]);
 
   const updateUser = useCallback(
-    (next: User) => {
+    (next: User | ((current: User) => User)) => {
       const current = resultRef.current;
-      if (current?.epoch !== epochRef.current || current.user?.id !== next.id) return;
-      storeResult({ ...current, user: next });
+      if (current?.epoch !== epochRef.current || !current.user) return;
+      // La función recibe la copia de `resultRef` (la última guardada), no la del último render.
+      const updated = typeof next === 'function' ? next(current.user) : next;
+      // Mismo objeto = nada que cambiar (p. ej. el actualizador vio que ya estaba hecho): sin render de más.
+      if (updated === current.user || current.user.id !== updated.id) return;
+      storeResult({ ...current, user: updated });
     },
     [storeResult],
   );

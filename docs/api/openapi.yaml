@@ -243,6 +243,91 @@ paths:
       security:
       - cookieAuth: []
       - bearerAuth: []
+  /api/users/me/genres:
+    get:
+      tags:
+      - favorite-genre-controller
+      summary: Obtiene mis géneros favoritos
+      description: 'Devuelve los géneros favoritos del usuario autenticado («Tus gustos»), ordenados por nombre. Solo incluye
+        los que siguen teniendo algún título visible (una película o una serie con episodios): un favorito que se ha quedado
+        sin títulos no aparece (vuelve a aparecer si recupera alguno, y desaparece del todo al guardar otra lista). Vacía
+        si no ha elegido ninguno.'
+      operationId: getFavoriteGenres
+      responses:
+        '200':
+          description: Lista obtenida correctamente (puede estar vacía)
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GenreResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+    put:
+      tags:
+      - favorite-genre-controller
+      summary: Guarda mis géneros favoritos
+      description: 'Sustituye la lista entera de géneros favoritos del usuario autenticado. Admite una lista vacía (no tener
+        ninguno: «Ahora no» en la bienvenida o quitar los gustos en el perfil) o entre 3 y 5 ids distintos de géneros con
+        algún título (los de GET /api/users/me/genres/options). Cada género favorito pesa en las recomendaciones como 2 «me
+        gusta». Cualquier llamada válida, también con la lista vacía, cierra para siempre la pregunta de bienvenida (genresOnboardingPending
+        pasa a false en GET /api/users/me). Es idempotente: repetir la misma lista deja el mismo resultado.'
+      operationId: replaceFavoriteGenres
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FavoriteGenresRequest'
+        required: true
+      responses:
+        '200':
+          description: Lista guardada; el cuerpo es la lista resultante, igual que GET /api/users/me/genres
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GenreResponse'
+        '400':
+          description: 'Lista no válida (código VALIDATION_ERROR, motivo en validationErrors.genreIds): falta genreIds o es
+            null ("Indica los géneros: entre 3 y 5, o una lista vacía si no quieres elegir ninguno."), no está vacía ni tiene
+            entre 3 y 5 elementos ("Elige entre 3 y 5 géneros, o ninguno."), hay ids repetidos ("Hay géneros repetidos.")
+            o alguno es null, no existe o no tiene títulos ("Alguno de los géneros no existe o no tiene títulos."). Un id
+            que no es un número entero da 400 MALFORMED_REQUEST. La lista anterior no cambia'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: La cuenta ya no existe (se borró durante la petición)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
   /api/series/{seriesId}/episodes/{episodeId}:
     put:
       tags:
@@ -1856,7 +1941,9 @@ paths:
       - user-controller
       summary: Obtiene el usuario autenticado
       description: 'Devuelve la información del usuario asociado al token JWT utilizado en la petición, incluido su icono
-        de perfil (avatar: una clave o null).'
+        de perfil (avatar: una clave o null) y si tiene pendiente la pregunta de bienvenida de los géneros favoritos (genresOnboardingPending:
+        solo una cuenta USER que aún no ha contestado ni saltado la pregunta; nunca un ADMIN). Ese dato solo sale aquí y en
+        PATCH /api/users/me, no en el listado de usuarios.'
       operationId: getCurrentUser
       responses:
         '200':
@@ -1864,7 +1951,7 @@ paths:
           content:
             '*/*':
               schema:
-                $ref: '#/components/schemas/UserResponse'
+                $ref: '#/components/schemas/CurrentUserResponse'
         '401':
           description: El usuario no está autenticado
           content:
@@ -1897,7 +1984,7 @@ paths:
           content:
             '*/*':
               schema:
-                $ref: '#/components/schemas/UserResponse'
+                $ref: '#/components/schemas/CurrentUserResponse'
         '400':
           description: 'Datos no válidos (código VALIDATION_ERROR, un mensaje por campo en validationErrors): cuerpo sin username
             ni avatar (validationErrors.username = "Indica al menos un cambio: el nombre de usuario o el icono de perfil"),
@@ -1935,10 +2022,12 @@ paths:
       tags:
       - recommendation-controller
       summary: Obtiene mis recomendaciones
-      description: 'Devuelve películas y series recomendadas al usuario autenticado según los géneros de lo que le gusta:
-        cada género pesa tantos puntos como títulos con «me gusta» lo tienen y cada título suma los pesos de sus géneros.
-        No incluye lo que ya le gusta ni series sin episodios; a igual puntuación, primero lo añadido más recientemente y
-        después el id mayor. Si no tiene ningún «me gusta», basedOnLikes es false y las dos listas van vacías.'
+      description: 'Devuelve películas y series recomendadas al usuario autenticado según los géneros de lo que le gusta y
+        de sus géneros favoritos: cada género pesa tantos puntos como títulos visibles con «me gusta» lo tienen, más 2 si
+        es uno de sus géneros favoritos, y cada título suma los pesos de sus géneros. No incluye lo que ya le gusta ni series
+        sin episodios; a igual puntuación, primero lo añadido más recientemente y después el id mayor. basis indica en qué
+        se basan: GENRES (solo géneros favoritos), LIKES (solo «me gusta»), GENRES_AND_LIKES (los dos) o NONE (ni géneros
+        favoritos con títulos ni «me gusta» visibles: las dos listas van vacías).'
       operationId: getRecommendations
       parameters:
       - name: limit
@@ -2017,6 +2106,33 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/MovieResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+  /api/users/me/genres/options:
+    get:
+      tags:
+      - favorite-genre-controller
+      summary: Obtiene los géneros que puedo elegir como favoritos
+      description: 'Devuelve los géneros que tienen algún título visible (una película o una serie con episodios), ordenados
+        por nombre: son los únicos que admite PUT /api/users/me/genres. Un género sin títulos no se ofrece porque elegirlo
+        no daría ninguna recomendación.'
+      operationId: getFavoriteGenreOptions
+      responses:
+        '200':
+          description: Lista obtenida correctamente (puede estar vacía si el catálogo no tiene títulos)
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GenreResponse'
         '401':
           description: El usuario no está autenticado
           content:
@@ -2520,6 +2636,28 @@ components:
       required:
       - currentPassword
       - newPassword
+    FavoriteGenresRequest:
+      type: object
+      description: 'Lista completa de géneros favoritos: sustituye a la anterior.'
+      properties:
+        genreIds:
+          type: array
+          description: 'Ids de los géneros elegidos: entre 3 y 5 distintos, de géneros con algún título (los de GET /api/users/me/genres/options),
+            o una lista vacía para no tener ninguno.'
+          items:
+            type: integer
+            format: int64
+            example: 3
+      required:
+      - genreIds
+    GenreResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
     EpisodeRequest:
       type: object
       properties:
@@ -2655,14 +2793,6 @@ components:
       - imageUrl
       - releaseYear
       - title
-    GenreResponse:
-      type: object
-      properties:
-        id:
-          type: integer
-          format: int64
-        name:
-          type: string
     SeasonResponse:
       type: object
       properties:
@@ -2971,6 +3101,39 @@ components:
           - crown
           - null
           example: rocket
+    CurrentUserResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum:
+          - USER
+          - ADMIN
+        createdAt:
+          type: string
+          format: date-time
+        avatar:
+          type:
+          - string
+          - 'null'
+          description: 'Clave del icono de perfil elegido (una de las de UpdateProfileRequest.avatar), o null si no eligió
+            ninguno: entonces se muestra la inicial del nombre. Trátala como texto: si el cliente no conoce la clave, debe
+            mostrar también la inicial.'
+          example: rocket
+        genresOnboardingPending:
+          type: boolean
+          description: 'true si hay que hacerle la pregunta de bienvenida de los géneros favoritos («¿qué géneros te gustan?»):
+            solo una cuenta USER que aún no la ha contestado ni saltado. Un ADMIN nunca la tiene pendiente, y las cuentas
+            que existían antes de esta funcionalidad tampoco. Pasa a false para siempre con el primer PUT /api/users/me/genres,
+            también con la lista vacía («Ahora no»).'
+          example: false
     UserResponse:
       type: object
       properties:
@@ -3000,10 +3163,18 @@ components:
     RecommendationsResponse:
       type: object
       properties:
-        basedOnLikes:
-          type: boolean
-          description: true si las recomendaciones salen de los «me gusta» del usuario; false si no tiene ninguno visible
-            (las dos listas van vacías)
+        basis:
+          type: string
+          description: 'En qué se basan las recomendaciones: NONE (ni géneros favoritos con títulos ni «me gusta» visibles;
+            las dos listas van vacías), GENRES (solo los géneros favoritos), LIKES (solo los «me gusta») o GENRES_AND_LIKES
+            (los dos). Distinto de NONE no garantiza que haya títulos: si ya le gusta todo lo de sus géneros, las listas pueden
+            ir vacías.'
+          enum:
+          - NONE
+          - GENRES
+          - LIKES
+          - GENRES_AND_LIKES
+          example: GENRES
         movies:
           type: array
           description: Películas recomendadas, de más a menos recomendable (como mucho limit)

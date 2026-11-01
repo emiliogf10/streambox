@@ -235,13 +235,13 @@ describe('LikeButton: caché', () => {
       { [PUT_SERIES]: () => noContentResponse(), [DELETE_MOVIE]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom') },
     );
 
-    queryClient.setQueryData(recommendations, makeRecommendations({ basedOnLikes: true, movies: [makeMovie({ id: 9 })] }));
+    queryClient.setQueryData(recommendations, makeRecommendations({ basis: 'LIKES', movies: [makeMovie({ id: 9 })] }));
     await user.click(screen.getByRole('button', { name: SERIES_NOT_LIKED }));
     await screen.findByText(likedMessage('Serie Uno'));
     await waitFor(() => expect(queryClient.getQueryData(recommendations)).toBeUndefined());
 
     // Un fallo también: si el servidor llegó a aplicarlo, las de antes serían falsas.
-    queryClient.setQueryData(recommendations, makeRecommendations({ basedOnLikes: true }));
+    queryClient.setQueryData(recommendations, makeRecommendations({ basis: 'LIKES' }));
     await user.click(screen.getByRole('button', { name: MOVIE_LIKED }));
     await screen.findByText(/El servidor ha tenido un problema/);
     await waitFor(() => expect(queryClient.getQueryData(recommendations)).toBeUndefined());

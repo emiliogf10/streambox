@@ -25,6 +25,7 @@ import {
   routeFetch,
 } from '../test/helpers';
 import type { QueryClient } from '@tanstack/react-query';
+import { GENRES_INVITE_TITLE } from '../components/GenresInviteCard';
 import { RECOMMENDATIONS_LIMIT } from '../hooks/useRecommendations';
 import { queryKeys } from '../lib/queryKeys';
 import type { TitleLists } from '../lib/titleLists';
@@ -165,11 +166,14 @@ describe('HomePage: contenido', () => {
   it('jerarquía de encabezados: un único h1 y, debajo, banner y filas como h2 (sin h3 sueltos)', async () => {
     renderHome();
     await screen.findByRole('region', { name: 'Novedades' });
+    // Sin géneros favoritos ni «Me gusta» (`basis: 'NONE'`), la tarjeta que invita a elegirlos es otra sección h2.
+    await screen.findByRole('region', { name: GENRES_INVITE_TITLE });
 
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'Estreno estrella',
       'Novedades',
+      GENRES_INVITE_TITLE,
       'Terror',
     ]);
     // Los antiguos paneles "Sinopsis / Reparto / Ficha" (h3) ya no existen.
@@ -264,9 +268,11 @@ describe('HomePage: fila «Series»', () => {
     renderHome();
 
     const row = await screen.findByRole('region', { name: 'Series' });
+    await screen.findByRole('region', { name: GENRES_INVITE_TITLE });
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'Estreno estrella',
       'Novedades',
+      GENRES_INVITE_TITLE,
       'Series',
       'Terror',
     ]);
@@ -302,10 +308,12 @@ describe('HomePage: fila «Series»', () => {
       'Todavía no hay series visibles, así que los usuarios no ven esta fila. Una serie aparece en cuanto tiene al menos un episodio.',
     );
     expect(within(row).getByRole('link', { name: 'Gestionar series' })).toHaveAttribute('href', '/admin/series');
-    // En su sitio de siempre (tras «Novedades») y sin tapar el resto de la portada.
+    // En su sitio de siempre (tras «Novedades» y lo personal) y sin tapar el resto de la portada.
+    await screen.findByRole('region', { name: GENRES_INVITE_TITLE });
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'Estreno estrella',
       'Novedades',
+      GENRES_INVITE_TITLE,
       'Series',
       'Terror',
     ]);
@@ -348,7 +356,7 @@ describe('HomePage: fila «Series»', () => {
 
 describe('HomePage: «Recomendadas para ti»', () => {
   const liked = makeRecommendations({
-    basedOnLikes: true,
+    basis: 'LIKES',
     movies: [makeMovie({ id: 20, title: 'Recomendada', genres: [terror] })],
     series: [makeSeries({ id: 21, title: 'Serie recomendada' })],
   });
@@ -379,7 +387,7 @@ describe('HomePage: «Recomendadas para ti»', () => {
     ['un usuario', 'USER'],
     ['un administrador', 'ADMIN'],
   ] as const)(
-    'a %s sin ningún «Me gusta» no se le enseña ni se le anuncia nada de las recomendaciones en ningún momento',
+    'a %s sin géneros favoritos ni «Me gusta» no se le anuncia nada mientras cargan y después solo ve la invitación a elegir géneros',
     async (_who, role) => {
       let answer: (response: Response) => void = () => {};
       routeFetch(fetchMock, {
@@ -388,9 +396,9 @@ describe('HomePage: «Recomendadas para ti»', () => {
         [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
         [RECOMMENDATIONS]: () => new Promise<Response>((resolve) => (answer = resolve)),
       });
-      // Cualquier cambio del DOM que deje a la vista (o en el texto que lee un lector de pantalla,
-      // `sr-only` incluido) algo de las recomendaciones queda anotado: así se cubre TODO el recorrido,
-      // no solo los instantes en que el test mira.
+      // Mientras cargan, cualquier cambio del DOM que deje a la vista (o en el texto que lee un lector de
+      // pantalla, `sr-only` incluido) algo de las recomendaciones queda anotado: así se cubre TODO el
+      // recorrido de la carga, no solo los instantes en que el test mira.
       const seen: string[] = [];
       const mentionsRecommendations = () => /recomend/i.test(document.body.textContent ?? '');
       const observer = new MutationObserver(() => {
@@ -409,22 +417,38 @@ describe('HomePage: «Recomendadas para ti»', () => {
           ),
         );
         expect(screen.queryByText('Cargando recomendaciones...')).not.toBeInTheDocument();
-
-        // Llega la respuesta (`basedOnLikes: false`): tampoco aparece nada.
-        answer(jsonResponse(makeRecommendations()));
-        await waitFor(() =>
-          expect(queryClient.getQueryState(queryKeys.recommendations.list(RECOMMENDATIONS_LIMIT))?.status).toBe(
-            'success',
-          ),
-        );
-        expect(screen.queryByRole('region', { name: /recomendadas para ti/ })).not.toBeInTheDocument();
-        expect(mentionsRecommendations()).toBe(false);
         expect(seen).toEqual([]);
       } finally {
         observer.disconnect();
       }
+
+      // Llega la respuesta (`basis: 'NONE'`): ninguna fila, solo la tarjeta que lleva a «Tus gustos» del perfil.
+      answer(jsonResponse(makeRecommendations()));
+      const invite = await screen.findByRole('region', { name: GENRES_INVITE_TITLE });
+      expect(within(invite).getByRole('link', { name: 'Elegir mis géneros' })).toHaveAttribute(
+        'href',
+        '/perfil#tus-gustos',
+      );
+      expect(screen.queryByRole('region', { name: /recomendadas para ti/ })).not.toBeInTheDocument();
+      expect(screen.queryByText('Cargando recomendaciones...')).not.toBeInTheDocument();
     },
   );
+
+  it('sin películas en la portada no invita a elegir géneros (no habría ninguno que elegir)', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([])),
+      [RECOMMENDATIONS]: () => jsonResponse(makeRecommendations()),
+    });
+    const queryClient = createTestQueryClient();
+    renderHome(queryClient);
+
+    expect(await screen.findByRole('heading', { name: 'El catálogo está vacío' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(queryClient.getQueryState(queryKeys.recommendations.list(RECOMMENDATIONS_LIMIT))?.status).toBe('success'),
+    );
+    expect(screen.queryByRole('region', { name: GENRES_INVITE_TITLE })).not.toBeInTheDocument();
+  });
 
   it('la petición sale a la vez que la del catálogo, no cuando este ya ha llegado (así no empuja la portada)', async () => {
     routeFetch(fetchMock, {
@@ -449,6 +473,23 @@ describe('HomePage: «Recomendadas para ti»', () => {
       // como cuando se vuelve a la portada desde la página de un título con los «Me gusta» ya cargados.
       [PAGE_0]: () => {
         queryClient.setQueryData(queryKeys.likes.all, likes);
+        return jsonResponse(makePage([hero, ...others]));
+      },
+      [RECOMMENDATIONS]: () => new Promise<Response>(() => {}),
+    });
+    renderHome(queryClient);
+
+    await screen.findByRole('region', { name: 'Novedades' });
+    const skeleton = await screen.findByText('Cargando recomendaciones...');
+    expect(skeleton.closest('[role="status"]')).toBeInTheDocument();
+  });
+
+  it('si la caché ya sabe que tiene géneros favoritos (vuelve tras elegirlos), reserva el hueco y anuncia la carga', async () => {
+    const queryClient = createTestQueryClient();
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => {
+        queryClient.setQueryData(queryKeys.favoriteGenres.mine, [terror]);
         return jsonResponse(makePage([hero, ...others]));
       },
       [RECOMMENDATIONS]: () => new Promise<Response>(() => {}),
@@ -496,7 +537,7 @@ describe('HomePage: «Recomendadas para ti»', () => {
       ...FAVORITES,
       [PAGE_0]: () => jsonResponse(makePage([])),
       [SERIES_ROW]: () => jsonResponse(makePage([makeSeries({ id: 10, title: 'Serie nueva' })])),
-      [RECOMMENDATIONS]: () => jsonResponse(makeRecommendations({ basedOnLikes: true, series: liked.series })),
+      [RECOMMENDATIONS]: () => jsonResponse(makeRecommendations({ basis: 'LIKES', series: liked.series })),
     });
     renderHome();
 

@@ -32,7 +32,10 @@ import lombok.Setter;
  * <p>
  * Contiene la información necesaria para identificar y autenticar
  * a un usuario, así como su rol, su icono de perfil, si su email está
- * verificado y su fecha de creación.
+ * verificado, si ya se le hizo la pregunta de sus géneros favoritos y su
+ * fecha de creación. Los géneros favoritos en sí no se mapean aquí: se leen y
+ * escriben con SQL directo sobre {@code user_favorite_genres}
+ * ({@code GenreRepository}), como los «me gusta».
  * </p>
  *
  * <p>
@@ -151,6 +154,31 @@ public class User {
      */
     @Column(name = "email_verified_at")
     private Instant emailVerifiedAt;
+
+    /**
+     * Instante en que se cerró la pregunta de bienvenida sobre los géneros
+     * favoritos (tanto si eligió géneros como si pulsó «Ahora no»), o
+     * {@code null} si aún no se le ha hecho.
+     *
+     * <p>
+     * Columna {@code genres_onboarded_at} de la {@code V11}. Esa migración la
+     * rellenó para <strong>todas</strong> las cuentas que ya existían (decisión
+     * del autor: quien ya usaba la aplicación no ve la pregunta, solo una
+     * tarjeta en el inicio). Una cuenta nueva nace con {@code null}: no tiene
+     * valor por defecto ni lo asigna Hibernate. Para cerrarla se usa
+     * {@code UserRepository.markGenresOnboarded}, que no pisa una fecha
+     * anterior; como la entidad usa {@code @DynamicUpdate}, guardar otros
+     * cambios del usuario con este campo desfasado en memoria no lo devuelve a
+     * {@code null}.
+     * </p>
+     *
+     * <p>
+     * Que la pregunta esté <em>pendiente</em> depende además del rol (un ADMIN
+     * nunca la tiene pendiente): eso lo decide el servicio, no la entidad.
+     * </p>
+     */
+    @Column(name = "genres_onboarded_at")
+    private Instant genresOnboardedAt;
 
     /**
      * Instante en el que se creó el registro.

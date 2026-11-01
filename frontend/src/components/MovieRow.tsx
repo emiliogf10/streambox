@@ -8,6 +8,8 @@ import { PosterRow } from './PosterRow';
 interface Props {
   title: string;
   movies: Movie[];
+  /** Frase opcional bajo el título que explica la fila (ver `PosterRow`). */
+  description?: string;
 }
 
 /**
@@ -17,6 +19,13 @@ interface Props {
  *
  * @param props el título y la lista de películas
  */
-export function MovieRow({ title, movies }: Props) {
-  return <PosterRow title={title} items={movies} renderItem={(movie) => <MovieCard movie={movie} />} />;
+export function MovieRow({ title, movies, description }: Props) {
+  return (
+    <PosterRow
+      title={title}
+      items={movies}
+      description={description}
+      renderItem={(movie) => <MovieCard movie={movie} />}
+    />
+  );
 }

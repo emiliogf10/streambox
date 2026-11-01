@@ -219,9 +219,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * una película, o de una serie con al menos un episodio.
      *
      * <p>
-     * Es lo que decide {@code basedOnLikes} en las recomendaciones: exactamente
+     * Junto con {@code hasFavoriteGenres}, decide el {@code basis} de las
+     * recomendaciones (antes {@code basedOnLikes}): exactamente
      * los mismos «me gusta» que alimentan los pesos de géneros
-     * ({@link MovieRepository#LIKED_GENRE_WEIGHTS}) y que el usuario ve en su
+     * ({@link MovieRepository#GENRE_WEIGHTS}) y que el usuario ve en su
      * sección «Te gusta». Un «me gusta» de una serie que ahora está oculta no
      * cuenta. Es una sola consulta con dos {@code EXISTS}, que paran en la
      * primera fila (clave primaria {@code (user_id, ...)} y el índice único de
@@ -235,4 +236,72 @@ public interface UserRepository extends JpaRepository<User, Long> {
             + " OR EXISTS (SELECT 1 FROM user_liked_series l WHERE l.user_id = :userId"
             + "   AND EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = l.series_id))", nativeQuery = true)
     boolean hasVisibleLikes(@Param("userId") Long userId);
+
+    // ------------------------------------------------------------------
+    // Géneros favoritos («Tus gustos», V11). Las filas de user_favorite_genres
+    // se leen y escriben en GenreRepository (devuelven géneros); aquí solo lo
+    // que pregunta por el usuario.
+    // ------------------------------------------------------------------
+
+    /**
+     * Indica si el usuario tiene algún género favorito.
+     *
+     * <p>
+     * Junto con {@link #hasVisibleLikes(Long)} permite saber en qué se basan
+     * sus recomendaciones (gustos, «me gusta», ambos o nada) sin lanzar las
+     * agregaciones: un usuario sin ninguna de las dos señales no tiene
+     * recomendaciones. No mira si esos géneros tienen títulos visibles:
+     * {@code PUT /api/users/me/genres} solo admite géneros con títulos, y si
+     * uno se queda vacío después, simplemente no aporta candidatas. Para en la
+     * primera fila de la clave primaria {@code (user_id, genre_id)}.
+     * </p>
+     *
+     * @param userId identificador del usuario
+     * @return {@code true} si tiene al menos un género favorito
+     */
+    @Query(value = "SELECT EXISTS (SELECT 1 FROM user_favorite_genres WHERE user_id = :userId)", nativeQuery = true)
+    boolean hasFavoriteGenres(@Param("userId") Long userId);
+
+    /**
+     * Cierra la pregunta de bienvenida de los géneros favoritos (rellena
+     * {@code genres_onboarded_at} si estaba nula) y, de paso, <strong>bloquea
+     * la fila del usuario</strong> hasta el final de la transacción.
+     *
+     * <p>
+     * <b>No pisa una fecha anterior</b>: {@code COALESCE} conserva la que hubiera,
+     * así que contestar la pregunta, saltarla («Ahora no») o editar después los
+     * gustos en el perfil dejan siempre la fecha de la primera vez.
+     * </p>
+     *
+     * <p>
+     * <b>Por qué no lleva {@code AND genres_onboarded_at IS NULL}</b>: así el
+     * {@code UPDATE} toca la fila <em>siempre</em> (aunque el valor no cambie,
+     * PostgreSQL y H2 la bloquean igual) y sirve de cerrojo para sustituir la
+     * lista de favoritos. El servicio debe llamarlo <strong>antes</strong> de
+     * {@code GenreRepository.clearFavorites}/{@code addFavorites}, en la misma
+     * transacción: dos {@code PUT} simultáneos del mismo usuario quedan en fila
+     * y gana entero el último. Sin el cerrojo, el segundo podía no ver (y por
+     * tanto no borrar) las filas que el primero insertó y confirmó mientras
+     * tanto, y la lista acabaría siendo la mezcla de las dos, con más de 5
+     * géneros. Además, si devuelve {@code 0} la cuenta ya no existe (se borró
+     * durante la petición): el servicio puede responder 404 antes de insertar
+     * nada.
+     * </p>
+     *
+     * <p>
+     * Es un {@code UPDATE} de una sola columna, así que no pisa nada que otra
+     * petición haya cambiado en la fila. No vacía la sesión de Hibernate: si el
+     * servicio tiene ese {@code User} cargado, su {@code genresOnboardedAt} en
+     * memoria queda desfasado (y, por {@code @DynamicUpdate}, guardar después
+     * otros cambios no lo devuelve a {@code null}).
+     * </p>
+     *
+     * @param userId id de la cuenta
+     * @param now    instante en que se cierra la pregunta (del {@code Clock} del servicio)
+     * @return {@code 1} si la cuenta existe (la pregunta queda cerrada, ahora o
+     *         desde antes); {@code 0} si no existe
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("update User u set u.genresOnboardedAt = coalesce(u.genresOnboardedAt, :now) where u.id = :userId")
+    int markGenresOnboarded(@Param("userId") Long userId, @Param("now") Instant now);
 }

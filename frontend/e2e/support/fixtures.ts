@@ -5,7 +5,10 @@
  *    correo YA CONFIRMADO (el enlace se lee de la bandeja del backend E2E, ver
  *    `createUserWithToken`), con su JWT (el valor de la cookie de sesión que fijó
  *    el login). Sin confirmar, el login daría 401 (como una contraseña incorrecta).
- *    Cada test tiene la suya, por eso son independientes y paralelizables.
+ *    Cada test tiene la suya, por eso son independientes y paralelizables. Con la pregunta de bienvenida
+ *    («¿qué géneros te gustan?») ya CERRADA (ver `createUserWithToken`): si no, al abrir la app con su
+ *    sesión iría a `/bienvenida`. Quien registre usuarios a mano y entre con el formulario usa
+ *    {@link skipGenresQuestionIfAsked}.
  *  - `signIn`: función que deja la sesión abierta en el navegador sin pasar por
  *    el formulario (siembra en el contexto del navegador la cookie `streambox_token`,
  *    HttpOnly como la real, que es lo que haría el login). Solo esa: sin el refresh
@@ -64,6 +67,72 @@ export { expect };
 export async function sessionCookie(page: Page) {
   const cookies = await page.context().cookies();
   return cookies.find((cookie) => cookie.name === SESSION_COOKIE);
+}
+
+/** `<h1>` de la pregunta de bienvenida (`/bienvenida`, `WelcomePage`). */
+export const WELCOME_TITLE = 'Cuéntanos qué te gusta';
+
+/**
+ * Tras enviar el formulario de login: si la cuenta aún tiene la pregunta de bienvenida pendiente (toda cuenta
+ * nueva que nunca la contestó), pulsa «Ahora no» y espera a salir de `/bienvenida`; si no, no hace nada.
+ *
+ * Es determinista: a quien tiene la pregunta pendiente la guarda le lleva a `/bienvenida` ANTES de pintar la
+ * portada (su `<h1>` «Catálogo de películas» nunca llega a existir), así que lo primero que aparezca de los dos
+ * dice en qué caso se está. Para los tests que entran con una cuenta registrada a mano y no tratan de la
+ * bienvenida (la prueban `favorite-genres.spec.ts`).
+ */
+export async function skipGenresQuestionIfAsked(page: Page): Promise<void> {
+  const welcome = page.getByRole('heading', { level: 1, name: WELCOME_TITLE });
+  const home = page.getByRole('heading', { level: 1, name: 'Catálogo de películas' });
+  await expect(welcome.or(home)).toBeAttached();
+  if (await welcome.isVisible()) {
+    await page.getByRole('button', { name: 'Ahora no' }).click();
+    await expect(page).not.toHaveURL(/\/bienvenida/);
+  }
+}
+
+/** Ruta de las recomendaciones de la portada (`useRecommendations`). */
+const RECOMMENDATIONS_PATH = '/api/users/me/recommendations';
+
+/**
+ * Abre la portada, espera a la respuesta del servidor a las recomendaciones y devuelve su `basis` (en qué se
+ * basan: `NONE`, `GENRES`, `LIKES` o `GENRES_AND_LIKES`). La usan `likes.spec.ts` y `favorite-genres.spec.ts`.
+ *
+ * **Por qué se espera a la respuesta.** No vale esperar a que se vaya un esqueleto: a quien no tiene «Me gusta»
+ * ni géneros favoritos no se le pinta ninguno (ver `RecommendedRows`), así que un «no hay filas» podría
+ * comprobarse antes de que llegaran. Se escucha ANTES de navegar porque la portada la pide en su primer render,
+ * en paralelo con el catálogo.
+ *
+ * **Por qué el cuerpo se lee DENTRO del predicado.** La primera petición a veces se CANCELA a medio camino
+ * (visto en la traza: 200 y luego `net::ERR_ABORTED`). La lanza la precarga (`usePrefetchRecommendations`, sin
+ * observadores); cuando se montan las filas, el `StrictMode` de React en desarrollo (el E2E usa Vite en modo
+ * desarrollo) monta, desmonta y vuelve a montar su `useQuery`; al quedarse sin observadores con la petición en
+ * vuelo y el `signal` ya usado, TanStack Query la aborta y, al volver a montarse, la repite
+ * (`Query.removeObserver`). Si las cabeceras ya habían llegado, Playwright entrega esa respuesta, pero su cuerpo
+ * nunca terminó de recibirse: leerlo después fallaba con «Network.getResponseBody: No data found for resource»
+ * (2 de cada 3 veces). Ahora una respuesta cuyo cuerpo no se puede leer no cuenta y se espera a la repetición,
+ * que es la que pinta la interfaz.
+ */
+export async function openHomeAndWaitForRecommendations(page: Page): Promise<string> {
+  let basis: string | undefined;
+  const answered = page.waitForResponse(async (response) => {
+    if (response.request().method() !== 'GET' || new URL(response.url()).pathname !== RECOMMENDATIONS_PATH) {
+      return false;
+    }
+    try {
+      basis = ((await response.json()) as { basis?: string }).basis;
+      return true;
+    } catch {
+      // Petición cancelada por la aplicación: su cuerpo no existe. La app la repite; se espera a esa.
+      return false;
+    }
+  });
+  await page.goto('/');
+  const response = await answered;
+  expect(response.status(), 'Las recomendaciones deben responder 200').toBe(200);
+  await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
+  if (basis === undefined) throw new Error('La respuesta de las recomendaciones no trae `basis`');
+  return basis;
 }
 
 /** Escapa un texto para usarlo literalmente dentro de una expresión regular. */

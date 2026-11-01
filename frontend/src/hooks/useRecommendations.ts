@@ -4,7 +4,7 @@ import { apiFetch, getErrorMessage } from '../lib/api';
 import { loadStatusOf } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
 import type { TitleLists } from '../lib/titleLists';
-import type { Recommendations } from '../lib/types';
+import type { Genre, Recommendations } from '../lib/types';
 
 /**
  * Cuántos títulos de cada tipo se piden. Doce, como «Películas similares»:
@@ -14,7 +14,7 @@ import type { Recommendations } from '../lib/types';
 export const RECOMMENDATIONS_LIMIT = 12;
 
 /** Respuesta vacía mientras no ha llegado la de verdad (misma identidad en cada render). */
-const NONE: Recommendations = { basedOnLikes: false, movies: [], series: [] };
+const NONE: Recommendations = { basis: 'NONE', movies: [], series: [] };
 
 /**
  * Opciones de la consulta de recomendaciones, compartidas por
@@ -65,29 +65,42 @@ function cacheKnowsUserHasLikes(lists: TitleLists | undefined): boolean {
 }
 
 /**
+ * `true` si la caché YA sabe que el usuario tiene géneros favoritos (la entrada
+ * `queryKeys.favoriteGenres.mine`, que llenan «Tus gustos» del perfil y la
+ * respuesta del `PUT` al guardarlos). Mismo papel que
+ * {@link cacheKnowsUserHasLikes}: es el caso de volver a la portada justo tras
+ * elegirlos, en el que casi seguro llegan filas.
+ */
+function cacheKnowsUserHasFavoriteGenres(genres: Genre[] | undefined): boolean {
+  return genres !== undefined && genres.length > 0;
+}
+
+/**
  * Recomendaciones del usuario de la sesión para la portada
- * (`GET /api/users/me/recommendations?limit=12`): títulos que comparten géneros
- * con lo que le gusta, sin lo que ya le gusta, en dos listas ya ordenadas por
- * el servidor.
+ * (`GET /api/users/me/recommendations?limit=12`): títulos de sus géneros
+ * favoritos y de los géneros de lo que le gusta, sin lo que ya le gusta, en dos
+ * listas ya ordenadas por el servidor, y en qué se basan (`basis`).
  *
  * - Se guardan en `queryKeys.recommendations.list(12)`. `useLikes` las
- *   **descarta** tras cada «Me gusta» (`resetQueries`): al volver a la portada
+ *   **descarta** tras cada «Me gusta», y `useSaveFavoriteGenres` tras guardar
+ *   los géneros favoritos (`resetQueries`): al volver a la portada
  *   se piden de nuevo y nunca se ve un instante las de antes, que podrían
  *   «recomendar» el título al que se acaba de dar «Me gusta». Tras un cambio
  *   del catálogo solo se invalidan (`keysAffectedBy`): ahí unas un poco viejas
  *   mientras llegan las nuevas no dicen nada falso sobre el usuario.
  * - `reserveSpace`: mientras cargan, si hay motivo para esperar algo y por
  *   tanto para reservar el hueco con un esqueleto anunciado:
- *   - la caché ya sabe que el usuario tiene «Me gusta» (ver
- *     {@link cacheKnowsUserHasLikes}). Es justo el caso de volver a la portada
- *     tras dar un «Me gusta»: casi seguro llegan filas, y sin hueco empujarían
- *     hacia abajo la fila «Series» que ya se estaba viendo;
+ *   - la caché ya sabe que el usuario tiene «Me gusta» o géneros favoritos
+ *     (ver {@link cacheKnowsUserHasLikes} y {@link cacheKnowsUserHasFavoriteGenres}).
+ *     Es justo el caso de volver a la portada tras dar un «Me gusta» o elegir
+ *     sus géneros: casi seguro llegan filas, y sin hueco empujarían hacia abajo
+ *     la fila «Series» que ya se estaba viendo;
  *   - o se está reintentando tras un error («Reintentar»): el usuario ha pedido
  *     algo y debe ver y oír que está en marcha, y el foco que `useRetryFocus`
  *     deja en el contenedor necesita que este siga visible.
  *
- *   En cualquier otro caso (la primera carga de quien no tiene «Me gusta», o
- *   no se sabe), nada: ni hueco ni `role="status"`.
+ *   En cualquier otro caso (la primera carga de quien no tiene ni lo uno ni lo
+ *   otro, o no se sabe), nada: ni hueco ni `role="status"`.
  * - Dato PERSONAL: la caché se vacía al cambiar de sesión, nunca se ven las del
  *   usuario anterior.
  * - Reintentos: los de la aplicación (uno, solo en red/5xx).
@@ -112,7 +125,8 @@ export function useRecommendations() {
     reserveSpace:
       status === 'loading' &&
       (query.errorUpdateCount > 0 ||
-        cacheKnowsUserHasLikes(queryClient.getQueryData<TitleLists>(queryKeys.likes.all))),
+        cacheKnowsUserHasLikes(queryClient.getQueryData<TitleLists>(queryKeys.likes.all)) ||
+        cacheKnowsUserHasFavoriteGenres(queryClient.getQueryData<Genre[]>(queryKeys.favoriteGenres.mine))),
     reload,
   };
 }

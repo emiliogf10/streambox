@@ -11,6 +11,7 @@ import { MovieCard } from '../components/MovieCard';
 import { SeriesCard } from '../components/SeriesCard';
 import { UserAvatar } from '../components/UserAvatar';
 import { AccountCard } from '../components/profile/AccountCard';
+import { FavoriteGenresSection } from '../components/profile/FavoriteGenresSection';
 import { LikedTitlesSection } from '../components/profile/LikedTitlesSection';
 import { ProfileCard } from '../components/profile/ProfileCard';
 import { SessionsCard } from '../components/profile/SessionsCard';
@@ -22,7 +23,7 @@ import type { GenreCount } from '../lib/profile';
 import { pluralize } from '../lib/series';
 import type { Movie, Series, User } from '../lib/types';
 
-/** Cuántos géneros enseña la tarjeta «Tus géneros» (los más frecuentes; más serían una nube de etiquetas). */
+/** Cuántos géneros enseña la tarjeta «Géneros de tu lista» (los más frecuentes; más serían una nube de etiquetas). */
 const TOP_GENRES = 6;
 
 /** Propiedades de {@link ProfileHeader}. */
@@ -121,9 +122,11 @@ interface GenresCardProps {
 }
 
 /**
- * Tarjeta «Tus géneros»: los géneros que más se repiten en «Mi lista», con
- * cuántos títulos tiene cada uno. Sustituye a unas «preferencias» que no
- * existen: aquí no se pregunta nada al usuario, se resume lo que ya guardó.
+ * Tarjeta «Géneros de tu lista»: los géneros que más se repiten en «Mi lista»,
+ * con cuántos títulos tiene cada uno. Aquí no se pregunta nada al usuario, se
+ * resume lo que ya guardó; los géneros que ELIGE como favoritos están en «Tus
+ * gustos» ({@link FavoriteGenresSection}). Antes se llamaba «Tus géneros»; se
+ * renombró al llegar «Tus gustos» para que no parecieran lo mismo.
  *
  * Cuatro situaciones, y en las cuatro el texto es verdad para cualquier rol:
  * - Cargando / error: la lista de favoritos aún no está (el error es de la
@@ -198,7 +201,7 @@ function GenresCard({ status, errorMessage, onRetry, genres, totalTitles }: Genr
     );
   }
 
-  return <ProfileCard title="Tus géneros">{body}</ProfileCard>;
+  return <ProfileCard title="Géneros de tu lista">{body}</ProfileCard>;
 }
 
 /** Propiedades de {@link ListPreview}. */
@@ -213,7 +216,7 @@ interface ListPreviewProps {
  * cada una lleva a la página de su título.
  *
  * Solo se pinta con la lista llena. Con la lista vacía la explicación y la salida
- * («Explorar películas») ya están en «Tus géneros»: repetirlas aquí serían dos
+ * («Explorar películas») ya están en «Géneros de tu lista»: repetirlas aquí serían dos
  * estados vacíos casi iguales uno encima de otro.
  */
 function ListPreview({ movies, series }: ListPreviewProps) {
@@ -252,26 +255,32 @@ function ListPreview({ movies, series }: ListPreviewProps) {
  * Página «Mi perfil» (`/perfil`): quién eres y qué has guardado.
  *
  * **De dónde sale cada dato (no hay nada inventado).** El usuario viene de
- * `GET /api/users/me` (`AuthContext`), las estadísticas, «Tus géneros» y «De tu
+ * `GET /api/users/me` (`AuthContext`), las estadísticas, «Géneros de tu lista» y «De tu
  * lista» de la lista compartida de favoritos (`FavoritesContext`, que `AppShell`
- * ya cargó) y «Te gusta» de los «Me gusta» (`useLikes`, la única lectura propia
- * de la página). Las escrituras son las de «Editar perfil» (nombre, icono de
- * perfil y contraseña en {@link AccountCard}; cerrar sesión en todos los
- * dispositivos en {@link SessionsCard}). Por eso no hay «títulos vistos», «horas», suscripción ni
+ * ya cargó), «Tus gustos» de los géneros favoritos (`useFavoriteGenres`) y «Te
+ * gusta» de los «Me gusta» (`useLikes`). Las escrituras son las de «Editar
+ * perfil» (nombre, icono de perfil y contraseña en {@link AccountCard}; cerrar
+ * sesión en todos los dispositivos en {@link SessionsCard}) y las de «Tus
+ * gustos» (elegir, editar y quitar los géneros favoritos, {@link FavoriteGenresSection}). Por eso no hay «títulos vistos», «horas», suscripción ni
  * preferencias de idioma: no existen ni historial de reproducción ni planes.
+ *
+ * **«Tus gustos»** ({@link FavoriteGenresSection}), a todo el ancho bajo las
+ * tarjetas (el selector de géneros lo necesita): los géneros que el usuario
+ * elige para sus recomendaciones. Es el destino de la tarjeta «Dinos qué géneros
+ * te gustan…» de la portada (`/perfil#tus-gustos`).
  *
  * **«Te gusta»** ({@link LikedTitlesSection}), al final: lo que vio y le gustó
  * (distinto de «Mi lista», que es lo que quiere ver), con sus propios estados.
  *
- * **Estados.** Tres fuentes independientes, cada una con los tres estados (la
- * de «Te gusta», dentro de su sección):
+ * **Estados.** Cuatro fuentes independientes, cada una con los tres estados (las
+ * de «Tus gustos» y «Te gusta», dentro de su sección):
  * - El usuario (cabecera y «Cuenta»): cargando o error con «Reintentar»
  *   (`refreshUser`). El `<h1>` «Mi perfil» está siempre; con el usuario cargado
  *   pasa a ser su nombre.
- * - La lista (estadísticas, «Tus géneros», «De tu lista»): mientras carga o si
+ * - La lista (estadísticas, «Géneros de tu lista», «De tu lista»): mientras carga o si
  *   falla, solo la tarjeta de géneros lo cuenta (con «Reintentar») y el resto de
  *   la página sigue siendo útil. Con la lista vacía, un único estado vacío en
- *   «Tus géneros» (ver {@link GenresCard}).
+ *   «Géneros de tu lista» (ver {@link GenresCard}).
  *
  * **Estructura.** Un `<h1>`, secciones con `<h2>` y estadísticas como lista de
  * descripción (`dl`), que es lo que son: pares «etiqueta → valor».
@@ -341,6 +350,8 @@ export function ProfilePage() {
             />
           </div>
         </div>
+
+        <FavoriteGenresSection />
 
         {status === 'ready' && totalTitles > 0 && (
           <ListPreview movies={movies} series={series} />

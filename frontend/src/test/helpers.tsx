@@ -17,7 +17,7 @@ import { AuthProvider } from '../context/AuthContext';
 import { ToastProvider } from '../context/ToastContext';
 import { LocationProbe } from './LocationProbe';
 import { createTestQueryClient } from './queryClient';
-import type { ApiErrorBody, Episode, Movie, PageResponse, Recommendations, Series, SeriesDetail, User } from '../lib/types';
+import type { ApiErrorBody, Episode, Genre, Movie, PageResponse, Recommendations, Series, SeriesDetail, User } from '../lib/types';
 
 /** Crea un usuario de prueba (`UserResponse`); por defecto, rol `USER`. */
 export function makeUser(overrides: Partial<User> = {}): User {
@@ -28,6 +28,7 @@ export function makeUser(overrides: Partial<User> = {}): User {
     role: 'USER',
     createdAt: '2026-01-01T10:00:00Z',
     avatar: null,
+    genresOnboardingPending: false,
     ...overrides,
   };
 }
@@ -45,10 +46,29 @@ export const LIKED_SERIES = 'GET /api/users/me/likes/series';
 /** Clave de {@link routeFetch} de las recomendaciones de la portada (`RecommendedRows`). */
 export const RECOMMENDATIONS = 'GET /api/users/me/recommendations?limit=12';
 
-/** Recomendaciones de prueba; por defecto, las de quien no tiene ningún «Me gusta». */
+/** Recomendaciones de prueba; por defecto, las de quien no tiene géneros favoritos ni «Me gusta» (`NONE`). */
 export function makeRecommendations(overrides: Partial<Recommendations> = {}): Recommendations {
-  return { basedOnLikes: false, movies: [], series: [], ...overrides };
+  return { basis: 'NONE', movies: [], series: [], ...overrides };
 }
+
+/** Clave de {@link routeFetch} de los géneros favoritos («Tus gustos»), que pide el perfil. */
+export const FAVORITE_GENRES = 'GET /api/users/me/genres';
+
+/** Clave de {@link routeFetch} de los géneros que se pueden elegir (bienvenida y editor de «Tus gustos»). */
+export const GENRE_OPTIONS = 'GET /api/users/me/genres/options';
+
+/**
+ * Géneros elegibles por defecto en {@link routeFetch}: tres, justo el mínimo para
+ * poder elegir («Tus gustos» y la tarjeta de la portada los necesitan).
+ */
+export const DEFAULT_GENRE_OPTIONS: Genre[] = [
+  { id: 901, name: 'Acción' },
+  { id: 902, name: 'Comedia' },
+  { id: 903, name: 'Drama' },
+];
+
+/** Clave de {@link routeFetch} para guardar los géneros favoritos. */
+export const SAVE_FAVORITE_GENRES = 'PUT /api/users/me/genres';
 
 /** Clave de {@link routeFetch} de la renovación de la sesión, que `apiFetch` pide ante un 401. */
 export const REFRESH_SESSION = 'POST /api/auth/refresh';
@@ -225,6 +245,13 @@ export function currentUserAs(user: User): () => Response {
  * listas vacías) y las recomendaciones ({@link RECOMMENDATIONS}: sin «Me
  * gusta», nada que pintar): la página de cada título, el perfil y la portada
  * los piden siempre, y los tests anteriores a ellos no tienen nada que decir.
+ * También los géneros favoritos ({@link FAVORITE_GENRES}: ninguno), que el perfil
+ * pide siempre en «Tus gustos». Las opciones ({@link GENRE_OPTIONS}) responden
+ * con {@link DEFAULT_GENRE_OPTIONS} (tres, justo el mínimo): la portada las pide
+ * para decidir si pinta la tarjeta «Dinos qué géneros te gustan…», y los tests
+ * de la portada anteriores a esa regla no tienen nada que decir de ellas. La
+ * bienvenida, el editor y los tests de «menos de 3» declaran las suyas. (El
+ * `PUT` no tiene valor por defecto: sus tests lo declaran.)
  *
  * Y {@link REFRESH_SESSION} (`POST /api/auth/refresh`) responde por defecto 401
  * `SESSION_EXPIRED` («no hay sesión que renovar»): `apiFetch` lo pide ante
@@ -243,6 +270,8 @@ export function routeFetch(fetchMock: Mock<typeof fetch>, routes: Record<string,
     [LIKED_MOVIES]: () => jsonResponse([]),
     [LIKED_SERIES]: () => jsonResponse([]),
     [RECOMMENDATIONS]: () => jsonResponse(makeRecommendations()),
+    [FAVORITE_GENRES]: () => jsonResponse([]),
+    [GENRE_OPTIONS]: () => jsonResponse(DEFAULT_GENRE_OPTIONS),
     [REFRESH_SESSION]: sessionExpiredResponse,
     ...routes,
   };

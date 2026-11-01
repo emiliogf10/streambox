@@ -13,9 +13,16 @@
  * lo que no puede desbordarse es la página (`documentElement`).
  */
 import type { Locator, Page } from '@playwright/test';
-import { addFavoritesByTitle, addSeriesFavoritesByTitle, findSeriesIdAsAdmin, genreIdByName, loginAdmin } from './support/api';
+import {
+  addFavoritesByTitle,
+  addSeriesFavoritesByTitle,
+  createUserWithToken,
+  findSeriesIdAsAdmin,
+  genreIdByName,
+  loginAdmin,
+} from './support/api';
 import { EMPTY_SERIES, HERO_TITLE, SERIES_HERO } from './support/catalog';
-import { expect, test, waitForMovieForm } from './support/fixtures';
+import { WELCOME_TITLE, expect, test, waitForMovieForm } from './support/fixtures';
 import { expectCovers, expectWholePoster } from './support/images';
 
 const VIEWPORTS = [
@@ -237,6 +244,34 @@ for (const viewport of VIEWPORTS) {
       await page.getByRole('button', { name: 'Cargar más películas' }).scrollIntoViewIfNeeded();
       await page.getByRole('button', { name: 'Cargar más películas' }).click();
       await expect(page.getByText(/Mostrando 25 de 25/)).toBeVisible();
+      await expectNoHorizontalScroll(page);
+    });
+
+    test('/bienvenida: título, selector de géneros y botones caben', async ({ page, request, signIn }) => {
+      await signIn(await createUserWithToken(request, { genresOnboarding: 'pending' }));
+      await page.goto('/');
+      await expect(page.getByRole('heading', { level: 1, name: WELCOME_TITLE })).toBeVisible();
+      const group = page.getByRole('group', { name: 'Tus géneros favoritos' });
+      await expect(group.getByRole('checkbox').first()).toBeAttached();
+
+      await expectFullyInsideViewportWidth(page.getByRole('heading', { level: 1, name: WELCOME_TITLE }), page, 'título');
+      await expectFullyInsideViewportWidth(group, page, 'selector de géneros');
+      await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Guardar' }), page, '«Guardar»');
+      await expectFullyInsideViewportWidth(page.getByRole('button', { name: 'Ahora no' }), page, '«Ahora no»');
+      await expectNoHorizontalScroll(page);
+    });
+
+    test('/perfil: «Tus gustos» con el selector abierto cabe', async ({ page, user, signIn }) => {
+      await signIn(user);
+      await page.goto('/perfil');
+      const tastes = page.getByRole('region', { name: 'Tus gustos' });
+      await tastes.getByRole('button', { name: 'Elegir géneros' }).click();
+      const group = tastes.getByRole('group', { name: 'Elige entre 3 y 5 géneros' });
+      await expect(group.getByRole('checkbox').first()).toBeAttached();
+
+      await expectFullyInsideViewportWidth(group, page, 'selector de géneros');
+      await expectFullyInsideViewportWidth(tastes.getByRole('button', { name: 'Guardar' }), page, '«Guardar»');
+      await expectFullyInsideViewportWidth(tastes.getByRole('button', { name: 'Cancelar' }), page, '«Cancelar»');
       await expectNoHorizontalScroll(page);
     });
 
@@ -577,6 +612,25 @@ for (const viewport of [
 ] as const) {
   test.describe(`Pantalla ancha ${viewport.name}`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('/bienvenida aprovecha el ancho: los géneros van en varias columnas, no en una lista estrecha', async ({
+      page,
+      request,
+      signIn,
+    }) => {
+      await signIn(await createUserWithToken(request, { genresOnboarding: 'pending' }));
+      await page.goto('/');
+      const group = page.getByRole('group', { name: 'Tus géneros favoritos' });
+      await expect(group.getByRole('checkbox').first()).toBeAttached();
+      const labels = group.locator('label');
+      const first = await labels.nth(0).boundingBox();
+      const third = await labels.nth(2).boundingBox();
+      // Las tres primeras opciones comparten fila (rejilla de 4–5 columnas en escritorio).
+      expect(Math.abs(first!.y - third!.y), 'las tres primeras opciones en la misma fila').toBeLessThanOrEqual(1);
+      const groupBox = await group.boundingBox();
+      expect(groupBox!.width, 'el selector ocupa demasiado poco ancho').toBeGreaterThanOrEqual(800);
+      await expectNoHorizontalScroll(page);
+    });
 
     test('la página de una película y la de una serie van centradas y sin scroll horizontal', async ({ page, user, signIn }) => {
       await signIn(user);

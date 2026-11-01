@@ -2,8 +2,8 @@
 
 | Archivo | Para qué sirve |
 | :--- | :--- |
-| [`openapi.yaml`](openapi.yaml) | Especificación OpenAPI 3.1 de todos los endpoints (52 operaciones en 34 rutas), con sus DTOs, códigos de error y seguridad. Se puede importar en Postman, Insomnia, Swagger Editor, etc. |
-| [`postman/streambox.postman_collection.json`](postman/streambox.postman_collection.json) | Colección de Postman (formato v2.1) con 125 peticiones y 247 aserciones, organizadas en 12 carpetas. |
+| [`openapi.yaml`](openapi.yaml) | Especificación OpenAPI 3.1 de todos los endpoints (55 operaciones en 36 rutas), con sus DTOs, códigos de error y seguridad. Se puede importar en Postman, Insomnia, Swagger Editor, etc. |
+| [`postman/streambox.postman_collection.json`](postman/streambox.postman_collection.json) | Colección de Postman (formato v2.1) con 139 peticiones y 278 aserciones, organizadas en 12 carpetas. |
 | [`postman/streambox-local.postman_environment.json`](postman/streambox-local.postman_environment.json) | Entorno `StreamBox - Local` (`baseUrl = http://localhost:8080`). |
 
 ## Cómo funciona la autenticación
@@ -48,7 +48,7 @@ En `openapi.yaml` las dos formas son esquemas de seguridad alternativos de cada 
 3. Rellena `adminEmail` y `adminPassword` con los valores de `ADMIN_EMAIL` / `ADMIN_PASSWORD` con los que arrancó el backend (las cuentas ADMIN solo se crean así y nacen con el correo confirmado). Hacen falta para las peticiones de administrador y para leer la bandeja del perfil `e2e`. `userPassword` es la contraseña de una cuenta de prueba que la propia colección registra: no es una credencial real.
 4. Lanza la colección entera con el **Runner**, en orden. Las peticiones se encadenan solas (los ids se guardan en variables de colección), la carpeta 8 borra lo que se creó, la 9 cierra las sesiones del USER, la 10 cambia su contraseña (y la restaura) y cierra todas sus sesiones, la 11 la restablece con «He olvidado mi contraseña» (y la restaura) y la 12 cierra la sesión del ADMIN.
 
-Carpetas: 1 Autenticación (registro, verificación del correo y login) · 2 Seguridad (401/403) · 3 Usuarios · 4 Géneros · 5 Películas · 6 Series y episodios · 7 Favoritos, «me gusta» y recomendaciones · 8 Limpieza · 9 Sesión (refresh y logout) · 10 Cuenta (contraseña y logout-all) · 11 Recuperar la contraseña («He olvidado mi contraseña») · 12 Cierre de la sesión del ADMIN.
+Carpetas: 1 Autenticación (registro, verificación del correo y login) · 2 Seguridad (401/403) · 3 Usuarios · 4 Géneros · 5 Películas · 6 Series y episodios · 7 Favoritos, «me gusta», géneros favoritos («Tus gustos») y recomendaciones · 8 Limpieza · 9 Sesión (refresh y logout) · 10 Cuenta (contraseña y logout-all) · 11 Recuperar la contraseña («He olvidado mi contraseña») · 12 Cierre de la sesión del ADMIN.
 
 ### Cómo modela la verificación del correo (carpeta 1)
 
@@ -95,7 +95,7 @@ El registro permite 5 altas por hora y IP, el reenvío del correo de confirmaci�
 ## Cómo se generó y cómo regenerarla
 
 - **`openapi.yaml`**: se arrancó el backend con la base H2 en memoria y el perfil `e2e` (como hace Playwright: `spring-boot:run -Dspring-boot.run.useTestClasspath=true -Dspring-boot.run.profiles=e2e` desde `streambox/`, con `SERVER_PORT=8099`, `SPRING_DATASOURCE_*` apuntando a H2, un `JWT_SECRET` de prueba, `STREAMBOX_AUTH_COOKIE_SECURE=false` y un administrador de prueba en `ADMIN_*`; ver `frontend/playwright.config.ts`), sin tocar la base de desarrollo. Se descargó `GET /v3/api-docs` y se convirtió a YAML (PyYAML, `sort_keys=False`, `width=120`). Solo se cambió `servers` (apunta a `localhost:8080`). Es la salida de `springdoc`, así que refleja exactamente lo que anotan los controladores. Si cambia un endpoint o un DTO, hay que volver a generarla.
-- **Colección**: escrita a partir de la especificación y comprobada con Newman 6 contra ese backend efímero (perfil `e2e`, límites por defecto): 125/125 peticiones y 253/253 aserciones en la primera ejecución sobre una base vacía, y 125/125 y 247/247 en una segunda sobre la misma base y con los mismos límites, tras esperar algo más de un minuto (ver «Límites de velocidad»), en la que la cuenta ya está confirmada y se omiten las aserciones que solo aplican al primer registro (ver «Cómo modela la verificación del correo»).
+- **Colección**: escrita a partir de la especificación y comprobada con Newman 6 contra ese backend efímero (perfil `e2e`, límites por defecto): 139/139 peticiones y 284/284 aserciones en la primera ejecución sobre una base vacía, y 139/139 y 278/278 en una segunda sobre la misma base y con los mismos límites, tras esperar algo más de un minuto (ver «Límites de velocidad»), en la que la cuenta ya está confirmada y se omiten las aserciones que solo aplican al primer registro (ver «Cómo modela la verificación del correo»).
 
 ## Qué comprueban los tests de la colección
 
@@ -112,8 +112,9 @@ Códigos de estado reales (200, 201, 202, 204, 400, 401, 403, 404, 409), forma d
 
 - `PUT /api/users/me/likes/movies/{id}` responde 204 sin cuerpo y **repetirlo también es 204** (es idempotente y conserva la fecha original; «Mi lista», en cambio, da 409). Un id inexistente da 404 `RESOURCE_NOT_FOUND` «Película no encontrada». La serie se marca igual (`/likes/series/{id}`); una serie sin episodios daría el mismo 404 que una inexistente.
 - `GET /api/users/me/likes/movies` contiene la película **una sola vez**; `GET /api/users/me/likes/series`, la serie con sus recuentos (`episodeCount` > 0).
-- `GET /api/users/me/recommendations?limit=12` responde `basedOnLikes: true` y, de las películas de la colección, recomienda exactamente la tercera y la segunda, en ese orden (las tres y la serie comparten un género que solo usa la colección: las dos candidatas empatan en puntuación y gana la añadida más recientemente) y nunca la que ya gusta; la serie que gusta tampoco sale. `limit=0` da 400 con `validationErrors.limit` = «El límite mínimo es 1».
-- `DELETE` del «me gusta» responde 204, **también con un id inexistente** (quitar nunca da 404). Sin ningún «me gusta», las recomendaciones vuelven con `basedOnLikes: false` y las dos listas vacías.
+- `GET /api/users/me/recommendations?limit=12` responde `basis: "LIKES"` (ya no existe `basedOnLikes`) y, de las películas de la colección, recomienda exactamente la tercera y la segunda, en ese orden (las tres y la serie comparten un género que solo usa la colección: las dos candidatas empatan en puntuación y gana la añadida más recientemente) y nunca la que ya gusta; la serie que gusta tampoco sale. `limit=0` da 400 con `validationErrors.limit` = «El límite mínimo es 1».
+- **Géneros favoritos («Tus gustos»).** La carpeta 4 crea dos géneros más que solo tiene la tercera película (así hay tres géneros con títulos; la carpeta 8 los borra). `GET /api/users/me/genres/options` los incluye a los tres; `PUT /api/users/me/genres` con dos géneros, con uno repetido o con uno inexistente da 400 `VALIDATION_ERROR` con el error solo en `validationErrors.genreIds` y el mensaje exacto («Elige entre 3 y 5 géneros, o ninguno.», «Hay géneros repetidos.», «Alguno de los géneros no existe o no tiene títulos.»); con los tres responde 200 con la lista guardada por nombre, que `GET /api/users/me/genres` repite. Después `GET /api/users/me` trae `genresOnboardingPending: false` (en la carpeta 3, en la primera ejecución, era `true`: el USER se acababa de registrar; y el listado de usuarios del panel no lleva ese campo) y las recomendaciones pasan a `basis: "GENRES_AND_LIKES"` (la tercera película, con los tres géneros favoritos, sigue delante de la segunda).
+- `DELETE` del «me gusta» responde 204, **también con un id inexistente** (quitar nunca da 404). Sin ningún «me gusta» pero con los gustos, las recomendaciones responden `basis: "GENRES"` con las tres películas de la colección (la de los tres géneros favoritos primero y, empatadas, la más nueva) y la serie. `PUT` con la lista vacía quita los gustos (200, `[]`) y, sin «me gusta» ni gustos, las recomendaciones vuelven con `basis: "NONE"` y las dos listas vacías.
 
 ## Nota sobre Postman en la nube
 

@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { WELCOME_PATH, locationPath, needsGenresOnboarding } from '../lib/favoriteGenres';
+import type { WelcomeState } from '../lib/favoriteGenres';
 import { ErrorState } from './ErrorState';
 import { LoadingState } from './LoadingState';
 import { MAIN_CONTENT_ID } from './SkipLink';
@@ -36,9 +38,22 @@ function GuardScreen({ children }: { children: ReactNode }) {
  *
  * Esas dos pantallas van dentro de un `<main>` propio ({@link GuardScreen}) y la
  * de error lleva su título como `<h1>`: son la página entera en ese momento.
+ *
+ * **Pregunta de bienvenida.** Con sesión, si el usuario es un `USER` con
+ * `genresOnboardingPending` (`GET /api/users/me`), cualquier ruta protegida le
+ * lleva a `/bienvenida` guardando a dónde iba (`state.from`, con búsqueda y
+ * fragmento), y allí vuelve al terminar. Va aquí porque es el único sitio por el
+ * que pasan las dos situaciones que piden la pregunta, tras el login (que
+ * redirige a `/`) y al cargar la app con sesión, y porque así nunca alcanza a
+ * las páginas públicas (`/verificar-email`, `/restablecer-contrasena`...), que
+ * no van dentro de esta guarda. Es **una sola vez**: al contestar o saltarla, el
+ * servidor la cierra y la sesión deja de tenerla pendiente
+ * (`useSaveFavoriteGenres`); si el servidor falla, «Continuar sin guardar» la
+ * cierra solo en esta visita. Un ADMIN nunca la ve ({@link needsGenresOnboarding}).
  */
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isCheckingSession, sessionCheckFailed, refreshUser } = useAuth();
+  const { isAuthenticated, isCheckingSession, sessionCheckFailed, refreshUser, user } = useAuth();
+  const location = useLocation();
   if (isCheckingSession) {
     return (
       <GuardScreen>
@@ -59,7 +74,12 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       </GuardScreen>
     );
   }
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (needsGenresOnboarding(user) && location.pathname !== WELCOME_PATH) {
+    const state: WelcomeState = { from: locationPath(location) };
+    return <Navigate to={WELCOME_PATH} replace state={state} />;
+  }
+  return <>{children}</>;
 }
 
 /**

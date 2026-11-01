@@ -31,7 +31,11 @@ import com.emilio.streambox.migration.UserAvatarSchemaCases;
  * {@code repository.AccountTokenRepositoryIntegrationTest} y cuyo efecto sobre
  * las cuentas existentes (solo las ADMIN quedan verificadas), en
  * {@code migration.EmailVerificationMigrationH2Test}; el propósito
- * {@code PASSWORD_RESET} de «He olvidado mi contraseña», en {@code V10}).
+ * {@code PASSWORD_RESET} de «He olvidado mi contraseña», en {@code V10};
+ * géneros favoritos y pregunta de bienvenida en {@code V11}, cuyas consultas
+ * se prueban en {@code repository.FavoriteGenresRepositoryIntegrationTest} y
+ * cuyo efecto sobre las cuentas existentes, en
+ * {@code migration.FavoriteGenresMigrationH2Test}).
  * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
  * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
  * de PostgreSQL.
@@ -902,6 +906,113 @@ class FlywaySchemaIntegrationTest {
         assertEquals(1, count("account_tokens"));
     }
 
+    // --- V11: géneros favoritos (user_favorite_genres, users.genres_onboarded_at) ---
+
+    @Test
+    void v11EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '11' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * {@code users.genres_onboarded_at} es una fecha con zona, opcional y
+     * <b>sin valor por defecto</b>: una cuenta creada después de la V11 nace
+     * con la pregunta de bienvenida pendiente ({@code NULL}). Que la V11
+     * rellenó las cuentas que ya existían se prueba partiendo de una base en la
+     * V10 ({@code migration.FavoriteGenresMigrationH2Test}).
+     */
+    @Test
+    void laFechaDeBienvenidaEsOpcionalConZonaYUnaCuentaNuevaNaceConLaPreguntaPendiente() {
+        Map<String, Object> column = jdbc.queryForMap("SELECT DATA_TYPE AS T, IS_NULLABLE AS N, COLUMN_DEFAULT AS D"
+                + " FROM INFORMATION_SCHEMA.COLUMNS"
+                + " WHERE LOWER(TABLE_NAME) = 'users' AND LOWER(COLUMN_NAME) = 'genres_onboarded_at'");
+        long userId = insertUser("bienvenida");
+
+        assertEquals("TIMESTAMP WITH TIME ZONE", column.get("T"));
+        assertEquals("YES", column.get("N"));
+        assertEquals(null, column.get("D"), "sin DEFAULT: cerraría la pregunta de las cuentas nuevas");
+        assertEquals(null, jdbc.queryForObject("SELECT genres_onboarded_at FROM users WHERE id = ?",
+                OffsetDateTime.class, userId));
+    }
+
+    /**
+     * Columnas de {@code user_favorite_genres} (todas obligatorias, fecha con
+     * zona), su clave primaria {@code (user_id, genre_id)} y el índice por
+     * {@code genre_id} (cascada al borrar un género).
+     */
+    @Test
+    void laTablaDeGenerosFavoritosTieneSusColumnasClavePrimariaEIndice() {
+        Map<String, String> columns = new java.util.TreeMap<>();
+        jdbc.queryForList("SELECT LOWER(COLUMN_NAME) AS C, DATA_TYPE AS T, IS_NULLABLE AS N"
+                        + " FROM INFORMATION_SCHEMA.COLUMNS WHERE LOWER(TABLE_NAME) = 'user_favorite_genres'")
+                .forEach(r -> columns.put((String) r.get("C"), r.get("T") + ("YES".equals(r.get("N")) ? " NULL" : " NOT NULL")));
+
+        assertEquals(Map.of(
+                "user_id", "BIGINT NOT NULL",
+                "genre_id", "BIGINT NOT NULL",
+                "created_at", "TIMESTAMP WITH TIME ZONE NOT NULL"), columns);
+        assertEquals(List.of("user_id", "genre_id"), keyColumns("pk_user_favorite_genres"));
+        assertEquals(List.of("genre_id ASC"), indexColumns("idx_favorite_genres_genre_id"));
+    }
+
+    /**
+     * Las dos claves foráneas de la V11 borran en cascada: borrar un usuario
+     * borra sus gustos (y no los de otro), y borrar un género lo quita de los
+     * gustos de todos <b>sin fallar</b> (no se protege como el que usa una
+     * película) y sin tocar los demás géneros.
+     */
+    @Test
+    void borrarUnUsuarioOUnGeneroBorraSusGustosEnCascadaYNadaMas() {
+        java.util.Map<String, String> rules = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT LOWER(CONSTRAINT_NAME) AS NAME, DELETE_RULE AS RULE"
+                        + " FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS")
+                .forEach(r -> rules.put((String) r.get("NAME"), (String) r.get("RULE")));
+        long ana = insertUser("gustoana");
+        long bea = insertUser("gustobea");
+        long drama = insertGenre("Gustodrama");
+        long comedy = insertGenre("Gustocomedia");
+        for (long user : new long[] { ana, bea }) {
+            insertFavoriteGenre(user, drama);
+            insertFavoriteGenre(user, comedy);
+        }
+
+        jdbc.update("DELETE FROM genres WHERE id = ?", drama);
+
+        assertEquals("CASCADE", rules.get("fk_favorite_genres_user"));
+        assertEquals("CASCADE", rules.get("fk_favorite_genres_genre"));
+        assertEquals(0, countWhere("user_favorite_genres", "genre_id", drama));
+        assertEquals(2, countWhere("user_favorite_genres", "genre_id", comedy));
+
+        jdbc.update("DELETE FROM users WHERE id = ?", ana);
+
+        assertEquals(0, countWhere("user_favorite_genres", "user_id", ana));
+        assertEquals(1, countWhere("user_favorite_genres", "user_id", bea));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM genres WHERE id = ?", Integer.class, comedy));
+    }
+
+    /**
+     * La clave primaria impide repetir un género en los gustos de un usuario;
+     * las claves foráneas, un género o un usuario inexistentes; y la fecha es
+     * obligatoria.
+     */
+    @Test
+    void laBaseDeDatosRechazaGustosDuplicadosHuerfanosOSinFecha() {
+        long userId = insertUser("gustodup");
+        long genreId = insertGenre("Gustodup");
+        insertFavoriteGenre(userId, genreId);
+
+        assertThrows(DataIntegrityViolationException.class, () -> insertFavoriteGenre(userId, genreId));
+        assertThrows(DataIntegrityViolationException.class, () -> insertFavoriteGenre(userId, Long.MAX_VALUE));
+        assertThrows(DataIntegrityViolationException.class, () -> insertFavoriteGenre(Long.MAX_VALUE, genreId));
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
+                "INSERT INTO user_favorite_genres (user_id, genre_id, created_at) VALUES (?, ?, NULL)",
+                userId, insertGenre("Gustosinfecha")));
+        assertEquals(1, count("user_favorite_genres"));
+    }
+
     // --- Utilidades ---
 
     private void insertAccountToken(long userId, String purpose, String hash, OffsetDateTime createdAt,
@@ -913,6 +1024,11 @@ class FlywaySchemaIntegrationTest {
     private void insertLike(String table, String titleColumn, long userId, long titleId) {
         jdbc.update("INSERT INTO " + table + " (user_id, " + titleColumn + ", created_at)"
                 + " VALUES (?, ?, CURRENT_TIMESTAMP)", userId, titleId);
+    }
+
+    private void insertFavoriteGenre(long userId, long genreId) {
+        jdbc.update("INSERT INTO user_favorite_genres (user_id, genre_id, created_at)"
+                + " VALUES (?, ?, CURRENT_TIMESTAMP)", userId, genreId);
     }
 
     private int countWhere(String table, String column, long value) {

@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.emilio.streambox.dto.CreateUserRequest;
+import com.emilio.streambox.dto.CurrentUserResponse;
 import com.emilio.streambox.dto.UpdateProfileRequest;
 import com.emilio.streambox.dto.UserResponse;
 import com.emilio.streambox.entity.User;
@@ -25,8 +26,9 @@ import com.emilio.streambox.repository.UserRepository;
  * Servicio con la lógica de negocio de las cuentas de usuario.
  *
  * <p>
- * Los métodos devuelven {@link UserResponse} (nunca la entidad, que contiene
- * la contraseña cifrada). La lista de favoritos tiene su propio servicio:
+ * Los métodos devuelven {@link UserResponse} o, para la propia cuenta,
+ * {@link CurrentUserResponse} (nunca la entidad, que contiene la contraseña
+ * cifrada). La lista de favoritos tiene su propio servicio:
  * {@link FavoriteService}; el registro, {@link RegistrationService} (que usa
  * las normalizaciones de aquí).
  * </p>
@@ -86,17 +88,19 @@ public class UserService {
     }
 
     /**
-     * Obtiene los datos públicos de un usuario.
+     * Obtiene los datos de la propia cuenta ({@code GET /api/users/me}),
+     * incluidos los que solo ve el propio usuario (como si tiene pendiente la
+     * pregunta de los géneros favoritos).
      *
-     * @param id identificador del usuario
-     * @return datos del usuario
+     * @param id identificador del usuario autenticado (del token)
+     * @return datos de la cuenta
      * @throws UserNotFoundException si no existe
      */
     @Transactional(readOnly = true)
-    public UserResponse getUserById(Long id) {
+    public CurrentUserResponse getCurrentUser(Long id) {
 
         return userRepository.findById(id)
-                .map(UserMapper::toResponse)
+                .map(UserMapper::toCurrentUserResponse)
                 .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado"));
     }
 
@@ -188,7 +192,7 @@ public class UserService {
      * @throws UserNotFoundException      si la cuenta ya no existe
      */
     @Transactional
-    public UserResponse updateProfile(Long userId, UpdateProfileRequest request) {
+    public CurrentUserResponse updateProfile(Long userId, UpdateProfileRequest request) {
 
         boolean usernameSent = request.username() != null;
         if (!usernameSent && !request.avatarSent()) {
@@ -216,11 +220,11 @@ public class UserService {
             changed = true;
         }
         if (!changed) {
-            return UserMapper.toResponse(user);
+            return UserMapper.toCurrentUserResponse(user);
         }
 
         try {
-            return UserMapper.toResponse(userRepository.saveAndFlush(user));
+            return UserMapper.toCurrentUserResponse(userRepository.saveAndFlush(user));
         } catch (DataIntegrityViolationException e) {
             // La única restricción de unicidad que puede tocar este UPDATE es
             // la de users.username. Cualquier otra violación (por ejemplo, el

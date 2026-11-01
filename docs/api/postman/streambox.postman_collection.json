@@ -96,6 +96,14 @@
     {
       "key": "userResetPassword",
       "value": "otra frase larga elegida al recuperar la cuenta"
+    },
+    {
+      "key": "genreBId",
+      "value": ""
+    },
+    {
+      "key": "genreCId",
+      "value": ""
     }
   ],
   "item": [
@@ -1130,6 +1138,11 @@
                   "  const u = pm.response.json();",
                   "  pm.expect(u).to.have.property(\"avatar\");",
                   "  pm.expect(u.avatar === null || typeof u.avatar === \"string\").to.be.true;",
+                  "});",
+                  "pm.test(\"Trae genresOnboardingPending (pendiente solo en la primera ejecución: el USER se acaba de registrar)\", function () {",
+                  "  const u = pm.response.json();",
+                  "  pm.expect(u.genresOnboardingPending).to.be.a(\"boolean\");",
+                  "  if (pm.collectionVariables.get(\"userAlreadyVerified\") !== \"true\") { pm.expect(u.genresOnboardingPending).to.eql(true); }",
                   "});"
                 ]
               }
@@ -1178,7 +1191,10 @@
                   "});",
                   "// Guarda el nombre del ADMIN: la petición «Cambiar mi nombre a uno ocupado (409)» lo usa.",
                   "const admin = pm.response.json().find(u => u.email === pm.environment.get(\"adminEmail\"));",
-                  "pm.collectionVariables.set(\"adminUsername\", admin ? admin.username : \"\");"
+                  "pm.collectionVariables.set(\"adminUsername\", admin ? admin.username : \"\");",
+                  "pm.test(\"El listado no lleva genresOnboardingPending (solo sale en /api/users/me)\", function () {",
+                  "  pm.response.json().forEach(u => pm.expect(u).to.not.have.property(\"genresOnboardingPending\"));",
+                  "});"
                 ]
               }
             }
@@ -1581,6 +1597,130 @@
                   "  pm.expect(g.id).to.be.a(\"number\");",
                   "  pm.expect(g.name).to.match(/^Postman /);",
                   "  pm.collectionVariables.set(\"genreId\", g.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Crear segundo género, para «Tus gustos» (ADMIN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "genres"
+              ]
+            },
+            "description": "La tercera película lo tendrá: así hay tres géneros con títulos y el USER puede elegir sus géneros favoritos en la carpeta 7 (de 3 a 5).",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"name\": \"Postman B {{$randomInt}}\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.test(\"Guarda su id\", function () {",
+                  "  const g = pm.response.json();",
+                  "  pm.expect(g.name).to.match(/^Postman B /i);",
+                  "  pm.collectionVariables.set(\"genreBId\", g.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Crear tercer género, para «Tus gustos» (ADMIN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "genres"
+              ]
+            },
+            "description": "La tercera película lo tendrá: así hay tres géneros con títulos y el USER puede elegir sus géneros favoritos en la carpeta 7 (de 3 a 5).",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"name\": \"Postman C {{$randomInt}}\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.test(\"Guarda su id\", function () {",
+                  "  const g = pm.response.json();",
+                  "  pm.expect(g.name).to.match(/^Postman C /i);",
+                  "  pm.collectionVariables.set(\"genreCId\", g.id);",
                   "});"
                 ]
               }
@@ -2085,10 +2225,10 @@
                 "movies"
               ]
             },
-            "description": "Mismo género que las otras dos pero estrenada en 1990: en las similares de la primera (2021) va detrás de la segunda (2020), más cercana en año.",
+            "description": "Mismo género que las otras dos pero estrenada en 1990: en las similares de la primera (2021) va detrás de la segunda (2020), más cercana en año (comparten un género con la primera en los dos casos). Lleva además los dos géneros que solo usa ella, para que el USER pueda elegir tres géneros favoritos en la carpeta 7.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Tercera película de Postman\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 1990,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"videoUrl\": \"https://videos.streambox.example/watch/postman-3\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "raw": "{\n  \"title\": \"Tercera película de Postman\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 1990,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"videoUrl\": \"https://videos.streambox.example/watch/postman-3\",\n  \"genreIds\": [{{genreId}}, {{genreBId}}, {{genreCId}}]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3307,7 +3447,7 @@
       ]
     },
     {
-      "name": "7. Favoritos, «me gusta» y recomendaciones (usuario autenticado)",
+      "name": "7. Favoritos, «me gusta», géneros favoritos y recomendaciones (usuario autenticado)",
       "description": "",
       "item": [
         {
@@ -3895,7 +4035,7 @@
           ]
         },
         {
-          "name": "Recomendaciones por géneros",
+          "name": "Recomendaciones por «me gusta» (basis LIKES)",
           "request": {
             "method": "GET",
             "header": [],
@@ -3927,7 +4067,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"Se basan en mis «me gusta»\", function () { pm.expect(pm.response.json().basedOnLikes).to.eql(true); });",
+                  "pm.test(\"Se basan solo en mis «me gusta» (basis LIKES)\", function () { pm.expect(pm.response.json().basis).to.eql(\"LIKES\"); pm.expect(pm.response.json()).to.not.have.property(\"basedOnLikes\"); });",
                   "pm.test(\"Recomienda las otras películas del género, la más nueva primero, sin la que ya me gusta\", function () { const v = n => Number(pm.collectionVariables.get(n)); const mine = [v(\"movieId\"), v(\"secondMovieId\"), v(\"thirdMovieId\")]; const ids = pm.response.json().movies.map(m => m.id).filter(id => mine.includes(id)); pm.expect(ids).to.eql([v(\"thirdMovieId\"), v(\"secondMovieId\")]); });",
                   "pm.test(\"No recomienda la serie que ya me gusta\", function () { pm.expect(pm.response.json().series.map(s => s.id)).to.not.include(Number(pm.collectionVariables.get(\"seriesId\"))); });"
                 ]
@@ -3969,6 +4109,334 @@
                 "exec": [
                   "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
                   "pm.test(\"Error de validación en limit\", function () { const body = pm.response.json(); pm.expect(body.code).to.eql(\"VALIDATION_ERROR\"); pm.expect(body.validationErrors.limit).to.eql(\"El límite mínimo es 1\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Géneros que puedo elegir como favoritos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/genres/options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "genres",
+                "options"
+              ]
+            },
+            "description": "Solo los géneros con algún título visible (una película o una serie con episodios), por nombre."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Incluye los tres géneros de la colección (todos tienen títulos)\", function () { const v = n => Number(pm.collectionVariables.get(n)); const mine = [v(\"genreId\"), v(\"genreBId\"), v(\"genreCId\")]; const ids = pm.response.json().map(g => g.id); mine.forEach(id => pm.expect(ids).to.include(id)); });",
+                  "pm.test(\"Cada opción tiene id y name\", function () { pm.response.json().forEach(g => { pm.expect(g.id).to.be.a(\"number\"); pm.expect(g.name).to.be.a(\"string\"); }); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Guardar solo dos géneros favoritos (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "genres"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"genreIds\": [{{genreId}}, {{genreBId}}] }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error solo en genreIds, con el mensaje de la regla\", function () { const body = pm.response.json(); pm.expect(body.code).to.eql(\"VALIDATION_ERROR\"); pm.expect(Object.keys(body.validationErrors)).to.eql([\"genreIds\"]); pm.expect(body.validationErrors.genreIds).to.eql(\"Elige entre 3 y 5 géneros, o ninguno.\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Guardar géneros favoritos repetidos (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "genres"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"genreIds\": [{{genreId}}, {{genreId}}, {{genreBId}}] }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error de repetidos en genreIds\", function () { const body = pm.response.json(); pm.expect(body.code).to.eql(\"VALIDATION_ERROR\"); pm.expect(Object.keys(body.validationErrors)).to.eql([\"genreIds\"]); pm.expect(body.validationErrors.genreIds).to.eql(\"Hay géneros repetidos.\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Guardar un género favorito inexistente (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "genres"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"genreIds\": [{{genreId}}, {{genreBId}}, 999999999] }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error de género no elegible en genreIds\", function () { const body = pm.response.json(); pm.expect(body.code).to.eql(\"VALIDATION_ERROR\"); pm.expect(Object.keys(body.validationErrors)).to.eql([\"genreIds\"]); pm.expect(body.validationErrors.genreIds).to.eql(\"Alguno de los géneros no existe o no tiene títulos.\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Guardar mis géneros favoritos (3)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "genres"
+              ]
+            },
+            "description": "Sustituye la lista entera. Cada género favorito pesa en las recomendaciones como 2 «me gusta». Guardar (también la lista vacía) cierra para siempre la pregunta de bienvenida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"genreIds\": [{{genreId}}, {{genreBId}}, {{genreCId}}] }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Devuelve exactamente los tres géneros guardados, por nombre\", function () { const v = n => Number(pm.collectionVariables.get(n)); const mine = [v(\"genreId\"), v(\"genreBId\"), v(\"genreCId\")]; const body = pm.response.json(); pm.expect(body.map(g => g.id).sort((a, b) => a - b)).to.eql(mine.sort((a, b) => a - b)); const names = body.map(g => g.name); pm.expect(names).to.eql([...names].sort((a, b) => a.localeCompare(b))); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mis géneros favoritos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "genres"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Son los tres que acabo de guardar\", function () { const v = n => Number(pm.collectionVariables.get(n)); const mine = [v(\"genreId\"), v(\"genreBId\"), v(\"genreCId\")]; pm.expect(pm.response.json().map(g => g.id).sort((a, b) => a - b)).to.eql(mine.sort((a, b) => a - b)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mi usuario ya no tiene la pregunta de los géneros pendiente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"genresOnboardingPending es false\", function () { pm.expect(pm.response.json().genresOnboardingPending).to.eql(false); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recomendaciones con gustos y «me gusta» (basis GENRES_AND_LIKES)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/recommendations?limit=12",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "recommendations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "12"
+                }
+              ]
+            },
+            "description": "Peso de un género = «me gusta» visibles con él + 2 si es favorito. La tercera película suma los tres géneros favoritos y la segunda solo el primero."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Se basan en los dos (basis GENRES_AND_LIKES)\", function () { pm.expect(pm.response.json().basis).to.eql(\"GENRES_AND_LIKES\"); });",
+                  "pm.test(\"La tercera película (con los tres géneros favoritos) va antes que la segunda\", function () { const v = n => Number(pm.collectionVariables.get(n)); const mine = [v(\"movieId\"), v(\"secondMovieId\"), v(\"thirdMovieId\")]; const ids = pm.response.json().movies.map(m => m.id).filter(id => mine.includes(id)); pm.expect(ids).to.eql([v(\"thirdMovieId\"), v(\"secondMovieId\")]); });"
                 ]
               }
             }
@@ -4078,7 +4546,94 @@
           ]
         },
         {
-          "name": "Recomendaciones sin «me gusta» (vacías)",
+          "name": "Recomendaciones solo con gustos (basis GENRES)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/recommendations?limit=12",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "recommendations"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "12"
+                }
+              ]
+            },
+            "description": "El «arranque en frío» resuelto: sin ningún «me gusta», los géneros favoritos bastan para recomendar."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Se basan solo en los géneros favoritos (basis GENRES)\", function () { pm.expect(pm.response.json().basis).to.eql(\"GENRES\"); });",
+                  "pm.test(\"Sin «me gusta», las tres películas vuelven a ser candidatas: la de tres géneros favoritos primero y, empatadas, la más nueva\", function () { const v = n => Number(pm.collectionVariables.get(n)); const mine = [v(\"movieId\"), v(\"secondMovieId\"), v(\"thirdMovieId\")]; const ids = pm.response.json().movies.map(m => m.id).filter(id => mine.includes(id)); pm.expect(ids).to.eql([v(\"thirdMovieId\"), v(\"secondMovieId\"), v(\"movieId\")]); });",
+                  "pm.test(\"La serie también vuelve a salir\", function () { pm.expect(pm.response.json().series.map(s => s.id)).to.include(Number(pm.collectionVariables.get(\"seriesId\"))); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quitar mis géneros favoritos (lista vacía)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "genres"
+              ]
+            },
+            "description": "La lista vacía es válida («Ahora no» en la bienvenida o quitar los gustos en el perfil).",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"genreIds\": [] }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200 con la lista vacía\", function () { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.eql([]); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recomendaciones sin «me gusta» ni gustos (basis NONE)",
           "request": {
             "method": "GET",
             "header": [],
@@ -4094,7 +4649,7 @@
                 "recommendations"
               ]
             },
-            "description": "Sin ningún «me gusta» no hay en qué basarse: el inicio no pinta la fila «Recomendadas para ti»."
+            "description": "Sin «me gusta» ni géneros favoritos no hay en qué basarse: el inicio no pinta la fila «Recomendadas para ti» e invita a elegir gustos."
           },
           "response": [],
           "event": [
@@ -4104,7 +4659,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"basedOnLikes false y listas vacías\", function () { const body = pm.response.json(); pm.expect(body.basedOnLikes).to.eql(false); pm.expect(body.movies).to.eql([]); pm.expect(body.series).to.eql([]); });"
+                  "pm.test(\"basis NONE y listas vacías\", function () { const body = pm.response.json(); pm.expect(body.basis).to.eql(\"NONE\"); pm.expect(body.movies).to.eql([]); pm.expect(body.series).to.eql([]); });"
                 ]
               }
             }
@@ -4384,6 +4939,94 @@
                 "api",
                 "genres",
                 "{{genreId}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Borrar segundo género (ADMIN)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/genres/{{genreBId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "genres",
+                "{{genreBId}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Borrar tercer género (ADMIN)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/genres/{{genreCId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "genres",
+                "{{genreCId}}"
               ]
             },
             "description": "",

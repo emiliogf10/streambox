@@ -46,8 +46,9 @@ import com.emilio.streambox.service.recommendation.Recommender;
  * </ol>
  *
  * <p>
- * <b>Coste fijo:</b> una sentencia si el usuario no tiene «me gusta» y, con
- * ellos, seis como mucho (las tres del recomendador, películas, series y
+ * <b>Coste fijo:</b> dos sentencias si el usuario no tiene ni géneros
+ * favoritos ni «me gusta» (los dos {@code EXISTS} del recomendador) y, con
+ * ellos, nueve como mucho (las seis del recomendador, películas, series y
  * recuentos), sea cual sea el límite. Una lista vacía no lanza su carga.
  * </p>
  */
@@ -98,8 +99,9 @@ public class RecommendationService {
      * @param userId identificador del usuario autenticado (del token)
      * @param limit  máximo de películas y, por separado, de series
      *               ({@value #MIN_LIMIT} a {@value #MAX_LIMIT})
-     * @return recomendaciones; con {@code basedOnLikes = false} y listas vacías
-     *         si no tiene ningún «me gusta» visible
+     * @return recomendaciones con su base ({@code basis}); con {@code NONE} y
+     *         listas vacías si no tiene ni géneros favoritos con títulos ni
+     *         «me gusta» visibles
      * @throws InvalidParameterException si el límite está fuera de rango
      */
     @Transactional(readOnly = true)
@@ -113,7 +115,7 @@ public class RecommendationService {
         Recommendations recommendations = recommender.recommend(userId, limit);
 
         return new RecommendationsResponse(
-                recommendations.basedOnLikes(),
+                recommendations.basis(),
                 loadMovies(normalize(recommendations.movieIds(), limit)),
                 loadSeries(normalize(recommendations.seriesIds(), limit)));
     }

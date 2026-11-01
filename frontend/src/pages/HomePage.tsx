@@ -57,11 +57,14 @@ function EmptyCatalog({ isAdmin }: { isAdmin: boolean }) {
  * aquí, en la misma zona (`useRetryFocus`), y no salta al `<main>`. `empty:hidden`:
  * sin recomendaciones, o mientras cargan sin motivo para esperarlas, no pinta
  * nada y no deja hueco.
+ *
+ * `inviteToChooseGenres`: si, sin nada en qué basarlas, pinta la tarjeta «Dinos
+ * qué géneros te gustan…». Solo con películas en la portada (ver `RecommendedRows`).
  */
-function RecommendationsSlot() {
+function RecommendationsSlot({ inviteToChooseGenres = false }: { inviteToChooseGenres?: boolean }) {
   return (
     <div tabIndex={-1} className="focus-ring rounded-xl empty:hidden">
-      <RecommendedRows />
+      <RecommendedRows inviteToChooseGenres={inviteToChooseGenres} />
     </div>
   );
 }
@@ -71,8 +74,9 @@ function RecommendationsSlot() {
  *
  * - El banner es la película más reciente del catálogo.
  * - Debajo, filas horizontales: "Novedades", las recomendadas para el usuario
- *   («Películas/Series recomendadas para ti», solo si le gusta algo y hay qué
- *   recomendar; ver `RecommendedRows`), la fila «Series» (las series más
+ *   («Películas/Series recomendadas para ti», solo si tiene géneros favoritos
+ *   o le gusta algo y hay qué recomendar; si no tiene ni lo uno ni lo otro, la
+ *   tarjeta «Dinos qué géneros te gustan…»; ver `RecommendedRows`), la fila «Series» (las series más
  *   recientes, ver `LatestSeriesRow`; no aparece si no hay ninguna) y una por
  *   género (ver `buildCatalogRows`). Sin películas, las recomendaciones (de
  *   series, si las hay) van antes de la fila «Series».
@@ -135,7 +139,7 @@ export function HomePage() {
             {/* Tras «Novedades», lo personal (las recomendaciones) y la fila «Series»: a la vista sin bajar mucho. */}
             {index === 0 && (
               <>
-                <RecommendationsSlot />
+                <RecommendationsSlot inviteToChooseGenres />
                 <LatestSeriesRow />
               </>
             )}
@@ -143,7 +147,7 @@ export function HomePage() {
         ))}
         {rows.length === 0 && (
           <>
-            <RecommendationsSlot />
+            <RecommendationsSlot inviteToChooseGenres />
             <LatestSeriesRow />
           </>
         )}

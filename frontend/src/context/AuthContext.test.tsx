@@ -865,6 +865,30 @@ describe('AuthProvider: usuario actual y rol', () => {
     expect(result.current.isAdmin).toBe(expected);
   });
 
+  it('updateUser con una función recibe el usuario más reciente: dos cambios seguidos no se pisan', async () => {
+    serve({ 'GET /api/users/me': () => jsonResponse(makeUser({ genresOnboardingPending: true })) });
+    const { result } = await startApp();
+
+    act(() => {
+      // Como un `PATCH` del nombre que termina justo antes de cerrar la pregunta de bienvenida.
+      result.current.updateUser((latest) => ({ ...latest, username: 'ana_nueva' }));
+      result.current.updateUser((latest) => ({ ...latest, genresOnboardingPending: false }));
+    });
+
+    expect(result.current.user).toMatchObject({ username: 'ana_nueva', genresOnboardingPending: false });
+  });
+
+  it('updateUser con una función no hace nada si aún no hay usuario cargado', async () => {
+    serve({ 'GET /api/users/me': UNAUTHORIZED });
+    const { result } = await startApp();
+    const updater = vi.fn((latest: User) => latest);
+
+    act(() => result.current.updateUser(updater));
+
+    expect(updater).not.toHaveBeenCalled();
+    expect(result.current.user).toBeNull();
+  });
+
   it('useAuth fuera de AuthProvider lanza un error claro', () => {
     // React registra con console.error el error de render; es lo esperado aquí.
     vi.spyOn(console, 'error').mockImplementation(() => {});

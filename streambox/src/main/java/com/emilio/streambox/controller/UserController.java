@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.emilio.streambox.dto.AcceptedResponse;
 import com.emilio.streambox.dto.CreateUserRequest;
+import com.emilio.streambox.dto.CurrentUserResponse;
 import com.emilio.streambox.dto.UpdateProfileRequest;
 import com.emilio.streambox.dto.UserResponse;
 import com.emilio.streambox.security.AuthenticatedUser;
@@ -60,6 +61,10 @@ public class UserController {
      * <p>
      * El usuario se identifica por el token JWT: Spring Security entrega el
      * {@link AuthenticatedUser} que estableció el filtro de autenticación.
+     * Devuelve {@link CurrentUserResponse} y no {@link UserResponse}: lleva
+     * datos que solo le interesan al propio usuario
+     * ({@code genresOnboardingPending}) y que no deben salir en el listado del
+     * panel.
      * </p>
      *
      * @param principal usuario autenticado de la petición actual
@@ -68,14 +73,17 @@ public class UserController {
     @GetMapping("/me")
     @SecurityRequirement(name = "bearerAuth")
     @Operation(summary = "Obtiene el usuario autenticado", description = "Devuelve la información del usuario asociado "
-            + "al token JWT utilizado en la petición, incluido su icono de perfil (avatar: una clave o null).")
+            + "al token JWT utilizado en la petición, incluido su icono de perfil (avatar: una clave o null) y "
+            + "si tiene pendiente la pregunta de bienvenida de los géneros favoritos (genresOnboardingPending: "
+            + "solo una cuenta USER que aún no ha contestado ni saltado la pregunta; nunca un ADMIN). Ese dato "
+            + "solo sale aquí y en PATCH /api/users/me, no en el listado de usuarios.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Usuario obtenido correctamente"),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado")
     })
-    public UserResponse getCurrentUser(@AuthenticationPrincipal AuthenticatedUser principal) {
+    public CurrentUserResponse getCurrentUser(@AuthenticationPrincipal AuthenticatedUser principal) {
 
-        return userService.getUserById(principal.id());
+        return userService.getCurrentUser(principal.id());
     }
 
     /**
@@ -115,7 +123,7 @@ public class UserController {
             @ApiResponse(responseCode = "409", description = "El nombre de usuario ya está en uso, o lo "
                     + "ha reservado un registro con el correo de otra cuenta (código USER_ALREADY_EXISTS)")
     })
-    public UserResponse updateCurrentUser(
+    public CurrentUserResponse updateCurrentUser(
             @AuthenticationPrincipal AuthenticatedUser principal,
             @Valid @RequestBody UpdateProfileRequest request) {
 

@@ -26,7 +26,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.emilio.streambox.dto.AcceptedResponse;
 import com.emilio.streambox.dto.CreateUserRequest;
 import com.emilio.streambox.dto.UpdateProfileRequest;
-import com.emilio.streambox.dto.UserResponse;
+import com.emilio.streambox.dto.CurrentUserResponse;
 import com.emilio.streambox.entity.Role;
 import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.UserAlreadyExistsException;
@@ -91,7 +91,7 @@ class PostgresUsernameReleaseIntegrationTest extends PostgresIntegrationTestSupp
         User owner = saveUser("titular_pg", Role.USER);
         String passwordHash = owner.getPassword();
 
-        UserResponse response = userService.updateProfile(owner.getId(), rename("caducada_pg"));
+        CurrentUserResponse response = userService.updateProfile(owner.getId(), rename("caducada_pg"));
 
         assertEquals("caducada_pg", response.username());
         assertFalse(userRepository.existsById(stale.getId()), "La pendiente sustituible se borra");
@@ -140,7 +140,7 @@ class PostgresUsernameReleaseIntegrationTest extends PostgresIntegrationTestSupp
 
         Future<AcceptedResponse> registration = pool.submit(() -> register("disputado_pg", owner.getEmail()));
         awaitWaitingForLock(1);
-        Future<UserResponse> renaming = pool.submit(
+        Future<CurrentUserResponse> renaming = pool.submit(
                 () -> userService.updateProfile(owner.getId(), rename("disputado_pg")));
         awaitWaitingForLock(2);
         releaseArbiter.countDown();

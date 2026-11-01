@@ -60,7 +60,7 @@ test.describe('Mi perfil', () => {
 
     await expect(page.getByRole('heading', { level: 1, name: user.username })).toBeVisible();
     await expect(page.getByText('Películas en mi lista')).toBeVisible();
-    const genres = page.getByRole('region', { name: 'Tus géneros' });
+    const genres = page.getByRole('region', { name: 'Géneros de tu lista' });
     await expect(genres.getByText(/Tu lista está vacía/)).toBeVisible();
     await expect(page.getByRole('region', { name: 'De tu lista', exact: true })).toHaveCount(0);
 
@@ -88,7 +88,7 @@ test.describe('Mi perfil', () => {
     await expect(stats('Géneros distintos')).toHaveText('3');
 
     // La serie sembrada es de Drama + Ciencia ficción: Acción 2, Ciencia ficción 3, Drama 2.
-    const genres = page.getByRole('region', { name: 'Tus géneros' });
+    const genres = page.getByRole('region', { name: 'Géneros de tu lista' });
     // Lo que lee un lector de pantalla en Chromium real: sin el número suelto y sin espacio antes de la coma.
     await expect(genres.getByRole('list')).toMatchAriaSnapshot(`
       - list:
@@ -171,9 +171,9 @@ test.describe('Mi perfil en pantallas estrechas', () => {
       }));
       expect(scrollWidth, `scrollWidth (${scrollWidth}) debe ser ≤ clientWidth (${clientWidth})`).toBeLessThanOrEqual(clientWidth);
 
-      // Apiladas: «Tus géneros» queda debajo de «Cuenta», no a su lado.
+      // Apiladas: «Géneros de tu lista» queda debajo de «Cuenta», no a su lado.
       const account = await page.getByRole('region', { name: 'Cuenta' }).boundingBox();
-      const genres = await page.getByRole('region', { name: 'Tus géneros' }).boundingBox();
+      const genres = await page.getByRole('region', { name: 'Géneros de tu lista' }).boundingBox();
       expect(genres!.y).toBeGreaterThan(account!.y + account!.height - 1);
     });
   }

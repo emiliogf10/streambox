@@ -21,6 +21,7 @@
   - Manejadores de excepción personalizados para `401 Unauthorized` y `403 Forbidden` en formato JSON estructurado.
   - **Verificación del correo al registrarse**: enlace de un solo uso (24 h, en la base solo su SHA-256) y registro que responde siempre igual, para que nadie pueda ocupar un email ajeno ni averiguar qué emails tienen cuenta.
   - **«He olvidado mi contraseña»**: enlace de un solo uso (1 h) para elegir una contraseña nueva; al usarlo, el correo queda confirmado y se cierran todas las sesiones (así nadie puede retener un email ajeno registrándolo con su contraseña).
+  - **Géneros favoritos («Tus gustos»)**: al empezar, el usuario elige entre 3 y 5 géneros y recibe recomendaciones desde el primer día (cada favorito pesa como 2 «me gusta»); se editan en el perfil.
 - **🎥 Catálogo y Búsqueda Dinámica**:
   - Paginación y ordenación nativa con `Pageable` y DTOs envolventes (`MoviePageResponse`).
   - Filtrado multicriterio combinable (título insensible a mayúsculas, género y año de lanzamiento) implementado mediante **Spring Data JPA `Specification`**.
@@ -129,7 +130,10 @@ La base de todos los endpoints es `/api`.
 | `DELETE` | `/api/users/me/favorites` | `USER`, `ADMIN` | Vacía por completo la lista del usuario actual |
 | `GET` | `/api/users/me/likes/movies` · `/api/users/me/likes/series` | `USER`, `ADMIN` | Títulos que le gustan al usuario («la vi y me gustó»), lo más reciente primero (solo series con episodios) |
 | `PUT` / `DELETE` | `/api/users/me/likes/movies/{movieId}` · `/api/users/me/likes/series/{seriesId}` | `USER`, `ADMIN` | Da o quita un «me gusta» (204, idempotentes; el `PUT` da 404 si el título no existe o la serie no tiene episodios) |
-| `GET` | `/api/users/me/recommendations?limit=12` | `USER`, `ADMIN` | Recomendaciones por géneros de lo que te gusta (`limit` 1–24): `{ basedOnLikes, movies, series }`; sin «me gusta», listas vacías |
+| `GET` | `/api/users/me/recommendations?limit=12` | `USER`, `ADMIN` | Recomendaciones por géneros de lo que te gusta y de tus géneros favoritos (cada favorito pesa como 2 «me gusta»; `limit` 1–24): `{ basis, movies, series }` con `basis` = `NONE` \| `GENRES` \| `LIKES` \| `GENRES_AND_LIKES`; sin favoritos ni «me gusta», `NONE` y listas vacías |
+| `GET` | `/api/users/me/genres` | `USER`, `ADMIN` | «Tus gustos»: tus géneros favoritos que tienen títulos, por nombre |
+| `GET` | `/api/users/me/genres/options` | `USER`, `ADMIN` | Géneros que se pueden elegir (con alguna película o serie visible) |
+| `PUT` | `/api/users/me/genres` | `USER`, `ADMIN` | Sustituye tus favoritos (`{"genreIds"}`): lista vacía o entre 3 y 5 distintos; 400 `VALIDATION_ERROR` en `genreIds`. Siempre cierra la pregunta de bienvenida |
 
 ### 3. Catálogo de Películas
 | Método | Endpoint | Acceso | Descripción |

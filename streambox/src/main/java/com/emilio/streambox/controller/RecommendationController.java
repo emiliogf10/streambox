@@ -63,11 +63,13 @@ public class RecommendationController {
      */
     @GetMapping
     @Operation(summary = "Obtiene mis recomendaciones", description = "Devuelve películas y series "
-            + "recomendadas al usuario autenticado según los géneros de lo que le gusta: cada género pesa "
-            + "tantos puntos como títulos con «me gusta» lo tienen y cada título suma los pesos de sus géneros. "
-            + "No incluye lo que ya le gusta ni series sin episodios; a igual puntuación, primero lo añadido "
-            + "más recientemente y después el id mayor. Si no tiene ningún «me gusta», basedOnLikes es false y "
-            + "las dos listas van vacías.")
+            + "recomendadas al usuario autenticado según los géneros de lo que le gusta y de sus géneros "
+            + "favoritos: cada género pesa tantos puntos como títulos visibles con «me gusta» lo tienen, más 2 "
+            + "si es uno de sus géneros favoritos, y cada título suma los pesos de sus géneros. No incluye lo "
+            + "que ya le gusta ni series sin episodios; a igual puntuación, primero lo añadido más recientemente "
+            + "y después el id mayor. basis indica en qué se basan: GENRES (solo géneros favoritos), LIKES "
+            + "(solo «me gusta»), GENRES_AND_LIKES (los dos) o NONE (ni géneros favoritos con títulos ni «me "
+            + "gusta» visibles: las dos listas van vacías).")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Recomendaciones obtenidas correctamente (las "
                     + "listas pueden estar vacías)"),

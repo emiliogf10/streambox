@@ -76,7 +76,7 @@ function LikedGroup<T extends CatalogItem>({ title, noun, items, renderCard }: L
  * administrador también tiene sus «Me gusta») y dice cómo llenarla y para qué
  * sirve. Sin botón: el camino es la página de un título (las tarjetas de «De tu
  * lista», justo encima si las hay, o las secciones de la barra), y repetir aquí el
- * «Explorar películas» de «Tus géneros» serían dos botones iguales en la misma
+ * «Explorar películas» de «Géneros de tu lista» serían dos botones iguales en la misma
  * pantalla cuando las dos están vacías.
  */
 function LikesEmpty() {

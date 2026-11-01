@@ -6,7 +6,7 @@
  * al panel. Se montan las MISMAS rutas que en el navegador, con un enrutador en
  * memoria; `fetch` está simulado.
  */
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppRoutes } from './App';
@@ -287,4 +287,54 @@ describe('Rutas del panel de administración', () => {
     expect(screen.getByText('ruta:/admin/peliculas')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Administrar' })).toHaveAttribute('aria-current', 'page');
   });
+});
+
+describe('Pregunta de bienvenida (géneros favoritos)', () => {
+  /** Rutas de un USER con la pregunta pendiente; `loggedIn` decide si `/users/me` responde ya con él. */
+  function pendingRoutes(state: { loggedIn: boolean }) {
+    routesFor('USER');
+    routeFetch(fetchMock, {
+      [CURRENT_USER]: () =>
+        state.loggedIn
+          ? jsonResponse(makeUser({ genresOnboardingPending: true }))
+          : jsonResponse({ status: 401, code: 'UNAUTHORIZED', message: 'No autenticado.' }, 401),
+      'POST /api/auth/login': () => {
+        state.loggedIn = true;
+        return noContentResponse();
+      },
+      'GET /api/users/me/genres/options': () => jsonResponse([{ id: 1, name: 'Drama' }]),
+      'GET /api/users/me/favorites': () => jsonResponse([]),
+    });
+  }
+
+  it('tras iniciar sesión con el formulario, una cuenta con la pregunta pendiente llega a /bienvenida', async () => {
+    pendingRoutes({ loggedIn: false });
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: '/login' });
+
+    await user.type(await screen.findByLabelText('Correo electrónico'), 'ana@example.com');
+    await user.type(screen.getByLabelText('Contraseña'), 'una-contrasena-larga');
+    await user.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Cuéntanos qué te gusta' })).toBeInTheDocument();
+    expect(screen.getByText('ruta:/bienvenida')).toBeInTheDocument();
+    // Sin la barra: es un paso, no una sección más.
+    expect(screen.queryByRole('navigation', { name: 'Principal' })).not.toBeInTheDocument();
+  });
+
+  it.each(['/verificar-email', '/restablecer-contrasena', '/recuperar-contrasena'])(
+    'la página pública %s nunca desvía a la bienvenida, aunque haya sesión con la pregunta pendiente',
+    async (route) => {
+      pendingRoutes({ loggedIn: true });
+      renderWithProviders(<AppRoutes />, { route, session: true });
+
+      expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
+      // Da tiempo a que la sesión se resuelva: si la guarda alcanzara estas rutas, ya habría desviado.
+      await waitFor(() =>
+        expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/users/me')).toBe(true),
+      );
+      expect(screen.getByText(`ruta:${route}`)).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Cuéntanos qué te gusta' })).not.toBeInTheDocument();
+    },
+  );
 });

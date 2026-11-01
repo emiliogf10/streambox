@@ -103,7 +103,7 @@ describe('useLikes: sesión', () => {
     });
     // La sesión nueva ya tiene sus recomendaciones en la caché.
     const recommendations = queryKeys.recommendations.list(12);
-    queryClient.setQueryData(recommendations, makeRecommendations({ basedOnLikes: true, movies: [m3] }));
+    queryClient.setQueryData(recommendations, makeRecommendations({ basis: 'LIKES', movies: [m3] }));
 
     await act(async () => {
       put.resolve(noContentResponse());
@@ -112,7 +112,7 @@ describe('useLikes: sesión', () => {
 
     expect(screen.queryByText(likedMessage('Dos'))).not.toBeInTheDocument();
     expect(queryClient.getQueryData(recommendations)).toEqual(
-      makeRecommendations({ basedOnLikes: true, movies: [m3] }),
+      makeRecommendations({ basis: 'LIKES', movies: [m3] }),
     );
     await waitFor(() => expect(result.current.likes.status).toBe('ready'));
     expect(result.current.likes.isLiked(2, 'movie')).toBe(false);

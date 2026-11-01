@@ -1,8 +1,6 @@
 package com.emilio.streambox.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
@@ -31,6 +29,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.emilio.streambox.dto.RecommendationBasis;
 import com.emilio.streambox.dto.RecommendationsResponse;
 import com.emilio.streambox.entity.Episode;
 import com.emilio.streambox.entity.Genre;
@@ -60,7 +59,8 @@ import jakarta.persistence.EntityManagerFactory;
  * Los casos finos del criterio (cada desempate, los pesos, H2 frente a
  * PostgreSQL) están en {@code repository.LikesQueryContract}; aquí se comprueba
  * que el endpoint los respeta de punta a punta (orden, exclusión de lo que ya
- * gusta y de las series ocultas, {@code basedOnLikes}), el contrato HTTP
+ * gusta y de las series ocultas, el peso de los géneros favoritos y
+ * {@code basis}), el contrato HTTP
  * (límite por defecto y rango, 401) y el coste fijo en sentencias SQL. Usa las
  * mismas propiedades que {@link CatalogIntegrationTest} para compartir su
  * contexto de Spring.
@@ -116,14 +116,19 @@ class RecommendationsIntegrationTest {
     // Sin «me gusta»
     // ------------------------------------------------------------------
 
-    /** Un usuario sin «me gusta» recibe {@code basedOnLikes: false} y dos listas vacías (no {@code null}). */
+    /**
+     * Un usuario sin «me gusta» ni géneros favoritos recibe {@code basis: NONE}
+     * y dos listas vacías (no {@code null}). El antiguo {@code basedOnLikes} ya
+     * no forma parte del contrato.
+     */
     @Test
     void sinMeGustaNoHayRecomendaciones() throws Exception {
         saveMovie("Una película cualquiera", drama);
 
         mockMvc.perform(get(RECOMMENDATIONS).header("Authorization", aliceToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.basedOnLikes").value(false))
+                .andExpect(jsonPath("$.basis").value("NONE"))
+                .andExpect(jsonPath("$.basedOnLikes").doesNotExist())
                 .andExpect(jsonPath("$.movies").isArray())
                 .andExpect(jsonPath("$.movies.length()").value(0))
                 .andExpect(jsonPath("$.series").isArray())
@@ -143,7 +148,7 @@ class RecommendationsIntegrationTest {
 
         RecommendationsResponse response = recommendations("");
 
-        assertFalse(response.basedOnLikes());
+        assertEquals(RecommendationBasis.NONE, response.basis());
         assertEquals(List.of(), response.movies());
     }
 
@@ -185,7 +190,7 @@ class RecommendationsIntegrationTest {
 
         RecommendationsResponse response = recommendations("");
 
-        assertTrue(response.basedOnLikes());
+        assertEquals(RecommendationBasis.LIKES, response.basis());
         assertEquals(List.of(both.getId(), dramaNewer.getId(), dramaTwinB.getId(), dramaTwinA.getId(),
                 scifiOnly.getId()), response.movies().stream().map(m -> m.id()).toList());
         assertEquals(List.of(bothSeries.getId(), dramaSeries.getId()),
@@ -205,7 +210,7 @@ class RecommendationsIntegrationTest {
 
         likeService.likeMovie(alice.getId(), candidate.getId());
         RecommendationsResponse allLiked = recommendations("");
-        assertTrue(allLiked.basedOnLikes(), "tiene «me gusta», solo que no queda nada nuevo");
+        assertEquals(RecommendationBasis.LIKES, allLiked.basis(), "tiene «me gusta», solo que no queda nada nuevo");
         assertEquals(List.of(), allLiked.movies());
 
         likeService.unlikeMovie(alice.getId(), candidate.getId());
@@ -220,7 +225,7 @@ class RecommendationsIntegrationTest {
         saveMovie("Otra comedia", comedy);
         likeService.likeMovie(bob.getId(), bobsMovie.getId());
 
-        assertFalse(recommendations("").basedOnLikes());
+        assertEquals(RecommendationBasis.NONE, recommendations("").basis());
     }
 
     // ------------------------------------------------------------------
@@ -307,25 +312,29 @@ class RecommendationsIntegrationTest {
     // Coste en sentencias SQL
     // ------------------------------------------------------------------
 
-    /** Sin «me gusta», una sola sentencia: abrir el inicio no le cuesta las agregaciones a un usuario nuevo. */
+    /**
+     * Sin «me gusta» ni favoritos, dos sentencias (los dos {@code EXISTS}):
+     * abrir el inicio no le cuesta las agregaciones a un usuario nuevo.
+     */
     @Test
-    void sinMeGustaElServicioEjecutaUnaSolaSentencia() {
+    void sinSenalesElServicioEjecutaDosSentencias() {
         saveMovie("Candidata", drama);
 
-        assertEquals(1, statementsFor(() -> recommendationService.getRecommendations(alice.getId(), 12)));
+        assertEquals(2, statementsFor(() -> recommendationService.getRecommendations(alice.getId(), 12)));
     }
 
     /**
-     * Con resultados, seis sentencias (¿tiene «me gusta»? + ids de películas +
-     * ids de series + películas con géneros + series con géneros + recuentos),
-     * sea cual sea el número de títulos o el límite; sin candidatas, tres.
+     * Con resultados, siete sentencias (¿tiene «me gusta»? + ¿tiene favoritos?
+     * + ids de películas + ids de series + películas con géneros + series con
+     * géneros + recuentos), sea cual sea el número de títulos o el límite; sin
+     * candidatas, cuatro.
      */
     @Test
     void conMeGustaElCosteEsFijo() {
         Movie liked = saveMovie("La que me gusta", drama, scifi);
         likeService.likeMovie(alice.getId(), liked.getId());
-        assertEquals(3, statementsFor(() -> recommendationService.getRecommendations(alice.getId(), 12)),
-                "sin candidatas: comprobación + dos consultas de ids");
+        assertEquals(4, statementsFor(() -> recommendationService.getRecommendations(alice.getId(), 12)),
+                "sin candidatas: dos comprobaciones + dos consultas de ids");
 
         for (int i = 0; i < 15; i++) {
             saveMovie("Película " + i, drama, i % 2 == 0 ? scifi : comedy);
@@ -340,8 +349,133 @@ class RecommendationsIntegrationTest {
         });
         long two = statementsFor(() -> recommendationService.getRecommendations(alice.getId(), 2));
 
-        assertEquals(6, twelve);
-        assertEquals(6, two, "el coste no depende del límite");
+        assertEquals(7, twelve);
+        assertEquals(7, two, "el coste no depende del límite");
+    }
+
+    /**
+     * Con géneros favoritos, dos sentencias más para comprobar que alguno
+     * conserva títulos (los favoritos y cuáles son visibles): seis sin
+     * candidatas y nueve con resultados, sea cual sea el número de títulos.
+     */
+    @Test
+    void conFavoritosElCosteEsFijo() {
+        addFavorite(alice, drama);
+        Movie only = saveMovie("La única de drama", drama);
+        likeService.likeMovie(alice.getId(), only.getId());
+        assertEquals(6, statementsFor(() -> recommendationService.getRecommendations(alice.getId(), 12)),
+                "sin candidatas: dos EXISTS + favoritos + visibles + dos consultas de ids");
+
+        for (int i = 0; i < 15; i++) {
+            saveMovie("Película " + i, drama);
+            Series series = saveSeries("Serie " + i, drama);
+            saveEpisode(series);
+        }
+
+        long twelve = statementsFor(() -> recommendationService.getRecommendations(alice.getId(), 12));
+        long two = statementsFor(() -> recommendationService.getRecommendations(alice.getId(), 2));
+
+        assertEquals(9, twelve);
+        assertEquals(9, two, "el coste no depende del límite");
+    }
+
+    // ------------------------------------------------------------------
+    // Géneros favoritos («Tus gustos»)
+    // ------------------------------------------------------------------
+
+    /**
+     * Arranque en frío resuelto: con solo géneros favoritos (sin ningún «me
+     * gusta»), hay recomendaciones y {@code basis = GENRES}. Antes, el
+     * recomendador cortaba sin «me gusta» y devolvía las listas vacías.
+     */
+    @Test
+    void conSoloGenerosFavoritosHayRecomendacionesBasadasEnGeneros() throws Exception {
+        Movie dramaMovie = saveMovie("Drama", drama);
+        saveMovie("Comedia", comedy);
+        Series dramaSeries = saveSeries("Serie drama", drama);
+        saveEpisode(dramaSeries);
+        addFavorite(alice, drama);
+
+        RecommendationsResponse response = recommendations("");
+
+        assertEquals(RecommendationBasis.GENRES, response.basis());
+        assertEquals(List.of(dramaMovie.getId()), movieIds(response));
+        assertEquals(List.of(dramaSeries.getId()), seriesIds(response));
+    }
+
+    /** Con favoritos y «me gusta», {@code GENRES_AND_LIKES}, y los dos suman. */
+    @Test
+    void conFavoritosYMeGustaLaBaseSonLosDos() throws Exception {
+        Movie liked = saveMovie("La que me gusta", comedy);
+        Movie comedyCandidate = saveMovie("Otra comedia", comedy);
+        Movie dramaCandidate = saveMovie("Drama", drama);
+        likeService.likeMovie(alice.getId(), liked.getId());
+        addFavorite(alice, drama);
+
+        RecommendationsResponse response = recommendations("");
+
+        assertEquals(RecommendationBasis.GENRES_AND_LIKES, response.basis());
+        // Drama pesa 2 (favorito) y Comedia 1 (un «me gusta»).
+        assertEquals(List.of(dramaCandidate.getId(), comedyCandidate.getId()), movieIds(response));
+    }
+
+    /**
+     * Un favorito que se ha quedado sin títulos visibles (aquí, uno cuya única
+     * serie no tiene episodios) no cuenta: {@code NONE}, para que el inicio
+     * invite a elegir gustos en lugar de prometer recomendaciones imposibles.
+     */
+    @Test
+    void unFavoritoSinTitulosVisiblesNoCuentaComoBase() throws Exception {
+        saveSeries("Serie de drama sin episodios", drama);
+        saveMovie("Comedia", comedy);
+        addFavorite(alice, drama);
+
+        RecommendationsResponse response = recommendations("");
+
+        assertEquals(RecommendationBasis.NONE, response.basis());
+        assertEquals(List.of(), response.movies());
+        assertEquals(List.of(), response.series());
+    }
+
+    /** Los favoritos de otro usuario no influyen en los míos. */
+    @Test
+    void losFavoritosDeOtroUsuarioNoInfluyen() throws Exception {
+        User bob = saveUser("recobobfav");
+        saveMovie("Drama", drama);
+        addFavorite(bob, drama);
+
+        assertEquals(RecommendationBasis.NONE, recommendations("").basis());
+    }
+
+    /**
+     * Un género favorito pesa exactamente como 2 «me gusta» (decisión del
+     * autor), de punta a punta. Drama es favorito; Comedia suma un punto por
+     * cada película con «me gusta». La candidata de drama es la más antigua,
+     * así que solo gana a la de comedia si pesa más (no en un empate):
+     * <ul>
+     * <li>con 1 «me gusta» de comedia, Drama (2) gana a Comedia (1): si el
+     * favorito valiera 1, empatarían y saldría primero la comedia;</li>
+     * <li>con 2, empatan (2 = 2) y sale primero la más nueva, la comedia: si el
+     * favorito valiera 3, seguiría ganando el drama.</li>
+     * </ul>
+     */
+    @Test
+    void unGeneroFavoritoPesaComoDosMeGusta() throws Exception {
+        Movie dramaCandidate = saveMovie("Candidata de drama", drama);
+        Movie comedyCandidate = saveMovie("Candidata de comedia", comedy);
+        setCreatedAt("movies", dramaCandidate.getId(), BASE);
+        setCreatedAt("movies", comedyCandidate.getId(), BASE.plusSeconds(60));
+        addFavorite(alice, drama);
+
+        Movie firstLike = saveMovie("Primera comedia que me gusta", comedy);
+        likeViaApi("movies", firstLike.getId());
+        assertEquals(List.of(dramaCandidate.getId(), comedyCandidate.getId()), movieIds(recommendations("")),
+                "favorito (2) > un «me gusta» (1)");
+
+        Movie secondLike = saveMovie("Segunda comedia que me gusta", comedy);
+        likeViaApi("movies", secondLike.getId());
+        assertEquals(List.of(comedyCandidate.getId(), dramaCandidate.getId()), movieIds(recommendations("")),
+                "favorito (2) = dos «me gusta» (2): empate, primero la más nueva");
     }
 
     // ------------------------------------------------------------------
@@ -432,7 +566,17 @@ class RecommendationsIntegrationTest {
         episodeRepository.save(episode);
     }
 
-    /** Vacía las tablas respetando las claves foráneas (los «me gusta» caen en cascada). */
+    /**
+     * Marca un género como favorito con SQL directo: la API exige de 3 a 5 (lo
+     * prueba {@code FavoriteGenresIntegrationTest}), y aquí basta uno para
+     * aislar su peso.
+     */
+    private void addFavorite(User user, Genre genre) {
+        jdbc.update("INSERT INTO user_favorite_genres (user_id, genre_id, created_at) VALUES (?, ?, ?)",
+                user.getId(), genre.getId(), OffsetDateTime.ofInstant(BASE, ZoneOffset.UTC));
+    }
+
+    /** Vacía las tablas respetando las claves foráneas (los «me gusta» y los favoritos caen en cascada). */
     private void cleanDatabase() {
         seriesRepository.deleteAll();
         userRepository.deleteAll();

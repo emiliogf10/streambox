@@ -236,14 +236,14 @@ describe('ProfilePage: estados del usuario', () => {
 });
 
 describe('ProfilePage: lista vacía', () => {
-  it('las estadísticas valen 0 y «Tus géneros» explica cómo llenarla, con «Explorar películas» hacia /peliculas', async () => {
+  it('las estadísticas valen 0 y «Géneros de tu lista» explica cómo llenarla, con «Explorar películas» hacia /peliculas', async () => {
     renderProfile();
     await findName('ana');
 
     expect(valueOf('Películas en mi lista')).toHaveTextContent('0');
     expect(valueOf('Series en mi lista')).toHaveTextContent('0');
     expect(valueOf('Géneros distintos')).toHaveTextContent('0');
-    const genres = section('Tus géneros');
+    const genres = section('Géneros de tu lista');
     expect(within(genres).getByText(/Tu lista está vacía/)).toBeInTheDocument();
     expect(await within(genres).findByRole('link', { name: 'Explorar películas' })).toHaveAttribute('href', '/peliculas');
     // Un único estado vacío: la sección «De tu lista» no se repite.
@@ -260,7 +260,7 @@ describe('ProfilePage: lista vacía', () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     });
 
-    const genres = section('Tus géneros');
+    const genres = section('Géneros de tu lista');
     expect(within(genres).getByText(/Tu lista está vacía/)).toBeInTheDocument();
     expect(within(genres).queryByRole('link')).not.toBeInTheDocument();
   });
@@ -293,11 +293,11 @@ describe('ProfilePage: con la lista llena', () => {
     expect(screen.getByText('Género distinto')).toBeInTheDocument();
   });
 
-  it('«Tus géneros» ordena por frecuencia y luego por nombre, con el recuento accesible', async () => {
+  it('«Géneros de tu lista» ordena por frecuencia y luego por nombre, con el recuento accesible', async () => {
     renderProfile({ movies: [dune, arrival], series: [dark] });
     await findName('ana');
 
-    const genres = await screen.findByRole('region', { name: 'Tus géneros' });
+    const genres = await screen.findByRole('region', { name: 'Géneros de tu lista' });
     // Drama 3; Ciencia ficción 2; Thriller 1. A la vista, nombre y número (lo de `aria-hidden`)...
     const items = within(genres).getAllByRole('listitem');
     const visible = (item: HTMLElement) =>
@@ -317,7 +317,7 @@ describe('ProfilePage: con la lista llena', () => {
     renderProfile({ movies: [makeMovie({ id: 1, genres: many })] });
     await findName('ana');
 
-    const genres = await screen.findByRole('region', { name: 'Tus géneros' });
+    const genres = await screen.findByRole('region', { name: 'Géneros de tu lista' });
     expect(within(genres).getAllByRole('listitem')).toHaveLength(6);
     expect(within(genres).getByText('Los 6 más frecuentes de 8 géneros en tu lista.')).toBeInTheDocument();
     expect(valueOf('Géneros distintos')).toHaveTextContent('8');
@@ -336,7 +336,9 @@ describe('ProfilePage: con la lista llena', () => {
       'Resumen de tu lista',
       'Cuenta',
       'Sesiones',
-      'Tus géneros',
+      'Géneros de tu lista',
+      // «Tus gustos» (los géneros favoritos que elige el usuario), a todo el ancho bajo las tarjetas.
+      'Tus gustos',
       'De tu lista',
       // «Te gusta» va al final: son los «Me gusta» (otra lista, ver `LikedTitlesSection.test.tsx`).
       'Te gusta',
@@ -374,19 +376,19 @@ describe('ProfilePage: con la lista llena', () => {
     renderProfile({ movies: [makeMovie({ id: 1, genres: [] })] });
     await findName('ana');
 
-    const genres = await screen.findByRole('region', { name: 'Tus géneros' });
+    const genres = await screen.findByRole('region', { name: 'Géneros de tu lista' });
     expect(within(genres).getByText('Los títulos de tu lista todavía no tienen géneros asignados.')).toBeInTheDocument();
     expect(within(genres).queryByRole('list')).not.toBeInTheDocument();
   });
 });
 
 describe('ProfilePage: estados de la lista', () => {
-  it('mientras carga la lista, los datos de la cuenta ya se ven y «Tus géneros» avisa', async () => {
+  it('mientras carga la lista, los datos de la cuenta ya se ven y «Géneros de tu lista» avisa', async () => {
     renderProfile({ extra: { [MOVIES]: () => new Promise<Response>(() => {}) } });
     await findName('ana');
 
     expect(within(section('Cuenta')).getByText('ana@example.com')).toBeInTheDocument();
-    expect(within(section('Tus géneros')).getByRole('status')).toHaveTextContent('Cargando tu lista...');
+    expect(within(section('Géneros de tu lista')).getByRole('status')).toHaveTextContent('Cargando tu lista...');
     // Sin lista no se inventan estadísticas (un «0» sería falso).
     expect(screen.queryByText('Películas en mi lista')).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'De tu lista' })).not.toBeInTheDocument();
@@ -415,7 +417,7 @@ describe('ProfilePage: estados de la lista', () => {
     expect(screen.queryByRole('heading', { name: 'No se pudo cargar tu lista' })).not.toBeInTheDocument();
     // El botón desapareció al pulsarlo: el foco quedó en la zona de la tarjeta, no en <body>.
     expect(document.activeElement).not.toBe(document.body);
-    expect(document.activeElement).toContainElement(section('Tus géneros'));
+    expect(document.activeElement).toContainElement(section('Géneros de tu lista'));
   });
 });
 

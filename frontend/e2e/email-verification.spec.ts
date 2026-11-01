@@ -26,7 +26,7 @@ import {
 import type { TestUser } from './support/api';
 import { BACKEND_URL, FRONTEND_URL } from './support/config';
 import { HERO_TITLE } from './support/catalog';
-import { expect, formAlert, sessionCookie, test } from './support/fixtures';
+import { expect, formAlert, sessionCookie, skipGenresQuestionIfAsked, test } from './support/fixtures';
 
 /** Título de `/verificar-email` cuando el token no vale (inválido, caducado o ya usado: el mismo caso). */
 const INVALID_LINK_TITLE = 'El enlace no es válido o ha caducado';
@@ -75,11 +75,15 @@ function recordConfirmations(page: Page): () => number {
   return () => count;
 }
 
-/** Inicia sesión con el formulario y espera a la portada. */
+/**
+ * Inicia sesión con el formulario y espera a la portada. Una cuenta recién confirmada pasa antes por la
+ * pregunta de bienvenida, que aquí se salta («Ahora no»).
+ */
 async function loginWithForm(page: Page, user: TestUser): Promise<void> {
   await page.getByLabel('Correo electrónico').fill(user.email);
   await page.getByLabel('Contraseña').fill(user.password);
   await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await skipGenresQuestionIfAsked(page);
   await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
   expect(await sessionCookie(page)).toBeDefined();
 }

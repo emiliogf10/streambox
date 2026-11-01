@@ -7,6 +7,7 @@ import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './components
 import { SkipLink } from './components/SkipLink';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
+import { WELCOME_PATH } from './lib/favoriteGenres';
 import { createQueryClient } from './lib/queryClient';
 import { AdminGenresPage } from './pages/admin/AdminGenresPage';
 import { AdminLayout } from './pages/admin/AdminLayout';
@@ -27,6 +28,7 @@ import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { SeriesDetailPage } from './pages/SeriesDetailPage';
 import { SeriesPage } from './pages/SeriesPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
+import { WelcomePage } from './pages/WelcomePage';
 
 /**
  * Mapa de rutas de la aplicación.
@@ -43,6 +45,10 @@ import { VerifyEmailPage } from './pages/VerifyEmailPage';
  *   de una película), `/series`, `/series/:id` (con `?temporada=N`), `/favorites` y
  *   `/perfil` (datos de la cuenta y resumen de la lista): privadas, dentro de `AppShell` (barra + contenido). A `/perfil` se
  *   llega desde «Mi perfil» en el menú de usuario de la barra.
+ * - `/bienvenida`: la pregunta de los géneros favoritos de una cuenta nueva
+ *   (`WelcomePage`). Privada (tras `RequireAuth`, que es quien lleva ahí a un
+ *   `USER` con la pregunta pendiente, una vez), pero FUERA de `AppShell`: sin
+ *   barra, como el login, porque es un paso y sus salidas son sus dos botones.
  * - `/admin/*`: panel de administración, también dentro de `AppShell` y además
  *   tras `RequireAdmin` (espera a conocer el rol; si no es `ADMIN`, a `/`).
  *   `/admin` lleva a `/admin/peliculas`; el resto de rutas del panel son el
@@ -77,6 +83,14 @@ export function AppRoutes() {
       <Route path="/verificar-email" element={<VerifyEmailPage />} />
       <Route path="/recuperar-contrasena" element={<ForgotPasswordPage />} />
       <Route path="/restablecer-contrasena" element={<ResetPasswordPage />} />
+      <Route
+        path={WELCOME_PATH}
+        element={
+          <RequireAuth>
+            <WelcomePage />
+          </RequireAuth>
+        }
+      />
       <Route
         element={
           <RequireAuth>

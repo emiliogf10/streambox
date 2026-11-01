@@ -95,22 +95,44 @@ export interface SeriesDetail extends Series {
 }
 
 /**
+ * En qué se basan las recomendaciones (`RecommendationsResponse.basis`):
+ * - `NONE`: en nada (sin géneros favoritos ni «Me gusta»); las listas llegan vacías.
+ * - `GENRES`: solo en los géneros favoritos («Tus gustos»).
+ * - `LIKES`: solo en los títulos que le gustan.
+ * - `GENRES_AND_LIKES`: en las dos cosas (un género favorito pesa como dos «Me gusta»).
+ *
+ * Existe para que la portada diga la verdad sobre el porqué de cada fila.
+ */
+export type RecommendationBasis = 'NONE' | 'GENRES' | 'LIKES' | 'GENRES_AND_LIKES';
+
+/**
  * Recomendaciones del usuario de la sesión (`GET /api/users/me/recommendations`).
  *
- * Las calcula el servidor a partir de los géneros de lo que le gusta («Me
- * gusta»), sin incluir lo que ya le gusta. Cada lista llega ya ordenada (la más
- * afín primero) y por separado: el servidor no da una puntuación común con la
- * que mezclarlas sin inventar un orden.
+ * Las calcula el servidor a partir de sus géneros favoritos y de los géneros de
+ * lo que le gusta («Me gusta»), sin incluir lo que ya le gusta. Cada lista
+ * llega ya ordenada (la más afín primero) y por separado: el servidor no da una
+ * puntuación común con la que mezclarlas sin inventar un orden.
  */
 export interface Recommendations {
   /**
-   * `true` si hay algún «Me gusta» en el que basarse. Con `false` las dos listas
-   * llegan vacías y la portada no pinta nada (las novedades ya están).
+   * En qué se basan (ver {@link RecommendationBasis}). Con `NONE` las dos listas
+   * llegan vacías y la portada invita a elegir géneros favoritos.
    */
-  basedOnLikes: boolean;
+  basis: RecommendationBasis;
   movies: Movie[];
   /** Solo series con episodios (las demás no las ve un usuario). */
   series: Series[];
+}
+
+/**
+ * Cuerpo de `PUT /api/users/me/genres` (guardar los géneros favoritos). Sustituye
+ * la lista entera: vacía (= «Ahora no» o quitar los gustos) o de 3 a 5 ids
+ * distintos de géneros con títulos visibles. Responde 200 con la lista guardada
+ * (`Genre[]`, por nombre) y, sea cual sea, cierra para siempre la pregunta de
+ * la bienvenida.
+ */
+export interface FavoriteGenresRequest {
+  genreIds: number[];
 }
 
 /** Página de resultados con los metadatos de paginación (`MoviePageResponse`, `SeriesPageResponse`). */
@@ -150,6 +172,14 @@ export interface User {
    * la interfaz no conozca también se pinta con la inicial, sin romper nada.
    */
   avatar: string | null;
+  /**
+   * `true` si a este usuario aún hay que hacerle la pregunta de la bienvenida
+   * («¿qué géneros te gustan?», `/bienvenida`): solo un `USER` que todavía no la
+   * ha contestado ni saltado; un `ADMIN`, nunca. Solo llega en `GET /api/users/me`
+   * (por eso es opcional: la respuesta de `PATCH /api/users/me` puede no
+   * traerlo). Ausente se trata como `false`: preguntar sin estar seguros sería peor.
+   */
+  genresOnboardingPending?: boolean;
 }
 
 /** Cuerpo de `POST /api/users` (registro público; el servidor siempre crea rol `USER`). */
