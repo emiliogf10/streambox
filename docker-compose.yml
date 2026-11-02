@@ -132,7 +132,7 @@ services:
   # subidas (ecosistema docker-compose de .github/dependabot.yml).
   # ---------------------------------------------------------------
   mailpit:
-    image: axllent/mailpit:v1.31.6
+    image: axllent/mailpit:v1.32.0
     restart: unless-stopped
     environment:
       # Sin consultar a GitHub si hay versión nueva (lo haría al abrir
