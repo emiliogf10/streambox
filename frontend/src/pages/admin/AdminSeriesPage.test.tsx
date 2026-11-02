@@ -249,6 +249,47 @@ describe('AdminSeriesPage: búsqueda', () => {
     expect(await screen.findByRole('row', { name: /^Dark/ })).toBeInTheDocument();
     expect(screen.getByText('busqueda:')).toBeInTheDocument();
   });
+
+  it('borrar con la primera carga de esa búsqueda en vuelo: la lectura vieja se descarta y la fila desaparece', async () => {
+    let deleted = false;
+    let answerStaleSearch: (response: Response) => void = () => {};
+    let searches = 0;
+    routeFetch(fetchMock, {
+      [listKey()]: () => jsonResponse(makePage([dark, severance])),
+      [searchKey('dark')]: () => {
+        searches += 1;
+        if (searches === 1) {
+          return new Promise<Response>((resolve) => {
+            answerStaleSearch = resolve;
+          });
+        }
+        return jsonResponse(makePage(deleted ? [] : [dark], { totalPages: deleted ? 0 : 1 }));
+      },
+      'DELETE /api/series/4': () => {
+        deleted = true;
+        return noContentResponse();
+      },
+    });
+    const user = setupUser();
+    renderList();
+    await screen.findByRole('row', { name: /^Dark/ });
+    await user.type(screen.getByRole('searchbox', { name: 'Buscar por título' }), 'dark');
+    passTime(DEBOUNCE_MS);
+    await waitFor(() => expect(searches).toBe(1));
+
+    // La fila de antes sigue en pantalla mientras llega la búsqueda: se borra desde ahí.
+    await user.click(screen.getByRole('button', { name: 'Borrar Dark' }));
+    await user.click(await screen.findByRole('button', { name: 'Sí, borrar serie' }));
+    await expectToastOnPage('«Dark» se ha borrado del catálogo.');
+
+    // Llega la respuesta en vuelo, leída ANTES del borrado.
+    answerStaleSearch(jsonResponse(makePage([dark])));
+
+    expect(await screen.findByRole('heading', { name: 'Sin resultados para «dark»' })).toBeInTheDocument();
+    expect(screen.queryByRole('row', { name: /^Dark/ })).not.toBeInTheDocument();
+    expect(searches).toBe(2);
+    expect(callsTo('/api/admin/series?title')[0][1]?.signal?.aborted).toBe(true);
+  });
 });
 
 describe('AdminSeriesPage: paginación', () => {

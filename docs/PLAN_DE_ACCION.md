@@ -38,7 +38,7 @@
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
 | Backend (JUnit) | **3870** | 3349 con H2 y 521 contra PostgreSQL real con Testcontainers. Sin Docker se omiten los de PostgreSQL |
-| Frontend (Vitest) | **1708** | |
+| Frontend (Vitest) | **1727** | |
 | E2E (Playwright) | **233** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
 
 Todos en verde en la máquina del autor.
@@ -332,6 +332,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - `accessibility.spec.ts:189` (formulario de película: «Volver al listado» tapado por la barra, a 375 y 1280 px) falla con ese navegador. En una página de prueba sin la app, ese Chromium no aplica `scroll-margin-top` a `focus()` si el elemento ya cabe entero en la ventana; el enlace tiene `scroll-margin-top` de 89 px. La interfaz es correcta y en la máquina del autor (Chromium de Playwright 1.63) pasa.
   - Al fallar, los 7 tests del proyecto `catalogo-mutable` salen «did not run»; con `--project=catalogo-mutable --no-deps` pasan 7/7.
 - **E2E inestables con la máquina cargada** — *Baja · BAJA*
+  - **Diagnóstico para cualquier inestable nuevo (2026-11-01):** dos que parecían «carga» resultaron ser carreras del test, con causa concreta (ver el historial de esa fecha). Antes de anotar uno como carga, mira la traza: qué elemento resolvió cada acción y qué peticiones seguían en vuelo. `trailer-layout.spec.ts:146` sigue sin ese análisis.
   - Un aviso que aparece bajo el cursor queda pausado por el *hover* y puede tapar un botón de la fila (p. ej. «Borrar» en Géneros, `admin.spec.ts:122`). Pausar solo con movimiento real del puntero, o colocar los avisos sin tapar acciones, cambia el comportamiento: queda como propuesta.
   - El 2026-10-17, con la batería en 12,8 min, falló una vez `e2e/trailer-keyboard.spec.ts` («el foco no se escapa del diálogo»); repetido, 6/6.
   - El 2026-10-15, con la batería en 8 min (en vez de ~4), falló una vez `auth.spec.ts:484` (dos pestañas renuevan a la vez); por separado pasó 3/3.
@@ -477,6 +478,22 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-01 · CI en rojo: carreras de los E2E y lecturas anteriores a la escritura
+
+- **Seguridad:** OSV-Scanner fallaba por avisos publicados después del último push (`vite` 8.3.2 y `undici` 8.11.2, solo de desarrollo). `vite` quedó resuelto con la PR #17; `undici` (8.12.3) llega con la PR #22 de Dependabot, en verde y **pendiente de fusionar** en la fecha de esta entrada. La #19 y la #21 fallaban solo por heredar esas versiones de `main`.
+- **CI:** falló en dos pushes a `main` siempre `email-verification.spec.ts` («el enlace ya usado…»). Causa, vista en la traza: `toHaveURL` pasa antes de que la ruta nueva se pinte (React Router usa `startTransition`) y el `fill` cayó en el campo de reenvío de `/verificar-email`. La primera hipótesis (el guard desmontaba el login) era falsa. Corregido en los tests con `waitForLoginPage` y `waitForAdminSearchResults` (`e2e/support/fixtures.ts`).
+- **`password-reset.spec.ts` (el inestable anotado como `:232`):** enviaba con la comprobación de sesión en curso, y la app no afirmaba, con razón, una sesión que no conocía. Corregido en el test con `openResetLinkWithKnownSession`. **Precio:** el E2E ya no cubre «carga en frío con token y sesión conocida», que queda en `ResetPasswordPage.test.tsx`. `favorite-genres.spec.ts` («las páginas públicas nunca desvían…») pasaba sin probar nada si `/users/me` iba lento: ahora espera a la sesión.
+- **Bugs reales encontrados por el camino (todos con test que falla sin el arreglo):**
+  - `RedirectIfAuthenticated` desmontaba `/login` y `/registro`, borrando lo escrito, si otra pestaña cambiaba la sesión.
+  - `useInvalidateCatalog`: una lectura en vuelo sin datos sobrevivía a `invalidateQueries`, y la fila borrada seguía en pantalla. Ahora `cancelQueries` antes de invalidar. Mismo problema con `setQueryData` en `AdminGenresPage` y `useSaveFavoriteGenres`.
+  - `ResetPasswordPage` afirmaba «También se ha cerrado la sesión…» sin haber sesión (nuevo estado `unconfirmed`).
+- **CI:** reporter `github` de Playwright (anotaciones visibles sin descargar nada; **aún sin probar en un CI real**) e informes de fallo guardados 14 días en vez de 7.
+- **Verificación** (orquestador): build y lint limpios, Vitest **1727**, E2E **233** + 24 omitidos. El backend no se ha tocado: no se ha ejecutado Maven.
+- **Pendiente:**
+  - `RequireAuth` no tiene la protección de `RedirectIfAuthenticated`: un aviso de otra pestaña desmonta las pantallas protegidas y se perdería un formulario del panel a medio escribir.
+  - `AuthContext.logout` lanza «Tu sesión sigue abierta» también en el cierre «por si acaso»: puede ser falso si luego resulta que no había sesión. Arreglarlo exige un modo silencioso.
+  - Con cierre `failed`, un aviso de otra pestaña podría enseñar un instante «También se ha cerrado…» (deducido del código, sin reproducir; ya ocurría antes).
 
 ### 2026-10-28 · Géneros favoritos («Tus gustos») y bienvenida
 

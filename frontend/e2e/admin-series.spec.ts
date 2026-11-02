@@ -39,7 +39,7 @@ import {
 } from './support/api';
 import type { NewEpisode } from './support/api';
 import { EMPTY_SERIES, SERIES_HERO } from './support/catalog';
-import { escapeRegExp, expect, formAlert, test, waitForMovieForm } from './support/fixtures';
+import { escapeRegExp, expect, formAlert, test, waitForAdminSearchResults, waitForMovieForm } from './support/fixtures';
 
 /** Sufijo único de la serie de este test (también sirve para buscarla y limpiarla). */
 const SUFFIX = `e2e${randomUUID().slice(0, 8)}`;
@@ -134,6 +134,7 @@ test('crea una serie, aterriza en su edición, sigue oculta para los usuarios y 
   await page.goto('/admin/series');
   await page.getByRole('searchbox', { name: 'Buscar por título' }).fill(SUFFIX);
   await expect(page).toHaveURL(new RegExp(`\\?q=${SUFFIX}$`));
+  await waitForAdminSearchResults(page, SUFFIX);
   const row = seriesRow(page, editedTitle);
   await expect(row).toContainText(HIDDEN_MARK);
   await expect(row.locator('img')).toHaveAttribute('src', '/covers/interstellar.webp');

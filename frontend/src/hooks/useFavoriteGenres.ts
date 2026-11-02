@@ -88,7 +88,9 @@ interface SaveContext {
  * cerró o se cambió de cuenta mientras tanto), no toca nada.
  *
  * Tras guardar:
- * - la respuesta pasa a ser la entrada `favoriteGenres.mine` (no se vuelve a pedir);
+ * - la respuesta pasa a ser la entrada `favoriteGenres.mine` (no se vuelve a
+ *   pedir), tras cortar cualquier lectura en vuelo: salió antes del `PUT` y, al
+ *   responder después, sustituiría lo guardado por la lista de antes;
  * - las **recomendaciones se descartan** (`resetQueries`, no solo se invalidan),
  *   igual que tras un «Me gusta»: dependen de los gustos y la portada no debe
  *   enseñar ni un instante las de antes (p. ej. la tarjeta «Dinos qué géneros…»
@@ -111,8 +113,9 @@ export function useSaveFavoriteGenres() {
       return apiFetch<Genre[]>('/users/me/genres', { method: 'PUT', body });
     },
     onMutate: () => ({ sessionKey: currentSessionKey() }),
-    onSuccess: (saved, _genreIds, context) => {
+    onSuccess: async (saved, _genreIds, context) => {
       if (context?.sessionKey !== currentSessionKey()) return;
+      await queryClient.cancelQueries({ queryKey: queryKeys.favoriteGenres.mine });
       queryClient.setQueryData(queryKeys.favoriteGenres.mine, saved);
       void queryClient.resetQueries({ queryKey: queryKeys.recommendations.all });
       // Con el actualizador funcional: el `PATCH` del nombre o del avatar pudo terminar mientras tanto, y

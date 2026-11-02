@@ -35,7 +35,7 @@ import {
 import type { TestUser } from './support/api';
 import { HERO_TITLE } from './support/catalog';
 import { BACKEND_URL, FRONTEND_URL } from './support/config';
-import { expect, formAlert, sessionCookie, skipGenresQuestionIfAsked, test } from './support/fixtures';
+import { expect, formAlert, sessionCookie, skipGenresQuestionIfAsked, test, waitForLoginPage } from './support/fixtures';
 
 /** Título de `/restablecer-contrasena` cuando el token no vale (inválido, caducado, usado o sustituido). */
 const INVALID_LINK_TITLE = 'El enlace no es válido o ha caducado';
@@ -65,8 +65,12 @@ async function loginAttempt(
 /**
  * Inicia sesión con el formulario y espera a la portada. La primera vez, una cuenta nueva pasa por la
  * pregunta de bienvenida, que aquí se salta («Ahora no»).
+ *
+ * Primero espera al login ya pintado: se llega con un clic desde `/restablecer-contrasena`, y la URL
+ * cambia antes de que la ruta nueva se pinte (ver {@link waitForLoginPage}).
  */
 async function loginWithForm(page: Page, email: string, password: string): Promise<void> {
+  await waitForLoginPage(page);
   await page.getByLabel('Correo electrónico').fill(email);
   await page.getByLabel('Contraseña', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Iniciar sesión' }).click();
@@ -80,6 +84,34 @@ async function submitNewPassword(page: Page, password: string): Promise<void> {
   await page.getByLabel('Contraseña nueva', { exact: true }).fill(password);
   await page.getByLabel('Repite la contraseña nueva').fill(password);
   await page.getByRole('button', { name: 'Cambiar la contraseña' }).click();
+}
+
+/**
+ * Abre el enlace del correo con la sesión de este navegador YA RECONOCIDA por la app. Es para el caso «había una
+ * sesión y la página lo sabe»; quien no tiene sesión abre el enlace directamente.
+ *
+ * **Por qué no vale `page.goto(link)` y esperar.** Carga la app de cero: `AuthContext` vuelve a preguntar
+ * `GET /api/users/me` y, mientras no responde, `ResetFlow` no sabe si hay sesión. Si la contraseña se envía en ese
+ * hueco, la página cierra la sesión por si acaso pero, con razón, NO afirma «También se ha cerrado la sesión...»
+ * (quizá no había ninguna: lo protege `ResetPasswordPage.qa.test.tsx`). Así falló en el CI. Una persona no escribe
+ * dos contraseñas en 200 ms; el test, sí. Y el formulario no enseña nada que dependa de la sesión, así que no hay
+ * nada que esperar en esa pantalla; escuchar la respuesta tampoco basta, porque deja un hueco entre recibirla y
+ * que React aplique el estado.
+ *
+ * **Señal.** La misma página sin token («enlace no válido») sí la tiene: «Ir al inicio» solo se pinta con
+ * `isAuthenticated`. Así que primero se carga esa, también de cero (la sesión se comprueba de verdad contra el
+ * servidor), y después se abre el enlace en la misma pestaña. Eso solo cambia el fragmento, sin recargar:
+ * `AuthContext` sigue vivo con lo que ya sabía. No es un rodeo solo para el test: es el caso de `useHashLinkToken`
+ * de abrir un enlace con la página ya en pantalla.
+ *
+ * Que el foco acabe en el título no es un adorno: `ResetFlow` solo lo pone ahí si el enlace llegó con la página ya
+ * montada (`announce`). Si el `goto` llegara a recargar, este paso fallaría en vez de reabrir la carrera en silencio.
+ */
+async function openResetLinkWithKnownSession(page: Page, link: string): Promise<void> {
+  await page.goto('/restablecer-contrasena');
+  await expect(page.getByRole('link', { name: 'Ir al inicio' })).toBeVisible();
+  await page.goto(link);
+  await expect(page.getByRole('heading', { level: 1, name: RESET_FORM_TITLE })).toBeFocused();
 }
 
 /** Pide el enlace por API y devuelve el correo que llega (el `n`-ésimo con ese asunto, empezando en 1). */
@@ -254,8 +286,7 @@ test.describe('He olvidado mi contraseña', () => {
       await loginWithForm(page, user.email, user.password);
 
       const email = await requestResetEmail(request, user);
-      await page.goto(passwordResetLink(email));
-      await expect(page.getByRole('heading', { level: 1, name: RESET_FORM_TITLE })).toBeVisible();
+      await openResetLinkWithKnownSession(page, passwordResetLink(email));
       const password = newPassword();
       await submitNewPassword(page, password);
 

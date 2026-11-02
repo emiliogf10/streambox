@@ -91,7 +91,15 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   timeout: 30_000,
   expect: { timeout: 7_000 },
-  reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
+  // En GitHub Actions (`CI`) se añade el reporter `github`: convierte cada test fallido en una
+  // anotación (con el archivo, la línea y el error) visible en el resumen del workflow y en la PR, sin
+  // tener que descargar el artefacto del informe HTML. En local no aporta nada (solo imprime comandos
+  // `::error` en la terminal), por eso va condicionado. `list` y `html` se mantienen siempre.
+  reporter: [
+    ['list'],
+    ['html', { open: 'never', outputFolder: 'playwright-report' }],
+    ...(process.env.CI ? [['github'] as const] : []),
+  ],
 
   use: {
     baseURL: FRONTEND_URL,

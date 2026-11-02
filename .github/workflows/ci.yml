@@ -122,7 +122,10 @@ jobs:
           name: backend-surefire-reports
           path: streambox/target/surefire-reports/
           if-no-files-found: ignore
-          retention-days: 7
+          # 14 y no 7: un fallo de un push a main puede tardar más de una semana
+          # en revisarse, y pasado ese plazo el informe se borra y solo queda
+          # el log, sin capturas ni trazas (pasó con el E2E del 25-oct-2026).
+          retention-days: 14
 
   # -----------------------------------------------------------------
   # Frontend: los mismos comandos que en local.
@@ -266,7 +269,10 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           if-no-files-found: ignore
-          retention-days: 7
+          # 14 y no 7: un fallo de un push a main puede tardar más de una semana
+          # en revisarse, y pasado ese plazo el informe se borra y solo queda
+          # el log, sin capturas ni trazas (pasó con el E2E del 25-oct-2026).
+          retention-days: 14
 
   # -----------------------------------------------------------------
   # Docker: construye las dos imágenes y comprueba que el stack de

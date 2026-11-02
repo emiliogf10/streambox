@@ -138,6 +138,9 @@ test.describe('Pregunta de bienvenida', () => {
 
     for (const path of ['/verificar-email', '/recuperar-contrasena', '/restablecer-contrasena']) {
       await page.goto(path);
+      // Primero, que la app sepa que hay sesión: en las tres páginas, «Ir al inicio» solo se pinta entonces. Sin
+      // esto, lo de abajo podría comprobarse antes de que responda `/users/me`, cuando aún nada podría desviar.
+      await expect(page.getByRole('link', { name: 'Ir al inicio' })).toBeVisible();
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
       await expect(page).toHaveURL(new RegExp(`${path}$`));
       await expect(page.getByRole('heading', { level: 1, name: WELCOME_TITLE })).toHaveCount(0);

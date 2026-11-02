@@ -75,9 +75,16 @@ export function AdminGenresPage() {
   /**
    * Aplica a la lista en caché un cambio que el servidor ya ha confirmado y avisa
    * a los listados que muestran géneros. El orden lo pone `useGenres` al leer.
+   *
+   * Antes corta la lectura de géneros en vuelo: salió antes de esta escritura y,
+   * al responder después, desharía el cambio en la lista. Si aún no había lista (el
+   * formulario de alta se puede usar mientras carga la primera vez), no hay dónde
+   * aplicar el cambio: se pide de nuevo, porque la lectura cortada ya no llegará.
    */
-  const applyGenreChange = (change: (list: Genre[]) => Genre[]) => {
-    queryClient.setQueryData<Genre[]>(queryKeys.genres.all, (list) => (list ? change(list) : list));
+  const applyGenreChange = async (change: (list: Genre[]) => Genre[]) => {
+    await queryClient.cancelQueries({ queryKey: queryKeys.genres.all });
+    const updated = queryClient.setQueryData<Genre[]>(queryKeys.genres.all, (list) => (list ? change(list) : list));
+    if (updated === undefined) void queryClient.invalidateQueries({ queryKey: queryKeys.genres.all });
     void invalidateCatalog('genres');
   };
 
@@ -134,7 +141,7 @@ export function AdminGenresPage() {
     try {
       const body: GenreRequest = { name: newName.trim() };
       const created = await apiFetch<Genre>('/genres', { method: 'POST', body });
-      applyGenreChange((list) => [...list, created]);
+      await applyGenreChange((list) => [...list, created]);
       setNewName('');
       toast.success(`Género «${created.name}» creado.`);
     } catch (error) {
@@ -180,7 +187,7 @@ export function AdminGenresPage() {
     try {
       const body: GenreRequest = { name: editName.trim() };
       const updated = await apiFetch<Genre>(`/genres/${genre.id}`, { method: 'PUT', body });
-      applyGenreChange((list) => list.map((item) => (item.id === genre.id ? updated : item)));
+      await applyGenreChange((list) => list.map((item) => (item.id === genre.id ? updated : item)));
       setEditingId(null);
       pendingFocus.current = { kind: 'rename-button', genreId: genre.id };
       toast.success(`Género «${genre.name}» renombrado a «${updated.name}».`);
@@ -209,7 +216,7 @@ export function AdminGenresPage() {
     setDeleting(true);
     try {
       await apiFetch(`/genres/${genre.id}`, { method: 'DELETE' });
-      applyGenreChange((list) => list.filter((item) => item.id !== genre.id));
+      await applyGenreChange((list) => list.filter((item) => item.id !== genre.id));
       pendingFocus.current = { kind: 'heading' }; // la fila (y su botón) desaparece
       toast.success(`Género «${genre.name}» borrado.`);
     } catch (error) {

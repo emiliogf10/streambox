@@ -38,9 +38,13 @@ type Status = 'ready' | 'saving' | 'done' | 'invalid';
  * - `none`: no había ninguna (o no se sabe que la hubiera: ver `closeSession`).
  * - `closing`: se está cerrando (`POST /auth/logout`).
  * - `closed`: cerrada.
- * - `failed`: el servidor no confirmó el cierre (red, 5xx...): se ofrece reintentar.
+ * - `failed`: había una sesión conocida y no se confirmó su cierre (red, 5xx...): se
+ *   ofrece reintentar. Si ya no está abierta, la cerró otra vía.
+ * - `unconfirmed`: se intentó cerrar «por si acaso» y no se confirmó, pero nunca se
+ *   supo que hubiera sesión. Sin más datos no se dice nada; si la comprobación
+ *   acaba descubriendo una, se ofrece reintentar como en `failed`.
  */
-type SessionCleanup = 'none' | 'closing' | 'closed' | 'failed';
+type SessionCleanup = 'none' | 'closing' | 'closed' | 'failed' | 'unconfirmed';
 
 /** Campos en el orden en que se ven (para llevar el foco al primero con error). */
 const FIELD_ORDER: (keyof PasswordResetValues)[] = ['newPassword', 'confirmPassword'];
@@ -156,13 +160,15 @@ function ResetFlow({ token, announce }: ResetFlowProps) {
    *
    * @param knownSession si se sabía que había sesión. Si solo se estaba
    *   comprobando (el arranque aún no había respondido), se cierra igual por si
-   *   acaso, pero sin decir «se ha cerrado la sesión» (quizá no había ninguna)
+   *   acaso, pero sin decir «se ha cerrado la sesión» (quizá no había ninguna).
+   *   Vale también si `logout` devuelve `false`: la comprobación pudo acabar en
+   *   401 entre medias y entonces no había nada que cerrar
    */
   const closeSession = (knownSession: boolean) => {
     setCleanup('closing');
     void logout().then((closed) => {
-      if (!closed) setCleanup('failed');
-      else setCleanup(knownSession ? 'closed' : 'none');
+      if (closed) setCleanup(knownSession ? 'closed' : 'none');
+      else setCleanup(knownSession ? 'failed' : 'unconfirmed');
     });
   };
 
@@ -230,9 +236,10 @@ function ResetFlow({ token, announce }: ResetFlowProps) {
 
   if (status === 'done') {
     const closingSession = cleanup === 'closing';
-    // Si el cierre «falló» pero ya no hay sesión (otra vía la cerró mientras tanto), está cerrada.
+    // Si el cierre de una sesión conocida «falló» pero ya no está abierta, la cerró otra vía.
+    // Con `unconfirmed` no se puede decir lo mismo: «sin sesión» quizá signifique que nunca la hubo.
     const sessionClosed = cleanup === 'closed' || (cleanup === 'failed' && !isAuthenticated);
-    const sessionStuck = cleanup === 'failed' && isAuthenticated;
+    const sessionStuck = (cleanup === 'failed' || cleanup === 'unconfirmed') && isAuthenticated;
     return (
       <AuthLayout
         title="Contraseña cambiada"

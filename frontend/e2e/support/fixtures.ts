@@ -69,6 +69,36 @@ export async function sessionCookie(page: Page) {
   return cookies.find((cookie) => cookie.name === SESSION_COOKIE);
 }
 
+/**
+ * Espera a que la pantalla de login esté PINTADA (su `<h1>`, `LoginPage`). Hay que llamarla antes de escribir en el
+ * formulario si se llega a `/login` con un clic desde otra pantalla.
+ *
+ * `toHaveURL` no lo garantiza: React Router cambia la ruta dentro de `startTransition`, así que `pushState` actualiza
+ * la URL al instante y la ruta nueva se pinta después. En ese hueco sigue en pantalla la página anterior, y
+ * `getByLabel('Correo electrónico')` puede resolverse en un campo con la misma etiqueta que ya no interesa (el del
+ * reenvío de `/verificar-email`). Así falló en el CI: el correo se escribió allí, el login se quedó sin él y su
+ * validación impidió entrar. Una persona no puede escribir en ese hueco: es una carrera del test, no un fallo de la app.
+ * El `<h1>` solo existe en el login, y React pinta la ruta nueva de una vez: visto él, ya no queda nada de la anterior.
+ */
+export async function waitForLoginPage(page: Page): Promise<void> {
+  await expect(page.getByRole('heading', { level: 1, name: 'Bienvenido de nuevo' })).toBeVisible();
+}
+
+/**
+ * Espera a que la tabla del panel enseñe los resultados de la búsqueda `term` (`useAdminSearchList`). Hay que llamarla
+ * antes de actuar sobre una fila tras buscar.
+ *
+ * `toHaveURL` tampoco basta aquí, y la fila buscada tampoco es señal: la URL cambia antes de pintarse y, mientras
+ * llega la respuesta, sigue la tabla anterior (`keepPreviousData`), que suele incluir ya esa fila. Pulsar en ella es
+ * actuar sobre una página a medio cargar. Son dos pasos porque cada uno cubre un hueco: el `<caption>` cambia con la URL
+ * (dice que la pantalla ya es la de esta búsqueda, aún con los datos viejos) y `aria-busy` se va al llegar los datos.
+ */
+export async function waitForAdminSearchResults(page: Page, term: string): Promise<void> {
+  const table = page.getByRole('table', { name: new RegExp(`^Resultados para «${escapeRegExp(term)}»`) });
+  await expect(table).toBeVisible();
+  await expect(table).not.toHaveAttribute('aria-busy', 'true');
+}
+
 /** `<h1>` de la pregunta de bienvenida (`/bienvenida`, `WelcomePage`). */
 export const WELCOME_TITLE = 'Cuéntanos qué te gusta';
 

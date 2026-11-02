@@ -8,22 +8,28 @@
  * usuario más reciente. Si el nombre cambió mientras el `PUT` estaba en vuelo
  * (`PATCH /users/me` desde el perfil, en otra parte de la pantalla), no puede
  * volver al nombre anterior.
+ *
+ * Y que un refresco de la lista que salió ANTES del `PUT` no sustituya lo
+ * guardado por la lista de antes cuando responde después.
  */
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuth } from '../context/AuthContext';
+import { queryKeys } from '../lib/queryKeys';
 import type { Genre } from '../lib/types';
 import {
   CURRENT_USER,
+  FAVORITE_GENRES,
   SAVE_FAVORITE_GENRES,
   jsonResponse,
   makeUser,
   renderWithProviders,
   routeFetch,
 } from '../test/helpers';
-import { useSaveFavoriteGenres } from './useFavoriteGenres';
+import { createTestQueryClient } from '../test/queryClient';
+import { useFavoriteGenres, useSaveFavoriteGenres } from './useFavoriteGenres';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -103,5 +109,58 @@ describe('useSaveFavoriteGenres: usuario de la sesión', () => {
     answer(jsonResponse(SAVED));
 
     expect(await screen.findByText('nombre:ana_nueva pendiente:false')).toBeInTheDocument();
+  });
+});
+
+/** Los favoritos que se ven en pantalla y el botón de guardar. */
+function TastesScreen() {
+  const favorites = useFavoriteGenres();
+  return (
+    <>
+      <SaveButton />
+      <p>{`gustos:${favorites.genres.map((genre) => genre.name).join(',')}`}</p>
+    </>
+  );
+}
+
+describe('useSaveFavoriteGenres: lista en caché', () => {
+  it('un refresco en vuelo anterior al PUT no deshace lo guardado al responder después', async () => {
+    const queryClient = createTestQueryClient();
+    const before: Genre[] = [{ id: 9, name: 'Terror' }];
+    let answerStaleRead: (response: Response) => void = () => {};
+    let reads = 0;
+    routeFetch(fetchMock, {
+      [FAVORITE_GENRES]: () => {
+        reads += 1;
+        if (reads === 2) {
+          return new Promise<Response>((resolve) => {
+            answerStaleRead = resolve;
+          });
+        }
+        return jsonResponse(before);
+      },
+      [SAVE_FAVORITE_GENRES]: () => jsonResponse(SAVED),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<TastesScreen />, { session: true, queryClient });
+    expect(await screen.findByText('gustos:Terror')).toBeInTheDocument();
+
+    // Un refresco en segundo plano, como el de volver a la pestaña con el dato anticuado.
+    await act(async () => {
+      void queryClient.refetchQueries({ queryKey: queryKeys.favoriteGenres.mine });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(reads).toBe(2));
+
+    await user.click(screen.getByRole('button', { name: 'Guardar gustos' }));
+    expect(await screen.findByText('gustos:Acción,Comedia,Drama')).toBeInTheDocument();
+
+    await act(async () => {
+      answerStaleRead(jsonResponse(before));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(queryClient.getQueryState(queryKeys.favoriteGenres.mine)?.fetchStatus).toBe('idle'));
+
+    expect(screen.getByText('gustos:Acción,Comedia,Drama')).toBeInTheDocument();
   });
 });

@@ -10,13 +10,15 @@
  * descubrir la sesión (`routeFetch` responde por defecto con un usuario normal si
  * se renderiza con `session: true` y con 401 si no). Mientras ese chequeo está
  * pendiente las rutas esperan: redirigir ya echaría al login a quien recarga con
- * la sesión abierta.
+ * la sesión abierta. Las comprobaciones POSTERIORES (aviso de otra pestaña) no
+ * deben desmontar un formulario de login o registro ya pintado.
  */
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, Route, Routes } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AppRoutes } from '../App';
 import {
   CURRENT_USER,
   errorResponse,
@@ -26,7 +28,7 @@ import {
   renderWithProviders,
   routeFetch,
 } from '../test/helpers';
-import { apiFetch } from '../lib/api';
+import { SESSION_CHANNEL_NAME, apiFetch } from '../lib/api';
 import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './RouteGuards';
 import { MAIN_CONTENT_ID, SkipLink } from './SkipLink';
 
@@ -324,5 +326,82 @@ describe('RedirectIfAuthenticated', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Entrar' }));
 
     expect(await screen.findByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
+  });
+
+  /**
+   * Una comprobación de la sesión POSTERIOR a la inicial (la que dispara el aviso de otra pestaña,
+   * `session-changed`) no debe desmontar el formulario ya pintado: antes la guarda lo cambiaba por
+   * «Comprobando tu sesión...» y, al volver a «sin sesión», el formulario se montaba de nuevo vacío y
+   * se perdía lo escrito. Se prueba con las páginas REALES (`AppRoutes`), no con un sustituto.
+   */
+  describe('con el formulario ya pintado, otra pestaña cambia la sesión', () => {
+    /** Canal de «otra pestaña» (el `BroadcastChannel` en memoria de `src/test/setup.ts`). */
+    let otherTab: BroadcastChannel;
+
+    beforeEach(() => {
+      otherTab = new BroadcastChannel(SESSION_CHANNEL_NAME);
+    });
+
+    afterEach(() => {
+      otherTab.close();
+    });
+
+    /** «La otra pestaña» anuncia un cambio de sesión y se deja que el canal (asíncrono) lo entregue. */
+    async function announceFromOtherTab() {
+      await act(async () => {
+        otherTab.postMessage({ type: 'session-changed' });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    it.each(['/login', '/registro'])(
+      'en %s lo escrito sigue ahí durante la nueva comprobación y después, si sigue sin haber sesión',
+      async (route) => {
+        renderWithProviders(<AppRoutes />, { route });
+        const email = await screen.findByLabelText('Correo electrónico');
+        const user = userEvent.setup();
+        await user.type(email, 'ana@example.com');
+        // La nueva comprobación queda pendiente hasta que el test la resuelva.
+        let answerMe: (response: Response) => void = () => {};
+        routeFetch(fetchMock, {
+          [CURRENT_USER]: () =>
+            new Promise<Response>((resolve) => {
+              answerMe = resolve;
+            }),
+        });
+
+        await announceFromOtherTab();
+
+        // Mientras se comprueba: el MISMO campo (no uno recién montado) y con lo escrito.
+        await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith('/api/users/me', expect.anything()));
+        expect(screen.queryByText('Comprobando tu sesión...')).not.toBeInTheDocument();
+        expect(screen.getByLabelText('Correo electrónico')).toBe(email);
+        expect(email).toHaveValue('ana@example.com');
+
+        // Sigue sin sesión (401 y el refresh tampoco renueva): nada cambia en pantalla.
+        await act(async () => {
+          answerMe(errorResponse(401, 'UNAUTHORIZED', 'No autenticado.'));
+        });
+        await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith('/api/auth/refresh', expect.anything()));
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+
+        expect(screen.getByLabelText('Correo electrónico')).toBe(email);
+        expect(email).toHaveValue('ana@example.com');
+        expect(screen.getByText(`ruta:${route}`)).toBeInTheDocument();
+      },
+    );
+
+    it('si la nueva comprobación encuentra una sesión (otra pestaña ha entrado), pasa a la portada', async () => {
+      renderWithProviders(<Routing />, { route: '/login' });
+      await screen.findByRole('heading', { name: 'Formulario de login' });
+      routeFetch(fetchMock, { [CURRENT_USER]: () => jsonResponse(makeUser()) });
+
+      await announceFromOtherTab();
+
+      expect(await screen.findByRole('heading', { name: 'Portada privada' })).toBeInTheDocument();
+      expect(screen.getByText('ruta:/')).toBeInTheDocument();
+    });
   });
 });

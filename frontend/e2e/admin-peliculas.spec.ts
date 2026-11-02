@@ -19,7 +19,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Page } from '@playwright/test';
 import { deleteMoviesMatching, loginAdmin } from './support/api';
-import { escapeRegExp, expect, formAlert, test, waitForMovieForm } from './support/fixtures';
+import { escapeRegExp, expect, formAlert, test, waitForAdminSearchResults, waitForMovieForm } from './support/fixtures';
 
 /** Sufijo único de la película de este test (también sirve para buscarla y limpiarla). */
 const SUFFIX = `e2e${randomUUID().slice(0, 8)}`;
@@ -144,6 +144,7 @@ test('crea una película con portada propia, la edita y la borra con confirmaci�
   // Buscarla por su sufijo y borrarla, con confirmación.
   await page.getByRole('searchbox', { name: 'Buscar por título' }).fill(SUFFIX);
   await expect(page).toHaveURL(new RegExp(`\\?q=${SUFFIX}$`));
+  await waitForAdminSearchResults(page, SUFFIX);
   const editedRow = movieRow(page, editedTitle);
   await editedRow.getByRole('button', { name: `Borrar ${editedTitle}` }).click();
   const dialog = page.getByRole('alertdialog', { name: `¿Borrar «${editedTitle}»?` });

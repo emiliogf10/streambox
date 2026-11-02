@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -118,11 +119,31 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
  * no tiene sentido mostrarlas y se redirige a la portada. Si el chequeo inicial
  * falló (sin saber si hay sesión) se muestran igualmente: el login sigue siendo
  * posible y el servidor decidirá.
+ *
+ * **El indicador «Comprobando tu sesión...» solo tapa el formulario la PRIMERA
+ * vez.** Mientras no se sabe si hay sesión se espera para que quien ya la tiene
+ * no vea un parpadeo del formulario. Pero la sesión se puede volver a comprobar
+ * con la pantalla ya pintada: cuando otra pestaña anuncia un cambio de sesión
+ * (`onSessionChangedElsewhere` en `AuthContext`, p. ej. al cerrar allí la
+ * sesión) el estado vuelve a «sin comprobar». Si en ese momento se cambiara el
+ * formulario por el indicador, se DESMONTARÍA y se perdería lo que la persona
+ * estaba escribiendo, casi siempre para volver a «sin sesión», es decir, para
+ * nada. Por eso, una vez mostrado, el formulario se queda montado durante las
+ * comprobaciones posteriores; si alguna confirma una sesión, se redirige a la
+ * portada como siempre.
+ *
+ * El recuerdo («ya se mostró») se guarda con el patrón de React de actualizar
+ * el estado durante el render a partir de la información del render anterior
+ * (no con un `ref`, que no debe leerse ni escribirse al renderizar): React
+ * repite el render en el acto, antes de pintar nada.
  */
 export function RedirectIfAuthenticated({ children }: { children: ReactNode }) {
   const { isAuthenticated, isCheckingSession } = useAuth();
+  const [contentShown, setContentShown] = useState(false);
+  const showsContent = !isCheckingSession && !isAuthenticated;
+  if (showsContent && !contentShown) setContentShown(true);
   // Sin esperar al chequeo inicial, quien ya tiene sesión vería un parpadeo del formulario.
-  if (isCheckingSession) {
+  if (isCheckingSession && !contentShown) {
     return (
       <GuardScreen>
         <LoadingState label="Comprobando tu sesión..." />

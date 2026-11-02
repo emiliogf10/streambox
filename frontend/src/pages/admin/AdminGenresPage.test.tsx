@@ -8,11 +8,13 @@
  * la fila y sin quitarlo). `fetch` está simulado; sesión, avisos y router son
  * los reales.
  */
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { queryKeys } from '../../lib/queryKeys';
 import type { Genre } from '../../lib/types';
 import { errorResponse, jsonResponse, noContentResponse, renderWithProviders, routeFetch } from '../../test/helpers';
+import { createTestQueryClient } from '../../test/queryClient';
 import { AdminGenresPage } from './AdminGenresPage';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -284,5 +286,80 @@ describe('AdminGenresPage: borrar', () => {
 
     await expectToastOnPage('El género «Acción» ya no existía. Se ha actualizado la lista.');
     await waitFor(() => expect(names()).toEqual(['Ciencia ficción', 'Drama']));
+  });
+});
+
+/**
+ * Una lectura de `GET /api/genres` que salió ANTES de una escritura y responde
+ * DESPUÉS no puede deshacerla en la lista: la escritura del panel gana siempre.
+ */
+describe('AdminGenresPage: lecturas en vuelo durante una escritura', () => {
+  it('crear con la primera carga en vuelo: se descarta esa lectura, se repite y el género nuevo sale en la lista', async () => {
+    const terror: Genre = { id: 9, name: 'Terror' };
+    let answerStaleRead: (response: Response) => void = () => {};
+    let reads = 0;
+    const user = renderGenres({
+      'GET /api/genres': () => {
+        reads += 1;
+        if (reads === 1) {
+          return new Promise<Response>((resolve) => {
+            answerStaleRead = resolve;
+          });
+        }
+        return jsonResponse([...GENRES, terror]);
+      },
+      'POST /api/genres': () => jsonResponse(terror, 201),
+    });
+    await waitFor(() => expect(reads).toBe(1));
+    expect(screen.getByText('Cargando géneros...')).toBeInTheDocument();
+
+    await user.type(newNameInput(), 'Terror');
+    await user.click(screen.getByRole('button', { name: 'Añadir' }));
+    expect(await screen.findByText('Género «Terror» creado.')).toBeInTheDocument();
+
+    answerStaleRead(jsonResponse(GENRES));
+
+    await waitFor(() => expect(names()).toEqual(['Acción', 'Ciencia ficción', 'Drama', 'Terror']));
+    expect(reads).toBe(2);
+  });
+
+  it('borrar con un refresco en vuelo: el género borrado no vuelve a la lista', async () => {
+    const queryClient = createTestQueryClient();
+    let answerStaleRead: (response: Response) => void = () => {};
+    let reads = 0;
+    routeFetch(fetchMock, {
+      'GET /api/genres': () => {
+        reads += 1;
+        if (reads === 2) {
+          return new Promise<Response>((resolve) => {
+            answerStaleRead = resolve;
+          });
+        }
+        return jsonResponse(GENRES);
+      },
+      'DELETE /api/genres/3': () => noContentResponse(),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<AdminGenresPage />, { route: '/admin/generos', session: true, queryClient });
+    await screen.findByRole('list', { name: 'Géneros' });
+
+    // Un refresco en segundo plano, como el de volver a la pestaña con el dato anticuado.
+    await act(async () => {
+      void queryClient.refetchQueries({ queryKey: queryKeys.genres.all });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(reads).toBe(2));
+
+    await user.click(screen.getByRole('button', { name: 'Borrar Acción' }));
+    await user.click(screen.getByRole('button', { name: 'Sí, borrar género' }));
+    await expectToastOnPage('Género «Acción» borrado.');
+
+    await act(async () => {
+      answerStaleRead(jsonResponse(GENRES));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(queryClient.getQueryState(queryKeys.genres.all)?.fetchStatus).toBe('idle'));
+    expect(names()).toEqual(['Ciencia ficción', 'Drama']);
   });
 });

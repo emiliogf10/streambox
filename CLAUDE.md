@@ -93,8 +93,10 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 - Cada bug corregido deja un test que falla sin el arreglo.
 - Lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia real) se prueba también contra PostgreSQL real en `src/test/.../postgres/` (extiende `PostgresIntegrationTestSupport`); H2 puede ocultar diferencias (ya ocultó un bug de búsqueda).
 - Frontend: lógica y componentes con Vitest + Testing Library (`*.test.ts(x)` junto al código, utilidades en `src/test/`); flujos completos con Playwright en `frontend/e2e/`. Localiza por rol/etiqueta, no con `data-testid`.
-- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 3870 con Docker —3349 con H2 y 521 contra PostgreSQL real—; sin Docker se omiten los de PostgreSQL (cada parametrizado omitido cuenta como uno, así que el recuento de omitidos no coincide con el de métodos); 1708 de Vitest y 233 E2E + 24 de capturas omitidas; en el contenedor de Claude (Chromium 141) fallan 2 E2E de `accessibility.spec.ts:189`).
+- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 3870 con Docker —3349 con H2 y 521 contra PostgreSQL real—; sin Docker se omiten los de PostgreSQL (cada parametrizado omitido cuenta como uno, así que el recuento de omitidos no coincide con el de métodos); 1727 de Vitest y 233 E2E + 24 de capturas omitidas; en el contenedor de Claude (Chromium 141) fallan 2 E2E de `accessibility.spec.ts:189`).
 - Vitest no espera tiempo real: los debounces se prueban con `src/test/fakeTimers.ts`. Los E2E que modifican el catálogo van en el proyecto `catalogo-mutable` de Playwright, que corre al final.
+- **En E2E, `toHaveURL` no prueba que la ruta nueva esté pintada** (React Router usa `startTransition`): tras navegar con un clic, espera a algo propio de la página de destino (`waitForLoginPage`, `waitForAdminSearchResults`; cap. 22 del manual). Un test «inestable con carga» es una carrera hasta que se demuestre lo contrario: mira la traza antes de anotarlo.
+- **Una lectura empezada antes de escribir no vale:** cancélala con `cancelQueries` antes de `invalidateQueries` o `setQueryData` (cap. 19.3 del manual).
 
 ## Frontend: estado actual
 
