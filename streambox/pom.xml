@@ -6,7 +6,7 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
 <parent>
 <groupId>org.springframework.boot</groupId>
 <artifactId>spring-boot-starter-parent</artifactId>
-<version>4.1.1</version>
+<version>4.1.2</version>
 <relativePath />
 </parent>
 <groupId>com.emilio</groupId>
@@ -116,7 +116,7 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
 <dependency>
 <groupId>org.springdoc</groupId>
 <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-<version>3.1.1</version>
+<version>3.2.0</version>
 </dependency>
 <dependency>
 <groupId>io.jsonwebtoken</groupId>
