@@ -58,8 +58,10 @@ import com.emilio.streambox.security.JwtService;
  *       {@code WARN} con el usuario y la familia, nunca el token (solo si
  *       quedaba algún token vivo; ver {@code revokeFamilyOnReuse}).</li>
  *   <li>{@link #revokeAllSessions(Long)} cierra todas las familias del
- *       usuario («cerrar sesión en todos los dispositivos» y cambio de
- *       contraseña).</li>
+ *       usuario («cerrar sesión en todos los dispositivos», cambio y
+ *       restablecimiento de la contraseña, confirmación del correo) y además
+ *       anula al momento todos sus JWT de acceso (sube
+ *       {@code users.token_version}).</li>
  *   <li><b>Gracia</b> ({@code reuse-grace}, 10 s): dos pestañas que despiertan
  *       a la vez mandan el mismo token; la segunda llega cuando la primera ya
  *       lo ha rotado. Si el token se rotó hace menos de la gracia y su sucesor
@@ -67,8 +69,8 @@ import com.emilio.streambox.security.JwtService;
  *       cambiar la cookie del refresh (el navegador ya tiene la del sucesor,
  *       que le llegó con la respuesta de la primera pestaña).</li>
  *   <li><b>Cuenta pendiente de confirmar el correo:</b> nunca se renueva
- *       (tampoco en la gracia) y se revocan todas sus sesiones; ver
- *       {@code rejectIfEmailNotVerified}.</li>
+ *       (tampoco en la gracia) y se revocan todos sus refresh tokens (sus JWT
+ *       ya los rechaza el filtro); ver {@code rejectIfEmailNotVerified}.</li>
  * </ul>
  *
  * <h2>Concurrencia</h2>
@@ -151,6 +153,51 @@ public class RefreshTokenService {
     /**
      * Renueva la sesión con un refresh token: rota y emite un JWT nuevo.
      *
+     * <h3>Versión de tokens: se lee la primera, antes que el sucesor</h3>
+     * <p>
+     * Justo después de bloquear el token presentado se lee
+     * {@code users.token_version} ({@code UserRepository.findTokenVersionById})
+     * y el JWT se firma <b>con ese valor</b> en las dos ramas que emiten (la
+     * gracia y la rotación normal), nunca con la entidad {@code User}, que se
+     * carga más tarde (LAZY).
+     * </p>
+     *
+     * <p>
+     * <b>Por qué el orden «versión → sucesor» (BAJA-A).</b> En la gracia, el
+     * token presentado (B) ya está revocado y su sucesor (C) lo bloquea solo
+     * quien lo revoque: un «cerrar todas las sesiones» simultáneo
+     * ({@link #revokeAllSessions(Long)}, transacción T1) no espera a esta
+     * petición. En READ COMMITTED cada sentencia ve lo confirmado al empezar,
+     * así que lo que importa es en qué momento confirma T1 respecto a las dos
+     * lecturas:
+     * </p>
+     * <ul>
+     *   <li><b>Antes de leer la versión:</b> T1 ya había revocado C, así que
+     *       al leer el sucesor se ve revocado y no hay gracia (401), aunque la
+     *       versión leída sea la nueva: no se emite nada.</li>
+     *   <li><b>Entre la versión y el sucesor:</b> C se ve revocado; no hay
+     *       gracia.</li>
+     *   <li><b>Después de leer el sucesor:</b> hay gracia, pero el JWT lleva la
+     *       versión <b>vieja</b>, y el filtro lo rechaza en cuanto T1 confirma.</li>
+     * </ul>
+     * <p>
+     * En ningún caso sale un JWT con la versión nueva para una sesión que T1
+     * ha cerrado. Con el orden contrario (el sucesor primero y la versión al
+     * cargar el usuario, como antes), si T1 confirmaba entre las dos lecturas
+     * se concedía la gracia (C se había visto vivo) <b>y</b> el JWT llevaba la
+     * versión nueva: un JWT válido 15 minutos tras «cerrar todas las sesiones».
+     * </p>
+     *
+     * <p>
+     * En la rotación normal el orden también es correcto: B está vivo y
+     * bloqueado por esta transacción, así que T1 no puede revocarlo (ni
+     * confirmar) hasta que esta termine; el JWT lleva la versión vieja y la
+     * segunda pasada de T1 revoca el sucesor recién creado. Se lee con una
+     * consulta de un solo valor y no con {@code token.getUser()} para que el
+     * resultado sea siempre el de la base de datos, aunque un llamante futuro
+     * tenga ya el usuario en la sesión de Hibernate.
+     * </p>
+     *
      * @param presentedToken valor de la cookie {@code streambox_refresh} (puede
      *                       ser {@code null} si no venía)
      * @return el JWT nuevo y el refresh token sucesor; en la gracia de un
@@ -171,13 +218,18 @@ public class RefreshTokenService {
         }
         RefreshToken token = refreshTokenRepository.findByTokenHashForUpdate(hash)
                 .orElseThrow(SessionExpiredException::new);
+        // Lo primero tras el bloqueo, antes de mirar el sucesor (gracia): ver
+        // el Javadoc. getId() de la referencia LAZY no lanza consulta. Sin fila
+        // (la cuenta se está borrando) no hay sesión que renovar.
+        int tokenVersion = userRepository.findTokenVersionById(token.getUser().getId())
+                .orElseThrow(SessionExpiredException::new);
         Instant now = clock.instant();
 
         if (token.getRevokedAt() != null) {
             if (isConcurrentRefresh(token, now)) {
                 User user = token.getUser();
                 rejectIfEmailNotVerified(user);
-                return new SessionTokens(jwtService.generateToken(user), null);
+                return new SessionTokens(jwtService.generateToken(user, tokenVersion), null);
             }
             revokeFamilyOnReuse(token, now);
             throw new SessionExpiredException();
@@ -195,7 +247,7 @@ public class RefreshTokenService {
         // misma transacción: o se rota del todo o no se rota.
         token.setRevokedAt(now);
         token.setReplacedBy(successor.entity());
-        return new SessionTokens(jwtService.generateToken(user), successor.issued());
+        return new SessionTokens(jwtService.generateToken(user, tokenVersion), successor.issued());
     }
 
     /**
@@ -217,10 +269,77 @@ public class RefreshTokenService {
     }
 
     /**
-     * Cierra <b>todas</b> las sesiones del usuario: revoca los tokens activos
-     * de todas sus familias ({@code POST /api/auth/logout-all} y cambio de
-     * contraseña).
+     * Cierra <b>todas</b> las sesiones del usuario: anula sus JWT de acceso y
+     * revoca los refresh tokens activos de todas sus familias.
      *
+     * <p>
+     * Lo llaman {@code POST /api/auth/logout-all} (el controlador no es
+     * transaccional: este método abre la suya), el cambio de contraseña
+     * ({@code PasswordChangeService}), el restablecimiento
+     * ({@code PasswordResetService}) y la confirmación del correo
+     * ({@code EmailVerificationService}); todos, salvo el primero, desde su
+     * propia transacción, a la que este método se une. El refresh de una
+     * cuenta pendiente <b>no</b> lo usa: solo revoca los refresh, sin subir la
+     * versión (ver {@code rejectIfEmailNotVerified}).
+     * </p>
+     *
+     * <h3>JWT de acceso: {@code token_version}</h3>
+     * <p>
+     * Primero se suma 1 a {@code users.token_version}
+     * ({@code UserRepository.incrementTokenVersion}): desde que la transacción
+     * confirma, {@code JwtAuthenticationFilter} rechaza todos los JWT emitidos
+     * antes (su claim {@code ver} ya no coincide), también el de un intruso al
+     * que le quedaran minutos. Está aquí, y no en cada servicio, para que
+     * cualquier flujo futuro que «cierre todas las sesiones» no pueda olvidarse
+     * de los JWT: revocar los refresh y la versión van siempre juntos y en la
+     * misma transacción (o las dos cosas o ninguna).
+     * </p>
+     *
+     * <p>
+     * <b>Por qué el incremento va antes de revocar los refresh.</b> El orden de
+     * bloqueos queda igual que en los demás flujos que cierran sesiones (los
+     * servicios de contraseña bloquean la fila de {@code users} y luego tocan
+     * {@code refresh_tokens}): dos de ellos a la vez quedan en fila en la fila
+     * del usuario, sin interbloqueo.
+     * </p>
+     *
+     * <p>
+     * <b>Carreras con un refresh o un login simultáneos.</b> Son seguras porque
+     * la versión se compara en cada petición, no al emitir:
+     * </p>
+     * <ul>
+     *   <li>Un refresh que leyó al usuario <em>antes</em> de que esta
+     *       transacción confirmara firma su JWT con la versión vieja: el filtro
+     *       lo rechaza en cuanto esto confirma, y su refresh sucesor lo revoca
+     *       la segunda pasada (ver abajo).</li>
+     *   <li>Un refresh que llega <em>después</em> encuentra su token revocado
+     *       (sin sucesor: no hay gracia) y recibe 401.</li>
+     *   <li>La gracia de las pestañas simultáneas
+     *       ({@code isConcurrentRefresh}) exige que el sucesor siga vivo, y aquí
+     *       se revoca. Pero esta transacción no bloquea al refresh que entra en
+     *       la gracia (su token ya estaba revocado: el {@code UPDATE} no lo
+     *       toca), así que puede confirmar <em>mientras</em> ese refresh se
+     *       ejecuta. Por eso {@link #refresh(String)} lee la versión <b>antes</b>
+     *       que el sucesor y firma con ella: si esto confirma antes de que lea
+     *       el sucesor, no hay gracia; si confirma después, la gracia emite un
+     *       JWT con la versión vieja, que el filtro rechaza. Nunca uno con la
+     *       nueva (BAJA-A; el razonamiento completo, en {@link #refresh(String)}).</li>
+     *   <li>Un login que termine a la vez puede llevar la versión vieja (su
+     *       JWT se rechaza; el frontend renueva) o la nueva; su familia nueva
+     *       puede quedar fuera (ver abajo). Es un login con la contraseña
+     *       válida en ese instante, no una sesión anterior que sobreviva.</li>
+     * </ul>
+     *
+     * <p>
+     * La <b>reutilización</b> de un refresh ya rotado ({@code revokeFamilyOnReuse})
+     * no pasa por aquí ni sube la versión, a propósito: revoca solo la familia
+     * robada. Subir la versión cerraría también los demás dispositivos del
+     * titular por el robo de una sola sesión; el JWT de acceso del ladrón vive
+     * como mucho {@code jwt.access-token-ttl}, y el titular puede cerrar todas
+     * sus sesiones si sospecha algo.
+     * </p>
+     *
+     * <h3>Refresh tokens: dos pasadas</h3>
      * <p>
      * Dos pasadas, por la misma carrera de READ COMMITTED que
      * {@code revokeWholeFamily}: si otra petición está rotando un token del
@@ -235,22 +354,43 @@ public class RefreshTokenService {
      * Lo que no cubre: un <b>login</b> que termine a la vez abre una familia
      * nueva que puede quedar fuera (no hay ninguna fila previa que bloquear).
      * Es un login con credenciales válidas en ese instante, no una sesión
-     * anterior que sobreviva. Tampoco revoca los JWT de acceso ya emitidos:
-     * son stateless y siguen valiendo hasta caducar (15 minutos como mucho),
-     * pero ya no se pueden renovar.
+     * anterior que sobreviva.
      * </p>
      *
      * <p>
      * Se une a la transacción de quien llama (el cambio de contraseña revoca y
      * abre la familia nueva en la misma). Las sentencias masivas vacían la
-     * sesión de Hibernate: las entidades cargadas antes quedan desacopladas.
+     * sesión de Hibernate: las entidades cargadas antes quedan desacopladas y
+     * su {@code getTokenVersion()} es la vieja. Quien emita un JWT después
+     * (el cambio de contraseña, para la sesión actual) debe leer la versión con
+     * {@code UserRepository.findTokenVersionById}.
      * </p>
      *
      * @param userId id del usuario (sale del token, nunca del cliente)
-     * @return número de tokens revocados entre las dos pasadas
+     * @return número de refresh tokens revocados entre las dos pasadas
      */
     @Transactional
     public int revokeAllSessions(Long userId) {
+
+        // Si la cuenta no existe (0 filas), tampoco tiene tokens que revocar.
+        userRepository.incrementTokenVersion(userId);
+        return revokeAllRefreshTokensOf(userId);
+    }
+
+    /**
+     * Revoca todos los refresh tokens activos del usuario, en dos pasadas (ver
+     * «Refresh tokens: dos pasadas» en {@link #revokeAllSessions(Long)}), sin
+     * tocar {@code users.token_version}.
+     *
+     * <p>
+     * Es la parte de {@link #revokeAllSessions(Long)} que no bloquea la fila
+     * de {@code users}; la usa también, sola, {@code rejectIfEmailNotVerified}.
+     * </p>
+     *
+     * @param userId id del usuario
+     * @return número de refresh tokens revocados entre las dos pasadas
+     */
+    private int revokeAllRefreshTokensOf(Long userId) {
 
         Instant now = clock.instant();
         int revoked = refreshTokenRepository.revokeAllByUserId(userId, now);
@@ -365,6 +505,48 @@ public class RefreshTokenService {
      * ({@code noRollbackFor} en {@link #refresh(String)}).
      * </p>
      *
+     * <p>
+     * <b>Por qué solo los refresh y no {@link #revokeAllSessions(Long)}
+     * (BAJA-B).</b> Aquí ya se tiene bloqueada la fila del token presentado
+     * ({@code refresh_tokens}); subir la versión bloquearía después la de
+     * {@code users}. La confirmación del correo y el restablecimiento de la
+     * contraseña bloquean en el orden contrario ({@code users} y luego
+     * {@code refresh_tokens}): si coincidían, PostgreSQL detectaba el
+     * interbloqueo y abortaba una de las dos (un 500). Subir la versión aquí
+     * tampoco aporta nada:
+     * </p>
+     * <ul>
+     *   <li>{@code JwtAuthenticationFilter} ya rechaza <b>cualquier</b> JWT de
+     *       una cuenta pendiente, lleve la versión que lleve;</li>
+     *   <li>las dos formas de que una cuenta de usuario pase a verificada
+     *       mientras la aplicación funciona (confirmar el correo y restablecer
+     *       la contraseña) llaman a {@link #revokeAllSessions(Long)} en la misma
+     *       transacción que la marcan, así que suben la versión justo cuando
+     *       los JWT antiguos volverían a valer. La tercera,
+     *       {@code AdminAccountInitializer} al arrancar, solo verifica una
+     *       cuenta ADMIN que alguien dejó pendiente a mano, sin subir la
+     *       versión: un caso que no debería darse (la V9 verificó a todos los
+     *       ADMIN).</li>
+     * </ul>
+     * <p>
+     * Se conservan las dos pasadas de {@code revokeAllByUserId} (el mismo
+     * método privado que usa {@link #revokeAllSessions(Long)}): son las que
+     * alcanzan a un sucesor creado por una rotación simultánea. Para una
+     * cuenta pendiente esa rotación ni siquiera llega a crear sucesor (también
+     * la rechaza este método), pero así el comportamiento no depende de ello.
+     * </p>
+     *
+     * <p>
+     * <b>Lo que queda (aceptado).</b> Si la cuenta tiene <i>más</i> de un
+     * refresh activo, la confirmación y este método aún pueden cruzarse entre
+     * filas de {@code refresh_tokens} (cada uno tiene una que el otro quiere
+     * revocar). Ya ocurría antes de la versión, exige una cuenta heredada con
+     * varias sesiones que renueve en el mismo instante en que confirma su
+     * correo, y no tiene efecto de seguridad: PostgreSQL aborta una de las
+     * dos, la otra confirma, y la confirmación se puede repetir con el mismo
+     * enlace si fue ella la abortada (el token no se gasta al deshacerse).
+     * </p>
+     *
      * @param user dueño del token presentado
      * @throws SessionExpiredException si la cuenta está pendiente
      */
@@ -374,7 +556,7 @@ public class RefreshTokenService {
             return;
         }
         Long userId = user.getId();
-        int revoked = revokeAllSessions(userId);
+        int revoked = revokeAllRefreshTokensOf(userId);
         LOGGER.debug("Refresh de una cuenta pendiente de confirmar el correo (usuario {}): se revocan sus "
                 + "sesiones ({} tokens activos)", userId, revoked);
         throw new SessionExpiredException();

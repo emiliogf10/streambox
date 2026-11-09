@@ -189,5 +189,16 @@ public enum ErrorCode {
      * <b>no</b> se gasta.
      * </p>
      */
-    INVALID_RESET_TOKEN
+    INVALID_RESET_TOKEN,
+
+    /**
+     * El cuerpo de la petición supera el tamaño máximo que admite la API
+     * ({@code streambox.http.max-request-body}, 64 KB por defecto): 413. Se
+     * rechaza sin leerlo si la cabecera {@code Content-Length} ya lo dice, y
+     * se corta la lectura en cuanto lo supera si llega sin ella (por trozos).
+     * Ningún cuerpo legítimo se acerca a ese tamaño (el mayor, el de una
+     * película del panel de administración, ronda los 16 KB en el peor caso).
+     * Ver {@code RequestBodySizeLimitFilter}.
+     */
+    PAYLOAD_TOO_LARGE
 }

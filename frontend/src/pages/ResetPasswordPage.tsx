@@ -114,8 +114,8 @@ interface ResetFlowProps {
  * la contraseña con el cierre normal (`logout` de `AuthContext`: borra las
  * cookies en el servidor y avisa a las demás pestañas), en silencio y sin el
  * aviso de «sesión caducada», que aquí sería falso. Si era de la misma cuenta,
- * el servidor ya la había revocado y, sin esto, seguiría en pantalla hasta que
- * caducara su JWT de acceso (hasta 15 minutos) y luego saltaría ese aviso; si
+ * el servidor ya la había revocado y, sin esto, seguiría en pantalla hasta su
+ * siguiente petición (su JWT de acceso ya no vale: 401) y entonces saltaría ese aviso; si
  * era de otra cuenta, cerrarla también es lo esperable: quien acaba de cambiar
  * la contraseña va a entrar con la suya. Solo cuenta la sesión que había al
  * cambiarla (si el arranque aún estaba comprobando si la había, se cierra por si

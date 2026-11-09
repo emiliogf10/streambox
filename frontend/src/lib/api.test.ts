@@ -244,7 +244,7 @@ describe('apiFetch: 401 y sesión', () => {
     expect(error).toMatchObject({
       status: 401,
       sessionExpired: true,
-      message: 'Tu sesión ha caducado. Inicia sesión de nuevo.',
+      message: 'Tu sesión ha terminado. Inicia sesión de nuevo.',
     });
   });
 
@@ -362,7 +362,7 @@ describe('apiFetch: renovación de la sesión (refresh token)', () => {
 
     const error = await catchError(apiFetch('/movies'));
 
-    expect(error).toMatchObject({ status: 401, sessionExpired: true, message: 'Tu sesión ha caducado. Inicia sesión de nuevo.' });
+    expect(error).toMatchObject({ status: 401, sessionExpired: true, message: 'Tu sesión ha terminado. Inicia sesión de nuevo.' });
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
     expect(onUnauthorized).toHaveBeenCalledWith(7);
     expect(refreshCalls()).toHaveLength(1);

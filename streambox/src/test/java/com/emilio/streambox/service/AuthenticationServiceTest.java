@@ -118,10 +118,12 @@ class AuthenticationServiceTest {
         User verified = user(Instant.parse("2026-10-01T10:00:00Z"));
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(verified));
         when(passwordEncoder.matches(PASSWORD, verified.getPassword())).thenReturn(true);
-        when(jwtService.generateToken(verified)).thenReturn("jwt");
+        when(jwtService.generateToken(verified, 0)).thenReturn("jwt");
 
-        service.login(EMAIL, PASSWORD, IP);
+        assertEquals("jwt", service.login(EMAIL, PASSWORD, IP).accessToken());
 
+        // La versión va explícita (INFO 7): la de la entidad recién leída.
+        verify(jwtService).generateToken(verified, 0);
         verify(loginAttemptService).recordSuccess(attempt);
         verify(loginAttemptService, never()).recordFailure(any());
         verify(refreshTokenService).startFamily(42L);

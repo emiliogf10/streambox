@@ -129,10 +129,11 @@ export const RESET_REQUEST_DONE_MESSAGE = (email: string): string =>
 
 /**
  * Aviso tras cambiar la contraseña: lo que el servidor ha hecho con las
- * sesiones. Las de los demás dispositivos tienen el refresh token revocado al
- * momento, pero el JWT de acceso que ya tengan no se puede revocar (es
- * *stateless*) y vale hasta 15 minutos más: se dice, como en «Cerrar sesión en
- * todos los dispositivos».
+ * sesiones. Todas quedan fuera al momento: el servidor revoca sus refresh
+ * tokens y sube la versión de los tokens de la cuenta (`users.token_version`),
+ * así que el JWT de acceso de cualquier otro dispositivo deja de valer en su
+ * siguiente petición (como en «Cerrar sesión en todos los dispositivos»). Ya no
+ * se avisa de ninguna espera (antes ese JWT seguía valiendo hasta 15 min). La de
+ * este navegador, si la había, la cierra la propia página (`ResetPasswordPage`).
  */
-export const RESET_SESSIONS_CLOSED =
-  'Por seguridad, se han cerrado todas las sesiones abiertas con tu cuenta. En otros dispositivos puede tardar hasta 15 minutos.';
+export const RESET_SESSIONS_CLOSED = 'Por seguridad, se han cerrado todas las sesiones abiertas con tu cuenta.';

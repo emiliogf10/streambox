@@ -134,7 +134,7 @@ export function recommendationsReason(basis: RecommendationBasis, genreNames?: s
       return 'Según los títulos que has marcado con «Me gusta».';
     case 'GENRES_AND_LIKES':
       return genres
-        ? `Porque te gustan ${genres} y según los títulos que has marcado con «Me gusta».`
+        ? `Porque te gustan ${genres}, y por los títulos que has marcado con «Me gusta».`
         : 'Según tus géneros favoritos y los títulos que has marcado con «Me gusta».';
   }
 }

@@ -34,7 +34,7 @@ import jakarta.persistence.EntityManagerFactory;
  *
  * <p>
  * Que el contexto de Spring arranque ya demuestra dos cosas: que todas las
- * migraciones ({@code V1}..{@code V11}) se aplican en PostgreSQL desde cero y que Hibernate
+ * migraciones ({@code V1}..{@code V12}) se aplican en PostgreSQL desde cero y que Hibernate
  * ({@code ddl-auto=validate}) acepta las entidades contra ese esquema. Aquí se
  * comprueba además lo que H2 no puede garantizar: los tipos reales del catálogo
  * del sistema ({@code information_schema}, {@code pg_catalog}), las políticas de
@@ -79,7 +79,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10 y V11 (sin
+     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10, V11 y V12 (sin
      * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
      * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
@@ -89,7 +89,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -357,8 +357,36 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                 String.class));
 
         assertTrue(checks.containsAll(Set.of("ck_users_role", "ck_movies_duration", "ck_movies_release_year",
-                "ck_users_avatar")),
+                "ck_users_avatar", "ck_users_token_version")),
                 "checks: " + checks);
+    }
+
+    /**
+     * {@code users.token_version} (V12) en PostgreSQL: {@code integer NOT NULL
+     * DEFAULT 0}, una cuenta creada sin indicarla nace en 0, y la base de datos
+     * rechaza {@code NULL} (23502) y una versión negativa (23514, con el nombre
+     * {@code ck_users_token_version}).
+     */
+    @Test
+    void laVersionDeLosTokensEsUnEnteroObligatorioQueEmpiezaEnCeroYNuncaEsNegativo() {
+        Map<String, Object> column = jdbc.queryForMap("SELECT data_type, is_nullable, column_default"
+                + " FROM information_schema.columns WHERE table_schema = 'public'"
+                + " AND table_name = 'users' AND column_name = 'token_version'");
+        long userId = insertUser("version", "version@test.com");
+
+        assertEquals("integer", column.get("data_type"));
+        assertEquals("NO", column.get("is_nullable"));
+        assertEquals("0", column.get("column_default"));
+        assertEquals(0, jdbc.queryForObject("SELECT token_version FROM users WHERE id = ?", Integer.class, userId));
+
+        DataIntegrityViolationException negative = assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("UPDATE users SET token_version = -1 WHERE id = ?", userId));
+        assertEquals(CHECK_VIOLATION, sqlState(negative));
+        assertTrue(negative.getMessage().contains("ck_users_token_version"), negative.getMessage());
+        DataIntegrityViolationException nulled = assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("UPDATE users SET token_version = NULL WHERE id = ?", userId));
+        assertEquals(NOT_NULL_VIOLATION, sqlState(nulled));
+        assertEquals(0, jdbc.queryForObject("SELECT token_version FROM users WHERE id = ?", Integer.class, userId));
     }
 
     /** PostgreSQL rechaza años y duraciones imposibles con 23514 y el nombre del CHECK. */

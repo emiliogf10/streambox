@@ -39,12 +39,18 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * <h2>Por qué el token de acceso dura minutos</h2>
  * <p>
- * Un JWT es <em>stateless</em>: el servidor no puede revocarlo, así que quien
- * copie uno puede usarlo hasta su {@code exp}. Con 15 minutos esa ventana es
- * pequeña; la sesión larga la mantiene el refresh token
- * ({@code streambox_refresh}), que sí se guarda en la base de datos y se puede
- * revocar. Por eso hay un máximo de {@value #MAX_ACCESS_TOKEN_TTL_TEXT}: un TTL
- * de horas anularía la ventaja de poder cerrar sesión de verdad.
+ * Un JWT es <em>stateless</em>: el servidor no guarda una lista de los que ha
+ * emitido. Sí puede anularlos <b>todos a la vez</b> por cuenta (claim
+ * {@code ver} frente a {@code users.token_version}, ver {@link JwtService}):
+ * «cerrar sesión en todos los dispositivos», cambiar o restablecer la
+ * contraseña y confirmar el correo los invalidan al momento. Lo que no anula
+ * es un token concreto: el logout normal solo revoca su refresh token y borra
+ * las cookies, así que una copia de ese JWT de acceso vale hasta su
+ * {@code exp}. Con 15 minutos esa ventana es pequeña; la sesión larga la
+ * mantiene el refresh token ({@code streambox_refresh}), que sí se guarda en
+ * la base de datos y se puede revocar uno a uno. Por eso hay un máximo de
+ * {@value #MAX_ACCESS_TOKEN_TTL_TEXT}: un TTL de horas agrandaría esa ventana
+ * sin necesidad.
  * </p>
  *
  * @param secret         secreto con el que se firman los tokens (HMAC-SHA256).

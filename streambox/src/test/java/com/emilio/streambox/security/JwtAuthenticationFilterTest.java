@@ -99,7 +99,7 @@ class JwtAuthenticationFilterTest {
     @Test
     void unFalloDeLaBaseDeDatosConBearerSePropagaYNoSeTrataComoAnonimo() {
         DataAccessResourceFailureException dbDown = dbDown();
-        when(jwtService.extractEmail(TOKEN)).thenReturn(EMAIL);
+        when(jwtService.parseAccessToken(TOKEN)).thenReturn(new AccessTokenClaims(EMAIL, 0));
         when(userRepository.findByEmail(EMAIL)).thenThrow(dbDown);
         MockFilterChain chain = new MockFilterChain();
 
@@ -114,7 +114,7 @@ class JwtAuthenticationFilterTest {
     /** Lo mismo con el token en la cookie (el caso del navegador). */
     @Test
     void unFalloDeLaBaseDeDatosConCookieSePropagaYNoSeTrataComoAnonimo() {
-        when(jwtService.extractEmail(TOKEN)).thenReturn(EMAIL);
+        when(jwtService.parseAccessToken(TOKEN)).thenReturn(new AccessTokenClaims(EMAIL, 0));
         when(userRepository.findByEmail(EMAIL)).thenThrow(dbDown());
         MockFilterChain chain = new MockFilterChain();
 
@@ -131,7 +131,7 @@ class JwtAuthenticationFilterTest {
      */
     @Test
     void unFalloDeLaBaseDeDatosEnUnaPeticionNoSeguraPorCookieSePropaga() {
-        when(jwtService.extractEmail(TOKEN)).thenReturn(EMAIL);
+        when(jwtService.parseAccessToken(TOKEN)).thenReturn(new AccessTokenClaims(EMAIL, 0));
         when(userRepository.findByEmail(EMAIL)).thenThrow(dbDown());
         MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -149,7 +149,7 @@ class JwtAuthenticationFilterTest {
      */
     @Test
     void unaExcepcionInesperadaAlValidarElTokenSePropaga() {
-        when(jwtService.extractEmail(TOKEN)).thenThrow(new IllegalStateException("fallo interno"));
+        when(jwtService.parseAccessToken(TOKEN)).thenThrow(new IllegalStateException("fallo interno"));
         MockFilterChain chain = new MockFilterChain();
 
         assertThrows(IllegalStateException.class,
@@ -180,7 +180,7 @@ class JwtAuthenticationFilterTest {
     @ParameterizedTest
     @MethodSource("invalidTokenExceptions")
     void unTokenNoValidoPorCabeceraDejaLaPeticionAnonima(RuntimeException invalid) throws Exception {
-        when(jwtService.extractEmail(TOKEN)).thenThrow(invalid);
+        when(jwtService.parseAccessToken(TOKEN)).thenThrow(invalid);
         MockFilterChain chain = new MockFilterChain();
 
         filter.doFilter(bearerRequest(), new MockHttpServletResponse(), chain);
@@ -198,7 +198,7 @@ class JwtAuthenticationFilterTest {
     @ParameterizedTest
     @MethodSource("invalidTokenExceptions")
     void unTokenNoValidoPorCookieDejaLaPeticionAnonima(RuntimeException invalid) throws Exception {
-        when(jwtService.extractEmail(TOKEN)).thenThrow(invalid);
+        when(jwtService.parseAccessToken(TOKEN)).thenThrow(invalid);
         MockFilterChain chain = new MockFilterChain();
         MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -212,7 +212,7 @@ class JwtAuthenticationFilterTest {
     /** Token válido de una cuenta borrada: anónima, no un error del servidor. */
     @Test
     void unTokenValidoDeUnUsuarioInexistenteDejaLaPeticionAnonima() throws Exception {
-        when(jwtService.extractEmail(TOKEN)).thenReturn(EMAIL);
+        when(jwtService.parseAccessToken(TOKEN)).thenReturn(new AccessTokenClaims(EMAIL, 0));
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
         MockFilterChain chain = new MockFilterChain();
 
@@ -226,7 +226,7 @@ class JwtAuthenticationFilterTest {
     @ParameterizedTest
     @ValueSource(strings = { "", "   " })
     void unTokenSinSubjectDejaLaPeticionAnonima(String subject) throws Exception {
-        when(jwtService.extractEmail(TOKEN)).thenReturn(subject);
+        when(jwtService.parseAccessToken(TOKEN)).thenReturn(new AccessTokenClaims(subject, 0));
         MockFilterChain chain = new MockFilterChain();
 
         filter.doFilter(bearerRequest(), new MockHttpServletResponse(), chain);
@@ -249,7 +249,7 @@ class JwtAuthenticationFilterTest {
         user.setRole(Role.ADMIN);
         user.setCreatedAt(Instant.now());
         user.setEmailVerifiedAt(null);
-        when(jwtService.extractEmail(TOKEN)).thenReturn(EMAIL);
+        when(jwtService.parseAccessToken(TOKEN)).thenReturn(new AccessTokenClaims(EMAIL, 0));
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
         MockFilterChain chain = new MockFilterChain();
 
@@ -257,8 +257,8 @@ class JwtAuthenticationFilterTest {
 
         assertNotNull(chain.getRequest(), "la petición sigue (anónima): la autorización decide");
         assertNull(currentAuthentication());
-        assertFalse(JwtAuthenticationFilter.canUseSession(user));
-        assertFalse(JwtAuthenticationFilter.canUseSession(null));
+        assertFalse(JwtAuthenticationFilter.canUseSession(user, 0));
+        assertFalse(JwtAuthenticationFilter.canUseSession(null, 0));
     }
 
     /** Control: con token válido y usuario existente, se autentica con su rol. */
@@ -270,7 +270,7 @@ class JwtAuthenticationFilterTest {
         user.setEmail(EMAIL);
         user.setRole(Role.ADMIN);
         user.setCreatedAt(Instant.now());
-        when(jwtService.extractEmail(TOKEN)).thenReturn(EMAIL);
+        when(jwtService.parseAccessToken(TOKEN)).thenReturn(new AccessTokenClaims(EMAIL, 0));
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
         MockFilterChain chain = new MockFilterChain();
 
@@ -281,6 +281,76 @@ class JwtAuthenticationFilterTest {
         assertNotNull(authentication);
         assertEquals(new AuthenticatedUser(7L, EMAIL, Role.ADMIN), authentication.getPrincipal());
         assertEquals("ROLE_ADMIN", authentication.getAuthorities().iterator().next().getAuthority());
+    }
+
+    // ------------------------------------------------------------------
+    // Versión del token (claim «ver» frente a users.token_version)
+    // ------------------------------------------------------------------
+
+    /**
+     * Un token de una versión anterior (emitido antes de cerrar todas las
+     * sesiones o de cambiar la contraseña) no autentica, ni por cabecera ni por
+     * cookie, aunque la firma sea válida y la cuenta exista y esté verificada.
+     * Sin la comparación, el filtro lo aceptaría hasta que caducara.
+     */
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1, 3, Integer.MAX_VALUE })
+    void unTokenDeOtraVersionNoAutentica(int tokenVersion) throws Exception {
+        User user = verifiedUser(2);
+        when(jwtService.parseAccessToken(TOKEN)).thenReturn(new AccessTokenClaims(EMAIL, tokenVersion));
+        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+
+        MockFilterChain bearerChain = new MockFilterChain();
+        filter.doFilter(bearerRequest(), new MockHttpServletResponse(), bearerChain);
+        assertNotNull(bearerChain.getRequest(), "la petición sigue (anónima): la autorización decide");
+        assertNull(currentAuthentication());
+
+        MockFilterChain cookieChain = new MockFilterChain();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(cookieRequest("POST"), response, cookieChain);
+        assertNotNull(cookieChain.getRequest());
+        assertEquals(200, response.getStatus(), "anónima, no un 403 CSRF");
+        assertNull(currentAuthentication());
+        assertFalse(JwtAuthenticationFilter.canUseSession(user, tokenVersion));
+    }
+
+    /** Control: con la versión actual de la cuenta (no la 0), sí autentica. */
+    @Test
+    void unTokenDeLaVersionActualAutentica() throws Exception {
+        when(jwtService.parseAccessToken(TOKEN)).thenReturn(new AccessTokenClaims(EMAIL, 2));
+        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(verifiedUser(2)));
+
+        filter.doFilter(bearerRequest(), new MockHttpServletResponse(), new MockFilterChain());
+
+        assertEquals(new AuthenticatedUser(7L, EMAIL, Role.USER), currentAuthentication().getPrincipal());
+    }
+
+    /**
+     * La excepción del claim {@code ver} ausente o mal tipado es una
+     * {@code JwtException}: petición anónima, sin consultar la base de datos.
+     */
+    @Test
+    void unTokenSinVersionValidaDejaLaPeticionAnonimaSinConsultarLaBaseDeDatos() throws Exception {
+        JwtService realService = new JwtService(
+                new JwtProperties("secreto-de-prueba-con-mas-de-treinta-y-dos-caracteres",
+                        java.time.Duration.ofMinutes(15)));
+        String noVersion = io.jsonwebtoken.Jwts.builder()
+                .issuer(JwtService.ISSUER)
+                .subject(EMAIL)
+                .expiration(new java.util.Date(System.currentTimeMillis() + 60_000))
+                .signWith(new javax.crypto.spec.SecretKeySpec(
+                        "secreto-de-prueba-con-mas-de-treinta-y-dos-caracteres".getBytes(StandardCharsets.UTF_8),
+                        "HmacSHA256"), JwtService.ALGORITHM)
+                .compact();
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", PROTECTED);
+        request.addHeader("Authorization", "Bearer " + noVersion);
+        MockFilterChain chain = new MockFilterChain();
+
+        filter(realService).doFilter(request, new MockHttpServletResponse(), chain);
+
+        assertNotNull(chain.getRequest());
+        assertNull(currentAuthentication());
+        verify(userRepository, never()).findByEmail(anyString());
     }
 
     // ------------------------------------------------------------------
@@ -295,7 +365,7 @@ class JwtAuthenticationFilterTest {
     @ParameterizedTest
     @MethodSource("invalidTokenExceptions")
     void elLogDeUnTokenNoValidoLlevaLaClaseADebugYNuncaElMensaje(RuntimeException invalid) throws Exception {
-        when(jwtService.extractEmail(TOKEN)).thenThrow(invalid);
+        when(jwtService.parseAccessToken(TOKEN)).thenThrow(invalid);
 
         List<ILoggingEvent> events = captureLogs(() ->
                 filter.doFilter(bearerRequest(), new MockHttpServletResponse(), new MockFilterChain()));
@@ -317,7 +387,7 @@ class JwtAuthenticationFilterTest {
         String hostileToken = header + "." + base64Url("{\"sub\":\"x\"}") + ".firma";
 
         // Premisa: el mensaje de jjwt sí contiene lo que puso el cliente.
-        JwtException direct = assertThrows(JwtException.class, () -> realService.extractEmail(hostileToken));
+        JwtException direct = assertThrows(JwtException.class, () -> realService.parseAccessToken(hostileToken));
         assertTrue(String.valueOf(direct.getMessage()).contains(CLIENT_CONTROLLED),
                 "premisa del test: " + direct.getMessage());
 
@@ -339,6 +409,18 @@ class JwtAuthenticationFilterTest {
     private JwtAuthenticationFilter filter(JwtService service) {
         return new JwtAuthenticationFilter(service, userRepository, new SecurityErrorResponseWriter(),
                 PathPatternRequestMatcher.withDefaults());
+    }
+
+    /** Cuenta verificada (id 7, USER) con la versión de tokens indicada. */
+    private static User verifiedUser(int tokenVersion) {
+        User user = new User();
+        user.setId(7L);
+        user.setEmail(EMAIL);
+        user.setRole(Role.USER);
+        user.setCreatedAt(Instant.now());
+        user.setEmailVerifiedAt(Instant.now());
+        org.springframework.test.util.ReflectionTestUtils.setField(user, "tokenVersion", tokenVersion);
+        return user;
     }
 
     private static DataAccessResourceFailureException dbDown() {

@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.web.filter.FormContentFilter;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -53,6 +54,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
+// El cuerpo de ~1 MB supera el tope general de 64 KB (RequestBodySizeLimitFilter), que
+// respondería 413 antes de lo que se prueba aquí: se sube solo en este contexto para
+// seguir probando esta protección por separado (el tope lo prueba
+// RequestBodySizeLimitTomcatIntegrationTest).
+@TestPropertySource(properties = "streambox.http.max-request-body=4MB")
 class FormContentFilterDisabledTomcatIntegrationTest {
 
     /** Algo más de 1 MB de formulario. */

@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,6 +59,8 @@ import com.emilio.streambox.support.TestAccounts;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import jakarta.persistence.EntityManagerFactory;
+
 /**
  * Tests de punta a punta de los géneros favoritos («Tus gustos»):
  * {@code GET/PUT /api/users/me/genres}, {@code GET /api/users/me/genres/options}
@@ -90,6 +94,9 @@ class FavoriteGenresIntegrationTest {
     private static final String DUPLICATES_MESSAGE = "Hay géneros repetidos.";
     private static final String NOT_ELIGIBLE_MESSAGE = "Alguno de los géneros no existe o no tiene títulos.";
 
+    /** Fecha pasada con la que se marcan filas para detectar si se vuelven a escribir. */
+    private static final OffsetDateTime PAST = OffsetDateTime.of(2026, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+
     @Autowired private MockMvc mockMvc;
     @Autowired private FavoriteGenreService favoriteGenreService;
     @Autowired private MovieRepository movieRepository;
@@ -100,6 +107,7 @@ class FavoriteGenresIntegrationTest {
     @Autowired private JwtService jwtService;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private EntityManagerFactory entityManagerFactory;
 
     private User alice;
     private String aliceToken;
@@ -353,6 +361,77 @@ class FavoriteGenresIntegrationTest {
                 Integer.class, alice.getId()));
     }
 
+    /**
+     * BAJA-1: un {@code PUT} con la misma lista que ya está guardada (en otro
+     * orden) no escribe nada. Se fechan a mano en el pasado las filas y la
+     * pregunta: si el servicio volviera a borrar e insertar, el
+     * {@code created_at} pasaría a ser la hora actual. Además se cuentan las
+     * sentencias de la llamada al servicio: validación, cerrojo y lectura de la
+     * lista guardada; sin el arreglo eran cinco (también el {@code UPDATE} de
+     * {@code users}, el {@code DELETE} y el {@code INSERT}).
+     */
+    @Test
+    void unPutIdenticoNoEscribeNada() throws Exception {
+        String first = putGenres(aliceToken, ids(terror, accion, drama))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        backdateFavoritesAndQuestion(alice);
+
+        String second = putGenres(aliceToken, ids(drama, terror, accion))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long statements = statementsFor(() -> favoriteGenreService.replaceFavoriteGenres(alice.getId(),
+                new FavoriteGenresRequest(List.of(accion.getId(), drama.getId(), terror.getId()))));
+
+        assertEquals(first, second, "misma respuesta, en el mismo orden");
+        assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM user_favorite_genres"
+                + " WHERE user_id = ? AND created_at = ?", Integer.class, alice.getId(), PAST),
+                "las filas no se han vuelto a insertar");
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE id = ? AND genres_onboarded_at = ?",
+                Integer.class, alice.getId(), PAST), "la fecha de la pregunta no cambia");
+        assertEquals(3, statements, "solo lecturas: validación, cerrojo y lista guardada");
+    }
+
+    /**
+     * Una lista distinta, aunque comparta géneros con la guardada, sí la
+     * sustituye entera: todas las filas son nuevas (fecha de esta elección) y
+     * la fecha de la pregunta sigue siendo la de la primera vez.
+     */
+    @Test
+    void unPutDistintoSustituyeAunqueCompartaGeneros() throws Exception {
+        putGenres(aliceToken, ids(terror, accion, drama)).andExpect(status().isOk());
+        backdateFavoritesAndQuestion(alice);
+
+        putGenres(aliceToken, ids(terror, accion, comedia))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Acción"))
+                .andExpect(jsonPath("$[1].name").value("Comedia"))
+                .andExpect(jsonPath("$[2].name").value("Terror"));
+
+        assertEquals(List.of("Acción", "Comedia", "Terror"), favoriteNames(aliceToken));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM user_favorite_genres"
+                + " WHERE user_id = ? AND created_at = ?", Integer.class, alice.getId(), PAST),
+                "se han sustituido todas las filas");
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE id = ? AND genres_onboarded_at = ?",
+                Integer.class, alice.getId(), PAST), "la fecha de la pregunta no cambia");
+    }
+
+    /**
+     * Repetir «Ahora no» (la lista vacía, sin gustos guardados) sigue
+     * respondiendo una lista vacía y conserva la fecha de la primera vez. Que
+     * no escriba nada lo prueba {@code FavoriteGenreServiceTest}: aquí el
+     * número de sentencias no lo distingue (antes eran el {@code UPDATE} y el
+     * {@code DELETE}; ahora, el cerrojo y la lectura).
+     */
+    @Test
+    void repetirLaListaVaciaConservaLaFechaDeLaPrimeraVez() throws Exception {
+        putGenres(aliceToken, "[]").andExpect(status().isOk());
+        backdateFavoritesAndQuestion(alice);
+
+        putGenres(aliceToken, "[]").andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM users WHERE id = ? AND genres_onboarded_at = ?",
+                Integer.class, alice.getId(), PAST));
+    }
+
     /** Cualquier número que no sea 0 ni de 3 a 5 se rechaza con el mensaje de la regla. */
     @ParameterizedTest
     @ValueSource(ints = { 1, 2, 6 })
@@ -550,6 +629,25 @@ class FavoriteGenresIntegrationTest {
     // ------------------------------------------------------------------
     // Utilidades
     // ------------------------------------------------------------------
+
+    /**
+     * Pone en el pasado ({@link #PAST}) el {@code created_at} de los favoritos
+     * del usuario y la fecha de su pregunta, con SQL directo: así se nota si
+     * una petición posterior los vuelve a escribir.
+     */
+    private void backdateFavoritesAndQuestion(User user) {
+        jdbc.update("UPDATE user_favorite_genres SET created_at = ? WHERE user_id = ?", PAST, user.getId());
+        jdbc.update("UPDATE users SET genres_onboarded_at = ? WHERE id = ?", PAST, user.getId());
+    }
+
+    /** Cuenta las sentencias JDBC que prepara {@code operation} (estadísticas de Hibernate). */
+    private long statementsFor(Runnable operation) {
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.setStatisticsEnabled(true);
+        statistics.clear();
+        operation.run();
+        return statistics.getPrepareStatementCount();
+    }
 
     private ResultActions putGenres(String token, String idsJson) throws Exception {
         return mockMvc.perform(put(GENRES).header("Authorization", token)

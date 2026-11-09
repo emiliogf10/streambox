@@ -227,9 +227,9 @@ public class AuthController {
             + "streambox_token y streambox_refresh (Set-Cookie con Max-Age=0). Es público e idempotente: "
             + "responde 204 haya o no sesión, y con un refresh token desconocido o ya revocado. Exige la "
             + "cabecera X-Requested-With: StreamBox (defensa CSRF, también con Authorization: Bearer): sin "
-            + "ella otra web podría borrar las cookies de la víctima. El JWT de "
-            + "acceso es stateless y no se puede revocar: una copia seguiría valiendo hasta su caducidad "
-            + "(como mucho 15 minutos por defecto), pero ya no se podría renovar.")
+            + "ella otra web podría borrar las cookies de la víctima. El logout no revoca el JWT de "
+            + "acceso: una copia seguiría valiendo hasta su caducidad (como mucho 15 minutos por defecto), "
+            + "pero ya no se podría renovar. Para anularlo también, usa POST /api/auth/logout-all.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Sesión revocada (si la había) y cookies borradas"),
             @ApiResponse(responseCode = "403", description = "Código CSRF_REJECTED: falta la cabecera "
@@ -283,9 +283,9 @@ public class AuthController {
     @Operation(summary = "Cierra sesión en todos los dispositivos", description = "Revoca todas las sesiones "
             + "de la cuenta autenticada, incluida la actual: ningún refresh token suyo vuelve a servir para "
             + "renovar. Borra las cookies streambox_token y streambox_refresh de esta petición (Set-Cookie con "
-            + "Max-Age=0). Sin cuerpo. Los JWT de acceso ya emitidos son stateless y no se pueden revocar: "
-            + "siguen valiendo hasta caducar (como mucho 15 minutos), pero ya no se pueden renovar. Además, "
-            + "ninguna IP de la cuenta sigue librándose del bloqueo por intentos fallidos del login.")
+            + "Max-Age=0). Sin cuerpo. Los JWT de acceso ya emitidos a la cuenta, en cualquier dispositivo, "
+            + "dejan de valer al momento (401). Además, ninguna IP de la cuenta sigue librándose del bloqueo "
+            + "por intentos fallidos del login.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Todas las sesiones revocadas y cookies borradas"),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado (no se revoca ni "

@@ -22,6 +22,12 @@ import {
   welcomeDestination,
 } from '../lib/favoriteGenres';
 
+/** Título de la página cuando se puede elegir (también mientras cargan los géneros). */
+const WELCOME_TITLE = 'Cuéntanos qué te gusta';
+
+/** Título cuando no hay géneros suficientes: «Cuéntanos qué te gusta» pediría algo imposible. */
+const WELCOME_TITLE_NO_CHOICE = 'Te damos la bienvenida';
+
 /** Aviso tras «Guardar». */
 export const WELCOME_SAVED_MESSAGE = 'Hemos guardado tus gustos. Puedes cambiarlos cuando quieras en tu perfil.';
 
@@ -58,7 +64,9 @@ type Phase = 'idle' | 'saving' | 'skipping' | 'done';
  * - Con menos de 3 géneros que elegir (ninguno, o 1 o 2 con títulos visibles:
  *   el mínimo sería imposible), lo dice con un texto distinto para cada caso y
  *   solo ofrece «Continuar» (también la lista vacía): ni un «Guardar» que nunca
- *   se habilita ni un contador que pide más de los que hay.
+ *   se habilita ni un contador que pide más de los que hay. También cambian el
+ *   título y desaparece la entradilla: «Cuéntanos qué te gusta» y «Elige entre 3
+ *   y 5 géneros» encima de «Todavía no hay géneros» se contradecían.
  * - Si el `PUT` falla (red, 5xx, 429), se avisa, se puede reintentar con el
  *   mismo botón y además se ofrece «Continuar sin guardar», que sigue sin
  *   cerrar la pregunta en el servidor (se volverá a preguntar la próxima vez
@@ -235,14 +243,17 @@ export function WelcomePage() {
         <h1
           ref={titleRef}
           tabIndex={-1}
-          className="mb-3 text-3xl leading-tight font-bold tracking-tight text-balance outline-hidden sm:text-4xl"
+          className="mb-8 text-3xl leading-tight font-bold tracking-tight text-balance outline-hidden sm:text-4xl"
         >
-          Cuéntanos qué te gusta
+          {notEnoughOptions ? WELCOME_TITLE_NO_CHOICE : WELCOME_TITLE}
         </h1>
-        <p className="mb-8 max-w-prose text-base leading-relaxed text-gray-300">
-          Elige entre 3 y 5 géneros y te recomendaremos películas y series desde el primer día. Podrás cambiarlos
-          cuando quieras en tu perfil.
-        </p>
+        {/* Sin géneros que elegir, pedir que se elijan sería falso: el recuadro de abajo explica qué pasa. */}
+        {!notEnoughOptions && (
+          <p className="-mt-5 mb-8 max-w-prose text-base leading-relaxed text-gray-300">
+            Elige entre 3 y 5 géneros y te recomendaremos películas y series desde el primer día. Podrás cambiarlos
+            cuando quieras en tu perfil.
+          </p>
+        )}
 
         <FormAlert message={formError} />
         {canContinueWithoutSaving && formError && (

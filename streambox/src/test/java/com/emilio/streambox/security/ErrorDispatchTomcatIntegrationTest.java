@@ -253,7 +253,7 @@ class ErrorDispatchTomcatIntegrationTest {
             "404, RESOURCE_NOT_FOUND",
             "405, METHOD_NOT_ALLOWED",
             "406, NOT_ACCEPTABLE",
-            "413, MALFORMED_REQUEST",
+            "413, PAYLOAD_TOO_LARGE",
             "415, UNSUPPORTED_MEDIA_TYPE",
             "503, INTERNAL_ERROR" })
     void unSendErrorLlegaConSuEstadoYSuCode(int status, String code) throws Exception {

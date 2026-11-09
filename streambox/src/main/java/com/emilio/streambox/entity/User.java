@@ -18,6 +18,7 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.DynamicUpdate;
 
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -32,8 +33,8 @@ import lombok.Setter;
  * <p>
  * Contiene la información necesaria para identificar y autenticar
  * a un usuario, así como su rol, su icono de perfil, si su email está
- * verificado, si ya se le hizo la pregunta de sus géneros favoritos y su
- * fecha de creación. Los géneros favoritos en sí no se mapean aquí: se leen y
+ * verificado, si ya se le hizo la pregunta de sus géneros favoritos, la
+ * versión vigente de sus tokens de acceso y su fecha de creación. Los géneros favoritos en sí no se mapean aquí: se leen y
  * escriben con SQL directo sobre {@code user_favorite_genres}
  * ({@code GenreRepository}), como los «me gusta».
  * </p>
@@ -179,6 +180,41 @@ public class User {
      */
     @Column(name = "genres_onboarded_at")
     private Instant genresOnboardedAt;
+
+    /**
+     * Versión de los tokens de acceso (JWT) de la cuenta: un JWT solo vale si
+     * se emitió con la versión actual.
+     *
+     * <p>
+     * Columna {@code token_version} de la {@code V12} ({@code NOT NULL DEFAULT 0},
+     * nunca negativa por {@code ck_users_token_version}). Revocar todos los JWT
+     * de acceso de la cuenta al momento («cerrar sesión en todos los
+     * dispositivos», cambiar o restablecer la contraseña) es sumarle 1 con
+     * {@code UserRepository.incrementTokenVersion}, que lo hace en una sola
+     * sentencia atómica.
+     * </p>
+     *
+     * <p>
+     * <b>Por qué no tiene setter y es {@code updatable = false}</b>: bajar la
+     * versión volvería a dar por buenos tokens ya revocados, y escribirla desde
+     * la entidad (leer, sumar, guardar) perdería incrementos si dos peticiones
+     * lo hicieran a la vez. Así, ningún DTO ni mapper puede asignarla, y ni un
+     * {@code save} ni el dirty checking de Hibernate la incluyen nunca en un
+     * {@code UPDATE}: solo cambia con la sentencia del repositorio. Al insertar
+     * sí se escribe (el {@code 0} del campo, igual que el {@code DEFAULT}), para
+     * que la entidad recién guardada diga lo mismo que la fila.
+     * </p>
+     *
+     * <p>
+     * <b>Ojo con el valor en memoria</b>: tras {@code incrementTokenVersion}, una
+     * entidad ya cargada en la misma sesión conserva la versión antigua (el
+     * {@code UPDATE} masivo no la refresca). Para emitir un JWT justo después
+     * de incrementar, lee la versión con {@code UserRepository.findTokenVersionById}.
+     * </p>
+     */
+    @Setter(AccessLevel.NONE)
+    @Column(name = "token_version", nullable = false, updatable = false)
+    private int tokenVersion;
 
     /**
      * Instante en el que se creó el registro.

@@ -19,9 +19,9 @@ paths:
       description: 'Cambia la contraseña de la cuenta autenticada comprobando antes la actual. Cierra todas las demás sesiones
         de la cuenta (sus refresh tokens quedan revocados) y mantiene la actual: la respuesta trae en Set-Cookie un streambox_token
         y un streambox_refresh nuevos (una sesión nueva, así que tampoco sirve una copia anterior del refresh token de esta).
-        Los JWT de acceso ya emitidos a otras sesiones no se pueden revocar: siguen valiendo hasta caducar (como mucho 15
-        minutos), pero ya no se pueden renovar. Si la contraseña actual es incorrecta no se cambia nada. Las IPs desde las
-        que se inició sesión dejan de librarse del bloqueo de la cuenta por intentos fallidos, salvo la de esta petición.'
+        Los JWT de acceso ya emitidos a las demás sesiones dejan de valer al momento (401). Si la contraseña actual es incorrecta
+        no se cambia nada. Las IPs desde las que se inició sesión dejan de librarse del bloqueo de la cuenta por intentos
+        fallidos, salvo la de esta petición.'
       operationId: changePassword
       requestBody:
         content:
@@ -1672,9 +1672,9 @@ paths:
       description: 'Fija una contraseña nueva con el token del enlace del correo (lo que va tras #token= en <STREAMBOX_PUBLIC_URL>/restablecer-contrasena).
         No requiere autenticación ni la cabecera X-Requested-With. Al cambiarla, el correo de la cuenta queda confirmado,
         dejan de servir todos los enlaces pendientes de la cuenta (de restablecimiento y de confirmación), se cierran TODAS
-        sus sesiones (los refresh tokens quedan revocados; los JWT de acceso ya emitidos valen hasta caducar, como mucho 15
-        minutos), se borran los intentos fallidos de login de la cuenta y se envía un aviso al correo. No inicia sesión: después
-        hay que entrar con la contraseña nueva. Si la contraseña nueva no cumple la política, el token NO se gasta.'
+        sus sesiones (los refresh tokens quedan revocados y los JWT de acceso ya emitidos dejan de valer al momento), se borran
+        los intentos fallidos de login de la cuenta y se envía un aviso al correo. No inicia sesión: después hay que entrar
+        con la contraseña nueva. Si la contraseña nueva no cumple la política, el token NO se gasta.'
       operationId: confirmPasswordReset
       requestBody:
         content:
@@ -1720,8 +1720,8 @@ paths:
         servir para renovar) y borra las cookies streambox_token y streambox_refresh (Set-Cookie con Max-Age=0). Es público
         e idempotente: responde 204 haya o no sesión, y con un refresh token desconocido o ya revocado. Exige la cabecera
         X-Requested-With: StreamBox (defensa CSRF, también con Authorization: Bearer): sin ella otra web podría borrar las
-        cookies de la víctima. El JWT de acceso es stateless y no se puede revocar: una copia seguiría valiendo hasta su caducidad
-        (como mucho 15 minutos por defecto), pero ya no se podría renovar.'
+        cookies de la víctima. El logout no revoca el JWT de acceso: una copia seguiría valiendo hasta su caducidad (como
+        mucho 15 minutos por defecto), pero ya no se podría renovar. Para anularlo también, usa POST /api/auth/logout-all.'
       operationId: logout
       parameters:
       - name: streambox_refresh
@@ -1755,9 +1755,8 @@ paths:
       summary: Cierra sesión en todos los dispositivos
       description: 'Revoca todas las sesiones de la cuenta autenticada, incluida la actual: ningún refresh token suyo vuelve
         a servir para renovar. Borra las cookies streambox_token y streambox_refresh de esta petición (Set-Cookie con Max-Age=0).
-        Sin cuerpo. Los JWT de acceso ya emitidos son stateless y no se pueden revocar: siguen valiendo hasta caducar (como
-        mucho 15 minutos), pero ya no se pueden renovar. Además, ninguna IP de la cuenta sigue librándose del bloqueo por
-        intentos fallidos del login.'
+        Sin cuerpo. Los JWT de acceso ya emitidos a la cuenta, en cualquier dispositivo, dejan de valer al momento (401).
+        Además, ninguna IP de la cuenta sigue librándose del bloqueo por intentos fallidos del login.'
       operationId: logoutAll
       responses:
         '204':
@@ -3350,6 +3349,9 @@ components:
             - MALFORMED_REQUEST (400 y otros 4xx genéricos): la petición no se puede interpretar (JSON mal formado, tipos
             incorrectos).
 
+            - PAYLOAD_TOO_LARGE (413): el cuerpo de la petición supera el tamaño máximo (64 KB por defecto), en cualquier
+            ruta; ningún cuerpo válido de la API se acerca a ese tamaño.
+
             - INVALID_CREDENTIALS (401): email o contraseña incorrectos en el login (también, con la misma respuesta, una
             cuenta que aún no ha confirmado su correo), o token ausente, caducado o no válido.
 
@@ -3399,6 +3401,7 @@ components:
           - CURRENT_PASSWORD_INCORRECT
           - INVALID_VERIFICATION_TOKEN
           - INVALID_RESET_TOKEN
+          - PAYLOAD_TOO_LARGE
           example: RESOURCE_NOT_FOUND
         message:
           type: string

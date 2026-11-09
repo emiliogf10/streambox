@@ -4,7 +4,7 @@
 [![Seguridad](https://github.com/emiliogf10/streambox/actions/workflows/seguridad.yml/badge.svg)](https://github.com/emiliogf10/streambox/actions/workflows/seguridad.yml)
 [![Docker](https://img.shields.io/badge/Docker-compose-2496ED.svg?logo=docker)](#-arrancar-con-docker-recomendado)
 [![Java 21](https://img.shields.io/badge/Java-21-orange.svg?logo=openjdk)](https://www.oracle.com/java/)
-[![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
+[![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1.2-brightgreen.svg?logo=springboot)](https://spring.io/projects/spring-boot)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-blue.svg?logo=postgresql)](https://www.postgresql.org/)
 [![JWT](https://img.shields.io/badge/JWT-JJWT%200.13.0-black.svg?logo=jsonwebtokens)](https://github.com/jwtk/jjwt)
 [![OpenAPI](https://img.shields.io/badge/Swagger-OpenAPI%203-green.svg?logo=swagger)](https://swagger.io/)
@@ -56,7 +56,7 @@
 | :--- | :--- |
 | **Frontend** | React 19, Vite, TypeScript, Tailwind CSS v4, TanStack Query (caché de datos del servidor) |
 | **Lenguaje Backend** | Java 21 LTS |
-| **Framework** | Spring Boot 4.1.1 |
+| **Framework** | Spring Boot 4.1.2 |
 | **Módulos Spring** | Spring WebMVC, Spring Data JPA, Spring Security, Spring Validation |
 | **Persistencia** | PostgreSQL (producción/local), Hibernate ORM, **Flyway** (migraciones) |
 | **Testing** | JUnit 5, MockMvc, `@SpringBootTest`, H2 (en memoria), Testcontainers (PostgreSQL real); Vitest y Playwright en el frontend |
@@ -115,8 +115,8 @@ La base de todos los endpoints es `/api`.
 | `POST` | `/api/auth/logout` | Público | Revoca la sesión del refresh token de la cookie y borra las dos cookies; 204 (403 `CSRF_REJECTED` sin `X-Requested-With: StreamBox`) |
 | `GET` | `/api/users/me` | `USER`, `ADMIN` | Consulta los datos del usuario autenticado (incluido `avatar`: la clave de su icono o `null`) |
 | `PATCH` | `/api/users/me` | `USER`, `ADMIN` | Cambia el nombre de usuario (`username`) y/o el icono de perfil (`avatar`: una de las 12 claves o `null` para volver a la inicial; si falta, no cambia); el email, el rol y la contraseña no se cambian aquí (400); 409 si el nombre está en uso |
-| `PUT` | `/api/users/me/password` | `USER`, `ADMIN` | Cambia la contraseña (`{"currentPassword","newPassword"}`): 204 con cookies nuevas; cierra todas las demás sesiones; 400 `CURRENT_PASSWORD_INCORRECT`; 429 tras 5 fallos en 15 min |
-| `POST` | `/api/auth/logout-all` | `USER`, `ADMIN` | Cierra la sesión en todos los dispositivos, incluido este (revoca todas las sesiones y borra las cookies); 204 |
+| `PUT` | `/api/users/me/password` | `USER`, `ADMIN` | Cambia la contraseña (`{"currentPassword","newPassword"}`): 204 con cookies nuevas; cierra todas las demás sesiones al momento (también sus JWT de acceso); 400 `CURRENT_PASSWORD_INCORRECT`; 429 tras 5 fallos en 15 min |
+| `POST` | `/api/auth/logout-all` | `USER`, `ADMIN` | Cierra la sesión en todos los dispositivos, incluido este (revoca todas las sesiones y borra las cookies; los JWT de acceso ya emitidos dejan de valer al momento); 204 |
 | `GET` | `/api/users` | `ADMIN` | Lista todos los usuarios registrados (la regla es por ruta: cualquier método salvo el `POST` de registro, `HEAD` incluido, exige `ADMIN`) |
 
 ### 2. Mi Lista (Favoritos del Usuario)
@@ -228,6 +228,7 @@ Configura las siguientes variables de entorno en tu sistema o en tu IDE:
 | `JWT_ACCESS_TOKEN_TTL` | Vida del token de acceso (JWT de la cookie `streambox_token`), formato de duración de Spring Boot (`15m`, `900s`). Mayor que 0 y como mucho `1h`. La sesión larga la mantiene el refresh token (`streambox_refresh`): 7 días por uso y 30 como mucho desde el login (`streambox.auth.refresh.*`) | `15m` |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Opcionales. Si ambas están definidas, al arrancar se crea el primer administrador (si no existe ya). Al crearlo, la contraseña debe cumplir la política del registro (12–64 caracteres, no común, sin el usuario ni el email) o la aplicación no arranca; si ya existe, no se valida. **`ADMIN_EMAIL` debe ser un buzón tuyo** (o uno que no reciba correo, como `admin@streambox.local`): la cuenta ADMIN también se recupera con «He olvidado mi contraseña», así que quien controle ese buzón puede ser administrador | — |
 | `ADMIN_USERNAME` | Opcional. Nombre de usuario del administrador inicial | `admin` |
+| `STREAMBOX_HTTP_MAX_REQUEST_BODY` | Tamaño máximo del cuerpo de una petición; por encima, 413 `PAYLOAD_TOO_LARGE`. Mayor que 0 y como mucho `10MB`. nginx aplica el mismo límite (`client_max_body_size`): si lo cambias, cambia los dos | `64KB` |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | Solo perfil `prod`: conexión a PostgreSQL | — |
 | `STREAMBOX_PUBLIC_URL` | URL de la web para los enlaces de los correos (obligatoria en `prod`; nunca se toma de la cabecera `Host`) | `http://localhost:5173` (Docker: `http://localhost:8088`) |
 | `SPRING_MAIL_HOST`, `SPRING_MAIL_PORT` (y `SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD`) | Servidor SMTP. Obligatorio en `prod` (sin él no arranca); en `dev`, si falta, los correos (con el enlace de confirmación) se escriben en la consola del backend (línea de `LoggingEmailSender`) | — (Docker: Mailpit, `mailpit:1025`) |

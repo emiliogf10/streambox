@@ -77,22 +77,32 @@ class PasswordChangeServiceTest {
         when(passwordEncoder.encode(NEW)).thenReturn("$2a$10$hash-nuevo");
     }
 
-    /** Guarda el hash, revoca todo y solo después abre la familia de la sesión actual. */
+    /**
+     * Guarda el hash, revoca todo y solo después emite el JWT de la sesión
+     * actual (con la versión releída tras el incremento, no la de la entidad
+     * en memoria) y abre su familia. Firmado antes de revocar, o con la
+     * versión vieja, el JWT nacería revocado y el usuario se echaría a sí
+     * mismo.
+     */
     @Test
     void cambiaElHashRevocaTodasLasSesionesYAbreUnaNueva() {
         User locked = user(HASH);
         IssuedRefreshToken issued = new IssuedRefreshToken("r".repeat(43), java.time.Duration.ofDays(7));
         when(entityManager.find(User.class, USER_ID, LockModeType.PESSIMISTIC_WRITE)).thenReturn(locked);
-        when(jwtService.generateToken(locked)).thenReturn("jwt");
+        when(userRepository.findTokenVersionById(USER_ID)).thenReturn(Optional.of(4));
+        when(jwtService.generateToken(locked, 4)).thenReturn("jwt");
         when(refreshTokenService.startFamily(USER_ID)).thenReturn(issued);
 
         SessionTokens tokens = service.changePassword(USER_ID, CURRENT, NEW, IP);
 
         assertEquals("$2a$10$hash-nuevo", locked.getPassword());
         assertEquals(new SessionTokens("jwt", issued), tokens);
-        InOrder order = inOrder(refreshTokenService);
+        InOrder order = inOrder(refreshTokenService, userRepository, jwtService);
         order.verify(refreshTokenService).revokeAllSessions(USER_ID);
+        order.verify(userRepository).findTokenVersionById(USER_ID);
+        order.verify(jwtService).generateToken(locked, 4);
         order.verify(refreshTokenService).startFamily(USER_ID);
+        verify(jwtService, never()).generateToken(locked);
         verify(attempts).recordSuccess(attempt);
         // Las IPs conocidas se olvidan (salvo la de esta petición) después del commit.
         InOrder afterCommit = inOrder(transactionManager, loginAttempts);
@@ -152,6 +162,7 @@ class PasswordChangeServiceTest {
     void siElCommitFallaNoOlvidaLasIpsConocidas() {
         User locked = user(HASH);
         when(entityManager.find(User.class, USER_ID, LockModeType.PESSIMISTIC_WRITE)).thenReturn(locked);
+        when(userRepository.findTokenVersionById(USER_ID)).thenReturn(Optional.of(1));
         when(refreshTokenService.startFamily(USER_ID))
                 .thenReturn(new IssuedRefreshToken("r".repeat(43), java.time.Duration.ofDays(7)));
         doThrow(new TransactionSystemException("commit fallido")).when(transactionManager).commit(any());

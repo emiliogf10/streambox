@@ -307,9 +307,11 @@ public final class AccountEmails {
      * </p>
      *
      * <p>
-     * «Puede tardar unos minutos» en otros dispositivos es verdad: su refresh
-     * token se revoca al momento, pero el JWT de acceso que ya tienen vale
-     * hasta que caduca (15 minutos por defecto) y no se puede revocar.
+     * «Se han cerrado todas las sesiones» es verdad al momento en todos los
+     * dispositivos: el restablecimiento revoca los refresh tokens y sube la
+     * versión de los tokens de acceso de la cuenta, así que un JWT de acceso
+     * ya emitido deja de valer en su siguiente petición (antes valía hasta
+     * caducar y el correo avisaba de que «podía tardar unos minutos»).
      * </p>
      *
      * @param to        destinatario (el email de la cuenta)
@@ -324,8 +326,8 @@ public final class AccountEmails {
                 La contraseña de tu cuenta de StreamBox se ha cambiado el %s (hora UTC) con un enlace para \
                 restablecerla enviado a este correo.
 
-                Por seguridad, se han cerrado todas las sesiones abiertas con tu cuenta. En otros dispositivos \
-                puede tardar unos minutos.
+                Por seguridad, se han cerrado todas las sesiones abiertas con tu cuenta, en todos los \
+                dispositivos.
 
                 Si has sido tú, no tienes que hacer nada más: ya puedes iniciar sesión con la contraseña nueva.
 

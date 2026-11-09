@@ -87,12 +87,14 @@ import com.emilio.streambox.security.refresh.RefreshTokenService;
  * {@code PostgresPasswordResetConcurrencyIntegrationTest} con hilos de verdad.
  * </p>
  *
- * <h2>Lo que no puede hacer</h2>
+ * <h2>Los JWT de acceso caen al momento</h2>
  * <p>
- * Los JWT de acceso ya emitidos son stateless y siguen valiendo hasta que
- * caducan (15 minutos como mucho); las sesiones ya no se pueden renovar. Es la
- * misma limitación que en el cambio de contraseña del perfil
- * ({@link PasswordChangeService}).
+ * {@code RefreshTokenService.revokeAllSessions}, en la misma transacción, sube
+ * además {@code users.token_version}: desde el commit, el filtro JWT rechaza
+ * todos los JWT de acceso emitidos antes (claim {@code ver}), igual que en el
+ * cambio de contraseña del perfil ({@link PasswordChangeService}). Aquí no se
+ * emite ninguno nuevo: el usuario inicia sesión después con la contraseña
+ * nueva.
  * </p>
  */
 @Service

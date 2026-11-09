@@ -21,6 +21,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.emilio.streambox.dto.FavoriteGenresRequest;
 import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Movie;
 import com.emilio.streambox.entity.Role;
@@ -31,6 +32,7 @@ import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
 import com.emilio.streambox.repository.SeriesRepository;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.service.FavoriteGenreService;
 
 /**
  * Géneros favoritos y su peso en las recomendaciones ({@code V11}) contra
@@ -48,10 +50,13 @@ import com.emilio.streambox.repository.UserRepository;
  * </p>
  *
  * <p>
- * Además, lo que H2 no puede demostrar: que el {@code UPDATE} de
- * {@code markGenresOnboarded} <b>serializa</b> dos sustituciones simultáneas de
- * la lista del mismo usuario, de modo que gana entera la última y nunca queda
- * una mezcla de las dos (que podría superar el máximo de 5 géneros).
+ * Además, lo que H2 no puede demostrar: que el bloqueo de la fila del usuario
+ * ({@code findForUpdateById}, {@code SELECT ... FOR UPDATE}) <b>serializa</b>
+ * dos sustituciones simultáneas de la lista del mismo usuario, de modo que gana
+ * entera la última y nunca queda una mezcla de las dos (que podría superar el
+ * máximo de 5 géneros). Antes el cerrojo era el {@code UPDATE} de
+ * {@code markGenresOnboarded}, que se hacía en cada {@code PUT}; ahora ese
+ * {@code UPDATE} solo se hace si la pregunta estaba pendiente (BAJA-1).
  * </p>
  */
 class PostgresFavoriteGenresIntegrationTest extends PostgresIntegrationTestSupport
@@ -59,6 +64,7 @@ class PostgresFavoriteGenresIntegrationTest extends PostgresIntegrationTestSuppo
 
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private FavoriteGenreService favoriteGenreService;
 
     @BeforeEach
     void setUp() {
@@ -130,10 +136,12 @@ class PostgresFavoriteGenresIntegrationTest extends PostgresIntegrationTestSuppo
     // ------------------------------------------------------------------
 
     /**
-     * El mecanismo: la primera sustitución cierra la pregunta (bloquea la fila
-     * del usuario), borra e inserta {@code (a, b, c)} y mantiene la transacción
-     * abierta. La segunda, con {@code (d, e, f)}, <b>espera</b> en su
-     * {@code markGenresOnboarded} hasta que la primera confirma; entonces su
+     * El mecanismo, con los mismos pasos que {@code FavoriteGenreService}: la
+     * primera sustitución bloquea la fila del usuario ({@code findForUpdateById}),
+     * cierra la pregunta, borra e inserta {@code (a, b, c)} y mantiene la
+     * transacción abierta. La segunda, con {@code (d, e, f)}, <b>espera</b> en
+     * su {@code findForUpdateById} hasta que la primera confirma; entonces lee
+     * la fila ya con la fecha puesta (no vuelve a cerrar la pregunta) y su
      * {@code DELETE} (una sentencia nueva, que ya ve lo confirmado) borra
      * {@code (a, b, c)} e inserta lo suyo. Resultado: exactamente
      * {@code (d, e, f)}. Sin el cerrojo, el {@code DELETE} de la segunda no
@@ -157,6 +165,7 @@ class PostgresFavoriteGenresIntegrationTest extends PostgresIntegrationTestSuppo
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             Future<?> one = pool.submit(() -> tx.executeWithoutResult(status -> {
+                userRepository.findForUpdateById(ana.getId()).orElseThrow();
                 userRepository.markGenresOnboarded(ana.getId(), BASE);
                 genreRepository.clearFavorites(ana.getId());
                 genreRepository.addFavorites(ana.getId(), first, BASE);
@@ -167,7 +176,9 @@ class PostgresFavoriteGenresIntegrationTest extends PostgresIntegrationTestSuppo
                 firstInserted.await();
                 long start = System.nanoTime();
                 tx.executeWithoutResult(status -> {
-                    userRepository.markGenresOnboarded(ana.getId(), BASE.plusSeconds(60));
+                    User locked = userRepository.findForUpdateById(ana.getId()).orElseThrow();
+                    assertEquals(BASE, locked.getGenresOnboardedAt(),
+                            "tras esperar al cerrojo, lee la fecha que confirmó la primera");
                     genreRepository.clearFavorites(ana.getId());
                     genreRepository.addFavorites(ana.getId(), second, BASE.plusSeconds(60));
                 });
@@ -187,15 +198,20 @@ class PostgresFavoriteGenresIntegrationTest extends PostgresIntegrationTestSuppo
 
     /**
      * Varias sustituciones simultáneas del mismo usuario (dos pestañas, doble
-     * clic con listas distintas), en varias rondas con una barrera: ninguna
-     * falla (ni por la clave primaria) y al final la lista es
-     * <b>exactamente una</b> de las pedidas, nunca una mezcla.
+     * clic con listas distintas), en varias rondas con una barrera, por el
+     * <b>servicio real</b> (cerrojo, pregunta, comparación con lo guardado,
+     * borrado e inserción): ninguna falla (ni por la clave primaria) y al final
+     * la lista es <b>exactamente una</b> de las pedidas, nunca una mezcla. A
+     * partir de la segunda ronda, alguna petición encuentra ya guardada su
+     * propia lista y no escribe nada: también ese camino va en fila.
      */
     @Test
     void variasSustitucionesSimultaneasDejanExactamenteUnaDeLasListas() throws Exception {
         List<Long> genreIds = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
-            genreIds.add(genre("genero " + i).getId());
+            Genre genre = genre("genero " + i);
+            movie("Película " + i, genre); // el servicio solo admite géneros con títulos visibles
+            genreIds.add(genre.getId());
         }
         int threads = 6;
         List<List<Long>> lists = new ArrayList<>();
@@ -203,7 +219,6 @@ class PostgresFavoriteGenresIntegrationTest extends PostgresIntegrationTestSuppo
             lists.add(List.of(genreIds.get(i), genreIds.get(i + 2), genreIds.get(i + 4)).stream().sorted().toList());
         }
         User ana = user("ana");
-        TransactionTemplate tx = tx();
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         try {
             for (int round = 0; round < 6; round++) {
@@ -212,11 +227,8 @@ class PostgresFavoriteGenresIntegrationTest extends PostgresIntegrationTestSuppo
                 for (List<Long> list : lists) {
                     calls.add(() -> {
                         barrier.await(30, TimeUnit.SECONDS);
-                        return tx.execute(status -> {
-                            userRepository.markGenresOnboarded(ana.getId(), BASE);
-                            genreRepository.clearFavorites(ana.getId());
-                            return genreRepository.addFavorites(ana.getId(), list, BASE);
-                        });
+                        return favoriteGenreService.replaceFavoriteGenres(ana.getId(),
+                                new FavoriteGenresRequest(list)).size();
                     });
                 }
                 for (Future<Integer> future : pool.invokeAll(calls)) {

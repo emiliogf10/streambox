@@ -40,8 +40,9 @@ interface PasswordFormProps {
  * sesiones y esta sigue abierta. El servidor responde 204 con cookies nuevas
  * (una sesión nueva), así que aquí no hay que hacer nada con la sesión: el
  * aviso de éxito ({@link PASSWORD_CHANGED}) cuenta lo que pasa en los demás
- * dispositivos, incluido que puede tardar hasta 15 minutos (su JWT de acceso no
- * se puede revocar). La petición va en el lock de sesión de `apiFetch` para no
+ * dispositivos: quedan fuera al momento, en su siguiente petición (el servidor
+ * sube la versión de los tokens de la cuenta y su JWT de acceso deja de valer).
+ * La petición va en el lock de sesión de `apiFetch` para no
  * cruzarse con una renovación (ver `SESSION_ROTATING_PATHS` en `lib/api.ts`).
  *
  * **Errores** (por `status`/`code`, nunca por el texto):

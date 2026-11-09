@@ -264,8 +264,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     /**
      * Cierra la pregunta de bienvenida de los géneros favoritos (rellena
-     * {@code genres_onboarded_at} si estaba nula) y, de paso, <strong>bloquea
-     * la fila del usuario</strong> hasta el final de la transacción.
+     * {@code genres_onboarded_at} si estaba nula). Como todo {@code UPDATE},
+     * bloquea la fila del usuario hasta el final de la transacción.
      *
      * <p>
      * <b>No pisa una fecha anterior</b>: {@code COALESCE} conserva la que hubiera,
@@ -274,18 +274,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * </p>
      *
      * <p>
-     * <b>Por qué no lleva {@code AND genres_onboarded_at IS NULL}</b>: así el
-     * {@code UPDATE} toca la fila <em>siempre</em> (aunque el valor no cambie,
-     * PostgreSQL y H2 la bloquean igual) y sirve de cerrojo para sustituir la
-     * lista de favoritos. El servicio debe llamarlo <strong>antes</strong> de
-     * {@code GenreRepository.clearFavorites}/{@code addFavorites}, en la misma
-     * transacción: dos {@code PUT} simultáneos del mismo usuario quedan en fila
-     * y gana entero el último. Sin el cerrojo, el segundo podía no ver (y por
-     * tanto no borrar) las filas que el primero insertó y confirmó mientras
-     * tanto, y la lista acabaría siendo la mezcla de las dos, con más de 5
-     * géneros. Además, si devuelve {@code 0} la cuenta ya no existe (se borró
-     * durante la petición): el servicio puede responder 404 antes de insertar
-     * nada.
+     * <b>Ya no es el cerrojo de la sustitución de la lista.</b> Antes el
+     * servicio lo llamaba en cada {@code PUT /api/users/me/genres} para
+     * bloquear la fila, aunque la fecha ya estuviera puesta; eso escribía la
+     * fila de {@code users} en cada petición (en PostgreSQL, una versión
+     * muerta por {@code UPDATE}, aunque el valor no cambie). Ahora
+     * {@code FavoriteGenreService} bloquea con {@link #findForUpdateById(Long)}
+     * y solo llama a este método si la fecha leída es nula. El
+     * {@code COALESCE} se mantiene como red de seguridad: si alguien lo
+     * llamara con la fecha ya puesta, seguiría sin pisarla.
      * </p>
      *
      * <p>
@@ -304,4 +301,69 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Modifying(flushAutomatically = true)
     @Query("update User u set u.genresOnboardedAt = coalesce(u.genresOnboardedAt, :now) where u.id = :userId")
     int markGenresOnboarded(@Param("userId") Long userId, @Param("now") Instant now);
+
+    // ------------------------------------------------------------------
+    // Versión de los tokens de acceso (V12): revocar al momento los JWT.
+    // ------------------------------------------------------------------
+
+    /**
+     * Suma 1 a la versión de los tokens de acceso de la cuenta: desde que la
+     * transacción confirma, todos los JWT emitidos con la versión anterior dejan
+     * de valer.
+     *
+     * <p>
+     * <b>Atómico frente a peticiones simultáneas</b>: es una sola sentencia
+     * ({@code token_version = token_version + 1}) que calcula el valor nuevo
+     * dentro de la base de datos, sin leerlo antes en Java. Dos revocaciones a
+     * la vez quedan en fila por el bloqueo de la fila que toma el
+     * {@code UPDATE} y suman 2; ninguna se pierde. Ese bloqueo dura hasta el
+     * final de la transacción.
+     * </p>
+     *
+     * <p>
+     * <b>{@code flushAutomatically = true}</b>: antes del {@code UPDATE} se
+     * escriben los cambios pendientes de la sesión (por ejemplo, el hash nuevo
+     * de un cambio de contraseña), como en los demás métodos de este
+     * repositorio.
+     * </p>
+     *
+     * <p>
+     * <b>Por qué sin {@code clearAutomatically}</b>: vaciar la sesión
+     * desacoplaría todas las entidades de quien llama, y cualquier cambio que
+     * hiciera después sobre ellas (en el mismo servicio) se perdería sin aviso.
+     * El precio es que un {@code User} ya cargado en la sesión <b>conserva la
+     * versión antigua en memoria</b> (y {@code findById} devolvería esa misma
+     * instancia sin releerla). Es inofensivo para lo que se guarda (el campo es
+     * {@code updatable = false}: nunca se escribe de vuelta), pero <b>no</b>
+     * sirve para emitir un JWT: para eso, {@link #findTokenVersionById(Long)}.
+     * </p>
+     *
+     * @param userId id de la cuenta (sale del token o del servicio, nunca del cliente)
+     * @return {@code 1} si la cuenta existe (la versión ha subido); {@code 0} si no existe
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("update User u set u.tokenVersion = u.tokenVersion + 1 where u.id = :userId")
+    int incrementTokenVersion(@Param("userId") Long userId);
+
+    /**
+     * Lee de la base de datos la versión actual de los tokens de acceso de la
+     * cuenta.
+     *
+     * <p>
+     * Es una consulta de un solo valor: Hibernate la resuelve siempre contra la
+     * base de datos, no con la entidad que pueda haber en la sesión. Por eso es
+     * la forma correcta de obtener la versión que debe llevar un JWT emitido
+     * <b>después</b> de {@link #incrementTokenVersion(Long)} en la misma
+     * transacción: ve el valor que acaba de escribir esa transacción y, como el
+     * {@code UPDATE} mantiene bloqueada la fila hasta el final, nadie más puede
+     * cambiarlo entre medias. Fuera de ese caso, una entidad recién leída en
+     * su propia transacción (el filtro JWT, el login) ya trae el valor
+     * correcto en {@link User#getTokenVersion()}.
+     * </p>
+     *
+     * @param userId id de la cuenta
+     * @return la versión actual, o vacío si la cuenta no existe
+     */
+    @Query("select u.tokenVersion from User u where u.id = :userId")
+    Optional<Integer> findTokenVersionById(@Param("userId") Long userId);
 }

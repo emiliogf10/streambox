@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -17,6 +18,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -26,6 +28,7 @@ import org.mockito.InOrder;
 import com.emilio.streambox.dto.FavoriteGenresRequest;
 import com.emilio.streambox.dto.GenreResponse;
 import com.emilio.streambox.entity.Genre;
+import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.exception.UserNotFoundException;
 import com.emilio.streambox.repository.GenreRepository;
@@ -34,7 +37,8 @@ import com.emilio.streambox.repository.UserRepository;
 /**
  * Tests unitarios de {@link FavoriteGenreService}: el orden de validación (sin
  * tocar la base de datos para lo que no la necesita), el orden obligatorio de
- * la escritura (cerrojo, borrado, inserción) y los casos de carrera que solo se
+ * la escritura (cerrojo, pregunta, comparación, borrado, inserción), que la
+ * misma lista no escriba nada (BAJA-1) y los casos de carrera que solo se
  * pueden forzar con dobles (cuenta borrada, género borrado entre la validación y
  * el {@code INSERT}). El contrato HTTP está en
  * {@code FavoriteGenresIntegrationTest}.
@@ -43,6 +47,9 @@ class FavoriteGenreServiceTest {
 
     private static final Long USER = 4L;
     private static final Instant NOW = Instant.parse("2026-10-25T12:00:00Z");
+
+    /** Fecha en que una cuenta ya había cerrado la pregunta de bienvenida. */
+    private static final Instant CLOSED = Instant.parse("2026-10-01T09:00:00Z");
 
     private GenreRepository genreRepository;
     private UserRepository userRepository;
@@ -56,41 +63,135 @@ class FavoriteGenreServiceTest {
     }
 
     /**
-     * Orden obligatorio: primero el cerrojo de la fila del usuario (que cierra
-     * la pregunta), después el borrado y por último la inserción, con la hora
-     * del {@code Clock}.
+     * Orden obligatorio: primero el cerrojo de la fila del usuario, después
+     * cerrar la pregunta (solo porque estaba pendiente), leer la lista guardada
+     * para compararla, el borrado y por último la inserción, con la hora del
+     * {@code Clock}.
      */
     @Test
     void guardaEnElOrdenObligatorio() {
         Set<Long> ids = Set.of(1L, 2L, 3L);
         when(genreRepository.findIdsWithVisibleTitles(anyCollection())).thenReturn(List.of(3L, 1L, 2L));
-        when(userRepository.markGenresOnboarded(USER, NOW)).thenReturn(1);
+        when(userRepository.findForUpdateById(USER)).thenReturn(Optional.of(user(null)));
+        when(genreRepository.findFavoritesByUserId(USER))
+                .thenReturn(List.of(genre(9L, "Drama")))
+                .thenReturn(List.of(genre(2L, "Acción")));
         when(genreRepository.addFavorites(USER, ids, NOW)).thenReturn(3);
-        when(genreRepository.findFavoritesByUserId(USER)).thenReturn(List.of(genre(2L, "Acción")));
 
         List<GenreResponse> result = service.replaceFavoriteGenres(USER, request(1L, 2L, 3L));
 
         InOrder order = inOrder(genreRepository, userRepository);
         order.verify(genreRepository).findIdsWithVisibleTitles(ids);
+        order.verify(userRepository).findForUpdateById(USER);
         order.verify(userRepository).markGenresOnboarded(USER, NOW);
+        order.verify(genreRepository).findFavoritesByUserId(USER);
         order.verify(genreRepository).clearFavorites(USER);
         order.verify(genreRepository).addFavorites(USER, ids, NOW);
         order.verify(genreRepository).findFavoritesByUserId(USER);
         assertEquals(List.of(new GenreResponse(2L, "Acción")), result);
     }
 
-    /** La lista vacía cierra la pregunta y borra, pero no inserta ni valida nada. */
+    /**
+     * La lista vacía, en una cuenta sin gustos y con la pregunta pendiente
+     * («Ahora no» en la bienvenida): cierra la pregunta y no borra, ni inserta,
+     * ni valida nada (no había nada que borrar).
+     */
     @Test
-    void laListaVaciaCierraLaPreguntaYBorraSinInsertar() {
-        when(userRepository.markGenresOnboarded(USER, NOW)).thenReturn(1);
+    void laListaVaciaSinGustosSoloCierraLaPregunta() {
+        when(userRepository.findForUpdateById(USER)).thenReturn(Optional.of(user(null)));
+        when(genreRepository.findFavoritesByUserId(USER)).thenReturn(List.of());
 
         assertEquals(List.of(), service.replaceFavoriteGenres(USER, request()));
 
-        InOrder order = inOrder(userRepository, genreRepository);
-        order.verify(userRepository).markGenresOnboarded(USER, NOW);
-        order.verify(genreRepository).clearFavorites(USER);
+        verify(userRepository).markGenresOnboarded(USER, NOW);
         verify(genreRepository, never()).findIdsWithVisibleTitles(any());
+        verify(genreRepository, never()).clearFavorites(anyLong());
         verify(genreRepository, never()).addFavorites(anyLong(), any(), any());
+    }
+
+    /**
+     * BAJA-1: la lista vacía en una cuenta que ya contestó y no tiene gustos
+     * (repetir «Ahora no») no escribe nada: ni la fecha de la pregunta ni el
+     * {@code DELETE}.
+     */
+    @Test
+    void laListaVaciaRepetidaNoEscribeNada() {
+        when(userRepository.findForUpdateById(USER)).thenReturn(Optional.of(user(CLOSED)));
+        when(genreRepository.findFavoritesByUserId(USER)).thenReturn(List.of());
+
+        assertEquals(List.of(), service.replaceFavoriteGenres(USER, request()));
+
+        verify(userRepository, never()).markGenresOnboarded(anyLong(), any());
+        verify(genreRepository, never()).clearFavorites(anyLong());
+        verify(genreRepository, never()).addFavorites(anyLong(), any(), any());
+    }
+
+    /** La lista vacía con gustos guardados los borra, sin insertar nada. */
+    @Test
+    void laListaVaciaConGustosLosBorraSinInsertar() {
+        when(userRepository.findForUpdateById(USER)).thenReturn(Optional.of(user(CLOSED)));
+        when(genreRepository.findFavoritesByUserId(USER)).thenReturn(List.of(genre(2L, "Acción")));
+
+        assertEquals(List.of(), service.replaceFavoriteGenres(USER, request()));
+
+        verify(genreRepository).clearFavorites(USER);
+        verify(genreRepository, never()).addFavorites(anyLong(), any(), any());
+    }
+
+    /**
+     * BAJA-1: la misma lista que ya está guardada (en otro orden) no escribe
+     * nada: ni {@code users} (la pregunta ya estaba cerrada) ni
+     * {@code user_favorite_genres}. Devuelve lo guardado, por nombre.
+     */
+    @Test
+    void laMismaListaNoEscribeNada() {
+        when(genreRepository.findIdsWithVisibleTitles(anyCollection())).thenReturn(List.of(1L, 2L, 3L));
+        when(userRepository.findForUpdateById(USER)).thenReturn(Optional.of(user(CLOSED)));
+        List<Genre> saved = List.of(genre(2L, "Acción"), genre(3L, "Drama"), genre(1L, "Terror"));
+        when(genreRepository.findFavoritesByUserId(USER)).thenReturn(saved);
+
+        List<GenreResponse> result = service.replaceFavoriteGenres(USER, request(3L, 1L, 2L));
+
+        assertEquals(List.of(new GenreResponse(2L, "Acción"), new GenreResponse(3L, "Drama"),
+                new GenreResponse(1L, "Terror")), result);
+        verify(userRepository, never()).markGenresOnboarded(anyLong(), any());
+        verify(genreRepository, never()).clearFavorites(anyLong());
+        verify(genreRepository, never()).addFavorites(anyLong(), any(), any());
+    }
+
+    /**
+     * La comparación es contra <b>todas</b> las filas guardadas: si hay un
+     * favorito más (p. ej. uno que se quedó sin títulos y por eso el
+     * {@code GET} no muestra), la lista pedida no es la misma y se sustituye.
+     */
+    @Test
+    void unFavoritoGuardadoDeMasHaceQueSeSustituya() {
+        Set<Long> ids = Set.of(1L, 2L, 3L);
+        when(genreRepository.findIdsWithVisibleTitles(anyCollection())).thenReturn(List.of(1L, 2L, 3L));
+        when(userRepository.findForUpdateById(USER)).thenReturn(Optional.of(user(CLOSED)));
+        when(genreRepository.findFavoritesByUserId(USER)).thenReturn(
+                List.of(genre(2L, "Acción"), genre(3L, "Drama"), genre(1L, "Terror"), genre(8L, "Western")));
+        when(genreRepository.addFavorites(USER, ids, NOW)).thenReturn(3);
+
+        service.replaceFavoriteGenres(USER, request(1L, 2L, 3L));
+
+        verify(genreRepository).clearFavorites(USER);
+        verify(genreRepository).addFavorites(USER, ids, NOW);
+    }
+
+    /** Con la pregunta ya cerrada, una lista distinta sustituye sin tocar {@code users}. */
+    @Test
+    void conLaPreguntaYaCerradaNoEscribeEnUsers() {
+        Set<Long> ids = Set.of(1L, 2L, 3L);
+        when(genreRepository.findIdsWithVisibleTitles(anyCollection())).thenReturn(List.of(1L, 2L, 3L));
+        when(userRepository.findForUpdateById(USER)).thenReturn(Optional.of(user(CLOSED)));
+        when(genreRepository.findFavoritesByUserId(USER)).thenReturn(List.of());
+        when(genreRepository.addFavorites(USER, ids, NOW)).thenReturn(3);
+
+        service.replaceFavoriteGenres(USER, request(1L, 2L, 3L));
+
+        verify(userRepository, never()).markGenresOnboarded(anyLong(), any());
+        verify(genreRepository).addFavorites(USER, ids, NOW);
     }
 
     /** El número se comprueba antes que nada: ninguna consulta. */
@@ -136,14 +237,15 @@ class FavoriteGenreServiceTest {
         verify(genreRepository, never()).clearFavorites(anyLong());
     }
 
-    /** Si la cuenta ya no existe, 404 sin borrar ni insertar. */
+    /** Si la cuenta ya no existe, 404 sin cerrar la pregunta, ni borrar, ni insertar. */
     @Test
     void siLaCuentaNoExisteNoBorraNiInserta() {
         when(genreRepository.findIdsWithVisibleTitles(anyCollection())).thenReturn(List.of(1L, 2L, 3L));
-        when(userRepository.markGenresOnboarded(USER, NOW)).thenReturn(0);
+        when(userRepository.findForUpdateById(USER)).thenReturn(Optional.empty());
 
         assertThrows(UserNotFoundException.class, () -> service.replaceFavoriteGenres(USER, request(1L, 2L, 3L)));
 
+        verify(userRepository, never()).markGenresOnboarded(anyLong(), any());
         verify(genreRepository, never()).clearFavorites(anyLong());
         verify(genreRepository, never()).addFavorites(anyLong(), any(), any());
     }
@@ -156,14 +258,16 @@ class FavoriteGenreServiceTest {
     @Test
     void siEntranMenosFilasDeLasValidadasLanzaParaDeshacer() {
         when(genreRepository.findIdsWithVisibleTitles(anyCollection())).thenReturn(List.of(1L, 2L, 3L));
-        when(userRepository.markGenresOnboarded(USER, NOW)).thenReturn(1);
+        when(userRepository.findForUpdateById(USER)).thenReturn(Optional.of(user(CLOSED)));
+        when(genreRepository.findFavoritesByUserId(USER)).thenReturn(List.of());
         when(genreRepository.addFavorites(USER, Set.of(1L, 2L, 3L), NOW)).thenReturn(2);
 
         InvalidParameterException error = assertThrows(InvalidParameterException.class,
                 () -> service.replaceFavoriteGenres(USER, request(1L, 2L, 3L)));
 
         assertEquals(FavoriteGenreService.NOT_ELIGIBLE_MESSAGE, error.getMessage());
-        verify(genreRepository, never()).findFavoritesByUserId(anyLong());
+        // Solo la lectura previa a la comparación: la final, tras el INSERT, no llega a hacerse.
+        verify(genreRepository, times(1)).findFavoritesByUserId(USER);
     }
 
     /** El GET solo devuelve los favoritos que siguen teniendo títulos visibles, en el orden del repositorio. */
@@ -188,6 +292,14 @@ class FavoriteGenreServiceTest {
 
     private static FavoriteGenresRequest request(Long... ids) {
         return new FavoriteGenresRequest(List.of(ids));
+    }
+
+    /** Cuenta tal como la devuelve {@code findForUpdateById}, con la fecha de la pregunta dada. */
+    private static User user(Instant genresOnboardedAt) {
+        User user = new User();
+        user.setId(USER);
+        user.setGenresOnboardedAt(genresOnboardedAt);
+        return user;
     }
 
     private static Genre genre(Long id, String name) {

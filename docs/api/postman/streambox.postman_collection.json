@@ -5249,7 +5249,7 @@
                 "logout"
               ]
             },
-            "description": "Revoca en el servidor la sesión del refresh token de la cookie y borra las dos cookies (Max-Age=0); el jar las elimina. Es idempotente: 204 haya o no sesión. El JWT de acceso no se puede revocar (es stateless): una copia valdría hasta caducar, pero ya no se podría renovar."
+            "description": "Revoca en el servidor la sesión del refresh token de la cookie y borra las dos cookies (Max-Age=0); el jar las elimina. Es idempotente: 204 haya o no sesión. El logout no revoca el JWT de acceso: una copia valdría hasta caducar, pero ya no se podría renovar. Para anularlo también, usa POST /api/auth/logout-all."
           },
           "response": [],
           "event": [
@@ -5901,7 +5901,7 @@
                 "logout-all"
               ]
             },
-            "description": "Revoca todas las sesiones de la cuenta autenticada (la cuenta sale del JWT, nunca de la URL), incluida la actual, y borra las dos cookies. Por cookie, así que lleva `X-Requested-With`. Los JWT de acceso ya emitidos son stateless: valen hasta caducar (15 min como mucho), pero no se renuevan."
+            "description": "Revoca todas las sesiones de la cuenta autenticada (la cuenta sale del JWT, nunca de la URL), incluida la actual, y borra las dos cookies. Por cookie, así que lleva `X-Requested-With`. Los JWT de acceso ya emitidos a la cuenta, en cualquier dispositivo, dejan de valer al momento (401)."
           },
           "response": [],
           "event": [

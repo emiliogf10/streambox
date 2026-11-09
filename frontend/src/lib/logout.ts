@@ -118,12 +118,15 @@ export async function logoutOnServer(canRetry: () => boolean = () => true): Prom
 // ---------------------------------------------------------------------------
 
 /**
- * Aviso de éxito del cierre global. Dice la verdad sobre los otros dispositivos:
- * sus refresh tokens quedan revocados al momento, pero el JWT de acceso que ya
- * tengan no se puede revocar (es *stateless*) y vale hasta 15 minutos más.
+ * Aviso de éxito del cierre global. Los otros dispositivos quedan fuera al
+ * momento: el servidor revoca sus refresh tokens y sube la versión de los
+ * tokens de la cuenta (`users.token_version`), así que su JWT de acceso deja de
+ * valer en su siguiente petición: van al login con el aviso neutro
+ * `SESSION_ENDED` («Tu sesión ha terminado», `lib/sessionMessages.ts`), que no
+ * dice «ha caducado» porque aquí sería falso. Ya no hay que avisar de ninguna
+ * espera (antes el JWT seguía valiendo hasta 15 min).
  */
-export const LOGOUT_ALL_DONE =
-  'Se ha cerrado la sesión en todos tus dispositivos. En los demás puede tardar hasta 15 minutos en cerrarse.';
+export const LOGOUT_ALL_DONE = 'Se ha cerrado la sesión en todos tus dispositivos.';
 
 /** Aviso si no se llegó al servidor (red caída o 502/503/504 del proxy). */
 export const LOGOUT_ALL_FAILED_NETWORK =
@@ -146,7 +149,7 @@ export const LOGOUT_ALL_FAILED_OTHER = 'No se han podido cerrar las sesiones. Tu
  * Diferencias con {@link logoutOnServer}, y por qué:
  * - **No es `public`**: el servidor necesita saber de quién son las sesiones (lo
  *   saca del JWT). Si el de acceso caducó, `apiFetch` renueva y repite; si ya no
- *   se puede renovar, cierra la sesión con su aviso de «sesión caducada».
+ *   se puede renovar, cierra la sesión con su aviso de sesión terminada (`SESSION_ENDED`).
  * - **Un 401 no es éxito**: en el logout normal significa «ya no había sesión»;
  *   aquí, que el servidor no llegó a revocar las DEMÁS. Se devuelve como fallo
  *   (quien llama ve que la sesión ya cambió y no enseña nada más).

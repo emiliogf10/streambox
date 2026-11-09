@@ -295,7 +295,7 @@ test.describe('He olvidado mi contraseña', () => {
         page.getByText('También se ha cerrado la sesión que había abierta en este navegador.'),
       ).toBeVisible();
       expect(await sessionCookie(page)).toBeUndefined();
-      await expect(page.getByText('Tu sesión ha caducado. Inicia sesión de nuevo.')).toHaveCount(0);
+      await expect(page.getByText('Tu sesión ha terminado. Inicia sesión de nuevo.')).toHaveCount(0);
       await expect(formAlert(page)).toHaveCount(0);
 
       // El otro dispositivo ya no puede renovar su sesión.

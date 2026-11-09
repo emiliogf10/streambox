@@ -44,7 +44,7 @@ import { createTestQueryClient } from '../test/queryClient';
 
 const fetchMock = vi.fn<typeof fetch>();
 
-const SESSION_EXPIRED = 'Tu sesión ha caducado. Inicia sesión de nuevo.';
+const SESSION_EXPIRED = 'Tu sesión ha terminado. Inicia sesión de nuevo.';
 const UNAUTHORIZED = () => errorResponse(401, 'UNAUTHORIZED', 'No autenticado.');
 
 /** Caché de datos nueva en cada test (`AuthProvider` la vacía al cambiar de sesión). */

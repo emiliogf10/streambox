@@ -14,6 +14,8 @@ import org.springframework.stereotype.Service;
 
 import com.emilio.streambox.entity.User;
 
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.MacAlgorithm;
@@ -26,7 +28,23 @@ import io.jsonwebtoken.security.MacAlgorithm;
  * Los tokens contienen el correo electrónico del usuario como
  * {@code subject}, identifican a Streambox como emisor ({@code iss}), duran
  * {@code jwt.access-token-ttl} (15 minutos por defecto) y están firmados con
- * HMAC-SHA256 y una clave derivada de {@code jwt.secret}.
+ * HMAC-SHA256 y una clave derivada de {@code jwt.secret}. Llevan también
+ * la versión de tokens de la cuenta (claim {@value #TOKEN_VERSION_CLAIM}).
+ * </p>
+ *
+ * <h2>Revocación inmediata: claim {@code ver}</h2>
+ * <p>
+ * Un JWT de acceso no se guarda en ningún sitio, así que no se puede borrar.
+ * Para poder anularlos antes de que caduquen, cada token lleva la versión
+ * ({@code users.token_version}) que tenía la cuenta al emitirlo, y
+ * {@code JwtAuthenticationFilter}, que ya lee el usuario de la base de datos
+ * en cada petición, solo lo acepta si coincide con la actual. Revocar todos
+ * los JWT de una cuenta es sumar 1 a esa columna, cosa que hace
+ * {@code RefreshTokenService.revokeAllSessions} (cerrar sesión en todos los
+ * dispositivos, cambiar o restablecer la contraseña, confirmar el correo).
+ * Sin lista negra y sin consultas extra. Lo que no permite es anular un solo
+ * token (el logout normal revoca su refresh, no su JWT de acceso): por eso el
+ * acceso sigue durando minutos.
  * </p>
  *
  * <h2>Algoritmo fijo: HS256</h2>
@@ -59,6 +77,12 @@ public class JwtService {
 
     /** Único algoritmo con el que se firman y se aceptan los tokens. */
     public static final MacAlgorithm ALGORITHM = Jwts.SIG.HS256;
+
+    /**
+     * Nombre del claim con la versión de tokens de la cuenta
+     * ({@code users.token_version}). Corto porque viaja en cada petición.
+     */
+    public static final String TOKEN_VERSION_CLAIM = "ver";
 
     private final SecretKey signingKey;
 
@@ -104,18 +128,52 @@ public class JwtService {
     }
 
     /**
-     * Genera un token de acceso para un usuario autenticado.
+     * Genera un token de acceso con la versión de tokens que trae la entidad.
+     *
+     * <p>
+     * <b>Solo para tests</b> (decenas de ellos crean un usuario y piden su
+     * token así). El código de producción usa siempre
+     * {@link #generateToken(User, int)} con la versión elegida a propósito, y
+     * {@code ExplicitTokenVersionSourceTest} falla si alguna clase de
+     * {@code src/main} llama a esta variante.
+     * </p>
+     *
+     * <p>
+     * <b>Por qué.</b> {@code user.getTokenVersion()} es lo que haya en memoria,
+     * y puede estar desfasado sin que se note: tras
+     * {@code UserRepository.incrementTokenVersion} en la misma transacción la
+     * entidad conserva la versión antigua (el token nacería revocado y el
+     * usuario se echaría a sí mismo, el error que se evitó en el cambio de
+     * contraseña), y en el refresh importa <i>cuándo</i> se leyó (BAJA-A, ver
+     * {@code RefreshTokenService.refresh}). Obligar a pasarla hace que quien
+     * emite tenga que pensar de dónde sale. Se conserva en vez de moverla a
+     * una utilidad de tests para no reescribir esos tests sin ganar nada: el
+     * test de arriba ya impide su uso en producción.
+     * </p>
      *
      * @param user usuario autenticado para el que se generará el token
      * @return token JWT firmado con HS256, válido durante {@code jwt.access-token-ttl}
      */
     public String generateToken(User user) {
+        return generateToken(user, user.getTokenVersion());
+    }
+
+    /**
+     * Genera un token de acceso para un usuario autenticado con una versión de
+     * tokens explícita (claim {@value #TOKEN_VERSION_CLAIM}).
+     *
+     * @param user         usuario autenticado (solo se usa su email)
+     * @param tokenVersion versión actual de {@code users.token_version} de la cuenta
+     * @return token JWT firmado con HS256, válido durante {@code jwt.access-token-ttl}
+     */
+    public String generateToken(User user, int tokenVersion) {
 
         Instant now = clock.instant();
 
         return Jwts.builder()
                 .issuer(ISSUER)
                 .subject(user.getEmail())
+                .claim(TOKEN_VERSION_CLAIM, tokenVersion)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessTokenTtl)))
                 .signWith(signingKey, ALGORITHM)
@@ -123,8 +181,8 @@ public class JwtService {
     }
 
     /**
-     * Extrae el correo electrónico almacenado como {@code subject}
-     * dentro de un token JWT.
+     * Valida un token de acceso y devuelve su email ({@code subject}) y su
+     * versión ({@value #TOKEN_VERSION_CLAIM}).
      *
      * <p>
      * Se verifica el algoritmo (solo HS256), la firma, la fecha de expiración
@@ -133,13 +191,82 @@ public class JwtService {
      * otro sistema, la librería JWT lanza una {@code JwtException}.
      * </p>
      *
-     * @param token token JWT del que se desea obtener el correo electrónico
-     * @return correo electrónico almacenado en el {@code subject} del token
+     * <p>
+     * Además el claim {@value #TOKEN_VERSION_CLAIM} debe existir y ser un
+     * entero JSON entre {@code 0} y {@link Integer#MAX_VALUE}; si no,
+     * {@link InvalidTokenVersionException} (también una {@code JwtException},
+     * así que el filtro lo trata como cualquier token no válido: petición
+     * anónima, nunca un 500). Un token sin {@code ver} es uno emitido antes de
+     * que existiera la revocación (como mucho 15 minutos tras el despliegue): el
+     * frontend, ante el 401, renueva con el refresh y recibe uno nuevo.
+     * Tratarlo como «versión 0» también sería seguro (la primera revocación lo
+     * anularía), pero dejaría para siempre una rama de compatibilidad en el
+     * parser; rechazarlo deja una sola regla (todo token válido lleva su
+     * versión) y al usuario solo le cuesta una renovación transparente.
+     * </p>
+     *
+     * <p>
+     * <b>Por qué se comprueba el tipo a mano</b> en vez de con
+     * {@code claims.get(name, Integer.class)}: las conversiones de jjwt entre
+     * tipos numéricos son un detalle de la librería. Aquí la regla es explícita:
+     * {@code Integer} o {@code Long} (lo que produce Jackson para un entero
+     * JSON) dentro de rango; un texto ({@code "1"}), un decimal ({@code 1.0},
+     * que llega como {@code Double}), un booleano, un negativo o un número que
+     * no cabe en un {@code int} se rechazan. Ninguno lo emite este servicio,
+     * así que solo puede venir de un token firmado a mano con el secreto.
+     * </p>
+     *
+     * @param token token JWT recibido (cabecera o cookie)
+     * @return email y versión del token
+     * @throws io.jsonwebtoken.JwtException si el token no es válido (incluido
+     *         {@link InvalidTokenVersionException} si falta {@code ver} o no
+     *         tiene el tipo esperado)
+     * @throws IllegalArgumentException si el token está vacío (lo lanza jjwt)
      */
-    public String extractEmail(String token) {
+    public AccessTokenClaims parseAccessToken(String token) {
 
-        return parser.parseSignedClaims(token)
-                .getPayload()
-                .getSubject();
+        Claims claims = parser.parseSignedClaims(token).getPayload();
+        return new AccessTokenClaims(claims.getSubject(), readTokenVersion(claims.get(TOKEN_VERSION_CLAIM)));
+    }
+
+    /**
+     * Convierte el valor crudo del claim {@value #TOKEN_VERSION_CLAIM} en la
+     * versión, o lanza {@link InvalidTokenVersionException}.
+     */
+    private static int readTokenVersion(Object raw) {
+
+        long value;
+        if (raw instanceof Integer integer) {
+            value = integer;
+        } else if (raw instanceof Long longValue) {
+            value = longValue;
+        } else {
+            // null (falta), String, Double, BigInteger, Boolean, objeto, lista...
+            throw new InvalidTokenVersionException();
+        }
+        if (value < 0 || value > Integer.MAX_VALUE) {
+            throw new InvalidTokenVersionException();
+        }
+        return (int) value;
+    }
+
+    /**
+     * El claim {@value #TOKEN_VERSION_CLAIM} falta o no es un entero válido.
+     *
+     * <p>
+     * Hereda de {@link JwtException} a propósito: es el contrato del filtro
+     * ({@code JwtAuthenticationFilter} solo perdona {@code JwtException} e
+     * {@code IllegalArgumentException}), así que no hace falta tocarlo y un
+     * claim raro nunca puede acabar en un 500. El mensaje es fijo y no
+     * reproduce el valor del token.
+     * </p>
+     */
+    public static final class InvalidTokenVersionException extends JwtException {
+
+        private static final long serialVersionUID = 1L;
+
+        InvalidTokenVersionException() {
+            super("El claim " + TOKEN_VERSION_CLAIM + " falta o no es un entero válido");
+        }
     }
 }

@@ -35,7 +35,9 @@ import com.emilio.streambox.migration.UserAvatarSchemaCases;
  * géneros favoritos y pregunta de bienvenida en {@code V11}, cuyas consultas
  * se prueban en {@code repository.FavoriteGenresRepositoryIntegrationTest} y
  * cuyo efecto sobre las cuentas existentes, en
- * {@code migration.FavoriteGenresMigrationH2Test}).
+ * {@code migration.FavoriteGenresMigrationH2Test}; la versión de los tokens
+ * de acceso en {@code V12}, cuyas consultas se prueban en
+ * {@code repository.UserTokenVersionRepositoryIntegrationTest}).
  * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
  * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
  * de PostgreSQL.
@@ -1011,6 +1013,59 @@ class FlywaySchemaIntegrationTest {
                 "INSERT INTO user_favorite_genres (user_id, genre_id, created_at) VALUES (?, ?, NULL)",
                 userId, insertGenre("Gustosinfecha")));
         assertEquals(1, count("user_favorite_genres"));
+    }
+
+    // --- V12: versión de los tokens de acceso (users.token_version) ---
+
+    @Test
+    void v12EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '12' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * {@code users.token_version} es un entero obligatorio con {@code DEFAULT 0}:
+     * una cuenta creada sin indicarla (como todas las anteriores a la V12, o un
+     * {@code INSERT} de una versión antigua de la aplicación) nace en la
+     * versión 0, que es la que el filtro JWT espera de sus tokens.
+     */
+    @Test
+    void laVersionDeLosTokensEsObligatoriaYUnaCuentaNuevaNaceEnCero() {
+        Map<String, Object> column = jdbc.queryForMap("SELECT DATA_TYPE AS T, IS_NULLABLE AS N, COLUMN_DEFAULT AS D"
+                + " FROM INFORMATION_SCHEMA.COLUMNS"
+                + " WHERE LOWER(TABLE_NAME) = 'users' AND LOWER(COLUMN_NAME) = 'token_version'");
+        long userId = insertUser("versiontoken");
+
+        assertEquals("INTEGER", column.get("T"));
+        assertEquals("NO", column.get("N"));
+        assertEquals("0", column.get("D"));
+        assertEquals(0, jdbc.queryForObject("SELECT token_version FROM users WHERE id = ?", Integer.class, userId));
+    }
+
+    /**
+     * La base de datos rechaza una versión nula o negativa
+     * ({@code ck_users_token_version}): bajar la versión podría volver a dar
+     * por buenos tokens revocados, y un {@code NULL} no tiene significado. La
+     * suma de 1 que usa la revocación sí se acepta.
+     */
+    @Test
+    void laBaseDeDatosRechazaVersionesNulasONegativas() {
+        long userId = insertUser("versionneg");
+
+        DataIntegrityViolationException negative = assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("UPDATE users SET token_version = -1 WHERE id = ?", userId));
+        assertTrue(negative.getMessage().toLowerCase(java.util.Locale.ROOT).contains("ck_users_token_version"),
+                negative.getMessage());
+        assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update("UPDATE users SET token_version = NULL WHERE id = ?", userId));
+        assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(
+                "INSERT INTO users (username, email, password, role, created_at, token_version)"
+                        + " VALUES ('versionnull', 'versionnull@test.com', 'p', 'USER', CURRENT_TIMESTAMP, NULL)"));
+        jdbc.update("UPDATE users SET token_version = token_version + 1 WHERE id = ?", userId);
+        assertEquals(1, jdbc.queryForObject("SELECT token_version FROM users WHERE id = ?", Integer.class, userId));
     }
 
     // --- Utilidades ---

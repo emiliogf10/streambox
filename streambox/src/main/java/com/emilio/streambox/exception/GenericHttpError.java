@@ -3,6 +3,7 @@ package com.emilio.streambox.exception;
 import org.springframework.http.HttpStatus;
 
 import com.emilio.streambox.dto.ErrorCode;
+import com.emilio.streambox.security.body.RequestBodySizeLimitFilter;
 
 /**
  * Código y mensaje genéricos de la API para un estado HTTP de error cuando no
@@ -50,7 +51,7 @@ record GenericHttpError(ErrorCode code, String message) {
      *
      * <p>
      * Cualquier 5xx es {@code INTERNAL_ERROR}. Los 4xx sin una entrada propia
-     * (400, 413...) caen en {@code MALFORMED_REQUEST}: todos significan «la
+     * (400, 411...) caen en {@code MALFORMED_REQUEST}: todos significan «la
      * petición, tal como llegó, no se puede atender».
      * </p>
      *
@@ -72,6 +73,7 @@ record GenericHttpError(ErrorCode code, String message) {
      * @param status estado HTTP de la respuesta (4xx o 5xx)
      * @return código y mensaje que se envían al cliente
      */
+    @SuppressWarnings("deprecation") // HttpStatus.PAYLOAD_TOO_LARGE, ver el switch
     static GenericHttpError forStatus(HttpStatus status) {
         if (status.is5xxServerError()) {
             return new GenericHttpError(ErrorCode.INTERNAL_ERROR, INTERNAL_ERROR_MESSAGE);
@@ -88,6 +90,12 @@ record GenericHttpError(ErrorCode code, String message) {
             case UNSUPPORTED_MEDIA_TYPE -> new GenericHttpError(ErrorCode.UNSUPPORTED_MEDIA_TYPE,
                     "El tipo de contenido no está soportado");
             case NOT_ACCEPTABLE -> new GenericHttpError(ErrorCode.NOT_ACCEPTABLE, NOT_ACCEPTABLE_MESSAGE);
+            // 413: el mismo code y mensaje que RequestBodySizeLimitFilter, venga
+            // de este filtro o de un sendError(413) de Tomcat (p. ej. su límite
+            // de formularios, server.tomcat.max-http-form-post-size).
+            // PAYLOAD_TOO_LARGE es el nombre antiguo (obsoleto) del mismo 413.
+            case CONTENT_TOO_LARGE, PAYLOAD_TOO_LARGE -> new GenericHttpError(ErrorCode.PAYLOAD_TOO_LARGE,
+                    RequestBodySizeLimitFilter.MESSAGE);
             default -> new GenericHttpError(ErrorCode.MALFORMED_REQUEST, MALFORMED_MESSAGE);
         };
     }

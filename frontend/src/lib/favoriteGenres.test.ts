@@ -88,7 +88,7 @@ describe('recommendationsReason', () => {
     [
       'GENRES_AND_LIKES',
       ['Acción', 'Drama', 'Comedia'],
-      'Porque te gustan Acción, Drama y Comedia y según los títulos que has marcado con «Me gusta».',
+      'Porque te gustan Acción, Drama y Comedia, y por los títulos que has marcado con «Me gusta».',
     ],
     ['GENRES_AND_LIKES', undefined, 'Según tus géneros favoritos y los títulos que has marcado con «Me gusta».'],
   ] as const)('%s con %j → %j', (basis, names, expected) => {

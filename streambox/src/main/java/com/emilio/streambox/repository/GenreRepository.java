@@ -117,7 +117,7 @@ public interface GenreRepository extends JpaRepository<Genre, Long> {
      * El servicio debe llamar a los dos en la <strong>misma
      * transacción</strong> (si el {@code INSERT} falla, el borrado se deshace y
      * la lista anterior sigue intacta) y, antes que a ninguno,
-     * {@code UserRepository.markGenresOnboarded}, que bloquea la fila del
+     * {@code UserRepository.findForUpdateById}, que bloquea la fila del
      * usuario para que dos sustituciones simultáneas no se mezclen.
      * </p>
      *

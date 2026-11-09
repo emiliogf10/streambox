@@ -59,9 +59,15 @@ interface RecommendedRowsProps {
  *   géneros te gustan…» si la portada lo permite (`inviteToChooseGenres`) Y hay
  *   al menos 3 géneros elegibles (`useGenreOptions`, que solo se pide en este
  *   caso); si no, nada. Con menos de 3 la tarjeta llevaría a un selector
- *   imposible (revisión de `qa`), y mientras llegan las opciones (o si fallan)
- *   tampoco se pinta: una invitación que podría ser falsa es peor que ninguna,
- *   y «Tus gustos» sigue en el perfil.
+ *   imposible (revisión de `qa`), y si las opciones fallan tampoco se pinta: una
+ *   invitación que podría ser falsa es peor que ninguna, y «Tus gustos» sigue en
+ *   el perfil. **Mientras llegan las opciones** se reserva su hueco con la propia
+ *   tarjeta, invisible (`visibility: hidden`: ni se ve, ni se lee, ni se enfoca):
+ *   esa petición sale después de la de las recomendaciones y, sin reserva, la
+ *   tarjeta aparecía tarde y empujaba 160 px la fila «Series» (revisión visual).
+ *   Con la tarjeta misma, el hueco mide lo mismo a cualquier ancho sin fijar
+ *   ninguna altura a mano. Si al final no se pinta (caso raro: catálogo casi
+ *   vacío o fallo), el hueco se cierra.
  * - **Con base pero sin nada que recomendar** (p. ej. ya le gusta todo lo de sus
  *   géneros): nada. Las novedades ya están justo encima.
  * - **Error** (red, 5xx...): un aviso compacto con «Reintentar» que solo
@@ -90,8 +96,16 @@ export function RecommendedRows({ inviteToChooseGenres = false }: RecommendedRow
     );
   }
   if (basis === 'NONE') {
+    if (!mayInvite) return null;
+    if (genreOptions.status === 'loading') {
+      return (
+        <div aria-hidden="true" className="invisible">
+          <GenresInviteCard />
+        </div>
+      );
+    }
     const canChoose = genreOptions.status === 'ready' && hasEnoughGenreOptions(genreOptions.genres.length);
-    return mayInvite && canChoose ? <GenresInviteCard /> : null;
+    return canChoose ? <GenresInviteCard /> : null;
   }
 
   const names = favoriteGenres.status === 'ready' ? favoriteGenres.genres.map((genre) => genre.name) : undefined;

@@ -103,8 +103,8 @@ public class PasswordResetController {
             + "enlace del correo (lo que va tras #token= en <STREAMBOX_PUBLIC_URL>/restablecer-contrasena). No "
             + "requiere autenticación ni la cabecera X-Requested-With. Al cambiarla, el correo de la cuenta queda "
             + "confirmado, dejan de servir todos los enlaces pendientes de la cuenta (de restablecimiento y de "
-            + "confirmación), se cierran TODAS sus sesiones (los refresh tokens quedan revocados; los JWT de "
-            + "acceso ya emitidos valen hasta caducar, como mucho 15 minutos), se borran los intentos fallidos "
+            + "confirmación), se cierran TODAS sus sesiones (los refresh tokens quedan revocados y los JWT de "
+            + "acceso ya emitidos dejan de valer al momento), se borran los intentos fallidos "
             + "de login de la cuenta y se envía un aviso al correo. No inicia sesión: después hay que entrar con "
             + "la contraseña nueva. Si la contraseña nueva no cumple la política, el token NO se gasta.")
     @ApiResponses({

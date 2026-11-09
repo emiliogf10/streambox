@@ -273,7 +273,7 @@ describe('Sesión caducada con datos en la caché', () => {
     });
 
     expect(await screen.findByText('ruta:/login')).toBeInTheDocument();
-    expect(screen.getByText('Tu sesión ha caducado. Inicia sesión de nuevo.')).toBeInTheDocument();
+    expect(screen.getByText('Tu sesión ha terminado. Inicia sesión de nuevo.')).toBeInTheDocument();
     expect(queryClient.getQueryData(queryKeys.favorites.all)).toBeUndefined();
     expect(screen.queryByText('La favorita de Ana')).not.toBeInTheDocument();
 

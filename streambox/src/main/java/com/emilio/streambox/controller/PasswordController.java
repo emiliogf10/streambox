@@ -74,8 +74,8 @@ public class PasswordController {
             + "comprobando antes la actual. Cierra todas las demás sesiones de la cuenta (sus refresh tokens "
             + "quedan revocados) y mantiene la actual: la respuesta trae en Set-Cookie un streambox_token y un "
             + "streambox_refresh nuevos (una sesión nueva, así que tampoco sirve una copia anterior del refresh "
-            + "token de esta). Los JWT de acceso ya emitidos a otras sesiones no se pueden revocar: siguen "
-            + "valiendo hasta caducar (como mucho 15 minutos), pero ya no se pueden renovar. Si la contraseña "
+            + "token de esta). Los JWT de acceso ya emitidos a las demás sesiones dejan de valer al momento "
+            + "(401). Si la contraseña "
             + "actual es incorrecta no se cambia nada. Las IPs desde las que se inició sesión dejan de librarse "
             + "del bloqueo de la cuenta por intentos fallidos, salvo la de esta petición.")
     @ApiResponses({

@@ -249,6 +249,9 @@ describe('Sin géneros y errores', () => {
     const { user } = renderWelcome({ routes: { [GENRE_OPTIONS]: () => jsonResponse([]) } });
 
     expect(await screen.findByText('Todavía no hay géneros que elegir')).toBeInTheDocument();
+    // El título y la entradilla no piden lo que es imposible hacer.
+    expect(screen.getByRole('heading', { level: 1, name: 'Te damos la bienvenida' })).toBeInTheDocument();
+    expect(screen.queryByText(/Elige entre 3 y 5/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Guardar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Ahora no' })).not.toBeInTheDocument();
 
@@ -273,6 +276,8 @@ describe('Sin géneros y errores', () => {
     const { user } = renderWelcome({ route: '/series', routes: { [GENRE_OPTIONS]: () => jsonResponse([GENRES[4]]) } });
 
     expect(await screen.findByText('Todavía no hay géneros suficientes')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Te damos la bienvenida' })).toBeInTheDocument();
+    expect(screen.queryByText(/Elige entre 3 y 5/)).not.toBeInTheDocument();
     expect(
       screen.getByText(
         'Hacen falta títulos visibles de al menos 3 géneros y por ahora solo los hay de «Drama». Cuando haya títulos de al menos 3 géneros, podrás elegir tus favoritos en tu perfil, en «Tus gustos». Mientras tanto, los títulos que marques con «Me gusta» también sirven para recomendarte otros parecidos.',

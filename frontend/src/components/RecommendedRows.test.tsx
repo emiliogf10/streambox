@@ -131,6 +131,45 @@ describe('RecommendedRows', () => {
   });
 
   /**
+   * Revisión visual: los géneros elegibles se piden después de las recomendaciones
+   * y, sin reservar el hueco, la tarjeta llegaba tarde y empujaba 160 px las filas
+   * de debajo. Mientras llegan, el hueco lo ocupa la propia tarjeta, invisible:
+   * sin ninguna invitación que se pueda leer o enfocar, porque aún podría ser falsa.
+   */
+  it('mientras llegan los géneros elegibles reserva el hueco de la tarjeta sin que se vea, se lea ni se enfoque', async () => {
+    let answer: (response: Response) => void = () => {};
+    routeFetch(fetchMock, {
+      [RECOMMENDATIONS]: () => jsonResponse(makeRecommendations()),
+      [GENRE_OPTIONS]: () => new Promise<Response>((resolve) => (answer = resolve)),
+    });
+    renderRows({ inviteToChooseGenres: true });
+
+    await vi.waitFor(() => expect(genreOptionsRequested()).toBe(true));
+    // `getByText` sí ve lo oculto: el hueco existe, y su contenedor lo oculta a la vista y al lector.
+    const placeholder = (await screen.findByText(GENRES_INVITE_TITLE)).closest('[aria-hidden="true"]');
+    expect(placeholder).toHaveClass('invisible');
+    expect(screen.queryByRole('region', { name: GENRES_INVITE_TITLE })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Elegir mis géneros' })).not.toBeInTheDocument();
+
+    answer(jsonResponse([accion, comedia, drama]));
+    expect(await screen.findByRole('region', { name: GENRES_INVITE_TITLE })).toBeInTheDocument();
+    expect(document.querySelector('.invisible')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['el servidor ofrece menos de 3 géneros', () => jsonResponse([accion, comedia])],
+    ['falla la petición', () => errorResponse(500, 'INTERNAL_ERROR', 'boom')],
+  ])('si %s, el hueco reservado se cierra', async (_label, options) => {
+    routeFetch(fetchMock, { [RECOMMENDATIONS]: () => jsonResponse(makeRecommendations()), [GENRE_OPTIONS]: options });
+    renderRows({ inviteToChooseGenres: true });
+
+    await vi.waitFor(() => expect(genreOptionsRequested()).toBe(true));
+    await vi.waitFor(() => expect(queryClient.getQueryState(queryKeys.favoriteGenres.options)?.status).not.toBe('pending'));
+    await vi.waitFor(() => expect(document.querySelector('.invisible')).not.toBeInTheDocument());
+    expect(screen.queryByText(GENRES_INVITE_TITLE)).not.toBeInTheDocument();
+  });
+
+  /**
    * Revisión de QA: con menos de 3 géneros elegibles, «Tus gustos» no tiene
    * selector (el mínimo es imposible), así que la tarjeta llevaría a un
    * callejón sin salida: no se pinta.
@@ -224,7 +263,7 @@ describe('RecommendedRows', () => {
     const series = await screen.findByRole('region', { name: RECOMMENDED_SERIES_TITLE });
     await vi.waitFor(() =>
       expect(series).toHaveAccessibleDescription(
-        'Porque te gustan Acción, Drama y Comedia y según los títulos que has marcado con «Me gusta».',
+        'Porque te gustan Acción, Drama y Comedia, y por los títulos que has marcado con «Me gusta».',
       ),
     );
   });

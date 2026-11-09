@@ -54,7 +54,7 @@ export function SessionsCard() {
       <ConfirmDialog
         open={confirming}
         title="¿Cerrar sesión en todos los dispositivos?"
-        description="Se cerrará tu sesión aquí y en cualquier otro navegador o dispositivo donde hayas entrado, y tendrás que volver a iniciar sesión. En los demás dispositivos puede tardar hasta 15 minutos en cerrarse."
+        description="Se cerrará tu sesión aquí y en cualquier otro navegador o dispositivo donde hayas entrado, y tendrás que volver a iniciar sesión."
         confirmLabel="Cerrar todas las sesiones"
         busyLabel="Cerrando sesiones..."
         busy={busy}

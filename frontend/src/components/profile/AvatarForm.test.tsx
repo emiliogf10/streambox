@@ -129,7 +129,7 @@ describe('AvatarForm: envío', () => {
     await user.click(within(group).getByRole('radio', { name: 'Hoja' }));
     await user.click(screen.getByRole('button', { name: 'Guardar icono' }));
 
-    expect(await screen.findByText('Tu sesión ha caducado. Inicia sesión de nuevo.')).toBeInTheDocument();
+    expect(await screen.findByText('Tu sesión ha terminado. Inicia sesión de nuevo.')).toBeInTheDocument();
     const form = screen.getByRole('form', { name: 'Cambiar icono de perfil' });
     expect(within(form).queryByRole('alert')).not.toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();

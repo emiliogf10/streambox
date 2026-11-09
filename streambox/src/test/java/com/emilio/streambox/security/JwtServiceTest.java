@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.emilio.streambox.entity.User;
 
@@ -57,7 +58,7 @@ class JwtServiceTest {
     void elTokenGeneradoSePuedeLeerDeNuevo() {
         String token = jwtService.generateToken(user());
 
-        assertEquals("ana@test.com", jwtService.extractEmail(token));
+        assertEquals("ana@test.com", jwtService.parseAccessToken(token).email());
     }
 
     @Test
@@ -78,10 +79,11 @@ class JwtServiceTest {
         String forged = Jwts.builder()
                 .issuer(JwtService.ISSUER)
                 .subject("ana@test.com")
+                .claim(JwtService.TOKEN_VERSION_CLAIM, 0)
                 .signWith(key("otra-clave-distinta-de-al-menos-32-caracteres!!"))
                 .compact();
 
-        assertThrows(JwtException.class, () -> jwtService.extractEmail(forged));
+        assertThrows(JwtException.class, () -> jwtService.parseAccessToken(forged));
     }
 
     @Test
@@ -90,12 +92,13 @@ class JwtServiceTest {
         String expired = Jwts.builder()
                 .issuer(JwtService.ISSUER)
                 .subject("ana@test.com")
+                .claim(JwtService.TOKEN_VERSION_CLAIM, 0)
                 .issuedAt(new Date(now - 120_000))
                 .expiration(new Date(now - 60_000))
                 .signWith(key(SECRET))
                 .compact();
 
-        assertThrows(ExpiredJwtException.class, () -> jwtService.extractEmail(expired));
+        assertThrows(ExpiredJwtException.class, () -> jwtService.parseAccessToken(expired));
     }
 
     @Test
@@ -103,15 +106,16 @@ class JwtServiceTest {
         String foreign = Jwts.builder()
                 .issuer("otro-sistema")
                 .subject("ana@test.com")
+                .claim(JwtService.TOKEN_VERSION_CLAIM, 0)
                 .signWith(key(SECRET))
                 .compact();
 
-        assertThrows(JwtException.class, () -> jwtService.extractEmail(foreign));
+        assertThrows(JwtException.class, () -> jwtService.parseAccessToken(foreign));
     }
 
     @Test
     void rechazaTextoQueNoEsUnJwt() {
-        assertThrows(JwtException.class, () -> jwtService.extractEmail("basura"));
+        assertThrows(JwtException.class, () -> jwtService.parseAccessToken("basura"));
     }
 
     // ------------------------------------------------------------------
@@ -135,7 +139,7 @@ class JwtServiceTest {
         String header = new String(Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
                 StandardCharsets.UTF_8);
         assertTrue(header.contains("\"alg\":\"HS256\""), header);
-        assertEquals("ana@test.com", service.extractEmail(token));
+        assertEquals("ana@test.com", service.parseAccessToken(token).email());
     }
 
     /**
@@ -152,11 +156,12 @@ class JwtServiceTest {
         String token = Jwts.builder()
                 .issuer(JwtService.ISSUER)
                 .subject("ana@test.com")
+                .claim(JwtService.TOKEN_VERSION_CLAIM, 0)
                 .expiration(new Date(System.currentTimeMillis() + 60_000))
                 .signWith(key, "HS384".equals(algorithm) ? Jwts.SIG.HS384 : Jwts.SIG.HS512)
                 .compact();
 
-        assertThrows(JwtException.class, () -> service.extractEmail(token));
+        assertThrows(JwtException.class, () -> service.parseAccessToken(token));
     }
 
     /**
@@ -177,10 +182,10 @@ class JwtServiceTest {
         assertEquals(start, claims.getIssuedAt().toInstant());
 
         clock.now = start.plus(Duration.ofMinutes(14));
-        assertEquals("ana@test.com", service.extractEmail(token));
+        assertEquals("ana@test.com", service.parseAccessToken(token).email());
 
         clock.now = start.plus(Duration.ofMinutes(16));
-        assertThrows(ExpiredJwtException.class, () -> service.extractEmail(token));
+        assertThrows(ExpiredJwtException.class, () -> service.parseAccessToken(token));
     }
 
     /** Reloj que solo cambia cuando el test lo pide. */
@@ -273,7 +278,7 @@ class JwtServiceTest {
     @ParameterizedTest
     @MethodSource("hostileTokens")
     void unTokenHostilSoloLanzaJwtExceptionOIllegalArgumentException(String token) {
-        Throwable thrown = assertThrows(Throwable.class, () -> jwtService.extractEmail(token),
+        Throwable thrown = assertThrows(Throwable.class, () -> jwtService.parseAccessToken(token),
                 "un token hostil nunca puede aceptarse");
 
         assertInvalidTokenException(thrown);
@@ -303,7 +308,7 @@ class JwtServiceTest {
         String token = signedWithRealKey(claims);
 
         try {
-            jwtService.extractEmail(token);
+            jwtService.parseAccessToken(token);
         } catch (Throwable thrown) {
             assertInvalidTokenException(thrown);
         }
@@ -315,9 +320,90 @@ class JwtServiceTest {
      */
     @Test
     void laFirmaHechaAManoEsValida() {
-        String token = signedWithRealKey("{\"iss\":\"streambox\",\"sub\":\"ana@test.com\"}");
+        String token = signedWithRealKey("{\"iss\":\"streambox\",\"sub\":\"ana@test.com\",\"ver\":0}");
 
-        assertEquals("ana@test.com", jwtService.extractEmail(token));
+        assertEquals("ana@test.com", jwtService.parseAccessToken(token).email());
+    }
+
+    // ------------------------------------------------------------------
+    // Claim «ver» (revocación inmediata con users.token_version)
+    // ------------------------------------------------------------------
+
+    /**
+     * El token lleva la versión de la entidad: es la que el filtro compara con
+     * {@code users.token_version}. Sin el claim, ningún token podría
+     * revocarse antes de caducar.
+     */
+    @Test
+    void elTokenLlevaLaVersionDeLaCuenta() {
+        User user = user();
+        ReflectionTestUtils.setField(user, "tokenVersion", 3);
+
+        String token = jwtService.generateToken(user);
+
+        Claims claims = Jwts.parser().verifyWith(key(SECRET)).build().parseSignedClaims(token).getPayload();
+        assertEquals(3, claims.get(JwtService.TOKEN_VERSION_CLAIM));
+        assertEquals(new AccessTokenClaims("ana@test.com", 3), jwtService.parseAccessToken(token));
+    }
+
+    /**
+     * Con la versión explícita (la que se relee tras incrementarla) manda esa,
+     * no la de la entidad en memoria, que puede estar desfasada.
+     */
+    @Test
+    void conVersionExplicitaUsaEsaYNoLaDeLaEntidad() {
+        User user = user();
+        ReflectionTestUtils.setField(user, "tokenVersion", 3);
+
+        String token = jwtService.generateToken(user, 4);
+
+        assertEquals(new AccessTokenClaims("ana@test.com", 4), jwtService.parseAccessToken(token));
+    }
+
+    /** Los extremos válidos del rango: 0 (cuenta nueva) e {@code Integer.MAX_VALUE}. */
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1, Integer.MAX_VALUE })
+    void aceptaCualquierVersionEnteraNoNegativa(int version) {
+        String token = signedWithRealKey("{\"iss\":\"streambox\",\"sub\":\"ana@test.com\",\"ver\":" + version + "}");
+
+        assertEquals(version, jwtService.parseAccessToken(token).tokenVersion());
+    }
+
+    /**
+     * Un token bien firmado sin {@code ver} (emitido antes de la revocación) o
+     * con un {@code ver} de otro tipo se rechaza con una {@code JwtException}
+     * (el filtro lo trata como anónimo, 401), nunca con otra excepción (500)
+     * ni aceptándolo como versión 0.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "",
+            ",\"ver\":null",
+            ",\"ver\":\"0\"",
+            ",\"ver\":\"1\"",
+            ",\"ver\":0.0",
+            ",\"ver\":1.5",
+            ",\"ver\":1e0",
+            ",\"ver\":-1",
+            ",\"ver\":-9223372036854775808",
+            ",\"ver\":2147483648",
+            ",\"ver\":99999999999999999999999",
+            ",\"ver\":true",
+            ",\"ver\":{}",
+            ",\"ver\":[0]" })
+    void rechazaUnTokenSinVersionOConUnaVersionNoValida(String verClaim) {
+        String token = signedWithRealKey("{\"iss\":\"streambox\",\"sub\":\"ana@test.com\"" + verClaim + "}");
+
+        assertThrows(JwtService.InvalidTokenVersionException.class, () -> jwtService.parseAccessToken(token));
+    }
+
+    /** El mensaje es fijo: no reproduce lo que vino en el token. */
+    @Test
+    void elErrorDeVersionNoReproduceElValorDelToken() {
+        String token = signedWithRealKey("{\"iss\":\"streambox\",\"sub\":\"ana@test.com\",\"ver\":\"MARCADOR-7f3a\"}");
+
+        JwtException thrown = assertThrows(JwtException.class, () -> jwtService.parseAccessToken(token));
+        assertTrue(!thrown.getMessage().contains("MARCADOR"), thrown.getMessage());
     }
 
     private static void assertInvalidTokenException(Throwable thrown) {

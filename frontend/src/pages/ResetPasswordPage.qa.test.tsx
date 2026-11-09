@@ -129,7 +129,7 @@ describe('ResetPasswordPage (QA): cambiar la contraseña mientras se comprueba l
     answerSessionCheck(jsonResponse(makeUser()));
     await vi.waitFor(() => expect(screen.getByText('estado:idle')).toBeInTheDocument());
     expect(screen.getByRole('link', { name: 'Iniciar sesión' })).toHaveAttribute('href', '/login');
-    expect(screen.queryByText(/Tu sesión ha caducado/)).toBeNull();
+    expect(screen.queryByText(/Tu sesión ha terminado/)).toBeNull();
   });
 
   it('la comprobación da 401 antes de que responda el cambio: no había sesión, así que ni se cierra nada ni se afirma', async () => {
@@ -156,7 +156,7 @@ describe('ResetPasswordPage (QA): cambiar la contraseña mientras se comprueba l
     expect(screen.getByText(RESET_SESSIONS_CLOSED)).toBeInTheDocument();
     expect(screen.queryByText(SESSION_CLOSED_HERE)).toBeNull();
     expect(screen.queryByText(SESSION_STUCK)).toBeNull();
-    expect(screen.queryByText(/Tu sesión ha caducado/)).toBeNull();
+    expect(screen.queryByText(/Tu sesión ha terminado/)).toBeNull();
   });
 
   it('el cierre «por si acaso» falla y la comprobación acaba en 401: tampoco había sesión y no se afirma', async () => {

@@ -341,8 +341,10 @@ class PostgresIntegrityRaceTranslationQaIntegrationTest extends PostgresIntegrat
      * escritura y en otra transacción ({@code REQUIRES_NEW}, otra conexión), lo
      * que hace {@code PasswordChangeService}: un {@code UPDATE} del hash. Es la
      * intercalación que ocurre si el usuario cambia la contraseña en una pestaña
-     * y el avatar en otra, o si quien tiene un token de acceso robado (vale
-     * hasta 15 min tras el cambio) lanza {@code PATCH} en bucle.
+     * y el avatar en otra, o si quien tiene un token de acceso robado lanza
+     * {@code PATCH} en bucle mientras se cambia (el token deja de valer cuando
+     * el cambio confirma, pero una petición que ya pasó el filtro sigue su
+     * curso).
      * </p>
      */
     @Test

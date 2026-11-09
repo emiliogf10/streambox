@@ -29,6 +29,8 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import com.emilio.streambox.dto.ErrorCode;
 import com.emilio.streambox.dto.ErrorResponse;
 import com.emilio.streambox.security.JsonRequestRejectedHandler;
+import com.emilio.streambox.security.body.RequestBodySizeLimitFilter;
+import com.emilio.streambox.security.body.RequestBodyTooLargeException;
 import com.emilio.streambox.service.SqlStates;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -373,6 +375,61 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
+     * Cuerpo demasiado grande que llega sin envolver (alguien leyó el cuerpo
+     * fuera de los conversores de mensajes): el mismo 413 que
+     * {@link #handleHttpMessageNotReadable}, en vez de un 500 con traza en el
+     * log, que cualquiera podría provocar a voluntad.
+     */
+    @ExceptionHandler(RequestBodyTooLargeException.class)
+    public ResponseEntity<ErrorResponse> handleRequestBodyTooLarge(
+            RequestBodyTooLargeException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.CONTENT_TOO_LARGE, ErrorCode.PAYLOAD_TOO_LARGE,
+                RequestBodySizeLimitFilter.MESSAGE, request);
+    }
+
+    /**
+     * Tomcat no ha podido analizar los parámetros de la petición: un formulario
+     * ({@code application/x-www-form-urlencoded}) por trozos mayor que
+     * {@code server.tomcat.max-http-form-post-size} (el mismo límite que
+     * {@code streambox.http.max-request-body}), un {@code %} mal codificado o
+     * más parámetros de los permitidos.
+     *
+     * <p>
+     * <b>Por qué hace falta (INFO 4 de la revisión del lote de seguridad).</b>
+     * La API no acepta formularios, pero Spring, al preparar un
+     * {@code @RequestBody} de un {@code POST} con ese tipo, reconstruye el
+     * cuerpo con {@code getParameterMap()}: eso hace que Tomcat lo analice por
+     * su cuenta, sin pasar por el flujo vigilado de
+     * {@link RequestBodySizeLimitFilter}. Desde Tomcat 11 un análisis fallido
+     * lanza esta excepción, que acababa en {@link #handleUnexpectedException}:
+     * un 500 con traza en el log que cualquiera, sin token (el login es
+     * público), podía provocar a voluntad. Con {@code Content-Length} el
+     * filtro ya cortaba los grandes; los que llegan por trozos y los mal
+     * codificados no.
+     * </p>
+     *
+     * <p>
+     * La excepción trae el estado que Tomcat considera correcto
+     * ({@code getErrorCode()}): 413 si el formulario es demasiado grande (el
+     * mismo {@code PAYLOAD_TOO_LARGE} que el filtro) y 400
+     * {@code MALFORMED_REQUEST} en cualquier otro caso. Su mensaje (qué falló
+     * y cómo configurar Tomcat) solo va al log, en {@code DEBUG}: no es un
+     * error del servidor.
+     * </p>
+     */
+    @ExceptionHandler(org.apache.tomcat.util.http.InvalidParameterException.class)
+    public ResponseEntity<ErrorResponse> handleUnparseableRequestParameters(
+            org.apache.tomcat.util.http.InvalidParameterException exception, HttpServletRequest request) {
+        LOGGER.debug("Tomcat no ha podido analizar los parámetros de {} (estado {}): {}",
+                request.getRequestURI(), exception.getErrorCode(), exception.getMessage());
+        if (exception.getErrorCode() == HttpStatus.CONTENT_TOO_LARGE.value()) {
+            return buildErrorResponse(HttpStatus.CONTENT_TOO_LARGE, ErrorCode.PAYLOAD_TOO_LARGE,
+                    RequestBodySizeLimitFilter.MESSAGE, request);
+        }
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, ErrorCode.MALFORMED_REQUEST, MALFORMED_MESSAGE, request);
+    }
+
+    /**
      * Último recurso: errores no previstos. Se registran con su traza
      * completa y se devuelve un mensaje genérico al cliente.
      */
@@ -435,10 +492,24 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 Map.of(property, "El valor no tiene el formato esperado"));
     }
 
+    /**
+     * Cuerpo que no se puede leer: 400 {@code MALFORMED_REQUEST}, salvo que la
+     * causa de fondo sea que el cuerpo superó el límite de tamaño mientras se
+     * leía (petición por trozos, sin {@code Content-Length}): entonces 413
+     * {@code PAYLOAD_TOO_LARGE}, lo mismo que responde
+     * {@link RequestBodySizeLimitFilter} cuando el tamaño se conoce de
+     * antemano. Jackson (o Spring, según el conversor) envuelve la
+     * {@link RequestBodyTooLargeException} del flujo en esta excepción, así
+     * que hay que buscarla en la cadena de causas.
+     */
     @Override
     protected ResponseEntity<Object> handleHttpMessageNotReadable(
             HttpMessageNotReadableException exception, HttpHeaders headers,
             HttpStatusCode status, WebRequest request) {
+        if (RequestBodyTooLargeException.isCauseOf(exception)) {
+            return body(HttpStatus.CONTENT_TOO_LARGE, ErrorCode.PAYLOAD_TOO_LARGE,
+                    RequestBodySizeLimitFilter.MESSAGE, request, headers, null);
+        }
         return body(HttpStatus.BAD_REQUEST, ErrorCode.MALFORMED_REQUEST,
                 MALFORMED_MESSAGE, request, headers, null);
     }

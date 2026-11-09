@@ -1,0 +1,65 @@
+-- ===================================================================
+-- V12: versión de los tokens de acceso de cada cuenta (users.token_version).
+--
+-- POR QUÉ
+--   Los JWT de acceso son stateless: duran 15 minutos y, hasta hoy, nada podía
+--   anularlos antes. «Cerrar sesión en todos los dispositivos», cambiar la
+--   contraseña o restablecerla revocan los refresh tokens (la sesión ya no se
+--   renueva), pero el JWT de acceso que tuviera un intruso seguía valiendo
+--   hasta caducar. Con esta columna se pueden revocar al momento: cada JWT
+--   lleva la versión de la cuenta con la que se emitió (claim «ver») y el
+--   filtro, que ya lee el usuario de la base de datos en cada petición, lo
+--   rechaza si no coincide con users.token_version. Revocar = sumar 1
+--   (UserRepository.incrementTokenVersion): todos los JWT anteriores dejan de
+--   valer a la vez, sin guardar una lista negra de tokens. Es la BAJA-3 del
+--   plan (docs/PLAN_DE_ACCION.md, apartado 2.5).
+--
+-- POR QUÉ UN CONTADOR Y NO UNA FECHA («tokens emitidos antes de …»)
+--   Una fecha obligaría a comparar el «iat» del JWT (en segundos) con un
+--   instante de la base de datos: un token emitido en el mismo segundo que la
+--   revocación quedaría en el aire, y el resultado dependería de los relojes.
+--   Un entero solo se compara por igualdad y se incrementa de forma atómica
+--   en una sola sentencia (token_version = token_version + 1), sin leer antes.
+--
+-- DEFAULT 0 NOT NULL
+--   Todas las cuentas existentes quedan en la versión 0, y las nuevas nacen
+--   así. NOT NULL porque el filtro compara siempre: un NULL no coincidiría con
+--   ninguna versión (o, peor, haría que un claim ausente «coincidiera») y no
+--   tiene ningún significado útil.
+--
+-- ck_users_token_version (token_version >= 0)
+--   La versión solo crece desde 0. Que nadie (un script, un UPDATE a mano)
+--   pueda dejarla negativa evita valores sin sentido. Desbordar el INTEGER
+--   (más de 2.000 millones de revocaciones de una misma cuenta) no es
+--   alcanzable; si ocurriera, la suma falla con un error en vez de dar la
+--   vuelta a un número negativo, y la revocación no se confirmaría en silencio.
+--
+-- RIESGOS PARA DATOS EXISTENTES (incluida la base de desarrollo en Supabase)
+--   - Solo AÑADE una columna a users con valor 0 en todas las filas. No borra
+--     ni cambia ningún otro dato.
+--   - Los JWT emitidos ANTES de desplegar la versión que añade el claim «ver»
+--     no lo llevan, y el filtro los rechaza (401): el frontend renueva solo
+--     con el refresh, que emite uno nuevo con la versión al momento. Duran
+--     15 minutos como mucho, así que el efecto es transitorio.
+--   - Bloqueos: en PostgreSQL 11 o posterior (Supabase usa una versión
+--     moderna), ADD COLUMN con un DEFAULT constante solo cambia metadatos y no
+--     reescribe la tabla. El ADD CONSTRAINT CHECK recorre users una vez, y con
+--     todas las filas a 0 se cumple siempre. Con las pocas cuentas de un
+--     proyecto así, son milisegundos.
+--   - Todo va en una transacción (Flyway; en PostgreSQL el DDL también es
+--     transaccional): si algo falla, no queda ni la columna ni el CHECK.
+--   - Una base adoptada (anterior a Flyway) recibe exactamente lo mismo: la
+--     tabla users existe desde V1 y no había ninguna columna con este nombre.
+--   - Una versión ANTERIOR de la aplicación sigue arrancando sobre el esquema
+--     nuevo (Hibernate no valida columnas que no conoce) y, como no la incluye
+--     en sus INSERT, el DEFAULT 0 rellena las cuentas que cree.
+--   - Supabase: es una columna, no una tabla, así que el callback
+--     afterMigrate__close_public_api.sql no tiene nada nuevo que cerrar.
+--
+-- SQL estándar (DEFAULT antes de NOT NULL, como pide la gramática de SQL):
+-- funciona igual en PostgreSQL y en H2 (modo PostgreSQL).
+-- ===================================================================
+
+ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0 NOT NULL;
+
+ALTER TABLE users ADD CONSTRAINT ck_users_token_version CHECK (token_version >= 0);

@@ -54,7 +54,9 @@ interface GenrePickerProps {
  * cursor de «no permitido», además del texto.
  *
  * **Responsive.** Rejilla de 2 columnas a 375 px que crece hasta 5 en escritorio:
- * aprovecha el ancho sin estirar cada casilla de borde a borde.
+ * aprovecha el ancho sin estirar cada casilla de borde a borde. Cada casilla
+ * ocupa toda la altura de su fila (`h-full`): un género de nombre largo ocupa dos
+ * líneas y, sin eso, sus vecinas se quedarían más bajas.
  *
  * El `ref` apunta al `fieldset` (para llevar el foco al grupo tras un error).
  */
@@ -99,7 +101,7 @@ export function GenrePicker({
           return (
             <li key={genre.id} className="min-w-0">
               <label
-                className={`relative flex min-h-11 items-center gap-2 rounded-lg border-2 py-2 pr-8 pl-3 text-sm transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-accent ${
+                className={`relative flex h-full min-h-11 items-center gap-2 rounded-lg border-2 py-2 pr-8 pl-3 text-sm transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-accent ${
                   checked
                     ? 'cursor-pointer border-accent bg-surface-raised font-semibold text-white'
                     : blocked

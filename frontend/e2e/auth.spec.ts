@@ -36,7 +36,7 @@ interface ErrorBody {
 }
 
 /** Aviso único que muestra la app cuando la sesión caduca y no se puede renovar. */
-const SESSION_EXPIRED_TOAST = 'Tu sesión ha caducado. Inicia sesión de nuevo.';
+const SESSION_EXPIRED_TOAST = 'Tu sesión ha terminado. Inicia sesión de nuevo.';
 
 /**
  * Registra un usuario nuevo e inicia sesión con el FORMULARIO, como una persona. Así el navegador tiene

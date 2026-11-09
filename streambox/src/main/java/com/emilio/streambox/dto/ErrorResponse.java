@@ -74,6 +74,8 @@ public class ErrorResponse {
                     + "ha cambiado.\n"
                     + "- MALFORMED_REQUEST (400 y otros 4xx genéricos): la petición no se puede interpretar "
                     + "(JSON mal formado, tipos incorrectos).\n"
+                    + "- PAYLOAD_TOO_LARGE (413): el cuerpo de la petición supera el tamaño máximo (64 KB por "
+                    + "defecto), en cualquier ruta; ningún cuerpo válido de la API se acerca a ese tamaño.\n"
                     + "- INVALID_CREDENTIALS (401): email o contraseña incorrectos en el login (también, con "
                     + "la misma respuesta, una cuenta que aún no ha confirmado su correo), o token "
                     + "ausente, caducado o no válido.\n"

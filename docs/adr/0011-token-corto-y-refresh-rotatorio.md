@@ -26,4 +26,5 @@ Con el 0004, el JWT valía 24 horas y no se podía invalidar: un token robado se
 - (+) El logout invalida la sesión de verdad (el *refresh token*); la tabla permitiría un futuro «cerrar sesión en todos los dispositivos» (`revokeAllByUserId`).
 - (−) Más piezas: una tabla, un endpoint, una tarea de limpieza y lógica de reintento en el frontend.
 - (−) Tras el logout, el token de acceso copiado sigue valiendo hasta 15 minutos (es *stateless*). Dentro de la gracia de 10 s, un token robado puede conseguir un token de acceso sin ser detectado.
+- **Actualización (2026-11-08):** «cerrar sesión en todos los dispositivos», cambiar o restablecer la contraseña y confirmar el correo ya anulan también los tokens de acceso **al momento**: `users.token_version` (migración V12) y claim `ver` en el JWT, que el filtro compara con la cuenta que ya lee en cada petición (manual, cap. 10.4 bis). El logout normal sigue como arriba: el token copiado vale hasta 15 minutos.
 - (−) El `sub` sigue siendo el email (mitigado por la vida corta); HSTS queda para cuando haya HTTPS.

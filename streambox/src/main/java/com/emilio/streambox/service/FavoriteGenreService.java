@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.emilio.streambox.dto.FavoriteGenresRequest;
 import com.emilio.streambox.dto.GenreResponse;
 import com.emilio.streambox.entity.Genre;
+import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.exception.UserNotFoundException;
 import com.emilio.streambox.mapper.GenreMapper;
@@ -34,8 +35,9 @@ import com.emilio.streambox.repository.UserRepository;
  * <p>
  * Como los «me gusta», se leen y escriben con SQL directo sobre la tabla de
  * unión {@code user_favorite_genres} ({@code GenreRepository}), sin colección en
- * {@code User}: nunca hace falta cargar la cuenta. El id del usuario sale
- * siempre del token, nunca de la URL (sin IDOR).
+ * {@code User}: nunca se carga la lista entera a través de la cuenta (la
+ * sustitución solo lee la fila de {@code users} para bloquearla). El id del
+ * usuario sale siempre del token, nunca de la URL (sin IDOR).
  * </p>
  */
 @Service
@@ -151,15 +153,30 @@ public class FavoriteGenreService {
      * <b>Escritura</b>, en una transacción y en este orden obligatorio:
      * </p>
      * <ol>
-     * <li>{@code markGenresOnboarded}: rellena la fecha de la pregunta si estaba
-     * nula (contestar <em>o</em> pulsar «Ahora no», que envía la lista vacía, la
-     * cierra) y, sobre todo, <strong>bloquea la fila del usuario</strong>. Así
-     * dos {@code PUT} simultáneos del mismo usuario van en fila y gana entero
-     * el último; sin el cerrojo, el segundo podía no borrar lo que el primero
+     * <li>{@code findForUpdateById}: <strong>bloquea la fila del usuario</strong>
+     * ({@code SELECT ... FOR UPDATE}) antes de leer ni escribir nada. Así dos
+     * {@code PUT} simultáneos del mismo usuario van en fila y gana entero el
+     * último: el segundo espera aquí y, cuando entra, ya ve lo que el primero
+     * confirmó. Sin el cerrojo, el segundo podía no borrar lo que el primero
      * acababa de insertar y la lista acabaría mezclada, con más de cinco
-     * géneros. Si devuelve 0, la cuenta ya no existe: 404, como el resto de
-     * {@code /me}.</li>
-     * <li>{@code clearFavorites}: borra la lista anterior.</li>
+     * géneros; y su comparación con la lista guardada (paso 3) podría hacerse
+     * contra una lista que estaba a punto de cambiar. Si no encuentra la fila,
+     * la cuenta ya no existe: 404, como el resto de {@code /me}.</li>
+     * <li>{@code markGenresOnboarded}, <strong>solo si la fecha de la pregunta
+     * es nula</strong>: la rellena (contestar <em>o</em> pulsar «Ahora no», que
+     * envía la lista vacía, la cierra). Si ya estaba cerrada no se toca
+     * {@code users}: el {@code UPDATE} no cambiaría nada y solo dejaría una
+     * versión muerta de la fila (en PostgreSQL, cada {@code UPDATE} escribe
+     * una fila nueva aunque el valor sea el mismo). La fecha leída es fiable
+     * porque se leyó ya con la fila bloqueada.</li>
+     * <li>Si el conjunto pedido es <strong>igual</strong> al guardado (todas las
+     * filas de {@code user_favorite_genres}, también las de géneros que se
+     * hayan quedado sin títulos), no se borra ni se inserta nada y se devuelve
+     * esa misma lista. Es lo que evita que un bucle de {@code PUT} idénticos
+     * (un doble clic, un cliente que reintenta) genere escrituras y filas
+     * muertas gratis, y conserva el {@code created_at} de cada favorito.</li>
+     * <li>{@code clearFavorites} (solo si había alguno): borra la lista
+     * anterior.</li>
      * <li>{@code addFavorites} (solo si la nueva no está vacía): si inserta
      * menos filas de las pedidas, un género se borró entre la validación y el
      * {@code INSERT}; se lanza la misma excepción de validación para que se
@@ -167,12 +184,12 @@ public class FavoriteGenreService {
      * </ol>
      *
      * <p>
-     * Es idempotente: repetir la misma lista deja el mismo resultado y conserva
-     * la fecha de la pregunta (la primera vez). La validación se hace antes del
-     * cerrojo para no tener la fila bloqueada mientras tanto; el hueco que deja
-     * (un género que pierda sus títulos justo entre medias) es inofensivo: el
-     * favorito se guarda y, simplemente, no aporta nada hasta que vuelva a tener
-     * títulos.
+     * Es idempotente: repetir la misma lista (en cualquier orden) da la misma
+     * respuesta, no escribe nada y conserva la fecha de la pregunta (la primera
+     * vez). La validación se hace antes del cerrojo para no tener la fila
+     * bloqueada mientras tanto; el hueco que deja (un género que pierda sus
+     * títulos justo entre medias) es inofensivo: el favorito se guarda y,
+     * simplemente, no aporta nada hasta que vuelva a tener títulos.
      * </p>
      *
      * @param userId  identificador del usuario autenticado (del token)
@@ -191,10 +208,19 @@ public class FavoriteGenreService {
             throw new InvalidParameterException(FIELD, NOT_ELIGIBLE_MESSAGE);
         }
 
-        if (userRepository.markGenresOnboarded(userId, clock.instant()) == 0) {
-            throw new UserNotFoundException("Usuario no encontrado");
+        User user = userRepository.findForUpdateById(userId)
+                .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado"));
+        if (user.getGenresOnboardedAt() == null) {
+            userRepository.markGenresOnboarded(userId, clock.instant());
         }
-        genreRepository.clearFavorites(userId);
+
+        List<Genre> current = genreRepository.findFavoritesByUserId(userId);
+        if (sameIds(current, genreIds)) {
+            return GenreMapper.toResponseList(current);
+        }
+        if (!current.isEmpty()) {
+            genreRepository.clearFavorites(userId);
+        }
         if (genreIds.isEmpty()) {
             return List.of();
         }
@@ -202,6 +228,28 @@ public class FavoriteGenreService {
             throw new InvalidParameterException(FIELD, NOT_ELIGIBLE_MESSAGE);
         }
         return GenreMapper.toResponseList(genreRepository.findFavoritesByUserId(userId));
+    }
+
+    /**
+     * Indica si los favoritos guardados son exactamente los ids pedidos, sin
+     * importar el orden.
+     *
+     * <p>
+     * Se compara como conjunto porque la lista no tiene orden propio (la
+     * respuesta va siempre por nombre): {@code [3, 1, 2]} y {@code [1, 2, 3]}
+     * son la misma elección. Basta con comparar tamaños y pertenencia: ni los
+     * guardados (clave primaria {@code (user_id, genre_id)}) ni los pedidos
+     * (ya validados) tienen repetidos.
+     * </p>
+     *
+     * @param current  favoritos guardados (todos, también los que ya no tienen títulos)
+     * @param genreIds ids pedidos, ya validados y sin repetidos
+     * @return {@code true} si son el mismo conjunto
+     */
+    private static boolean sameIds(List<Genre> current, Set<Long> genreIds) {
+
+        return current.size() == genreIds.size()
+                && current.stream().map(Genre::getId).allMatch(genreIds::contains);
     }
 
     /**

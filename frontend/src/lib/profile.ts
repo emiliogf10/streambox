@@ -118,12 +118,15 @@ export function usernameChangedMessage(username: string): string {
 }
 
 /**
- * Aviso tras cambiar la contraseña. Dice lo que pasa con las demás sesiones
- * sin exagerar: sus refresh tokens quedan revocados al momento, pero el JWT de
- * acceso que ya tengan sigue valiendo hasta que caduque (como mucho 15 minutos).
+ * Aviso tras cambiar la contraseña. Dice lo que pasa con las demás sesiones:
+ * quedan fuera al momento (el servidor revoca sus refresh tokens y sube la
+ * versión de los tokens de la cuenta, `users.token_version`, así que su JWT de
+ * acceso deja de valer en su siguiente petición). Esta sigue dentro porque la
+ * respuesta trae cookies nuevas, y las demás pestañas de este navegador también
+ * (comparten esas cookies): por eso habla de «otros navegadores y dispositivos».
  */
 export const PASSWORD_CHANGED =
-  'Contraseña cambiada. Se han cerrado tus otras sesiones; en otros dispositivos puede tardar hasta 15 minutos.';
+  'Contraseña cambiada. Se han cerrado tus sesiones en otros navegadores y dispositivos; en este sigues dentro.';
 
 /**
  * Mensaje del 429 del cambio de contraseña (5 fallos de la contraseña actual

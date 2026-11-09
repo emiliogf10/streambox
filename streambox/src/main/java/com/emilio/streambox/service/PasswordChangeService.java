@@ -42,8 +42,9 @@ import jakarta.persistence.PersistenceContext;
  *   <li>Solo entonces comprueba que la nueva es distinta de la actual (antes
  *       sería un oráculo: diría si la nueva <em>es</em> la actual).</li>
  *   <li>En una transacción: guarda el hash nuevo, <b>revoca todas las
- *       sesiones</b> del usuario y abre una familia nueva para la sesión
- *       actual.</li>
+ *       sesiones</b> del usuario (refresh tokens y JWT de acceso) y abre una
+ *       familia nueva para la sesión actual, con un JWT de la versión
+ *       nueva.</li>
  *   <li>Tras confirmar la transacción, olvida las «IPs conocidas» del login
  *       salvo la de esta petición ({@link LoginAttemptService#forgetKnownIpsExcept}).</li>
  * </ol>
@@ -67,13 +68,16 @@ import jakarta.persistence.PersistenceContext;
  * usa, su sesión termina cuando caduque su JWT.
  * </p>
  *
- * <h2>Lo que no puede hacer</h2>
+ * <h2>Los JWT de acceso de las otras sesiones caen al momento</h2>
  * <p>
- * Los JWT de acceso ya emitidos a las otras sesiones son stateless y siguen
- * valiendo hasta que caducan (15 minutos como mucho): durante ese rato esas
- * sesiones aún pueden hacer peticiones, pero ya no renovarse. Cerrarlas al
- * instante exigiría guardar en la cuenta una marca de «credenciales cambiadas
- * en» y rechazar los JWT emitidos antes (columna nueva).
+ * {@link RefreshTokenService#revokeAllSessions(Long)} sube además
+ * {@code users.token_version}: desde el commit, el filtro JWT rechaza todos
+ * los JWT de acceso emitidos antes (claim {@code ver}), así que las otras
+ * sesiones no pueden hacer ni una petición más. Por eso el JWT de la sesión
+ * actual se firma <b>después</b> de revocar y con la versión releída de la
+ * base de datos ({@code findTokenVersionById}): firmado antes, o con la
+ * versión de la entidad en memoria (la de antes del incremento), nacería ya
+ * revocado y el usuario se echaría a sí mismo.
  * </p>
  *
  * <h2>Transacciones y concurrencia</h2>
@@ -205,12 +209,18 @@ public class PasswordChangeService {
             throw new CurrentPasswordIncorrectException();
         }
         locked.setPassword(newHash);
-        // Antes de revocar: las sentencias masivas vacían la sesión de
-        // Hibernate (la entidad queda desacoplada, aunque sus datos sirven).
-        String accessToken = jwtService.generateToken(locked);
 
-        // revokeAllSessions escribe antes el hash nuevo (flushAutomatically).
+        // revokeAllSessions escribe antes el hash nuevo (flushAutomatically) y
+        // sube token_version: todos los JWT anteriores dejan de valer.
         int revoked = refreshTokenService.revokeAllSessions(userId);
+        // El JWT de la sesión actual, después y con la versión NUEVA. No sirve
+        // locked.getTokenVersion(): el UPDATE masivo no refresca la entidad (y
+        // revokeAllByUserId vacía la sesión de Hibernate, así que locked queda
+        // desacoplada; su email sigue sirviendo). La fila sigue bloqueada por
+        // esta transacción: nadie puede cambiar la versión entre medias.
+        int tokenVersion = userRepository.findTokenVersionById(userId)
+                .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado"));
+        String accessToken = jwtService.generateToken(locked, tokenVersion);
         IssuedRefreshToken refreshToken = refreshTokenService.startFamily(userId);
 
         LOGGER.info("Contraseña cambiada por el usuario {}: {} refresh tokens revocados; la sesión actual "

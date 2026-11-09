@@ -11,9 +11,9 @@
  */
 import type { APIRequestContext, Page } from '@playwright/test';
 import { addFavoritesByTitle, addSeriesFavoritesByTitle, loginAdmin } from './support/api';
-import { ADMIN_EMAIL, ADMIN_USERNAME, BACKEND_URL } from './support/config';
+import { ADMIN_EMAIL, ADMIN_USERNAME, BACKEND_URL, FRONTEND_URL } from './support/config';
 import { VISIBLE_SERIES } from './support/catalog';
-import { expect, formAlert, sessionCookie, test } from './support/fixtures';
+import { expect, formAlert, sessionCookie, test, waitForLoginPage } from './support/fixtures';
 
 /** Abre el menú de usuario y entra en «Mi perfil», como haría una persona. */
 async function openProfileFromMenu(page: Page): Promise<void> {
@@ -314,7 +314,7 @@ test.describe('Editar perfil', () => {
 
     await expect(
       page.getByText(
-        'Contraseña cambiada. Se han cerrado tus otras sesiones; en otros dispositivos puede tardar hasta 15 minutos.',
+        'Contraseña cambiada. Se han cerrado tus sesiones en otros navegadores y dispositivos; en este sigues dentro.',
       ),
     ).toBeVisible();
     // Esta sesión sigue (con cookies nuevas) y la del «otro dispositivo» ya no se puede renovar.
@@ -354,13 +354,63 @@ test.describe('Editar perfil', () => {
     await dialog.getByRole('button', { name: 'Cerrar todas las sesiones' }).click();
 
     await expect(page).toHaveURL(/\/login$/);
-    await expect(
-      page.getByText(
-        'Se ha cerrado la sesión en todos tus dispositivos. En los demás puede tardar hasta 15 minutos en cerrarse.',
-      ),
-    ).toBeVisible();
+    await expect(page.getByText('Se ha cerrado la sesión en todos tus dispositivos.')).toBeVisible();
     expect(await sessionCookie(page)).toBeUndefined();
     expect(await refreshFromOtherDevice(request)).toBe(401);
+  });
+
+  /**
+   * Revocación inmediata del JWT de acceso (`users.token_version`): otro navegador con su propia sesión (login con el
+   * formulario: JWT y refresh token suyos) cae al login EN SU SIGUIENTE PETICIÓN, segundos después y no a los 15
+   * minutos. Antes del cambio su JWT seguía valiendo hasta caducar: la navegación a /series se habría pintado sin más
+   * y este test fallaría en la URL. La primera petición de /series que responde recibe 401 aunque su JWT acaba de
+   * emitirse, y el refresh también (familia revocada).
+   */
+  test('tras «Cerrar sesión en todos los dispositivos», otro navegador cae al login en su siguiente petición', async ({
+    page,
+    browser,
+    user,
+    signIn,
+  }) => {
+    const other = await browser.newContext({ baseURL: FRONTEND_URL });
+    try {
+      const otherPage = await other.newPage();
+      await otherPage.goto('/login');
+      await waitForLoginPage(otherPage);
+      await loginWithForm(otherPage, user.email, user.password);
+      await expect(otherPage).toHaveURL(/\/$/);
+      await expect(otherPage.getByRole('heading', { level: 1, name: 'Catálogo de películas' })).toBeVisible();
+
+      await signIn(user);
+      await page.goto('/perfil');
+      await page.getByRole('button', { name: 'Cerrar sesión en todos los dispositivos' }).click();
+      await page
+        .getByRole('alertdialog', { name: '¿Cerrar sesión en todos los dispositivos?' })
+        .getByRole('button', { name: 'Cerrar todas las sesiones' })
+        .click();
+      await expect(page.getByText('Se ha cerrado la sesión en todos tus dispositivos.')).toBeVisible();
+
+      // El otro navegador sigue en pantalla hasta que hace algo: navegar dentro de la SPA a una sección que pide
+      // datos nuevos (sin recargar, como una persona). Se anotan las respuestas de la API a partir de aquí: la
+      // primera que llega con estado es la que lo echa. (No vale esperar a una ruta concreta: /series lanza varias
+      // peticiones a la vez y, en cuanto una recibe el 401, la app aborta las demás al ir al login; una petición
+      // abortada nunca tiene respuesta.)
+      const apiStatuses: string[] = [];
+      otherPage.on('response', (response) => {
+        const { pathname } = new URL(response.url());
+        if (pathname.startsWith('/api/')) apiStatuses.push(`${pathname} ${response.status()}`);
+      });
+      await otherPage.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Series' }).click();
+
+      await expect(otherPage).toHaveURL(/\/login$/);
+      await waitForLoginPage(otherPage);
+      await expect(otherPage.getByText('Tu sesión ha terminado. Inicia sesión de nuevo.')).toBeVisible();
+      // Su JWT de acceso, emitido hace unos segundos (no ha caducado), ya no vale; y su refresh tampoco renueva.
+      expect(apiStatuses[0], `respuestas de la API: ${apiStatuses.join(', ')}`).toMatch(/^\/api\/(?!auth\/).* 401$/);
+      expect(apiStatuses).toContain('/api/auth/refresh 401');
+    } finally {
+      await other.close();
+    }
   });
 
   test('a 375 px, con el formulario de contraseña abierto, la página no se desplaza en horizontal', async ({

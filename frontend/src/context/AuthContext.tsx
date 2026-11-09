@@ -6,7 +6,7 @@ import { LOGOUT_ALL_DONE, logoutAllOnServer, logoutOnServer } from '../lib/logou
 import type { LogoutResult } from '../lib/logout';
 import type { User } from '../lib/types';
 import { useToast } from './ToastContext';
-import { SESSION_CLOSED_ELSEWHERE, SESSION_SWITCHED_ELSEWHERE } from '../lib/sessionMessages';
+import { SESSION_CLOSED_ELSEWHERE, SESSION_ENDED, SESSION_SWITCHED_ELSEWHERE } from '../lib/sessionMessages';
 
 /**
  * Clave de `localStorage` donde versiones anteriores guardaban el JWT. Ya no se
@@ -387,7 +387,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         applySession('none');
         // Sin bucle: quien recibe el aviso vuelve a preguntar, pero nunca lo reenvía.
         announceSessionChange();
-        toast.info('Tu sesión ha caducado. Inicia sesión de nuevo.');
+        toast.info(SESSION_ENDED);
         // Limpia las cookies y revoca en el servidor lo que quede de la sesión
         // (best-effort, sin bucle: es `public`). Si el 401 vino del refresh, el
         // servidor ya las borró; si vino de la repetición tras renovar, no.

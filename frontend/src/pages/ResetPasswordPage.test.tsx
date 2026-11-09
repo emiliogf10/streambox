@@ -194,7 +194,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
     expect(screen.getByText('estado:idle')).toBeInTheDocument();
     expect(logoutCalls()).toHaveLength(1);
     expect(screen.getByRole('link', { name: 'Iniciar sesión' })).toHaveAttribute('href', '/login');
-    expect(screen.queryByText(/Tu sesión ha caducado/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tu sesión ha terminado/)).not.toBeInTheDocument();
     // Sigue en la página (no la ha echado ninguna guarda).
     expect(screen.getByText('ruta:/restablecer-contrasena')).toBeInTheDocument();
   });

@@ -7,6 +7,7 @@
  * respuestas que no son JSON...) vive en UN solo sitio y las pantallas solo
  * tienen que capturar un {@link ApiError} con un mensaje ya listo para el usuario.
  */
+import { SESSION_ENDED } from './sessionMessages';
 import type { ApiErrorBody } from './types';
 
 /** Prefijo común de todos los endpoints (el proxy de Vite lo envía al backend). */
@@ -490,6 +491,10 @@ const UNREACHABLE_STATUSES = new Set([502, 503, 504]);
  * debe entender); para el resto se usa el `message` del servidor, que ya está en
  * español y es específico (validaciones, duplicados...).
  *
+ * El 401 de una ruta protegida dice {@link SESSION_ENDED} («ha terminado», no
+ * «ha caducado»): el servidor responde igual si la sesión caducó que si el
+ * titular la cerró desde otro dispositivo, y el texto debe ser verdad en los dos.
+ *
  * Un 502/503/504 SIN `code` en el cuerpo es la página del proxy: el backend no
  * llegó a contestar, así que se dice «No se pudo conectar con el servidor» (como
  * con la red caída y como el aviso del cierre de sesión, `lib/logout.ts`) y no
@@ -508,7 +513,7 @@ function buildApiError(res: Response, body: unknown, isPublic: boolean): ApiErro
   if (status === 401) {
     message = isPublic
       ? (serverMessage ?? 'Credenciales incorrectas.')
-      : 'Tu sesión ha caducado. Inicia sesión de nuevo.';
+      : SESSION_ENDED;
   } else if (status === 403) {
     message = 'No tienes permisos para realizar esta acción.';
   } else if (status === 429) {

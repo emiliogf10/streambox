@@ -432,7 +432,7 @@ const bodyOf = (call: Parameters<typeof fetch>) => JSON.parse(String(call[1]?.bo
 function expectSessionStillOpen(name = 'ana') {
   expect(screen.getByRole('heading', { level: 1, name })).toBeInTheDocument();
   expect(callsTo('/api/auth/logout', 'POST')).toHaveLength(0);
-  expect(screen.queryByText(/Tu sesión ha caducado/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Tu sesión ha terminado/)).not.toBeInTheDocument();
 }
 
 type Events = ReturnType<typeof userEvent.setup>;
@@ -968,7 +968,7 @@ describe('ProfilePage: cerrar sesión en todos los dispositivos', () => {
 
     const dialog = await openDialog(user);
     expect(dialog).toHaveAccessibleDescription(
-      'Se cerrará tu sesión aquí y en cualquier otro navegador o dispositivo donde hayas entrado, y tendrás que volver a iniciar sesión. En los demás dispositivos puede tardar hasta 15 minutos en cerrarse.',
+      'Se cerrará tu sesión aquí y en cualquier otro navegador o dispositivo donde hayas entrado, y tendrás que volver a iniciar sesión.',
     );
     expect(within(dialog).getByRole('button', { name: 'Cancelar' })).toHaveFocus();
 

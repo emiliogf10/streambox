@@ -15,9 +15,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.security.web.firewall.CompositeRequestRejectedHandler;
 import org.springframework.security.web.firewall.ObservationMarkingRequestRejectedHandler;
 import org.springframework.security.web.firewall.RequestRejectedHandler;
+import org.springframework.security.web.header.HeaderWriterFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.security.body.RequestBodyLimitProperties;
+import com.emilio.streambox.security.body.RequestBodySizeLimitFilter;
 import com.emilio.streambox.security.ratelimit.RateLimitProperties;
 import com.emilio.streambox.security.ratelimit.RateLimitingFilter;
 
@@ -255,14 +258,25 @@ public class SecurityConfig {
          * series), que usan el id del token y nunca uno de la URL.</li>
          * <li>Registra {@link JwtAuthenticationFilter} antes del filtro
          * estándar {@link UsernamePasswordAuthenticationFilter}.</li>
+         * <li>Registra {@link RequestBodySizeLimitFilter} (413 por encima de
+         * {@code streambox.http.max-request-body}) justo después de
+         * {@link HeaderWriterFilter}: antes que el límite por IP, el filtro JWT
+         * (base de datos) y Spring MVC (que es quien lee el cuerpo), y después
+         * del que pone las cabeceras de seguridad, para que el 413 también las
+         * lleve. Se crea aquí y no como {@code @Bean} para que Spring Boot no
+         * lo registre además como filtro de servlet (ver su Javadoc).</li>
          * </ul>
          *
-         * @param http                    objeto utilizado para configurar la seguridad
-         *                                HTTP
-         * @param jwtAuthenticationFilter filtro encargado de procesar
-         *                                los tokens JWT
-         * @param rateLimitingFilter      filtro que limita los intentos de
-         *                                login y registro por IP
+         * @param http                       objeto utilizado para configurar la seguridad
+         *                                   HTTP
+         * @param jwtAuthenticationFilter    filtro encargado de procesar
+         *                                   los tokens JWT
+         * @param rateLimitingFilter         filtro que limita los intentos de
+         *                                   login y registro por IP
+         * @param authenticationEntryPoint   401 en JSON
+         * @param accessDeniedHandler        403 en JSON
+         * @param requestBodyLimitProperties tamaño máximo del cuerpo de las peticiones
+         * @param errorWriter                escritor de errores JSON (el 413 del límite del cuerpo)
          * @return cadena de filtros de seguridad configurada
          * @throws Exception si se produce un error durante la configuración
          */
@@ -272,7 +286,9 @@ public class SecurityConfig {
                         JwtAuthenticationFilter jwtAuthenticationFilter,
                         RateLimitingFilter rateLimitingFilter,
                         JwtAuthenticationEntryPoint authenticationEntryPoint,
-                        JwtAccessDeniedHandler accessDeniedHandler) throws Exception {
+                        JwtAccessDeniedHandler accessDeniedHandler,
+                        RequestBodyLimitProperties requestBodyLimitProperties,
+                        SecurityErrorResponseWriter errorWriter) throws Exception {
 
                 http
                                 .csrf(csrf -> csrf.disable())
@@ -478,7 +494,15 @@ public class SecurityConfig {
                                 // antes de validar el token.
                                 .addFilterBefore(
                                                 rateLimitingFilter,
-                                                JwtAuthenticationFilter.class);
+                                                JwtAuthenticationFilter.class)
+
+                                // Tope del cuerpo: antes que el límite por IP, el JWT
+                                // y Spring MVC; después de las cabeceras de seguridad.
+                                .addFilterAfter(
+                                                new RequestBodySizeLimitFilter(
+                                                                requestBodyLimitProperties,
+                                                                errorWriter),
+                                                HeaderWriterFilter.class);
 
                 return http.build();
         }

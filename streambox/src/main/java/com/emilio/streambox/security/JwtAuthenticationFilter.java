@@ -35,12 +35,14 @@ import jakarta.servlet.http.HttpServletResponse;
  * El filtro comprueba la cabecera {@code Authorization} de cada petición.
  * Cuando contiene un token con el formato {@code Bearer <token>}, el token
  * se valida mediante {@link JwtService} y se obtiene el correo electrónico
- * del usuario.
+ * del usuario y la versión de tokens con la que se emitió (claim {@code ver}).
  * </p>
  *
  * <p>
- * Posteriormente se busca el usuario en la base de datos y, si existe,
- * se construye un {@link AuthenticatedUser} ligero que se almacena como
+ * Posteriormente se busca el usuario en la base de datos y, si existe, ha
+ * confirmado su correo y la versión del token coincide con la suya
+ * ({@code users.token_version}; ver {@link #canUseSession(User, int)}), se
+ * construye un {@link AuthenticatedUser} ligero que se almacena como
  * principal en el {@link SecurityContextHolder}. Al no contener la
  * contraseña ni colecciones JPA con carga diferida, se evita tanto la
  * exposición de datos sensibles como posibles
@@ -150,7 +152,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * <p>
      * Si el token no es válido o ha expirado, o el usuario ya no existe, la
      * petición continúa sin autenticación y Spring Security la rechazará
-     * (401) si el endpoint lo requiere (ver {@link #readEmailOrNull}). En
+     * (401) si el endpoint lo requiere (ver {@link #readClaimsOrNull}). Lo
+     * mismo si su versión ya no es la de la cuenta (revocado). En
      * cambio, un fallo al consultar el usuario (base de datos caída) <b>no</b>
      * se captura: sube y el cliente recibe un 500 {@code INTERNAL_ERROR}, no un
      * 401 que le cerraría la sesión.
@@ -210,8 +213,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
 
-        String email = readEmailOrNull(token, request);
-        if (email == null) {
+        AccessTokenClaims claims = readClaimsOrNull(token, request);
+        if (claims == null) {
             // Token no válido: la petición sigue como anónima y Spring Security
             // responderá 401 si la ruta lo exige (o la atenderá si es pública).
             filterChain.doFilter(request, response);
@@ -224,14 +227,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // petición a /error (ApiErrorController): el cliente recibe un 500
         // INTERNAL_ERROR. Tratarlo como "sin autenticar" daría un 401 falso y
         // el frontend cerraría la sesión de un usuario con un token válido.
-        User user = userRepository.findByEmail(email).orElse(null);
+        User user = userRepository.findByEmail(claims.email()).orElse(null);
 
         // Token válido de un usuario que ya no existe (cuenta borrada): no es
         // un error del servidor, la petición sigue como anónima (401 si la ruta
         // es protegida), igual que con un token no válido. Lo mismo si la
-        // cuenta está pendiente de confirmar el correo (ver
-        // canUseSession): su JWT, emitido antes de la V9, no abre la API.
-        if (canUseSession(user)) {
+        // cuenta está pendiente de confirmar el correo o si el token es de una
+        // versión revocada (ver canUseSession).
+        if (canUseSession(user, claims.tokenVersion())) {
 
             // Defensa CSRF: el navegador adjunta la cookie solo, así que una
             // petición no segura autenticada por cookie debe traer una cabecera
@@ -262,7 +265,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Valida el token y devuelve el email de su {@code subject}, o
+     * Valida el token y devuelve su email ({@code subject}) y su versión, o
      * {@code null} si el token no es válido.
      *
      * <p>
@@ -278,7 +281,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * ({@code IncorrectClaimException}, {@code MissingClaimException}), sin
      * firma o cifrado ({@code UnsupportedJwtException}) o con Base64/JSON que
      * no se puede leer (las excepciones de {@code io.jsonwebtoken.io}, que
-     * también heredan de {@code JwtException}).</li>
+     * también heredan de {@code JwtException}). Incluye
+     * {@link JwtService.InvalidTokenVersionException}: falta el claim
+     * {@code ver} o no es un entero válido.</li>
      * <li>{@link IllegalArgumentException}: jjwt la lanza si el token está
      * vacío (p. ej. {@code Authorization: Bearer } sin nada detrás).</li>
      * </ul>
@@ -305,15 +310,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      *
      * @param token   token recibido (de la cabecera o de la cookie)
      * @param request petición, solo para registrar la ruta
-     * @return email del {@code subject}, o {@code null} si el token no es
+     * @return email y versión del token, o {@code null} si el token no es
      *         válido o no trae {@code subject}
      */
-    private String readEmailOrNull(String token, HttpServletRequest request) {
+    private AccessTokenClaims readClaimsOrNull(String token, HttpServletRequest request) {
         try {
-            String email = jwtService.extractEmail(token);
+            AccessTokenClaims claims = jwtService.parseAccessToken(token);
             // Los tokens propios siempre llevan subject; uno firmado sin él no
             // identifica a nadie y se trata como no válido.
-            return email == null || email.isBlank() ? null : email;
+            String email = claims.email();
+            return email == null || email.isBlank() ? null : claims;
         } catch (JwtException | IllegalArgumentException e) {
             LOGGER.debug("Token JWT no válido en {} ({}): la petición sigue sin autenticar",
                     request.getRequestURI(), e.getClass().getSimpleName());
@@ -322,8 +328,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Indica si el dueño de un token válido puede usar la API: debe existir y
-     * tener el correo confirmado.
+     * Indica si el dueño de un token válido puede usar la API: debe existir,
+     * tener el correo confirmado y el token debe ser de su versión actual.
      *
      * <p>
      * <b>Por qué se mira aquí la verificación.</b> El login ya no da sesión a
@@ -347,11 +353,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      * anónima, sin cambios.
      * </p>
      *
-     * @param user usuario del {@code subject} del token, o {@code null} si no existe
+     * <p>
+     * <b>Versión del token (revocación inmediata).</b> Un token cuyo claim
+     * {@code ver} no es el {@code users.token_version} actual se emitió antes
+     * de una revocación de todas las sesiones («cerrar sesión en todos los
+     * dispositivos», cambio o restablecimiento de la contraseña, confirmación
+     * del correo): se trata igual, como anónimo. Cuesta cero consultas (el
+     * usuario ya está cargado) y, por la misma razón que el cambio de rol, el
+     * efecto es inmediato. Si quien lo usa es el titular en otro dispositivo,
+     * el frontend intenta renovar ante el 401 y el refresh, revocado en la
+     * misma transacción que subió la versión, le devuelve al login. Un token
+     * de una versión <em>mayor</em> que la actual no puede existir (la versión
+     * solo crece y solo se firma con la leída de la base de datos), pero por
+     * si acaso tampoco se acepta: la comparación es por igualdad.
+     * </p>
+     *
+     * @param user         usuario del {@code subject} del token, o {@code null} si no existe
+     * @param tokenVersion claim {@code ver} del token
      * @return {@code true} si la petición debe quedar autenticada como ese usuario
      */
-    static boolean canUseSession(User user) {
-        return user != null && user.isEmailVerified();
+    static boolean canUseSession(User user, int tokenVersion) {
+        return user != null && user.isEmailVerified() && user.getTokenVersion() == tokenVersion;
     }
 
     /** Valor de la cookie de sesión, o {@code null} si no viene o está vacía. */

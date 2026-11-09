@@ -86,6 +86,42 @@ public class AuthenticationService {
      * la contraseña.
      * </p>
      *
+     * <p>
+     * <b>Versión del JWT.</b> Se pasa explícita ({@code user.getTokenVersion()}
+     * de la entidad recién leída por {@code findByEmail}, en su propia
+     * transacción: es el valor de la base de datos en ese instante). Si un
+     * «cerrar todas las sesiones» la sube a la vez, el JWT nace con la vieja y
+     * el filtro lo rechaza: el frontend renueva con el refresh de la familia
+     * nueva (ver {@code RefreshTokenService.revokeAllSessions}).
+     * </p>
+     *
+     * <p>
+     * <b>Riesgo aceptado: un login a la vez que un cambio o restablecimiento
+     * de la contraseña.</b> El login lee el hash, BCrypt tarda unos 100 ms y
+     * después abre la familia. Si el cambio confirma en ese intervalo, quien
+     * conocía la contraseña <i>antigua</i> recibe una familia nueva que
+     * {@code revokeAllSessions} no llegó a ver, y su refresh le daría un JWT
+     * con la versión nueva. Cerrarlo exigiría bloquear la fila del usuario al
+     * abrir la familia y comparar la versión con la leída al principio, y
+     * rechazar el login si cambió. No se hace porque:
+     * </p>
+     * <ul>
+     *   <li>exige acertar una ventana de ~100 ms <b>con</b> la contraseña
+     *       antigua: quien ya la conoce pudo iniciar sesión un segundo antes,
+     *       y esa sesión sí la habría cerrado el cambio;</li>
+     *   <li>no deja ninguna sesión <i>anterior</i> viva: es un login con la
+     *       contraseña que era válida cuando se comprobó, visible y cerrable
+     *       con «Cerrar sesión en todos los dispositivos» o con otro cambio;</li>
+     *   <li>el rechazo tendría efectos raros para el usuario legítimo: un
+     *       «cerrar todas las sesiones» simultáneo desde otro dispositivo
+     *       también lo dispararía, y no hay una respuesta honesta que dar (el
+     *       401 {@code INVALID_CREDENTIALS} diría que la contraseña es
+     *       incorrecta cuando no lo era, y gastaría o falsearía los intentos;
+     *       un código nuevo obligaría a tocar el contrato y el frontend);</li>
+     *   <li>todos los logins pasarían a bloquear la fila de {@code users},
+     *       por una carrera que ya existía antes de la versión.</li>
+     * </ul>
+     *
      * @param email    correo electrónico del usuario
      * @param password contraseña en texto plano
      * @param clientIp dirección remota del cliente ({@code request.getRemoteAddr()},
@@ -104,7 +140,10 @@ public class AuthenticationService {
     public SessionTokens login(String email, String password, String clientIp) {
 
         User user = authenticate(email, password, clientIp);
-        return new SessionTokens(jwtService.generateToken(user), refreshTokenService.startFamily(user.getId()));
+        // Versión explícita (ver el Javadoc): la entidad se acaba de leer en
+        // su propia transacción y no ha pasado por ningún incremento.
+        String accessToken = jwtService.generateToken(user, user.getTokenVersion());
+        return new SessionTokens(accessToken, refreshTokenService.startFamily(user.getId()));
     }
 
     /**
