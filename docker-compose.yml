@@ -44,7 +44,7 @@ services:
   # falta migrar los datos del volumen (pg_upgrade o volcado y carga).
   # ---------------------------------------------------------------
   db:
-    image: postgres:16.15-trixie
+    image: postgres:16.16-trixie
     restart: unless-stopped
     environment:
       # La imagen oficial crea la base y el usuario la primera vez que
