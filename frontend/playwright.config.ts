@@ -140,6 +140,11 @@ export default defineConfig({
         SPRING_DATASOURCE_DRIVER_CLASS_NAME: 'org.h2.Driver',
         SPRING_DATASOURCE_USERNAME: 'sa',
         SPRING_DATASOURCE_PASSWORD: '',
+        // H2 2.4.240 liga cada CHECK ... IN (...) a la sesión de la conexión que lo
+        // creó (la de Flyway): si Hikari la jubila (por defecto a los 30 min), todo
+        // INSERT en esas tablas falla con «Database is already closed». Sin
+        // caducidad, esa conexión vive tanto como el backend (cap. 22 del manual).
+        SPRING_DATASOURCE_HIKARI_MAX_LIFETIME: '0',
         JWT_SECRET: JWT_SECRET,
         JWT_ACCESS_TOKEN_TTL: '15m',
         // El backend E2E corre en http: sin esto la cookie de sesión llevaría `Secure` y

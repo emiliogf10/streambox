@@ -3,6 +3,7 @@ package com.emilio.streambox.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.sql.SQLException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -229,6 +231,25 @@ class GenreServiceTest {
                 "\t\n",
                 "​x​",
                 "A" + "İ".repeat(49));
+    }
+
+    /**
+     * Regresión de ReDoS (NV-1 de la auditoría run-3): los extremos se
+     * recortaban con una expresión cuadrática (unos 25 s con 60.000 espacios
+     * interiores). El nombre llega acotado por {@code @Size}, pero el recorte
+     * no debe depender de ello: se rechaza por longitud en tiempo lineal.
+     */
+    @Test
+    void unNombreEnormeSeRechazaPorLongitudEnTiempoLineal() {
+        // Normalizado queda "a " + 50 letras: 52 caracteres, más del máximo de 50.
+        String huge = "a" + " ".repeat(60_000) + "b".repeat(50);
+
+        InvalidParameterException thrown = assertTimeoutPreemptively(Duration.ofSeconds(2),
+                () -> assertThrows(InvalidParameterException.class,
+                        () -> service.createGenre(new GenreRequest(huge))));
+
+        assertEquals("name", thrown.getParameter());
+        verifyNoInteractions(genreRepository, movieRepository, seriesRepository);
     }
 
     /**

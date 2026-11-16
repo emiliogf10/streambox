@@ -85,7 +85,8 @@ import jakarta.servlet.http.Cookie;
  * ({@code application-test.properties}) para que el atacante pueda reenviar sin
  * esperar. Sin {@code @Transactional}: los correos salen tras el commit. Las
  * cuentas usan el dominio {@value #DOMAIN} y cada test sus propias IPs y
- * nombres (las reservas de nombre viven en memoria todo el contexto).
+ * nombres (las reservas de nombre se guardan en la base de datos del contexto,
+ * que comparten todos sus tests).
  * </p>
  */
 @SpringBootTest
@@ -140,6 +141,9 @@ class PasswordResetQaIntegrationTest {
     @AfterEach
     void cleanUp() {
         jdbc.update("DELETE FROM users WHERE email LIKE ?", "%" + DOMAIN);
+        // Las reservas de nombre se guardan en la base de datos (V13): se borran
+        // para que no pasen de un test a otro (sus dueños se van en cascada).
+        jdbc.update("DELETE FROM username_reservations");
     }
 
     // ------------------------------------------------------------------

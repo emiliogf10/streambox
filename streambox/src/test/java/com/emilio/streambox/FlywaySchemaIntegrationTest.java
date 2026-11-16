@@ -37,7 +37,9 @@ import com.emilio.streambox.migration.UserAvatarSchemaCases;
  * cuyo efecto sobre las cuentas existentes, en
  * {@code migration.FavoriteGenresMigrationH2Test}; la versión de los tokens
  * de acceso en {@code V12}, cuyas consultas se prueban en
- * {@code repository.UserTokenVersionRepositoryIntegrationTest}).
+ * {@code repository.UserTokenVersionRepositoryIntegrationTest}; las reservas
+ * de nombre de usuario en {@code V13}, cuyas consultas se prueban en
+ * {@code repository.UsernameReservationRepositoryIntegrationTest}).
  * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
  * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
  * de PostgreSQL.
@@ -1068,7 +1070,130 @@ class FlywaySchemaIntegrationTest {
         assertEquals(1, jdbc.queryForObject("SELECT token_version FROM users WHERE id = ?", Integer.class, userId));
     }
 
+    // --- V13: reservas de nombre de usuario (username_reservations y sus dueños) ---
+
+    @Test
+    void v13EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '13' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * Columnas de las dos tablas de la V13 (todas obligatorias; el nombre del
+     * mismo tamaño que {@code users.username}, fechas con zona), sus claves
+     * primarias (el nombre, para que cada reserva tenga una sola caducidad; y
+     * nombre + hash para los dueños) y el índice de la limpieza por
+     * {@code expires_at}.
+     */
+    @Test
+    void lasTablasDeReservasTienenSusColumnasClavesPrimariasEIndice() {
+        assertEquals(Map.of(
+                "username", "CHARACTER VARYING(50) NOT NULL",
+                "created_at", "TIMESTAMP WITH TIME ZONE NOT NULL",
+                "expires_at", "TIMESTAMP WITH TIME ZONE NOT NULL"), columnsOf("username_reservations"));
+        assertEquals(Map.of(
+                "username", "CHARACTER VARYING(50) NOT NULL",
+                "email_hash", "CHARACTER VARYING(64) NOT NULL"), columnsOf("username_reservation_owners"));
+        assertEquals(50, jdbc.queryForObject("SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS"
+                + " WHERE LOWER(TABLE_NAME) = 'users' AND LOWER(COLUMN_NAME) = 'username'", Integer.class),
+                "el nombre reservado debe caber igual que en users");
+        assertEquals(List.of("username"), keyColumns("pk_username_reservations"));
+        assertEquals(List.of("username", "email_hash"), keyColumns("pk_username_reservation_owners"));
+        assertEquals(List.of("expires_at ASC"), indexColumns("idx_username_reservations_expires_at"));
+    }
+
+    /**
+     * Los dueños cuelgan de su reserva con {@code ON DELETE CASCADE} (borrar o
+     * sustituir una reserva caducada se lleva a sus dueños, y solo a los
+     * suyos) y no hay ninguna clave foránea hacia {@code users}: la reserva
+     * debe sobrevivir al borrado de cualquier cuenta.
+     */
+    @Test
+    void borrarUnaReservaBorraSusDuenosEnCascadaYNoDependeDeUsers() {
+        java.util.Map<String, String> rules = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT LOWER(CONSTRAINT_NAME) AS NAME, DELETE_RULE AS RULE"
+                        + " FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS")
+                .forEach(r -> rules.put((String) r.get("NAME"), (String) r.get("RULE")));
+        insertReservation("reservaa", T0, T0.plusDays(1));
+        insertReservation("reservab", T0, T0.plusDays(1));
+        insertReservationOwner("reservaa", HASH_A);
+        insertReservationOwner("reservaa", HASH_B);
+        insertReservationOwner("reservab", HASH_A);
+
+        jdbc.update("DELETE FROM username_reservations WHERE username = 'reservaa'");
+
+        assertEquals("CASCADE", rules.get("fk_username_reservation_owners_reservation"));
+        assertEquals(List.of("username_reservations"), jdbc.queryForList(
+                "SELECT DISTINCT LOWER(pk.TABLE_NAME) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc"
+                        + " JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS fk ON fk.CONSTRAINT_NAME = rc.CONSTRAINT_NAME"
+                        + " JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS pk ON pk.CONSTRAINT_NAME = rc.UNIQUE_CONSTRAINT_NAME"
+                        + " WHERE LOWER(fk.TABLE_NAME) IN ('username_reservations', 'username_reservation_owners')",
+                String.class), "la única clave foránea es la de los dueños hacia su reserva");
+        assertEquals(1, count("username_reservation_owners"));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM username_reservation_owners WHERE username = 'reservab'", Integer.class));
+    }
+
+    /**
+     * Restricciones de la V13: un nombre solo tiene una reserva y un email es
+     * dueño una sola vez; un dueño necesita su reserva; la caducidad va después
+     * de la creación; y el hash tiene el formato de un SHA-256 hexadecimal en
+     * minúsculas (un email en claro, en mayúsculas o recortado se rechaza).
+     */
+    @Test
+    void laBaseDeDatosRechazaReservasDuplicadasHuerfanasOMalFormadas() {
+        insertReservation("reservadup", T0, T0.plusDays(1));
+        insertReservationOwner("reservadup", HASH_A);
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertReservation("reservadup", T0.plusHours(1), T0.plusDays(2)));
+        assertThrows(DataIntegrityViolationException.class, () -> insertReservationOwner("reservadup", HASH_A));
+        assertThrows(DataIntegrityViolationException.class, () -> insertReservationOwner("sinreserva", HASH_A));
+        DataIntegrityViolationException expiry = assertThrows(DataIntegrityViolationException.class,
+                () -> insertReservation("reservafecha", T0, T0));
+        assertTrue(expiry.getMessage().toLowerCase(java.util.Locale.ROOT)
+                .contains("ck_username_reservations_expires_at"), expiry.getMessage());
+        assertThrows(DataIntegrityViolationException.class, () -> insertReservation("reservanull", T0, null));
+        assertThrows(DataIntegrityViolationException.class, () -> insertReservation("reservanull", null, T0));
+        for (String badHash : List.of("ana@test.com", "A".repeat(64), "a".repeat(63), "a".repeat(63) + "g")) {
+            DataIntegrityViolationException format = assertThrows(DataIntegrityViolationException.class,
+                    () -> insertReservationOwner("reservadup", badHash), badHash);
+            assertTrue(format.getMessage().toLowerCase(java.util.Locale.ROOT)
+                    .contains("ck_username_reservation_owners_email_hash_format"), format.getMessage());
+        }
+        assertThrows(DataIntegrityViolationException.class, () -> insertReservationOwner("reservadup", null));
+        assertThrows(DataIntegrityViolationException.class, () -> insertReservation("x".repeat(51), T0, T0.plusDays(1)));
+
+        insertReservationOwner("reservadup", HASH_B);
+        assertEquals(1, count("username_reservations"));
+        assertEquals(2, count("username_reservation_owners"));
+    }
+
     // --- Utilidades ---
+
+    private void insertReservation(String username, OffsetDateTime createdAt, OffsetDateTime expiresAt) {
+        jdbc.update("INSERT INTO username_reservations (username, created_at, expires_at) VALUES (?, ?, ?)",
+                username, createdAt, expiresAt);
+    }
+
+    private void insertReservationOwner(String username, String emailHash) {
+        jdbc.update("INSERT INTO username_reservation_owners (username, email_hash) VALUES (?, ?)",
+                username, emailHash);
+    }
+
+    /** Columnas de una tabla como {@code nombre -> "TIPO[(longitud)] [NOT] NULL"}. */
+    private Map<String, String> columnsOf(String table) {
+        Map<String, String> columns = new java.util.TreeMap<>();
+        jdbc.queryForList("SELECT LOWER(COLUMN_NAME) AS C, DATA_TYPE AS T, CHARACTER_MAXIMUM_LENGTH AS L,"
+                        + " IS_NULLABLE AS N FROM INFORMATION_SCHEMA.COLUMNS WHERE LOWER(TABLE_NAME) = ?", table)
+                .forEach(r -> columns.put((String) r.get("C"), r.get("T")
+                        + ("CHARACTER VARYING".equals(r.get("T")) ? "(" + r.get("L") + ")" : "")
+                        + ("YES".equals(r.get("N")) ? " NULL" : " NOT NULL")));
+        return columns;
+    }
 
     private void insertAccountToken(long userId, String purpose, String hash, OffsetDateTime createdAt,
             OffsetDateTime expiresAt, OffsetDateTime usedAt) {

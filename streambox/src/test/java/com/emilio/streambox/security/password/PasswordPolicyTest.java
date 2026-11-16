@@ -3,9 +3,11 @@ package com.emilio.streambox.security.password;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -252,6 +254,52 @@ class PasswordPolicyTest {
     void toleraDatosPersonalesNulos() {
         assertFalse(PasswordPolicy.containsPersonalData(VALID, null, null));
         assertEquals(Optional.empty(), PasswordPolicy.findViolation(VALID, null, null));
+    }
+
+    // ------------------------------------------------------------------
+    // Coste acotado con datos personales enormes (ReDoS, NV-1 de la auditoría run-3)
+    // ------------------------------------------------------------------
+
+    /**
+     * Regresión de ReDoS: el registro anónimo llega aquí con el nombre y el
+     * email <b>sin acotar</b> ({@code @ValidPassword} es una restricción de
+     * clase y Bean Validation la evalúa aunque fallen los {@code @Size}). Los
+     * extremos se recortaban con {@code [invisibles]+$} sin ancla inicial, que
+     * con una racha interior de espacios reintenta desde cada posición: con
+     * 60.000 espacios tardaba unos 25 s por campo (medido en local: 4.000 →
+     * 57 ms, 8.000 → 201 ms, 16.000 → 833 ms; ×4 al duplicar). Ahora es lineal
+     * y, además, los datos más largos que {@value PasswordPolicy#MAX_PERSONAL_DATA_INPUT_LENGTH}
+     * caracteres ni se miran. El margen de 2 s es holgado a propósito para no
+     * ser inestable en el CI: el arreglo tarda milisegundos.
+     */
+    @Test
+    void unNombreOUnEmailEnormesNoDisparanUnCosteCuadratico() {
+        String hugeUsername = "a" + " ".repeat(60_000) + "a";
+        String hugeEmail = "a" + NBSP.repeat(60_000) + "a@test.com";
+
+        Optional<String> violation = assertTimeoutPreemptively(Duration.ofSeconds(2),
+                () -> PasswordPolicy.findContentViolation(VALID, hugeUsername, hugeEmail));
+
+        assertEquals(Optional.empty(), violation);
+    }
+
+    /**
+     * El tope solo descarta lo que ningún registro válido puede enviar: hasta
+     * {@value PasswordPolicy#MAX_PERSONAL_DATA_INPUT_LENGTH} caracteres (con
+     * invisibles en los extremos incluidos) el dato se sigue normalizando y
+     * comprobando; por encima no se compara, porque ese nombre o email ya es
+     * inválido por su {@code @Size} y la petición se rechaza igualmente.
+     */
+    @Test
+    void losDatosPersonalesSeCompruebanHastaElTopeYNoPorEncima() {
+        int max = PasswordPolicy.MAX_PERSONAL_DATA_INPUT_LENGTH;
+        String password = "Hola-lucia_dev-26";
+        String atLimit = "lucia_dev" + " ".repeat(max - "lucia_dev".length());
+        assertEquals(max, atLimit.length());
+
+        assertTrue(PasswordPolicy.containsPersonalData(password, atLimit, null));
+        assertTrue(PasswordPolicy.containsPersonalData(password, null, atLimit + "@test.com"));
+        assertFalse(PasswordPolicy.containsPersonalData(password, atLimit + " ", null));
     }
 
     // ------------------------------------------------------------------

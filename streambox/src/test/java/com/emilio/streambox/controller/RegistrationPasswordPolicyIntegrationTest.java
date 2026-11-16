@@ -1,12 +1,14 @@
 package com.emilio.streambox.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -217,6 +219,27 @@ class RegistrationPasswordPolicyIntegrationTest {
                 .andExpect(jsonPath("$.validationErrors.username").exists())
                 .andExpect(jsonPath("$.validationErrors.email").exists())
                 .andExpect(jsonPath("$.validationErrors.password").value(LENGTH));
+    }
+
+    /**
+     * Regresión de ReDoS (NV-1 de la auditoría run-3), de punta a punta: un
+     * {@code POST /api/users} anónimo con un nombre de 60.000 caracteres (cabe
+     * en el límite de 64 KB del cuerpo) llegaba a la política de contraseñas
+     * sin acotar, porque {@code @ValidPassword} es de clase y se evalúa aunque
+     * falle el {@code @Size} del nombre, y tenía ocupado un hilo de Tomcat unos
+     * 25 s. Debe ser un 400 de validación del nombre, y rápido. Se usa
+     * {@code assertTimeout} (no el preventivo) para que MockMvc corra en el
+     * hilo del test, con su transacción; el margen de 5 s es holgado.
+     */
+    @Test
+    void unNombreGiganteDa400DeValidacionEnTiempoAcotado() throws Exception {
+        String hugeUsername = "a" + " ".repeat(60_000) + "a";
+
+        assertTimeout(Duration.ofSeconds(5), () -> register(hugeUsername, "pwdhuge@test.com", "Rio-Tajo-482")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.validationErrors.username").exists())
+                .andExpect(jsonPath("$.validationErrors.password").doesNotExist()));
     }
 
     // ------------------------------------------------------------------

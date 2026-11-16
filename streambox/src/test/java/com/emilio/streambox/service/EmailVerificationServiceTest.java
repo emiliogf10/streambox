@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -310,6 +311,39 @@ class EmailVerificationServiceTest {
         when(users.deleteIfEmailNotVerified(7L)).thenReturn(0);
 
         assertEquals(false, service.deleteIfUsernameReleased(stale));
+    }
+
+    // ------------------------------------------------------------------
+    // El primer token, con la fecha de alta de la cuenta
+    // ------------------------------------------------------------------
+
+    /**
+     * El primer token de una cuenta nueva se emite con su fecha de alta, no
+     * con el reloj: aquí el registro tomó su «ahora» 6 minutos antes (más que
+     * {@link EmailVerificationService#REGISTRATION_TOKEN_WINDOW}, como si las
+     * esperas de los cerrojos se hubieran alargado). Con {@code clock.instant()}
+     * el token sería de {@code NOW} y la cuenta contaría como heredada para
+     * siempre (ni sustituible ni liberaría su nombre).
+     */
+    @Test
+    void elPrimerTokenDeUnaCuentaNuevaLlevaSuFechaDeAlta() {
+        User created = pendingUser();
+        Instant createdAt = NOW.minus(Duration.ofMinutes(6));
+        created.setCreatedAt(createdAt);
+        when(users.getReferenceById(7L)).thenReturn(created);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.issueForNewAccount(created, createdAt);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        ArgumentCaptor<AccountToken> saved = ArgumentCaptor.forClass(AccountToken.class);
+        verify(tokens).save(saved.capture());
+        assertEquals(created.getCreatedAt(), saved.getValue().getCreatedAt());
+        assertEquals(createdAt.plus(Duration.ofHours(24)), saved.getValue().getExpiresAt());
+        assertEquals(AccountTokenPurpose.EMAIL_VERIFICATION, saved.getValue().getPurpose());
     }
 
     private static User pendingUser() {

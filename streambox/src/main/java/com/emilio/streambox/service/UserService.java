@@ -21,6 +21,7 @@ import com.emilio.streambox.exception.UserAlreadyExistsException;
 import com.emilio.streambox.exception.UserNotFoundException;
 import com.emilio.streambox.mapper.UserMapper;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.validation.InvisibleEdges;
 
 /**
  * Servicio con la lógica de negocio de las cuentas de usuario.
@@ -42,16 +43,6 @@ public class UserService {
      * mensaje de «correo en uso»: el registro no revela qué emails tienen cuenta.
      */
     static final String USERNAME_TAKEN_MESSAGE = "El nombre de usuario ya está en uso";
-
-    /**
-     * Caracteres invisibles en los extremos del nombre: separadores Unicode
-     * (incluido el espacio de no separación), controles y caracteres de
-     * formato. Es la misma expresión que usa {@link GenreService}: con un
-     * simple {@code trim()}, que solo quita lo que es {@code <= U+0020}, un
-     * espacio duro final creaba un «gemelo» visual de otro usuario.
-     */
-    private static final Pattern EDGES =
-            Pattern.compile("^[\\p{Z}\\p{Cc}\\p{Cf}]+|[\\p{Z}\\p{Cc}\\p{Cf}]+$");
 
     /** Secuencias de separadores o controles dentro del nombre (se colapsan en un espacio). */
     private static final Pattern INNER_SPACES = Pattern.compile("[\\p{Z}\\p{Cc}]+");
@@ -159,6 +150,24 @@ public class UserService {
      * </p>
      *
      * <p>
+     * <strong>Concurrencia con el registro.</strong> El {@code UNIQUE} no basta
+     * contra un registro simultáneo con un email que ya tiene cuenta: ese
+     * registro no inserta en {@code users}, solo reserva el nombre en otra
+     * tabla, y su reserva sin confirmar es invisible aquí. El registro y este
+     * cambio podían salir bien los dos (202 y 200) solo si el email tenía
+     * cuenta: un oráculo. Por eso, antes de nada, se bloquea la fila del nombre
+     * en {@code username_reservations} ({@link UsernameReservations#lockForRename}),
+     * el mismo punto por el que pasa todo registro: el que llegue segundo
+     * espera y decide con lo que confirmó el primero. Si el nombre no tenía
+     * reserva, la fila se crea solo para bloquearla y se quita antes de
+     * confirmar ({@link UsernameReservations#releaseRenameLock}): un cambio de
+     * nombre no deja ninguna reserva, así que si la cuenta vuelve a cambiar de
+     * nombre el anterior queda libre en el acto. El nombre se bloquea antes que
+     * cualquier fila de {@code users} (igual que en el registro), así que no
+     * se forman ciclos de espera.
+     * </p>
+     *
+     * <p>
      * <strong>La contraseña no se revalida.</strong> La política prohíbe que la
      * contraseña contenga el nombre de usuario, pero aquí solo se tiene su hash
      * BCrypt, no el texto en claro, así que no se puede comprobar. La regla se
@@ -206,8 +215,12 @@ public class UserService {
                 .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado"));
 
         boolean changed = false;
+        boolean renameLockCreated = false;
         if (usernameSent && !username.equals(user.getUsername())) {
-            if (usernameReservations.isReservedForOthers(username, user.getEmail())) {
+            // Lo primero que se bloquea es el nombre, antes de mirar quién lo
+            // tiene (ver «Concurrencia con el registro» arriba).
+            renameLockCreated = usernameReservations.lockForRename(username);
+            if (!renameLockCreated && usernameReservations.isReservedForOthers(username, user.getEmail())) {
                 throw new UserAlreadyExistsException(USERNAME_TAKEN_MESSAGE);
             }
             // Puede devolver otra instancia (releída bajo bloqueo): se sigue con ella.
@@ -224,7 +237,13 @@ public class UserService {
         }
 
         try {
-            return UserMapper.toCurrentUserResponse(userRepository.saveAndFlush(user));
+            CurrentUserResponse response = UserMapper.toCurrentUserResponse(userRepository.saveAndFlush(user));
+            if (renameLockCreated) {
+                // El cerrojo no debe quedar como reserva (ver «Concurrencia con
+                // el registro»). Si algo falla antes, se va con el rollback.
+                usernameReservations.releaseRenameLock(username);
+            }
+            return response;
         } catch (DataIntegrityViolationException e) {
             // La única restricción de unicidad que puede tocar este UPDATE es
             // la de users.username. Cualquier otra violación (por ejemplo, el
@@ -340,10 +359,21 @@ public class UserService {
      * Normaliza un nombre de usuario y valida su longitud sobre el resultado.
      *
      * <p>
-     * Quita lo invisible de los extremos ({@link #EDGES}) y colapsa los
-     * espacios interiores en uno ({@link #INNER_SPACES}), para que
-     * {@code "ana  lópez"} y {@code "ana lópez"} no sean dos cuentas que se ven
-     * igual. No cambia mayúsculas: el nombre es el que el usuario eligió.
+     * Quita lo invisible de los extremos ({@link InvisibleEdges}: separadores
+     * Unicode, incluido el espacio de no separación, controles y caracteres de
+     * formato) y colapsa los espacios interiores en uno
+     * ({@link #INNER_SPACES}), para que {@code "ana  lópez"} y
+     * {@code "ana lópez"} no sean dos cuentas que se ven igual. Con un simple
+     * {@code trim()}, que solo quita lo que es {@code <= U+0020}, un espacio
+     * duro final creaba un «gemelo» visual de otro usuario. No cambia
+     * mayúsculas: el nombre es el que el usuario eligió.
+     * </p>
+     *
+     * <p>
+     * El recorte de los extremos es lineal: la expresión regular de antes
+     * ({@code ^[…]+|[…]+$}) era cuadrática con una racha interior de espacios
+     * (ReDoS, NV-1 de la auditoría run-3). Hoy el nombre ya llega acotado por
+     * {@code @Size}, pero el coste no debe depender de ello.
      * </p>
      *
      * <p>
@@ -360,7 +390,7 @@ public class UserService {
     static String normalizeUsername(String username) {
 
         String normalized = username == null ? ""
-                : INNER_SPACES.matcher(EDGES.matcher(username).replaceAll("")).replaceAll(" ");
+                : INNER_SPACES.matcher(InvisibleEdges.strip(username)).replaceAll(" ");
         int length = normalized.length();
         if (length < UpdateProfileRequest.USERNAME_MIN_LENGTH
                 || length > UpdateProfileRequest.USERNAME_MAX_LENGTH) {

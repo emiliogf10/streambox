@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mockingDetails;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.mockito.stubbing.Answer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -140,7 +142,7 @@ class PostgresIntegrityViolationLogPrivacyQaIntegrationTest extends PostgresInte
     @Test
     void unaCarreraDeRegistroNoDejaElEmailEnNingunLog() throws Exception {
         saveUserWithEmail("primera", PERSONAL_EMAIL);
-        doReturn(Optional.empty()).when(spiedUsers).findByEmail(PERSONAL_EMAIL);
+        emptyOnFirstRead().findByEmail(PERSONAL_EMAIL);
         appender.list.clear();
 
         mockMvc.perform(post("/api/users").contentType(MediaType.APPLICATION_JSON)
@@ -190,5 +192,20 @@ class PostgresIntegrityViolationLogPrivacyQaIntegrationTest extends PostgresInte
             text.append('\n').append(p.getMessage());
         }
         return text.toString();
+    }
+
+    /**
+     * Prepara una lectura del espía de {@code UserRepository} en la que solo la
+     * <b>primera</b> llamada contesta vacío: es la comprobación previa del
+     * registro, que en la carrera aún no ve la cuenta de la otra petición. Las
+     * siguientes van al repositorio real, como en la carrera de verdad: desde
+     * MEDIA-A, el {@code INSERT} con {@code ON CONFLICT DO NOTHING} no crea
+     * nada y el registro repite su decisión, que ya ve esa cuenta. (El espía
+     * envuelve un proxy de Spring Data: su respuesta por defecto es la que
+     * delega en el repositorio real.)
+     */
+    private UserRepository emptyOnFirstRead() {
+        Answer<?> real = mockingDetails(spiedUsers).getMockCreationSettings().getDefaultAnswer();
+        return doReturn(Optional.empty()).doAnswer(real).when(spiedUsers);
     }
 }

@@ -9,6 +9,7 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -91,6 +92,13 @@ public abstract class PostgresIntegrationTestSupport {
     @Autowired protected EpisodeRepository episodeRepository;
     @Autowired protected JwtService jwtService;
     @Autowired protected PasswordEncoder passwordEncoder;
+
+    /**
+     * Para vaciar en {@link #cleanDatabase()} las tablas que no tienen entidad
+     * (reservas de nombre). Privado y con un nombre propio para no ocultar el
+     * {@code jdbc} que declaran muchas subclases.
+     */
+    @Autowired private JdbcTemplate cleanupJdbc;
 
     /**
      * Devuelve el contenedor compartido, arrancándolo la primera vez.
@@ -194,8 +202,17 @@ public abstract class PostgresIntegrationTestSupport {
      * (arrastran episodios, {@code series_genres} y {@code user_favorite_series}),
      * usuarios (arrastra {@code user_favorite_movies}), películas (arrastra
      * {@code movie_genres}) y por último géneros, que ya nadie usa.
+     *
+     * <p>
+     * También las <b>reservas de nombre</b> ({@code username_reservations}; sus
+     * dueños se van en cascada). No dependen de {@code users} (no tienen
+     * clave foránea, a propósito) y, como el contenedor es el mismo para todas
+     * las clases, una reserva de un test daría 409 a otro que use el mismo
+     * nombre, aunque sea de otra clase.
+     * </p>
      */
     protected void cleanDatabase() {
+        cleanupJdbc.update("DELETE FROM username_reservations");
         seriesRepository.deleteAll();
         userRepository.deleteAll();
         movieRepository.deleteAll();

@@ -25,6 +25,18 @@ public class ValidPasswordValidator implements ConstraintValidator<ValidPassword
      * </p>
      *
      * <p>
+     * <b>El nombre y el email llegan sin acotar.</b> Esta es una restricción de
+     * clase del grupo por defecto y el proyecto no usa {@code @GroupSequence}
+     * ni {@code fail_fast}, así que Bean Validation la evalúa <i>aunque</i> ya
+     * hayan fallado los {@code @Size} de esos campos: en el registro anónimo
+     * pueden medir casi los 64 KB del cuerpo. Por eso
+     * {@link PasswordPolicy} los recorta en tiempo lineal y no compara los que
+     * pasan de {@link PasswordPolicy#MAX_PERSONAL_DATA_INPUT_LENGTH} (ReDoS,
+     * NV-1 de la auditoría run-3). Cualquier comprobación nueva con esos datos
+     * debe tener coste lineal o acotarlos antes.
+     * </p>
+     *
+     * <p>
      * El mensaje se pasa como plantilla de Bean Validation, que interpreta
      * {@code {...}} y expresiones {@code ${...}}. Es seguro porque siempre es
      * una constante de {@link PasswordPolicy}: nunca debe construirse con datos

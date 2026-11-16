@@ -1,8 +1,10 @@
 package com.emilio.streambox.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
@@ -97,6 +99,26 @@ class CreateUserRequestValidationTest {
         assertTrue(violations.stream().anyMatch(v -> v.getPropertyPath().toString().equals("username")));
         assertTrue(violations.stream().anyMatch(v -> v.getPropertyPath().toString().equals("email")));
         assertEquals(List.of(COMMON), passwordErrors("ab", "no-es-un-email", "password1234"));
+    }
+
+    /**
+     * Regresión de ReDoS (NV-1 de la auditoría run-3): {@code @ValidPassword}
+     * es una restricción de <b>clase</b> del grupo por defecto y el proyecto no
+     * usa {@code @GroupSequence} ni {@code fail_fast}, así que Bean Validation
+     * la evalúa aunque el {@code @Size(max = 50)} del nombre ya haya fallado. El
+     * validador recibía así un nombre de 60.000 caracteres y lo recortaba con
+     * una expresión cuadrática (unos 25 s). Debe seguir dando solo el error de
+     * longitud del nombre, y en un tiempo acotado.
+     */
+    @Test
+    void unNombreGiganteDaSoloSuErrorDeLongitudYEnTiempoAcotado() {
+        String hugeUsername = "a" + " ".repeat(60_000) + "a";
+
+        var violations = assertTimeoutPreemptively(Duration.ofSeconds(2),
+                () -> validator.validate(request(hugeUsername, "pepito@test.com", "Rio-Tajo-482")));
+
+        assertEquals(List.of("username"),
+                violations.stream().map(v -> v.getPropertyPath().toString()).toList());
     }
 
     // ------------------------------------------------------------------

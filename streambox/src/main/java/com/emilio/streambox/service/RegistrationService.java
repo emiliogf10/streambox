@@ -1,13 +1,14 @@
 package com.emilio.streambox.service;
 
+import java.sql.Savepoint;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -44,7 +45,8 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter;
  * <h2>Qué pasa en cada caso</h2>
  * <ul>
  *   <li><b>Email nuevo</b>: cuenta {@code USER} pendiente + token + correo con
- *       el enlace de verificación.</li>
+ *       el enlace de verificación. Su nombre queda además reservado 24 h, como
+ *       en los demás caminos (ver «Concurrencia»).</li>
  *   <li><b>Email de una cuenta verificada</b>: correo «Ya tienes una cuenta»
  *       (sin enlace) y ningún cambio. La contraseña enviada se descarta.</li>
  *   <li><b>Email de una cuenta pendiente</b>: se reenvía el enlace (con el
@@ -70,7 +72,10 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter;
  *       reservado lo mismo que si se hubiera creado (la vida del enlace) y da
  *       el mismo 409. Sin la reserva, repetir el registro con ese nombre daba
  *       409 si el email era nuevo y 202 si ya tenía cuenta: un oráculo de
- *       emails registrados en dos peticiones.</li>
+ *       emails registrados en dos peticiones. Todo registro que responde 202
+ *       reserva su nombre (también el que crea la cuenta), y la reserva y la
+ *       cuenta nueva usan el mismo instante, así que el nombre queda libre a
+ *       la vez en los dos casos (incidencia BAJA-A).</li>
  * </ul>
  *
  * <h2>Mismo coste en todos los caminos</h2>
@@ -85,21 +90,62 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter;
  *
  * <h2>Concurrencia</h2>
  * <p>
- * Las filas implicadas (dueño del email y dueño del nombre) se bloquean en
- * orden de id ({@code PESSIMISTIC_WRITE}): dos registros a la vez sobre las
- * mismas cuentas esperan uno al otro sin poder bloquearse mutuamente. Si dos
- * registros con un email o un nombre <em>nuevos</em> llegan a la vez (no hay
- * fila que bloquear), el {@code UNIQUE} de la base de datos frena al segundo y
- * {@link #translateRace} lo traduce: por el email, el mismo 202 (la otra
- * petición ya envió su correo) y el nombre queda reservado, como en cualquier
- * registro con un email que ya tiene cuenta; por el nombre, el 409 de siempre.
+ * <b>Lo primero, el nombre.</b> Antes de leer nada, la transacción reclama la
+ * fila del nombre en {@code username_reservations}
+ * ({@link UsernameReservations#reserve}), que queda bloqueada hasta el final.
+ * «Editar perfil» hace lo mismo al cambiar de nombre. Así, dos peticiones que
+ * piden el mismo nombre se ejecutan una detrás de otra y la segunda ve la
+ * reserva o la cuenta que confirmó la primera. Antes, un registro con un email
+ * que ya tenía cuenta y otro simultáneo con el mismo nombre y un email nuevo
+ * (o un cambio de nombre) podían salir bien los dos, porque la reserva sin
+ * confirmar del primero era invisible; con un email nuevo, el {@code UNIQUE}
+ * de {@code users.username} frenaba a uno: la diferencia delataba el email.
  * </p>
  * <p>
- * Si una de esas filas <b>desaparece o cambia de nombre</b> mientras se espera
- * su bloqueo (otro registro la sustituyó), la transacción se deshace y se
- * repite <b>una vez</b> desde el principio con el estado nuevo
- * ({@link #MAX_ATTEMPTS}). Antes, el bloqueo con {@code refresh} lanzaba
- * {@code EntityNotFoundException} y el registro respondía 500.
+ * Después, las filas de {@code users} implicadas (dueño del email y dueño del
+ * nombre) se bloquean en orden de id ({@code PESSIMISTIC_WRITE}): dos registros
+ * a la vez sobre las mismas cuentas esperan uno al otro sin poder bloquearse
+ * mutuamente. Reclamar el nombre <b>antes</b> que ninguna fila de
+ * {@code users}, y uno solo por transacción, no añade ciclos: quien espera un
+ * nombre no retiene nada.
+ * </p>
+ * <p>
+ * <b>La decisión se repite sin soltar el nombre</b> (incidencia MEDIA-A). Dos
+ * cosas pueden cambiar mientras el registro decide; las que afectan al email
+ * solo pasan si <b>no</b> tiene una cuenta verificada (una verificada no se
+ * borra ni se crea a la vez), y por eso, si soltaban el nombre, se notaba
+ * desde fuera:
+ * </p>
+ * <ul>
+ *   <li>una de las filas <b>desaparece o cambia de nombre</b> mientras se
+ *       espera su bloqueo (otro registro sustituyó la pendiente del email, o
+ *       el dueño del nombre se lo cambió);</li>
+ *   <li>otro registro con el mismo email <em>nuevo</em> crea su cuenta a la
+ *       vez (no había fila que bloquear): la cuenta se inserta con
+ *       {@code ON CONFLICT DO NOTHING}
+ *       ({@link UserRepository#insertPendingUserIfAbsent}), la base de datos
+ *       espera a que el otro confirme y no inserta nada.</li>
+ * </ul>
+ * <p>
+ * En los dos casos se vuelve a un punto de guardado tomado <b>justo después de
+ * reclamar el nombre</b> ({@link TransactionSavepoints}) y se repite la
+ * decisión con el estado nuevo (como mucho {@value #MAX_ATTEMPTS} veces); en
+ * el segundo, ya con la cuenta del otro a la vista, sigue el camino «el email
+ * ya tiene cuenta» (202 y el nombre reservado). Antes se deshacía toda la
+ * transacción (el primer caso para repetirla; el segundo, por la violación de
+ * {@code uk_users_email}) y, con ella, la reserva del nombre: quien esperaba
+ * por ese nombre (p. ej. un {@code PATCH /api/users/me} del atacante) entraba
+ * en ese hueco y salía bien (200), cuando con el email verificado habría dado
+ * 409. Ese 200 delataba que el email no tenía cuenta.
+ * </p>
+ * <p>
+ * <b>Sin interbloqueos nuevos.</b> Volver al punto de guardado suelta también
+ * los bloqueos de filas de {@code users} tomados después (en PostgreSQL), así
+ * que cada intento empieza reteniendo solo el nombre, como la transacción al
+ * empezar, y vuelve a bloquear en orden de id. La espera del {@code INSERT}
+ * por el email de otro registro ya existía con el {@code INSERT} de JPA; ese
+ * otro registro bloqueó sus filas antes de insertar, así que no puede estar
+ * esperando ninguna de las de este.
  * </p>
  *
  * <h2>Riesgo conocido: cuentas creadas con el email de otro</h2>
@@ -134,14 +180,44 @@ public class RegistrationService {
     private final EmailProperties.Resend noticeLimits;
     private final TransactionTemplate transactionTemplate;
     private final UsernameReservations usernameReservations;
+    private final TransactionSavepoints savepoints;
+    private final Clock clock;
 
     /**
-     * Intentos de la transacción del registro: el primero y un reintento si
-     * una fila cambió mientras se esperaba su bloqueo (ver «Concurrencia»).
-     * Que falle dos veces seguidas exige dos registros simultáneos que
-     * sustituyan las mismas cuentas a la vez: es un 500 legítimo.
+     * Intentos de la decisión del registro dentro de su transacción (ver
+     * «Concurrencia»): el primero y hasta tres repeticiones si las cuentas
+     * cambian mientras se decide. Cada repetición es barata (no suelta el
+     * nombre ni vuelve a cifrar la contraseña).
+     *
+     * <h2>Por qué cuatro (incidencia BAJA-1)</h2>
+     * <p>
+     * Mientras este registro R (nombre N, email V) tiene el cerrojo de N, solo
+     * hay tres cambios que lanzan {@link AccountsChangedException}, y cada uno
+     * puede pasar <b>como mucho una vez</b>:
+     * </p>
+     * <ul>
+     *   <li><b>Del lado del nombre, uno:</b> el dueño de N se lo cambia o
+     *       desaparece. Después nadie más puede quedarse con N: para dárselo a
+     *       una cuenta hay que pasar por su cerrojo, que tiene R.</li>
+     *   <li><b>Del lado del email, dos:</b> (1) desaparece la pendiente de V
+     *       (p. ej. el atacante pide con otra cuenta el nombre de una pendiente
+     *       suya con V creada hace 24 h o más, y la borra
+     *       {@link EmailVerificationService#deleteIfUsernameReleased}); y (2) R
+     *       pierde la carrera del {@code INSERT … ON CONFLICT} frente a otro
+     *       registro con V. Tras (2), la cuenta de V es nueva: su enlace está
+     *       vigente y su nombre es suyo 24 h, así que ya no se puede borrar
+     *       mientras R decide y no hay un tercer cambio de este lado.</li>
+     * </ul>
+     * <p>
+     * Con tres intentos, un atacante podía encadenar los tres cambios (uno en
+     * cada intento) y R acababa en 500; con V verificado solo el primero es
+     * posible y R respondía 202: 500 frente a 202 era un oráculo de emails
+     * registrados. Con cuatro, el cuarto intento ya no puede ver ningún cambio
+     * provocable: agotarlos solo es posible por un fallo (p. ej. una fila que
+     * desaparece sin motivo), y entonces el 500 es legítimo.
+     * </p>
      */
-    static final int MAX_ATTEMPTS = 2;
+    static final int MAX_ATTEMPTS = 4;
 
     /**
      * Límite silencioso de avisos «Ya tienes una cuenta» por email: como mucho
@@ -166,7 +242,8 @@ public class RegistrationService {
      * @param rateLimitProperties      tope de claves de los contadores en memoria
      * @param clock                    reloj de la aplicación
      * @param transactionManager       gestor de transacciones
-     * @param usernameReservations     nombres reservados por registros sin cuenta nueva
+     * @param usernameReservations     reservas de nombre (y cerrojo del nombre)
+     * @param savepoints               puntos de guardado para repetir la decisión
      */
     public RegistrationService(
             UserRepository userRepository,
@@ -178,7 +255,8 @@ public class RegistrationService {
             RateLimitProperties rateLimitProperties,
             Clock clock,
             PlatformTransactionManager transactionManager,
-            UsernameReservations usernameReservations) {
+            UsernameReservations usernameReservations,
+            TransactionSavepoints savepoints) {
 
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
@@ -188,6 +266,8 @@ public class RegistrationService {
         this.noticeLimits = emailProperties.resend();
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.usernameReservations = usernameReservations;
+        this.savepoints = savepoints;
+        this.clock = clock;
         this.noticesPerWindow = new SlidingWindowCounter(noticeLimits.window(), clock,
                 rateLimitProperties.maxKeys());
         this.noticesPerInterval = noticeLimits.minInterval().isZero() ? null
@@ -213,7 +293,7 @@ public class RegistrationService {
      * @throws InvalidParameterException  si el nombre o el email normalizados no
      *                                    tienen una longitud válida (400)
      * @throws IllegalStateException      si las cuentas implicadas cambian
-     *                                    mientras se bloquean en los
+     *                                    mientras se decide en los
      *                                    {@value #MAX_ATTEMPTS} intentos (500)
      */
     public AcceptedResponse register(CreateUserRequest request) {
@@ -223,35 +303,74 @@ public class RegistrationService {
         // Siempre, exista o no el email (ver «Mismo coste» en la clase).
         String passwordHash = passwordEncoder.encode(request.getPassword());
 
+        transactionTemplate.executeWithoutResult(status -> registerInTransaction(email, username, passwordHash));
+        return AcceptedResponse.REGISTRATION;
+    }
+
+    /**
+     * Parte transaccional del registro: reclama el nombre y, sin soltarlo,
+     * decide (ver los casos y «Concurrencia» en la clase).
+     *
+     * <p>
+     * <b>Un solo «ahora»</b> para la reserva del nombre, para la fecha de alta
+     * de la cuenta que se cree y para su primer token: así la pendiente libera
+     * su nombre justo cuando caduca la reserva (incidencia BAJA-A, ver
+     * {@link EmailVerificationService#releasesUsername}) y su primer token es
+     * de su alta aunque las esperas de los cerrojos se alarguen (ver
+     * {@link EmailVerificationService#issueForNewAccount}). Se trunca a
+     * microsegundos, la precisión con la que guardan las fechas PostgreSQL y
+     * H2: si no, el valor guardado podría quedar unos nanosegundos por delante
+     * o por detrás del que se compara en Java.
+     * </p>
+     *
+     * @throws IllegalStateException si las cuentas implicadas cambian en los
+     *         {@value #MAX_ATTEMPTS} intentos de la decisión (500)
+     */
+    private void registerInTransaction(String email, String username, String passwordHash) {
+
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+
+        // Lo primero, antes de leer nada: reclamar el nombre (ver
+        // «Concurrencia»). Deja la reserva hecha para todos los caminos que
+        // responden 202 (también el que crea la cuenta); los que acaban en 409
+        // la deshacen con la transacción.
+        boolean reservedBefore = !usernameReservations.reserve(username, email, now);
+
+        // Justo después: lo que haga la decisión se puede deshacer sin soltar
+        // el nombre (MEDIA-A).
+        Savepoint beforeDecision = savepoints.create();
         for (int attempt = 1;; attempt++) {
             try {
-                transactionTemplate.executeWithoutResult(
-                        status -> registerInTransaction(email, username, passwordHash));
-                return AcceptedResponse.REGISTRATION;
-            } catch (AccountChangedWhileLockingException e) {
+                decide(email, username, passwordHash, reservedBefore, now);
+                return;
+            } catch (AccountsChangedException e) {
                 if (attempt >= MAX_ATTEMPTS) {
                     throw new IllegalStateException("El registro ha encontrado cuentas cambiando en "
                             + MAX_ATTEMPTS + " intentos seguidos", e);
                 }
-                // Se repite con el estado nuevo (la transacción ya se deshizo).
-            } catch (DataIntegrityViolationException e) {
-                translateRace(e);
-                // Perdió la carrera por el email: nadie creó una cuenta con
-                // este nombre, pero debe quedar ocupado como en cualquier
-                // registro con un email que ya tiene cuenta (ver la clase).
-                usernameReservations.reserve(username, email);
-                return AcceptedResponse.REGISTRATION;
+                // Deshace borrados y bloqueos de filas de este intento; el
+                // nombre sigue reclamado. El siguiente lee el estado nuevo.
+                savepoints.rollbackTo(beforeDecision);
             }
         }
     }
 
     /**
-     * Parte transaccional del registro (ver los casos en la clase).
+     * Un intento de la decisión, con el nombre ya reclamado.
      *
-     * @throws AccountChangedWhileLockingException si una de las cuentas
-     *         implicadas desapareció o cambió mientras se esperaba su bloqueo
+     * <p>
+     * Nada de lo que tiene efectos fuera de la base de datos (correos, límite
+     * de avisos en memoria) ocurre antes del último punto en el que puede
+     * saltar {@link AccountsChangedException}: así, repetir el intento no deja
+     * un correo programado de un intento descartado.
+     * </p>
+     *
+     * @throws AccountsChangedException si una de las cuentas implicadas
+     *         desapareció o cambió mientras se esperaba su bloqueo, o si otro
+     *         registro creó a la vez la cuenta de este email
      */
-    private void registerInTransaction(String email, String username, String passwordHash) {
+    private void decide(String email, String username, String passwordHash, boolean reservedBefore,
+            Instant now) {
 
         Locked locked = lockInIdOrder(userRepository.findByEmail(email), userRepository.findByUsername(username),
                 email, username);
@@ -266,8 +385,9 @@ public class RegistrationService {
                 freeUsernameOrFail(holder.get());
             }
         }
-        if (usernameReservations.isReserved(username)) {
-            // Mismo 409 que si el nombre lo tuviera una cuenta (ver la clase).
+        if (reservedBefore) {
+            // Ya había una reserva vigente del nombre (de cualquier email):
+            // mismo 409 que si el nombre lo tuviera una cuenta (ver la clase).
             // Si se acaba de borrar una sustituible, el 409 deshace el borrado.
             throw new UserAlreadyExistsException(UserService.USERNAME_TAKEN_MESSAGE);
         }
@@ -275,36 +395,57 @@ public class RegistrationService {
         if (owner.isPresent()) {
             User existing = owner.get();
             // En los tres caminos que no crean cuenta, el nombre queda tan
-            // ocupado como si se hubiera creado (oráculo del nombre, ver la clase).
+            // ocupado como si se hubiera creado (oráculo del nombre, ver la
+            // clase): la reserva del principio se confirma con el 202 y, si algo
+            // falla después, se deshace con todo lo demás.
             if (existing.isEmailVerified()) {
-                usernameReservations.reserve(username, email);
                 notifyAlreadyRegistered(email);
                 return;
             }
             if (!emailVerificationService.isReplaceable(existing)) {
                 // Pendiente con su enlace vigente, o heredada: se le reenvía el
                 // enlace (con el límite silencioso) y no se toca nada más.
-                usernameReservations.reserve(username, email);
                 emailVerificationService.issueIfAllowed(existing);
                 return;
             }
             if (userRepository.deleteIfEmailNotVerified(existing.getId()) != 1) {
                 // No debería pasar con la fila bloqueada, pero si se verificó
                 // entre medias, es una cuenta existente y confirmada.
-                usernameReservations.reserve(username, email);
                 notifyAlreadyRegistered(email);
                 return;
             }
         }
 
-        User user = new User();
-        user.setEmail(email);
-        user.setUsername(username);
-        user.setPassword(passwordHash);
-        user.setRole(Role.USER);
-        // emailVerifiedAt queda a null: la cuenta nace pendiente.
-        User saved = userRepository.saveAndFlush(user);
-        emailVerificationService.issueForNewAccount(saved);
+        createPendingAccount(email, username, passwordHash, now);
+    }
+
+    /**
+     * Crea la cuenta pendiente y emite su primer enlace.
+     *
+     * <p>
+     * Si la base de datos no la inserta es que otra transacción, que ya ha
+     * confirmado, tiene una cuenta con este email (otro registro simultáneo
+     * con el mismo email nuevo: aquí no había fila que bloquear) o con este
+     * nombre (solo si alguien se lo dio sin pasar por su cerrojo, como el
+     * administrador inicial). No es un error: se repite la decisión, que ya
+     * la ve y responde lo mismo que si hubiera llegado antes (el 202 de «el
+     * email ya tiene cuenta» o el 409 del nombre). Antes, aquí saltaba la
+     * violación de {@code uk_users_email} y se deshacía toda la transacción
+     * (MEDIA-A).
+     * </p>
+     *
+     * @throws AccountsChangedException si ya hay una cuenta con ese email o nombre
+     */
+    private void createPendingAccount(String email, String username, String passwordHash, Instant now) {
+
+        if (userRepository.insertPendingUserIfAbsent(username, email, passwordHash, now) != 1) {
+            throw new AccountsChangedException();
+        }
+        User created = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalStateException("La cuenta recién creada no aparece por su email"));
+        // Mismo instante que la cuenta: si el token usara el reloj y las esperas
+        // de los cerrojos pasaran de 5 min, la cuenta contaría como heredada.
+        emailVerificationService.issueForNewAccount(created, now);
     }
 
     /**
@@ -352,9 +493,9 @@ public class RegistrationService {
      * <p>
      * Si una ya no existe, o ya no tiene el email o el nombre por el que se
      * encontró (el email no cambia nunca; el nombre, con «Editar perfil»), se
-     * lanza {@link AccountChangedWhileLockingException} para repetir el
-     * registro: decidir con la fila de antes podría borrar o rechazar con
-     * datos que ya no son ciertos.
+     * lanza {@link AccountsChangedException} para repetir la decisión:
+     * decidir con la fila de antes podría borrar o rechazar con datos que ya
+     * no son ciertos.
      * </p>
      */
     private Locked lockInIdOrder(Optional<User> owner, Optional<User> holder, String email, String username) {
@@ -366,13 +507,13 @@ public class RegistrationService {
         Map<Long, User> fresh = new HashMap<>();
         for (User user : byId.values()) {
             fresh.put(user.getId(), emailVerificationService.lockForUpdate(user)
-                    .orElseThrow(AccountChangedWhileLockingException::new));
+                    .orElseThrow(AccountsChangedException::new));
         }
         Optional<User> lockedOwner = owner.map(user -> fresh.get(user.getId()));
         Optional<User> lockedHolder = holder.map(user -> fresh.get(user.getId()));
         if (lockedOwner.filter(user -> !email.equals(user.getEmail())).isPresent()
                 || lockedHolder.filter(user -> !username.equals(user.getUsername())).isPresent()) {
-            throw new AccountChangedWhileLockingException();
+            throw new AccountsChangedException();
         }
         return new Locked(lockedOwner, lockedHolder);
     }
@@ -390,49 +531,6 @@ public class RegistrationService {
     }
 
     /**
-     * Traduce la violación de unicidad de un registro que perdió la carrera
-     * contra otro simultáneo (ver «Concurrencia» en la clase).
-     *
-     * <p>
-     * La transacción ya se deshizo (y con ella cualquier correo programado),
-     * así que aquí solo se decide la respuesta. Se mira el nombre de la
-     * restricción ({@code uk_users_email} o {@code uk_users_username}, de la
-     * {@code V1}): tras el error no se puede volver a preguntar a la base de
-     * datos en esa transacción.
-     * </p>
-     *
-     * <ul>
-     *   <li>Email: no se lanza nada (la petición responde el 202 de siempre). La
-     *       otra petición creó la cuenta y envió su correo; un 409 aquí
-     *       revelaría que el email acaba de registrarse.</li>
-     *   <li>Nombre: el 409 de siempre.</li>
-     *   <li>Cualquier otra violación, o una de unicidad sin nombre de
-     *       restricción (no pasa con PostgreSQL ni con H2), se relanza: 500 y
-     *       registro en el log. Disfrazarla de «nombre en uso» podría ser falso
-     *       y de 202 dejaría al usuario esperando un correo que no llega.</li>
-     * </ul>
-     *
-     * @param error excepción del {@code INSERT}
-     * @throws UserAlreadyExistsException si la violación es la del nombre
-     * @throws DataIntegrityViolationException si no es de unicidad o no se sabe de cuál
-     */
-    static void translateRace(DataIntegrityViolationException error) {
-
-        if (!(error instanceof DuplicateKeyException)
-                && !SqlStates.UNIQUE_VIOLATION.equals(SqlStates.find(error))) {
-            throw error;
-        }
-        String constraint = SqlStates.constraintName(error);
-        if (constraint != null && constraint.contains("uk_users_email")) {
-            return;
-        }
-        if (constraint != null && constraint.contains("uk_users_username")) {
-            throw new UserAlreadyExistsException(UserService.USERNAME_TAKEN_MESSAGE);
-        }
-        throw error;
-    }
-
-    /**
      * Dueño del email y dueño del nombre, ya bloqueados y releídos.
      *
      * @param owner  cuenta con el email del registro, si existe
@@ -442,15 +540,17 @@ public class RegistrationService {
     }
 
     /**
-     * Una cuenta del registro desapareció o cambió mientras se esperaba su
-     * bloqueo: deshace la transacción para repetir el registro (ver
-     * «Concurrencia» en la clase). Nunca sale de {@link #register}.
+     * Las cuentas del registro cambiaron mientras se decidía: una desapareció
+     * o cambió mientras se esperaba su bloqueo, u otro registro creó a la vez
+     * la de este email. Vuelve al punto de guardado para repetir la decisión
+     * sin soltar el nombre (ver «Concurrencia» en la clase). Nunca sale de
+     * {@link #register}.
      */
-    static final class AccountChangedWhileLockingException extends RuntimeException {
+    static final class AccountsChangedException extends RuntimeException {
 
         private static final long serialVersionUID = 1L;
 
-        AccountChangedWhileLockingException() {
+        AccountsChangedException() {
             // Sin mensaje ni traza: es control de flujo, no un error.
             super(null, null, false, false);
         }
