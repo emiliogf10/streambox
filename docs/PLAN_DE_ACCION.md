@@ -65,7 +65,6 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 | Tema | Prioridad | Dónde |
 | :--- | :--- | :--- |
 | Revisión visual humana | Media | [2.3](#23-revisión-visual-humana-del-frontend) |
-| Bloqueo de cuenta como arma (residual) | Media | [2.5](#25-seguridad) |
 | CORS y cabeceras por perfil (S12) | Media | [2.5](#25-seguridad) |
 | Reproductor integrado y siguientes pasos de series | Media | [2.9](#29-funcionalidades-nuevas) |
 
@@ -174,11 +173,9 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 - **Auditoría 1: pistas sin verificar** — *Baja · BAJA*. Dos pistas de resultados descartados por mal formados, que los cazadores nuevos no repitieron. No son hallazgos: comprobar si interesan.
   - ✅ ~~Una pestaña restaurada desde la caché atrás/adelante (bfcache) podría seguir usando una sesión cerrada en otra pestaña~~: **resuelta por la tarea 29**. El token ya no está en la memoria de la pestaña sino en una cookie que el logout borra para todas, y una pestaña restaurada recibe 401 en su siguiente petición.
   - ⬜ Tras el NAT de Docker Desktop o un proxy TLS, el límite por IP podría volverse global.
-- **Bloqueo de cuenta como arma (residual)** — *Media · MEDIA*
-  - Resuelto para el titular que entra desde una **IP conocida** (NV-2 de la auditoría 1).
-  - Sigue siendo posible bloquear un primer login desde una IP **nueva** mientras dure el ataque, y la «IP conocida» se pierde al reiniciar (estado en memoria).
-  - Con una IP compartida con la víctima (NAT móvil, empresa, VPN, `/64`) se puede distinguir si una cuenta tiene un login reciente desde esa IP (limitación documentada).
-  - **Alternativa estructural pendiente de decidir:** cookie de dispositivo firmada (HMAC) y ligada al email, emitida en el login correcto; no depende de la IP ni de los reinicios. Otras: CAPTCHA o persistir las IPs conocidas.
+- ✅ ~~**Bloqueo de cuenta como arma (residual)**~~ — **hecho el 2026-11-16** con la **cookie de dispositivo firmada** ([ADR 0014](adr/0014-cookie-de-dispositivo.md); ver el [historial](#4-historial-de-trabajos)). El titular entra desde cualquier navegador en el que ya inició sesión, aunque la cuenta esté bloqueada, desde cualquier red y tras un reinicio.
+  - Queda, por diseño: un primer login desde un navegador **nuevo** durante un bloqueo sigue rechazado (para eso está «He olvidado mi contraseña»).
+  - Sigue la limitación de las IPs compartidas para quien entra **sin** cookie (las IPs conocidas se conservan como respaldo).
 - **CORS y cabeceras (S12)** — *Media · BAJA*. CORS explícito por perfil y CSP, para cuando el frontend esté en otro origen.
 - **Rate limiting en memoria** — *Baja (hasta escalar) · MEDIA*. Con varias réplicas el límite se multiplica y un reinicio lo borra. Si se escala: Redis/Bucket4j distribuido. También lo propone el informe de Gemini; sigue siendo condicional (ADR 0006: hoy hay una sola instancia).
 - **Contraseñas: lo que la política no cubre** — *Baja · MEDIA*
