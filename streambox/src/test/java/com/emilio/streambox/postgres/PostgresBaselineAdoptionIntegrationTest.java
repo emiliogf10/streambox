@@ -114,7 +114,7 @@ class PostgresBaselineAdoptionIntegrationTest {
 
     /**
      * La historia queda registrada: baseline en la versión 0 (por eso V1 SÍ se
-     * ejecuta), luego V1, V2, V3, V4, la V5 de PostgreSQL (db/vendor/postgresql), V6, V7, V8, V9, V10, V11 y V12, todas correctas. Una segunda ejecución no
+     * ejecuta), luego V1, V2, V3, V4, la V5 de PostgreSQL (db/vendor/postgresql), V6, V7, V8, V9, V10, V11, V12 y V13, todas correctas. Una segunda ejecución no
      * hace nada y {@code validate} pasa (los checksums coinciden).
      */
     @Test
@@ -123,10 +123,10 @@ class PostgresBaselineAdoptionIntegrationTest {
 
         MigrateResult first = flyway(db).migrate();
 
-        assertEquals(12, first.migrationsExecuted, "deben ejecutarse V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11 y V12");
+        assertEquals(13, first.migrationsExecuted, "deben ejecutarse V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12 y V13");
         List<Map<String, Object>> history = jdbc(db).queryForList(
                 "SELECT version, description, type, success FROM flyway_schema_history ORDER BY installed_rank");
-        assertEquals(List.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
+        assertEquals(List.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"), history.stream().map(r -> (String) r.get("version")).toList(), "" + history);
         assertEquals("BASELINE", history.get(0).get("type"));
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
 
@@ -181,7 +181,8 @@ class PostgresBaselineAdoptionIntegrationTest {
                         "idx_movies_title_search", "idx_series_title_search",
                         "idx_liked_movies_movie_id", "idx_liked_series_series_id",
                         "idx_liked_movies_user_created_at", "idx_liked_series_user_created_at",
-                        "idx_account_tokens_user_purpose", "idx_favorite_genres_genre_id"),
+                        "idx_account_tokens_user_purpose", "idx_favorite_genres_genre_id",
+                        "idx_username_reservations_expires_at"),
                 Set.copyOf(jdbc.queryForList("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'"
                         + " AND indexname LIKE 'idx\\_%'", String.class)));
     }
@@ -510,7 +511,7 @@ class PostgresBaselineAdoptionIntegrationTest {
     }
 
     /**
-     * Contraste: una base vacía NO recibe fila de baseline (solo V1 a V11) y
+     * Contraste: una base vacía NO recibe fila de baseline (solo V1 a V13) y
      * sí tiene cascadas y CHECK. Garantiza que los dos caminos de arranque
      * producen lo que describe cada test.
      */
@@ -521,15 +522,16 @@ class PostgresBaselineAdoptionIntegrationTest {
         flyway(db).migrate();
 
         JdbcTemplate jdbc = jdbc(db);
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"), jdbc.queryForList(
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"), jdbc.queryForList(
                 "SELECT version FROM flyway_schema_history ORDER BY installed_rank", String.class));
-        // Quince claves foráneas en cascada. V1: géneros->película, favoritos->usuario y
+        // Dieciséis claves foráneas en cascada. V1: géneros->película, favoritos->usuario y
         // favoritos->película. V3: géneros->serie, episodios->serie, favoritos de
         // series->usuario y favoritos de series->serie. V4: refresh tokens->usuario
         // (la del sucesor, fk_refresh_tokens_replaced_by, es SET NULL y no cuenta).
         // V8: «me gusta» de películas->usuario/película y de series->usuario/serie.
         // V9: tokens de cuenta->usuario. V11: géneros favoritos->usuario/género.
-        assertEquals(15, jdbc.queryForObject(
+        // V13: dueños de una reserva de nombre->su reserva (ninguna hacia users).
+        assertEquals(16, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.referential_constraints"
                         + " WHERE constraint_schema = 'public' AND delete_rule = 'CASCADE'", Integer.class));
         assertThrows(DataIntegrityViolationException.class, () -> jdbc.update(

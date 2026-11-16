@@ -131,6 +131,9 @@ class RegistrationIntegrationTest {
     @AfterEach
     void cleanUp() {
         jdbc.update("DELETE FROM users WHERE email LIKE ?", "%" + DOMAIN);
+        // Las reservas de nombre se guardan en la base de datos (V13): se borran
+        // para que no pasen de un test a otro (sus dueños se van en cascada).
+        jdbc.update("DELETE FROM username_reservations");
         if (movieId != null) {
             movieRepository.deleteById(movieId);
             movieId = null;
@@ -368,6 +371,36 @@ class RegistrationIntegrationTest {
         assertEquals(AccountEmails.VERIFICATION_SUBJECT, onlyEmailTo("hugo.nuevo" + DOMAIN).subject());
     }
 
+    /**
+     * BAJA-A: con un email nuevo y con uno ya registrado, el nombre enviado
+     * queda libre <b>en el mismo instante</b> (24 h exactas desde el registro).
+     * Antes, la reserva caducaba a las 24 h del principio de la transacción,
+     * pero la pendiente del email nuevo conservaba su nombre hasta 24 h después
+     * de su {@code created_at}, que ponía {@code @CreationTimestamp} un poco
+     * más tarde (y con la hora del sistema, no con el reloj de la aplicación):
+     * en ese hueco, el nombre seguía dando 409 solo si el email era nuevo. Un
+     * microsegundo antes de las 24 h, los dos siguen ocupados.
+     */
+    @Test
+    void conEmailNuevoYConEmailRegistradoElNombreQuedaLibreEnElMismoInstante() throws Exception {
+        createUser("lola_titular", "lola" + DOMAIN, true, null);
+        register("lola_nueva", "lola.nueva" + DOMAIN, PASSWORD).andExpect(status().isAccepted());
+        register("lola_reservada", "lola" + DOMAIN, PASSWORD).andExpect(status().isAccepted());
+
+        CLOCK.advance(Duration.ofHours(24).minusNanos(1_000));
+        register("lola_nueva", "otra.lola1" + DOMAIN, OTHER_PASSWORD).andExpect(status().isConflict());
+        register("lola_reservada", "otra.lola2" + DOMAIN, OTHER_PASSWORD).andExpect(status().isConflict());
+
+        CLOCK.advance(Duration.ofNanos(1_000));
+        register("lola_nueva", "otra.lola1" + DOMAIN, OTHER_PASSWORD).andExpect(status().isAccepted());
+        register("lola_reservada", "otra.lola2" + DOMAIN, OTHER_PASSWORD).andExpect(status().isAccepted());
+
+        assertEquals("otra.lola1" + DOMAIN, userRepository.findByUsername("lola_nueva").orElseThrow().getEmail());
+        assertEquals("otra.lola2" + DOMAIN,
+                userRepository.findByUsername("lola_reservada").orElseThrow().getEmail());
+        assertTrue(userRepository.findByEmail("lola.nueva" + DOMAIN).isEmpty(), "la pendiente vieja se borró");
+    }
+
     /** El nombre de una cuenta confirmada da 409 aunque pase el tiempo. */
     @Test
     void elNombreDeUnaCuentaConfirmadaDa409() throws Exception {
@@ -403,7 +436,7 @@ class RegistrationIntegrationTest {
     @ParameterizedTest
     @EnumSource(ExistingAccount.class)
     void elSegundoRegistroConElMismoNombreRespondeIgualExistaONoElEmail(ExistingAccount kind) throws Exception {
-        // Nombres únicos por caso: las reservas viven en memoria durante todo el contexto.
+        // Nombres únicos por caso: las reservas quedan en la base de datos del contexto.
         String suffix = "_" + kind.name().toLowerCase();
         String withEmail = "oraculo.b" + suffix + DOMAIN;
         switch (kind) {

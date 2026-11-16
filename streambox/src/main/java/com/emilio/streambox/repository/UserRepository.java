@@ -151,6 +151,62 @@ public interface UserRepository extends JpaRepository<User, Long> {
     int deleteIfEmailNotVerified(@Param("userId") Long userId);
 
     /**
+     * Crea la cuenta {@code USER} <strong>pendiente</strong> de un registro,
+     * <strong>salvo que choque</strong> con otra que tenga el mismo email o el
+     * mismo nombre: entonces no hace nada y devuelve {@code 0}, sin error.
+     *
+     * <p>
+     * <b>Por qué no {@code saveAndFlush}.</b> Con dos registros simultáneos con
+     * el mismo email nuevo, el segundo {@code INSERT} de JPA violaba
+     * {@code uk_users_email}: Hibernate marca entonces la transacción para
+     * deshacerla, y el registro perdía con ella la reserva de su nombre (su
+     * cerrojo) a mitad de la decisión, justo lo que delataba que el email no
+     * tenía cuenta (incidencia MEDIA-A, ver {@code RegistrationService},
+     * «Concurrencia»). Con {@code ON CONFLICT DO NOTHING} el choque no es un
+     * error: la base de datos espera a que la otra transacción termine y, si
+     * confirmó su cuenta, no inserta nada. La transacción sigue viva y el
+     * registro repite su decisión con esa cuenta a la vista.
+     * </p>
+     *
+     * <p>
+     * Sin columna de conflicto, como el resto de {@code ON CONFLICT} del
+     * proyecto ({@code UsernameReservationRepository}): vale para los dos
+     * {@code UNIQUE} y es la forma que entienden PostgreSQL y H2 en modo
+     * PostgreSQL. Las demás restricciones ({@code CHECK}, {@code NOT NULL})
+     * siguen dando su error. El rol va fijo en la sentencia: el registro nunca
+     * crea administradores. {@code avatar}, {@code email_verified_at} y
+     * {@code genres_onboarded_at} quedan a {@code NULL} y
+     * {@code token_version} toma su {@code DEFAULT 0}.
+     * </p>
+     *
+     * <p>
+     * <b>{@code created_at} lo pone quien llama</b>, no
+     * {@code @CreationTimestamp} (que no actúa en SQL nativo): el registro
+     * pasa el mismo instante con el que creó la reserva del nombre, para que
+     * la pendiente libere su nombre exactamente cuando caduca la reserva
+     * (incidencia BAJA-A, ver {@code EmailVerificationService#releasesUsername}).
+     * </p>
+     *
+     * <p>
+     * No devuelve la entidad (el id lo genera la base de datos): quien llama la
+     * lee después con {@link #findByEmail}.
+     * </p>
+     *
+     * @param username     nombre normalizado
+     * @param email        email normalizado
+     * @param passwordHash hash BCrypt de la contraseña
+     * @param createdAt    fecha de alta (del {@code Clock} de la aplicación)
+     * @return {@code 1} si la ha creado; {@code 0} si ya había una cuenta con
+     *         ese email o ese nombre
+     */
+    @Modifying(flushAutomatically = true)
+    @Query(value = "INSERT INTO users (username, email, password, role, created_at)"
+            + " VALUES (:username, :email, :password, 'USER', :createdAt) ON CONFLICT DO NOTHING",
+            nativeQuery = true)
+    int insertPendingUserIfAbsent(@Param("username") String username, @Param("email") String email,
+            @Param("password") String passwordHash, @Param("createdAt") Instant createdAt);
+
+    /**
      * Obtiene las películas de la lista de un usuario, ordenadas por título.
      *
      * <p>

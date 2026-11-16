@@ -130,6 +130,16 @@ class PostgresUsernameReleaseIntegrationTest extends PostgresIntegrationTestSupp
      * cambio de nombre simplemente espera: el registro borra la pendiente y
      * avisa al titular (202), y después el cambio de nombre encuentra la
      * pendiente borrada, da el nombre por libre y se guarda.
+     *
+     * <p>
+     * Desde el arreglo de la carrera del nombre (ver
+     * {@code PostgresUsernameRaceIntegrationTest}), los dos reclaman antes la
+     * fila del nombre en {@code username_reservations}: el cambio de nombre ya
+     * no llega a las filas de {@code users}, sino que espera en esa fila
+     * mientras el registro la tiene. Tampoco hay interbloqueo: el registro, que
+     * retiene el nombre, solo espera al árbitro; y el cambio de nombre, que
+     * espera el nombre, no retiene nada.
+     * </p>
      */
     @Test
     void unRegistroYUnCambioDeNombreSobreLasMismasCuentasNoSeInterbloquean() throws Exception {
@@ -139,10 +149,10 @@ class PostgresUsernameReleaseIntegrationTest extends PostgresIntegrationTestSupp
         Future<?> arbiter = holdRowLock(stale.getId());
 
         Future<AcceptedResponse> registration = pool.submit(() -> register("disputado_pg", owner.getEmail()));
-        awaitWaitingForLock(1);
+        awaitWaitingForLock(1, "%users%");
         Future<CurrentUserResponse> renaming = pool.submit(
                 () -> userService.updateProfile(owner.getId(), rename("disputado_pg")));
-        awaitWaitingForLock(2);
+        awaitWaitingForLock(1, "%username_reservations%");
         releaseArbiter.countDown();
         arbiter.get(10, TimeUnit.SECONDS);
 
@@ -206,22 +216,26 @@ class PostgresUsernameReleaseIntegrationTest extends PostgresIntegrationTestSupp
         return arbiter;
     }
 
-    /** Espera (máx. 10 s) a ver {@code expected} conexiones esperando un bloqueo sobre {@code users}. */
-    private void awaitWaitingForLock(int expected) throws InterruptedException {
+    /**
+     * Espera (máx. 10 s) a ver {@code expected} conexiones esperando un
+     * bloqueo en una sentencia que cumple {@code queryPattern} ({@code ILIKE}).
+     * Ojo: {@code %users%} no casa con {@code username_reservations}.
+     */
+    private void awaitWaitingForLock(int expected, String queryPattern) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         int waiting = 0;
         while (System.nanoTime() < deadline) {
             Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM pg_stat_activity"
                     + " WHERE datname = current_database() AND wait_event_type = 'Lock'"
-                    + " AND query ILIKE ?", Integer.class, "%users%");
+                    + " AND query ILIKE ?", Integer.class, queryPattern);
             waiting = count == null ? 0 : count;
             if (waiting >= expected) {
                 return;
             }
             Thread.sleep(20);
         }
-        throw new AssertionError("Se esperaban " + expected + " conexiones esperando el bloqueo de users y hay "
-                + waiting);
+        throw new AssertionError("Se esperaban " + expected + " conexiones esperando un bloqueo en " + queryPattern
+                + " y hay " + waiting);
     }
 
     /** Resultado de un hilo; si lanzó una excepción, el test falla con ella (p. ej. un 500 en la vida real). */

@@ -21,6 +21,7 @@ import com.emilio.streambox.mapper.GenreMapper;
 import com.emilio.streambox.repository.GenreRepository;
 import com.emilio.streambox.repository.MovieRepository;
 import com.emilio.streambox.repository.SeriesRepository;
+import com.emilio.streambox.validation.InvisibleEdges;
 
 /**
  * Servicio con la lógica de negocio de los géneros cinematográficos.
@@ -44,14 +45,6 @@ import com.emilio.streambox.repository.SeriesRepository;
  */
 @Service
 public class GenreService {
-
-    /**
-     * Caracteres invisibles en los extremos del nombre: separadores Unicode,
-     * controles y caracteres de formato. Se precompila porque se usa en cada
-     * alta y edición.
-     */
-    private static final Pattern EDGES =
-            Pattern.compile("^[\\p{Z}\\p{Cc}\\p{Cf}]+|[\\p{Z}\\p{Cc}\\p{Cf}]+$");
 
     /** Secuencias de separadores o controles dentro del nombre (se colapsan en un espacio). */
     private static final Pattern INNER_SPACES = Pattern.compile("[\\p{Z}\\p{Cc}]+");
@@ -280,7 +273,10 @@ public class GenreService {
      * {@link Character#isWhitespace}, que excluye a propósito los espacios
      * duros, justo el caso que permitía un nombre invisible. Los de formato se
      * quitan solo en los extremos: dentro del texto pueden tener sentido (el
-     * unidor de ancho cero de algunos emojis).</li>
+     * unidor de ancho cero de algunos emojis). El recorte lo hace
+     * {@link InvisibleEdges} en tiempo lineal: la expresión regular de antes
+     * ({@code ^[…]+|[…]+$}) era cuadrática con una racha interior de espacios
+     * (ReDoS, NV-1 de la auditoría run-3).</li>
      * <li><strong>Interior:</strong> cualquier secuencia de separadores o
      * controles se sustituye por un único espacio normal, para que
      * {@code "Ciencia  ficción"} (dos espacios) o {@code "Ciencia ficción"}
@@ -304,7 +300,7 @@ public class GenreService {
      */
     private static String normalizeName(String name) {
 
-        String collapsed = INNER_SPACES.matcher(EDGES.matcher(name).replaceAll("")).replaceAll(" ");
+        String collapsed = INNER_SPACES.matcher(InvisibleEdges.strip(name)).replaceAll(" ");
         if (collapsed.isEmpty()) {
             return collapsed;
         }

@@ -139,6 +139,9 @@ class EmailVerificationIntegrationTest {
     @AfterEach
     void cleanUp() {
         jdbc.update("DELETE FROM users WHERE email LIKE ?", "%" + DOMAIN);
+        // Las reservas de nombre se guardan en la base de datos (V13): se borran
+        // para que no pasen de un test a otro (sus dueños se van en cascada).
+        jdbc.update("DELETE FROM username_reservations");
     }
 
     // ------------------------------------------------------------------

@@ -220,12 +220,43 @@ class PostgresTitleSearchIntegrationTest extends PostgresIntegrationTestSupport 
         assertEquals(List.of("Mañana"), found);
     }
 
-    /** Lo mismo para las series: en el panel y en la búsqueda pública (con su {@code EXISTS}). */
+    /**
+     * Lo mismo para las series: en el panel y en la búsqueda pública (con su
+     * {@code EXISTS} sobre {@code episodes}).
+     *
+     * <p>
+     * <b>Por qué las series de relleno tienen episodios y se analiza también
+     * {@code episodes}.</b> La búsqueda pública une dos tablas, así que el plan
+     * depende de las estadísticas de las dos. Antes solo se analizaba
+     * {@code series} y {@code episodes} quedaba con las que le hubiera dejado
+     * autovacuum en algún momento de la ejecución (las otras clases de PostgreSQL
+     * insertan y borran episodios sin parar). Si la había analizado con uno o
+     * dos episodios, el planificador acertaba al <i>no</i> usar el índice:
+     * recorría {@code episodes} (1 fila estimada), agrupaba por
+     * {@code series_id} y buscaba esa única serie por su clave primaria
+     * ({@code pk_series}), con un coste estimado de 17,9 frente a 53–63 del
+     * índice GIN. Así fallaba el test en el CI, de forma intermitente:
+     * dependía de cuándo pasara autovacuum, no del código.
+     * </p>
+     *
+     * <p>
+     * Ahora el catálogo es el de verdad, donde casi todas las series tienen
+     * episodios (aquí 3 cada una, 6.001 en total), y las dos tablas se analizan
+     * justo antes de buscar: las estadísticas las fija el test, no autovacuum.
+     * Con esos datos recorrer {@code episodes} costaría miles de búsquedas por
+     * clave primaria, y el plan elegido es el índice GIN de {@code series} más
+     * el índice único de {@code episodes} (que empieza por {@code series_id})
+     * para el {@code EXISTS}. No se fuerza ningún plan: sigue comprobándose que
+     * el planificador elige el índice por sí mismo.
+     * </p>
+     */
     @Test
     void laBusquedaDeSeriesUsaElIndiceGin() {
         insertFiller("series", 2_000);
+        insertFillerEpisodes(3);
         saveEpisode(saveSeries("Pokémon: la serie", 2000), 1, 1);
         vacuumAnalyze("series");
+        vacuumAnalyze("episodes");
 
         assertEquals(List.of("Pokémon: la serie"), searchCountingIndexScans("idx_series_title_search", () ->
                 seriesService.getAdminSeries("pokemon", PageRequest.of(0, 10, Sort.by("title", "id")))
@@ -523,6 +554,18 @@ class PostgresTitleSearchIntegrationTest extends PostgresIntegrationTestSupport 
                         + " VALUES (?, 'd', 2000, 'i', now())";
         jdbc.batchUpdate(sql, IntStream.rangeClosed(1, rows)
                 .mapToObj(i -> new Object[] { "Título de relleno número " + i }).toList());
+    }
+
+    /**
+     * Da a cada serie ya guardada {@code perSeries} episodios (temporada 1), con
+     * un solo {@code INSERT ... SELECT}: así las series de relleno son visibles,
+     * como las de un catálogo real, y {@code episodes} tiene un tamaño
+     * proporcionado al de {@code series}.
+     */
+    private void insertFillerEpisodes(int perSeries) {
+        jdbc.update("INSERT INTO episodes (series_id, season_number, episode_number, title, duration, video_url,"
+                + " created_at) SELECT s.id, 1, n, 'Episodio de relleno', 45, 'v', now()"
+                + " FROM series s CROSS JOIN generate_series(1, ?) AS n", perSeries);
     }
 
     private JsonNode call(String endpoint, String token, String title) throws Exception {

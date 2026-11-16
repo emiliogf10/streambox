@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mockingDetails;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -24,6 +25,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.mockito.stubbing.Answer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -79,7 +81,10 @@ import tools.jackson.databind.json.JsonMapper;
  * otra petición aún no hubiera escrito ({@code findByEmail} o
  * {@code findByUsername} → vacío; {@code findAllById} → el género ya
  * borrado). El {@code INSERT} es real y
- * choca con la restricción, como en la carrera.
+ * choca con la restricción, como en la carrera. En el registro, desde la
+ * incidencia MEDIA-A el choque ya no es una violación: la cuenta se inserta con
+ * {@code ON CONFLICT DO NOTHING} y el registro repite su decisión (por eso ahí
+ * solo la primera lectura contesta vacío, {@code emptyOnFirstRead}).
  * </p>
  *
  * <p>
@@ -132,9 +137,12 @@ class IntegrityViolationTranslationIntegrationTest {
     // ------------------------------------------------------------------
 
     /**
-     * Carrera por el email: el segundo registro choca con {@code uk_users_email}
-     * y recibe el <b>mismo 202</b> que cualquier registro (antes, 409 «El correo
-     * electrónico ya está en uso», que revelaba el email). La cuenta que existe
+     * Carrera por el email: el {@code INSERT} del segundo registro choca con
+     * {@code uk_users_email} y recibe el <b>mismo 202</b> que cualquier registro
+     * (antes, 409 «El correo electrónico ya está en uso», que revelaba el
+     * email). Desde MEDIA-A el choque no es un error ({@code ON CONFLICT DO
+     * NOTHING}): el registro repite su decisión, ve la cuenta y sigue el camino
+     * «el email ya tiene cuenta». La cuenta que existe
      * es la primera y el segundo no se guarda, pero su nombre queda reservado
      * como en cualquier registro con un email que ya tiene cuenta
      * ({@code UsernameReservations}): el siguiente registro con ese nombre da
@@ -142,13 +150,14 @@ class IntegrityViolationTranslationIntegrationTest {
      *
      * <p>
      * Cada test de esta clase usa un nombre distinto por eso mismo: la reserva
-     * vive en memoria durante todo el contexto de Spring (24 h).
+     * queda 24 h en la base de datos del contexto de Spring (la limpieza de
+     * esta clase solo borra cuentas).
      * </p>
      */
     @Test
     void dosRegistrosConElMismoEmailDanAlSegundoElMismo202() throws Exception {
         User first = saveUser("primera", "carrera@test.com");
-        doReturn(Optional.empty()).when(userRepository).findByEmail("carrera@test.com");
+        emptyOnFirstRead().findByEmail("carrera@test.com");
 
         register("segunda", "carrera@test.com")
                 .andExpect(status().isAccepted())
@@ -165,7 +174,7 @@ class IntegrityViolationTranslationIntegrationTest {
     @Test
     void dosRegistrosConElMismoNombreDanAlSegundoEl409DeNombreEnUso() throws Exception {
         saveUser("carrera", "primera@test.com");
-        doReturn(Optional.empty()).when(userRepository).findByUsername("carrera");
+        emptyOnFirstRead().findByUsername("carrera");
 
         register("carrera", "segunda@test.com")
                 .andExpect(status().isConflict())
@@ -197,7 +206,7 @@ class IntegrityViolationTranslationIntegrationTest {
         DataIntegrityViolationException error = assertThrows(DataIntegrityViolationException.class,
                 () -> saveUser("tercera", email));
         assertTrue(messages(error).contains(email), "H2 debería incluir el valor duplicado en su mensaje");
-        doReturn(Optional.empty()).when(userRepository).findByEmail(email);
+        emptyOnFirstRead().findByEmail(email);
 
         Logger root = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -352,5 +361,20 @@ class IntegrityViolationTranslationIntegrationTest {
         movieRepository.deleteAll();
         genreRepository.deleteAll();
         userRepository.deleteAll();
+    }
+
+    /**
+     * Prepara una lectura del espía de {@code UserRepository} en la que solo la
+     * <b>primera</b> llamada contesta vacío: es la comprobación previa del
+     * registro, que en la carrera aún no ve la cuenta de la otra petición. Las
+     * siguientes van al repositorio real, como en la carrera de verdad: desde
+     * MEDIA-A, el {@code INSERT} con {@code ON CONFLICT DO NOTHING} no crea
+     * nada y el registro repite su decisión, que ya ve esa cuenta. (El espía
+     * envuelve un proxy de Spring Data: su respuesta por defecto es la que
+     * delega en el repositorio real.)
+     */
+    private UserRepository emptyOnFirstRead() {
+        Answer<?> real = mockingDetails(userRepository).getMockCreationSettings().getDefaultAnswer();
+        return doReturn(Optional.empty()).doAnswer(real).when(userRepository);
     }
 }

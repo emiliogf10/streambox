@@ -1,14 +1,19 @@
 package com.emilio.streambox.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,7 +40,6 @@ import com.emilio.streambox.entity.User;
 import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.exception.UserAlreadyExistsException;
 import com.emilio.streambox.repository.UserRepository;
-import com.emilio.streambox.security.ratelimit.RateLimitProperties;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
@@ -61,16 +65,19 @@ class UserServiceTest {
     private UserRepository userRepository;
     private UserService service;
     private UsernameReservations reservations;
+    private InMemoryUsernameReservationRepository reservationRepository;
     private EmailVerificationService emailVerificationService;
     private User user;
 
     @BeforeEach
     void setUp() {
         userRepository = mock(UserRepository.class);
-        RateLimitProperties rateLimit = mock(RateLimitProperties.class);
-        when(rateLimit.maxKeys()).thenReturn(1000);
-        reservations = new UsernameReservations(new EmailProperties("a@b.test", Duration.ofHours(24), Duration.ofHours(1), false,
-                new EmailProperties.Resend(3, Duration.ofHours(1), Duration.ZERO)), rateLimit, Clock.systemUTC());
+        // Espía sobre el doble en memoria: para comprobar el orden de las llamadas.
+        reservationRepository = spy(new InMemoryUsernameReservationRepository());
+        reservations = new UsernameReservations(reservationRepository,
+                new EmailProperties("a@b.test", Duration.ofHours(24), Duration.ofHours(1), false,
+                        new EmailProperties.Resend(3, Duration.ofHours(1), Duration.ZERO)),
+                Clock.systemUTC());
         emailVerificationService = mock(EmailVerificationService.class);
         // Por defecto, el bloqueo devuelve la misma cuenta (nadie la cambió entre medias).
         when(emailVerificationService.lockForUpdate(any()))
@@ -147,6 +154,58 @@ class UserServiceTest {
         when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         assertEquals("bea", service.updateProfile(USER_ID, request("bea")).username());
+        // La reserva de antes no era un cerrojo de este cambio: sigue ahí.
+        assertTrue(reservations.isReserved("bea"));
+    }
+
+    // ------------------------------------------------------------------
+    // Carrera con el registro: el nombre se bloquea lo primero
+    // ------------------------------------------------------------------
+
+    /**
+     * El nombre se bloquea ({@code lock}) <b>antes</b> de mirar si está
+     * reservado o quién lo tiene: si se mirara antes, la reserva sin confirmar
+     * de un registro simultáneo pasaría desapercibida (la carrera en sí se
+     * prueba contra PostgreSQL en {@code PostgresUsernameRaceIntegrationTest}).
+     */
+    @Test
+    void elNombreSeBloqueaAntesDeMirarQuienLoTiene() {
+        when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateProfile(USER_ID, request("bea"));
+
+        InOrder order = inOrder(reservationRepository, userRepository);
+        order.verify(reservationRepository).lock(eq("bea"), any(), any());
+        order.verify(userRepository).findByUsername("bea");
+        order.verify(userRepository).saveAndFlush(any());
+        order.verify(reservationRepository).deleteLock("bea");
+    }
+
+    /**
+     * Un cambio de nombre no deja ninguna reserva: la fila que hizo de cerrojo
+     * se quita antes de confirmar. Si la cuenta vuelve a cambiarse el nombre,
+     * el anterior queda libre para los demás en el acto.
+     */
+    @Test
+    void unCambioDeNombreNoDejaNingunaReserva() {
+        when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateProfile(USER_ID, request("bea"));
+        service.updateProfile(USER_ID, request("carla"));
+
+        assertEquals(0, reservationRepository.size());
+        assertFalse(reservations.isReserved("bea"));
+        assertFalse(reservations.isReserved("ana"));
+    }
+
+    /** Sin cambio de nombre (solo el avatar) no se bloquea ningún nombre. */
+    @Test
+    void soloElAvatarNoBloqueaNingunNombre() {
+        when(userRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.updateProfile(USER_ID, avatarRequest(null, text("cat")));
+
+        verify(reservationRepository, never()).lock(anyString(), any(), any());
     }
 
     // ------------------------------------------------------------------
@@ -262,6 +321,24 @@ class UserServiceTest {
     })
     void normalizaExtremosInvisiblesYEspaciosInterioresSinTocarMayusculas(String raw, String expected) {
         assertEquals(expected, UserService.normalizeUsername(raw));
+    }
+
+    /**
+     * Regresión de ReDoS (NV-1 de la auditoría run-3): los extremos se
+     * recortaban con la misma expresión cuadrática que la política de
+     * contraseñas (unos 25 s con 60.000 espacios interiores). Hoy el nombre
+     * llega ya acotado por {@code @Size}, pero el recorte no debe depender de
+     * ello: se rechaza por longitud en tiempo lineal.
+     */
+    @Test
+    void unNombreEnormeSeRechazaPorLongitudEnTiempoLineal() {
+        // Normalizado queda "a " + 50 letras: 52 caracteres, más del máximo de 50.
+        String huge = "a" + " ".repeat(60_000) + "b".repeat(50);
+
+        InvalidParameterException error = assertTimeoutPreemptively(Duration.ofSeconds(2),
+                () -> assertThrows(InvalidParameterException.class, () -> UserService.normalizeUsername(huge)));
+
+        assertEquals("username", error.getParameter());
     }
 
     @ParameterizedTest

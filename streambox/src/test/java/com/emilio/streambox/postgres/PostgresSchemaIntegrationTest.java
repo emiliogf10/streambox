@@ -34,7 +34,7 @@ import jakarta.persistence.EntityManagerFactory;
  *
  * <p>
  * Que el contexto de Spring arranque ya demuestra dos cosas: que todas las
- * migraciones ({@code V1}..{@code V12}) se aplican en PostgreSQL desde cero y que Hibernate
+ * migraciones ({@code V1}..{@code V13}) se aplican en PostgreSQL desde cero y que Hibernate
  * ({@code ddl-auto=validate}) acepta las entidades contra ese esquema. Aquí se
  * comprueba además lo que H2 no puede garantizar: los tipos reales del catálogo
  * del sistema ({@code information_schema}, {@code pg_catalog}), las políticas de
@@ -72,6 +72,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         jdbc.update("DELETE FROM users");
         jdbc.update("DELETE FROM movies");
         jdbc.update("DELETE FROM genres");
+        jdbc.update("DELETE FROM username_reservations"); // V13: sus dueños se van en cascada
     }
 
     // ------------------------------------------------------------------
@@ -79,7 +80,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10, V11 y V12 (sin
+     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10, V11, V12 y V13 (sin
      * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
      * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
@@ -89,7 +90,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -675,6 +676,105 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                 "SELECT genre_id FROM user_favorite_genres WHERE user_id = ?", Long.class, userId));
         jdbc.update("DELETE FROM users WHERE id = ?", userId);
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM user_favorite_genres", Integer.class));
+    }
+
+    // ------------------------------------------------------------------
+    // V13: reservas de nombre de usuario (username_reservations y sus dueños)
+    // ------------------------------------------------------------------
+
+    /**
+     * Esquema de la V13 tal como lo ve PostgreSQL: tipos reales
+     * ({@code varchar(50)} como {@code users.username}, {@code varchar(64)},
+     * {@code timestamptz}), todo obligatorio, las dos claves primarias, la
+     * única clave foránea (dueños hacia su reserva, en cascada; ninguna hacia
+     * {@code users}, para que la reserva sobreviva al borrado de una cuenta),
+     * el índice de la limpieza y los dos {@code CHECK}. Sus consultas se
+     * prueban en {@code PostgresUsernameReservationIntegrationTest}.
+     */
+    @Test
+    void lasTablasDeReservasTienenElEsquemaEsperado() {
+        Map<String, String> columns = new java.util.TreeMap<>();
+        jdbc.queryForList("SELECT table_name, column_name, data_type, character_maximum_length, is_nullable"
+                        + " FROM information_schema.columns WHERE table_schema = 'public'"
+                        + " AND table_name IN ('username_reservations', 'username_reservation_owners')")
+                .forEach(r -> columns.put(r.get("table_name") + "." + r.get("column_name"), r.get("data_type")
+                        + (r.get("character_maximum_length") == null ? "" : "(" + r.get("character_maximum_length") + ")")
+                        + ("YES".equals(r.get("is_nullable")) ? " NULL" : " NOT NULL")));
+        assertEquals(Map.of(
+                "username_reservations.username", "character varying(50) NOT NULL",
+                "username_reservations.created_at", "timestamp with time zone NOT NULL",
+                "username_reservations.expires_at", "timestamp with time zone NOT NULL",
+                "username_reservation_owners.username", "character varying(50) NOT NULL",
+                "username_reservation_owners.email_hash", "character varying(64) NOT NULL"), columns);
+        assertEquals(List.of("username"), primaryKeyColumns("username_reservations"));
+        assertEquals(List.of("username", "email_hash"), primaryKeyColumns("username_reservation_owners"));
+
+        List<Map<String, Object>> foreignKeys = jdbc.queryForList(
+                "SELECT conname, confrelid::regclass::text AS target, confdeltype FROM pg_constraint"
+                        + " WHERE contype = 'f' AND conrelid IN"
+                        + " ('public.username_reservations'::regclass, 'public.username_reservation_owners'::regclass)");
+        assertEquals(1, foreignKeys.size(), "" + foreignKeys);
+        assertEquals("fk_username_reservation_owners_reservation", foreignKeys.get(0).get("conname"));
+        assertEquals("username_reservations", foreignKeys.get(0).get("target"));
+        assertEquals("c", String.valueOf(foreignKeys.get(0).get("confdeltype")), "ON DELETE CASCADE");
+
+        Map<String, String> definitions = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public'")
+                .forEach(r -> definitions.put((String) r.get("indexname"), (String) r.get("indexdef")));
+        assertIndex(definitions, "idx_username_reservations_expires_at",
+                "ON public.username_reservations USING btree (expires_at)");
+
+        Set<String> checks = Set.copyOf(jdbc.queryForList(
+                "SELECT conname FROM pg_constraint WHERE contype = 'c' AND connamespace = 'public'::regnamespace",
+                String.class));
+        assertTrue(checks.containsAll(Set.of("ck_username_reservations_expires_at",
+                "ck_username_reservation_owners_email_hash_format")), "checks: " + checks);
+    }
+
+    /**
+     * Con el código real de PostgreSQL: un nombre repetido o un dueño repetido
+     * violan la clave primaria ({@code 23505}), un dueño sin reserva la clave
+     * foránea ({@code 23503}), una caducidad que no va después de la creación
+     * o un hash que no es SHA-256 hexadecimal en minúsculas, el {@code CHECK}
+     * ({@code 23514}), y las fechas son obligatorias ({@code 23502}). Borrar
+     * la reserva se lleva a sus dueños, y borrar un usuario no toca nada.
+     */
+    @Test
+    void laBaseDeDatosRechazaReservasInvalidasYBorrarlaArrastraASusDuenos() {
+        java.time.OffsetDateTime t0 = java.time.OffsetDateTime.parse("2026-11-12T10:00:00Z");
+        String reservation = "INSERT INTO username_reservations (username, created_at, expires_at) VALUES (?, ?, ?)";
+        String owner = "INSERT INTO username_reservation_owners (username, email_hash) VALUES (?, ?)";
+        String hashA = "a".repeat(64);
+        long userId = insertUser("reservado", "reservado@test.com");
+        jdbc.update(reservation, "reservado", t0, t0.plusDays(1));
+        jdbc.update(owner, "reservado", hashA);
+        jdbc.update(owner, "reservado", "0123456789abcdef".repeat(4));
+
+        assertEquals(UNIQUE_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(reservation, "reservado", t0.plusHours(1), t0.plusDays(2)))));
+        assertEquals(UNIQUE_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(owner, "reservado", hashA))));
+        assertEquals(FOREIGN_KEY_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(owner, "sinreserva", hashA))));
+        DataIntegrityViolationException expiry = assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(reservation, "fechas", t0, t0));
+        assertEquals(CHECK_VIOLATION, sqlState(expiry));
+        assertTrue(expiry.getMessage().contains("ck_username_reservations_expires_at"), expiry.getMessage());
+        for (String badHash : List.of("reservado@test.com", "A".repeat(64), "a".repeat(63) + "g")) {
+            DataIntegrityViolationException format = assertThrows(DataIntegrityViolationException.class,
+                    () -> jdbc.update(owner, "reservado", badHash), badHash);
+            assertEquals(CHECK_VIOLATION, sqlState(format), badHash);
+            assertTrue(format.getMessage().contains("ck_username_reservation_owners_email_hash_format"),
+                    format.getMessage());
+        }
+        assertEquals(NOT_NULL_VIOLATION, sqlState(assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(reservation, "sinfecha", t0, null))));
+
+        jdbc.update("DELETE FROM users WHERE id = ?", userId);
+        assertEquals(2, count("username_reservation_owners"), "la reserva no depende de la cuenta");
+
+        jdbc.update("DELETE FROM username_reservations WHERE username = 'reservado'");
+        assertEquals(0, count("username_reservation_owners"));
     }
 
     // ------------------------------------------------------------------

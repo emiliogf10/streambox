@@ -190,27 +190,30 @@ class PostgresIntegrityRaceTranslationQaIntegrationTest extends PostgresIntegrat
 
     /**
      * Dos registros con el mismo email: el segundo recibe el <b>mismo 202</b>
-     * que cualquier registro (no revela que el email acaba de registrarse). El
-     * servicio lo decide por el nombre de la restricción
-     * ({@code uk_users_email}), que en PostgreSQL llega sin el prefijo de
-     * esquema ni el sufijo de índice de H2: si la extracción fallara, la
-     * violación se relanzaría (500).
+     * que cualquier registro (no revela que el email acaba de registrarse).
+     * Desde MEDIA-A, su {@code INSERT ... ON CONFLICT DO NOTHING} no crea nada
+     * (sin error) y el registro repite su decisión, que ya ve la cuenta: aquí
+     * se comprueba con PostgreSQL de verdad que ese choque no acaba en 500.
      */
     @Test
     void registroConEmailEnCarreraDaElMismo202() throws Exception {
         saveUser("primera", Role.USER);
-        doReturn(Optional.empty()).when(spiedUsers).findByEmail("primera@test.com");
+        emptyOnFirstRead().findByEmail("primera@test.com");
 
         mockMvc.perform(json(post("/api/users"), registration("segunda", "primera@test.com"), null))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.message").value(AcceptedResponse.REGISTRATION_MESSAGE));
     }
 
-    /** Dos registros con el mismo nombre: 409 con el mensaje del <b>nombre</b> ({@code uk_users_username}). */
+    /**
+     * Dos registros con el mismo nombre ({@code uk_users_username}): la
+     * decisión repetida ve al dueño del nombre y da el 409 con el mensaje del
+     * <b>nombre</b>.
+     */
     @Test
     void registroConNombreEnCarreraDa409DeNombre() throws Exception {
         saveUser("disputado", Role.USER);
-        doReturn(Optional.empty()).when(spiedUsers).findByUsername("disputado");
+        emptyOnFirstRead().findByUsername("disputado");
 
         mockMvc.perform(json(post("/api/users"), registration("disputado", "otra@test.com"), null))
                 .andExpect(status().isConflict())
@@ -396,5 +399,20 @@ class PostgresIntegrityRaceTranslationQaIntegrationTest extends PostgresIntegrat
             builder.contentType(MediaType.APPLICATION_JSON).content(body.getBytes(StandardCharsets.UTF_8));
         }
         return builder;
+    }
+
+    /**
+     * Prepara una lectura del espía de {@code UserRepository} en la que solo la
+     * <b>primera</b> llamada contesta vacío: es la comprobación previa del
+     * registro, que en la carrera aún no ve la cuenta de la otra petición. Las
+     * siguientes van al repositorio real, como en la carrera de verdad: desde
+     * MEDIA-A, el {@code INSERT} con {@code ON CONFLICT DO NOTHING} no crea
+     * nada y el registro repite su decisión, que ya ve esa cuenta. (El espía
+     * envuelve un proxy de Spring Data: su respuesta por defecto es la que
+     * delega en el repositorio real.)
+     */
+    private UserRepository emptyOnFirstRead() {
+        Answer<?> real = mockingDetails(spiedUsers).getMockCreationSettings().getDefaultAnswer();
+        return doReturn(Optional.empty()).doAnswer(real).when(spiedUsers);
     }
 }

@@ -47,7 +47,7 @@ import com.emilio.streambox.support.TestAccounts;
  * <ul>
  * <li>nombre de usuario y nombre de género: el servicio convierte los
  * caracteres de control interiores en un espacio y quita los de los extremos
- * ({@code INNER_SPACES}/{@code EDGES}); se guarda sin NUL;</li>
+ * ({@code INNER_SPACES}/{@code InvisibleEdges}); se guarda sin NUL;</li>
  * <li>email: {@code @Email} no admite el NUL (ni en el registro ni en el
  * login), así que es un 400 antes de consultar nada;</li>
  * <li>contraseña: nunca llega a la base de datos (solo su hash BCrypt), así

@@ -239,13 +239,31 @@ public class EmailVerificationService {
      * Emite el primer token de una cuenta recién creada y programa su correo.
      * Sin límite: es el correo del propio registro.
      *
-     * @param user cuenta (ya guardada en esta transacción)
+     * <p>
+     * <b>Con la fecha de alta de la cuenta, no con el reloj.</b> Que el primer
+     * token sea de cuando se creó la cuenta ({@link #REGISTRATION_TOKEN_WINDOW})
+     * es lo que distingue una pendiente creada por el registro de una heredada
+     * ({@link #isPendingCreatedByRegistration}). El registro toma su «ahora»
+     * antes de esperar el cerrojo del nombre y los bloqueos de filas; si el
+     * token usara {@code clock.instant()} y esas esperas pasaran de
+     * {@link #REGISTRATION_TOKEN_WINDOW}, la cuenta contaría como heredada para
+     * siempre (nunca sustituible ni liberaría su nombre). Con el mismo instante
+     * la condición se cumple por construcción. Efecto secundario buscado: el
+     * enlace caduca a las 24 h del alta, igual que la reserva del nombre
+     * ({@link UsernameReservations}) y el nombre de la pendiente
+     * ({@link #releasesUsername}). Los demás emisores (reenvío, «He olvidado mi
+     * contraseña») siguen usando el reloj.
+     * </p>
+     *
+     * @param user      cuenta (ya guardada en esta transacción)
+     * @param createdAt su fecha de alta ({@code users.created_at}), que será
+     *                  también la de emisión del token
      * @throws org.springframework.transaction.IllegalTransactionStateException
      *         si no hay una transacción en curso
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void issueForNewAccount(User user) {
-        issue(user, clock.instant());
+    public void issueForNewAccount(User user, Instant createdAt) {
+        issue(user, createdAt);
     }
 
     /**
@@ -359,10 +377,19 @@ public class EmailVerificationService {
      * </p>
      *
      * <p>
-     * La fecha de alta la pone Hibernate ({@code @CreationTimestamp}, hora del
-     * sistema) en la misma transacción en la que se guardaría la reserva, así
-     * que las dos caducan con milisegundos de diferencia; la latencia de la
-     * red ya es mayor que eso.
+     * <b>Mismo instante que la reserva</b> (incidencia BAJA-A). El registro
+     * crea la cuenta con {@code created_at} igual al instante con el que
+     * reservó su nombre ({@link UsernameReservations#reserve(String, String,
+     * java.time.Instant)}), así que esta regla y la caducidad de la reserva
+     * cambian a la vez: con {@code <=} aquí y {@code expires_at > now} allí,
+     * en {@code created_at + 24 h} los dos dejan el nombre libre. Antes, la
+     * fecha de alta la ponía {@code @CreationTimestamp} unos milisegundos
+     * después (y con la hora del sistema, no con el {@code Clock}): con un
+     * email nuevo, el nombre seguía ocupado un poco más que con uno
+     * registrado. Se prefirió esto a restar aquí un margen fijo: con el mismo
+     * instante la igualdad es exacta y no hay una constante que justificar.
+     * Las cuentas creadas de otra forma (heredadas, administradores) no
+     * llegan a esta comparación o no tienen reserva con la que coincidir.
      * </p>
      *
      * @param user cuenta (con la fila ya bloqueada en esta transacción)
@@ -374,7 +401,8 @@ public class EmailVerificationService {
         if (!isPendingCreatedByRegistration(user)) {
             return false;
         }
-        Instant releasedAt = user.getCreatedAt().plus(emailProperties.verificationTtl());        return !releasedAt.isAfter(clock.instant());
+        Instant releasedAt = user.getCreatedAt().plus(emailProperties.verificationTtl());
+        return !releasedAt.isAfter(clock.instant());
     }
 
     /**
@@ -389,7 +417,7 @@ public class EmailVerificationService {
      * pendiente caducada, pasadas 24 h «Editar perfil» respondería 409 con el
      * nombre de un registro hecho con un email nuevo (la pendiente sigue en la
      * base de datos) y 200 con el de uno hecho con un email que ya tenía cuenta
-     * (su reserva en memoria, {@link UsernameReservations}, ya caducó): un
+     * (su reserva, {@link UsernameReservations}, ya caducó): un
      * oráculo de emails registrados. Aplicando la misma regla, los dos casos
      * dan 200.
      * </p>

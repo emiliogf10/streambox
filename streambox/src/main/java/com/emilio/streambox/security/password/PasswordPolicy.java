@@ -4,9 +4,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import com.emilio.streambox.validation.InvisibleEdges;
 
 /**
  * Política de contraseñas de las cuentas <b>nuevas</b>: único sitio donde están
@@ -68,9 +69,10 @@ import java.util.stream.Stream;
  * de ancho cero ({@code U+200B}) o ideográficos ({@code U+3000}) pasaba la
  * lista de comunes, aunque para un atacante (y para quien la ve escrita) es la
  * misma contraseña. Se quitan los separadores Unicode ({@code \p{Z}}), los
- * controles ({@code \p{Cc}}) y los caracteres de formato ({@code \p{Cf}}), la
- * misma regla que aplica {@code GenreService} a los nombres de género. Lo que
- * queda <i>dentro</i> de la contraseña no se toca.
+ * controles ({@code \p{Cc}}) y los caracteres de formato ({@code \p{Cf}}), con
+ * {@link InvisibleEdges}, la misma regla que aplican {@code GenreService} a los
+ * nombres de género y {@code UserService} a los de usuario. Lo que queda
+ * <i>dentro</i> de la contraseña no se toca.
  * </p>
  *
  * <h2>Prioridad</h2>
@@ -103,6 +105,32 @@ public final class PasswordPolicy {
      */
     public static final int MIN_PERSONAL_DATA_LENGTH = 4;
 
+    /**
+     * Longitud máxima (tal como llega, antes de normalizar) del usuario o de la
+     * parte local del email que se compara con la contraseña; por encima no se
+     * mira.
+     *
+     * <p>
+     * <b>Por qué.</b> El registro anónimo llega aquí con esos datos
+     * <b>sin acotar</b>: {@link ValidPassword} es una restricción de clase y
+     * Bean Validation la evalúa aunque ya hayan fallado los {@code @Size} del
+     * nombre (50) y del email (100), porque el proyecto no usa
+     * {@code @GroupSequence} ni {@code fail_fast}. Con un cuerpo de 64 KB eso
+     * eran 64.000 caracteres que normalizar por campo (ReDoS, NV-1 de la
+     * auditoría run-3). La normalización ya es lineal ({@link
+     * com.emilio.streambox.validation.InvisibleEdges}); este tope es una
+     * segunda barrera, por si algún día vuelve a haber algo costoso aquí.
+     * </p>
+     *
+     * <p>
+     * No cambia nada para un dato válido: 320 es más que cualquier nombre (50)
+     * o email (100) que la aplicación acepta y que el máximo teórico de un
+     * email (64 + 1 + 255). Un dato más largo ya es inválido por su
+     * {@code @Size} y la petición se rechaza igualmente.
+     * </p>
+     */
+    public static final int MAX_PERSONAL_DATA_INPUT_LENGTH = 320;
+
     /** La contraseña no se ha enviado. */
     public static final String REQUIRED_MESSAGE = "La contraseña es obligatoria";
 
@@ -121,14 +149,6 @@ public final class PasswordPolicy {
     /** Contiene el nombre de usuario o la parte local del email. */
     public static final String PERSONAL_DATA_MESSAGE =
             "La contraseña no puede contener tu nombre de usuario ni tu email.";
-
-    /**
-     * Caracteres invisibles en los extremos: separadores Unicode, controles y
-     * caracteres de formato (la misma expresión que {@code GenreService}). Se
-     * precompila porque se usa en cada registro.
-     */
-    private static final Pattern EDGES =
-            Pattern.compile("^[\\p{Z}\\p{Cc}\\p{Cf}]+|[\\p{Z}\\p{Cc}\\p{Cf}]+$");
 
     /**
      * Contraseñas comunes, ya normalizadas (sin caracteres invisibles en los
@@ -307,6 +327,12 @@ public final class PasswordPolicy {
      * para buscar algo dentro de ella.
      * </p>
      *
+     * <p>
+     * Un usuario o una parte local de más de
+     * {@value #MAX_PERSONAL_DATA_INPUT_LENGTH} caracteres no se compara (ver
+     * esa constante): ya es inválido y así su tamaño no cuesta CPU.
+     * </p>
+     *
      * @param password contraseña (no {@code null})
      * @param username nombre de usuario (puede ser {@code null})
      * @param email    email (puede ser {@code null}; si no tiene {@code @} se
@@ -325,7 +351,9 @@ public final class PasswordPolicy {
     }
 
     private static boolean containsPart(String lowerPassword, String part) {
-        if (part == null) {
+        // Un dato más largo que el tope ya es inválido por su @Size: no se gasta
+        // CPU en normalizarlo (ver MAX_PERSONAL_DATA_INPUT_LENGTH).
+        if (part == null || part.length() > MAX_PERSONAL_DATA_INPUT_LENGTH) {
             return false;
         }
         String normalizedPart = normalize(part);
@@ -342,8 +370,13 @@ public final class PasswordPolicy {
         return at >= 0 ? email.substring(0, at) : email;
     }
 
-    /** Quita los caracteres invisibles de los extremos y pasa a minúsculas (ver la clase). */
+    /**
+     * Quita los caracteres invisibles de los extremos y pasa a minúsculas (ver
+     * la clase). El recorte es lineal, sin expresión regular: la anterior
+     * ({@code ^[…]+|[…]+$}) era cuadrática con una racha interior de espacios
+     * (ver {@link InvisibleEdges}).
+     */
     private static String normalize(String value) {
-        return EDGES.matcher(value).replaceAll("").toLowerCase(Locale.ROOT);
+        return InvisibleEdges.strip(value).toLowerCase(Locale.ROOT);
     }
 }

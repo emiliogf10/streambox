@@ -93,8 +93,8 @@ import jakarta.servlet.http.Cookie;
  * <p>
  * Sin {@code @Transactional}: los correos salen tras el commit. Los usuarios
  * del dominio {@value #DOMAIN} se borran antes y después de cada test, y los
- * nombres llevan el sufijo del caso porque las reservas de nombre viven en
- * memoria durante todo el contexto. Reloj ajustable para caducar enlaces y
+ * nombres llevan el sufijo del caso porque las reservas de nombre quedan en
+ * la base de datos del contexto. Reloj ajustable para caducar enlaces y
  * reservas sin esperar.
  * </p>
  */
@@ -147,6 +147,9 @@ class EmailVerificationQaIntegrationTest {
     @AfterEach
     void cleanUp() {
         jdbc.update("DELETE FROM users WHERE email LIKE ?", "%" + DOMAIN);
+        // Las reservas de nombre se guardan en la base de datos (V13): se borran
+        // para que no pasen de un test a otro (sus dueños se van en cascada).
+        jdbc.update("DELETE FROM username_reservations");
         if (movieId != null) {
             movieRepository.deleteById(movieId);
             movieId = null;
