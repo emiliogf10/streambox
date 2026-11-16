@@ -20,7 +20,7 @@
 # Vitest 5 exigen Node ^22.12 o ^24 (campo "engines" de sus package.json).
 # Versión fijada hasta el parche de Node y la de Alpine para que la imagen
 # se construya igual hoy que dentro de seis meses.
-FROM node:24.22.2-alpine3.24 AS build
+FROM node:24.22.3-alpine3.24 AS build
 
 WORKDIR /app
 
