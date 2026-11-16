@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -149,12 +150,12 @@ class AuthenticationServiceTest {
         LoginAttempt deviceAttempt = new LoginAttempt(EMAIL, IP, false, new Reservation(2, 1), "dispositivo");
         IssuedDeviceToken renewed = new IssuedDeviceToken("v1.nueva.firma", java.time.Duration.ofDays(30));
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(verified));
-        when(deviceCookieService.deviceIdFor("cookie", verified)).thenReturn(Optional.of("dispositivo"));
+        when(deviceCookieService.deviceIdForAny(List.of("cookie"), verified)).thenReturn(Optional.of("dispositivo"));
         when(loginAttemptService.reserveAttempt(EMAIL, IP, "dispositivo")).thenReturn(deviceAttempt);
         when(passwordEncoder.matches(PASSWORD, verified.getPassword())).thenReturn(true);
         when(deviceCookieService.issue(42L, 0, "dispositivo")).thenReturn(renewed);
 
-        assertEquals(renewed, service.login(EMAIL, PASSWORD, IP, "cookie").deviceToken());
+        assertEquals(renewed, service.login(EMAIL, PASSWORD, IP, List.of("cookie")).deviceToken());
 
         verify(loginAttemptService).recordSuccess(deviceAttempt);
         verify(loginAttemptService, never()).reserveAttempt(EMAIL, IP, null);
@@ -170,9 +171,9 @@ class AuthenticationServiceTest {
         when(passwordEncoder.matches(PASSWORD, "hash-falso")).thenReturn(false);
         when(loginAttemptService.recordFailure(attempt)).thenReturn(4);
 
-        assertThrows(InvalidCredentialsException.class, () -> service.login(EMAIL, PASSWORD, IP, "cookie"));
+        assertThrows(InvalidCredentialsException.class, () -> service.login(EMAIL, PASSWORD, IP, List.of("cookie")));
 
-        verify(deviceCookieService).deviceIdFor("cookie", null);
+        verify(deviceCookieService).deviceIdForAny(List.of("cookie"), null);
         verify(loginAttemptService).reserveAttempt(EMAIL, IP, null);
         verify(deviceCookieService, never()).issue(any(), anyInt(), any());
     }

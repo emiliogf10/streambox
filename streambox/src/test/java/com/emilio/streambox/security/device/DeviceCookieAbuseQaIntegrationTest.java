@@ -28,7 +28,6 @@ import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -325,19 +324,16 @@ class DeviceCookieAbuseQaIntegrationTest {
      * que sin cookie.
      *
      * <p>
-     * <b>Falla hoy (incidencia QA-DC-1):</b> {@code @CookieValue} decodifica
-     * el valor como si fuera parte de una URL
+     * <b>Regresión de la incidencia QA-DC-1:</b> con {@code @CookieValue}, que
+     * decodifica el valor como si fuera parte de una URL
      * ({@code ServletCookieValueMethodArgumentResolver} →
-     * {@code UrlPathHelper.decodeRequestString}), y con una secuencia
-     * inválida lanza {@code IllegalArgumentException("Invalid encoded
-     * sequence")} antes de llegar al servicio: 500 {@code INTERNAL_ERROR} y una
-     * traza ERROR en el log por cada petición, sin autenticar. Lo mismo pasa
-     * con {@code streambox_refresh} en refresh y logout (anterior a este
-     * cambio; ver {@code DeviceCookieTomcatQaIntegrationTest}).
+     * {@code UrlPathHelper.decodeRequestString}), una secuencia inválida
+     * lanzaba {@code IllegalArgumentException("Invalid encoded sequence")}
+     * antes de llegar al servicio: 500 {@code INTERNAL_ERROR} y una traza ERROR
+     * en el log por cada petición, sin autenticar. Ahora el controlador lee
+     * las cookies sin decodificar ({@code RequestCookies}).
      * </p>
      */
-    @Disabled("QA-DC-1: @CookieValue URL-decodifica la cookie y un '%' inválido da 500 INTERNAL_ERROR; "
-            + "pendiente del agente security (leer la cookie sin decodificar)")
     @ParameterizedTest
     @ValueSource(strings = { "%", "%zz", "v1.%%%.%%%", "%E0%A4%A" })
     void unaSecuenciaPorcentualInvalidaEnLaCookieNoDa500(String value) throws Exception {
@@ -381,9 +377,8 @@ class DeviceCookieAbuseQaIntegrationTest {
     }
 
     /**
-     * Con la basura delante de la válida: hoy se lee solo la primera
-     * ({@code @CookieValue} toma la primera con ese nombre), así que el
-     * titular queda bloqueado aunque su navegador tenga la cookie válida.
+     * Con la basura delante de la válida, se usa la válida: el titular entra
+     * pese al bloqueo de la cuenta.
      *
      * <p>
      * Importa porque el navegador ordena las cookies con el mismo nombre por
@@ -396,11 +391,10 @@ class DeviceCookieAbuseQaIntegrationTest {
      * </p>
      *
      * <p>
-     * <b>Falla hoy (incidencia QA-DC-2, BAJA):</b> 429 {@code ACCOUNT_LOCKED}.
+     * <b>Regresión de la incidencia QA-DC-2 (BAJA):</b> cuando solo se miraba
+     * la primera ({@code @CookieValue}), daba 429 {@code ACCOUNT_LOCKED}.
      * </p>
      */
-    @Disabled("QA-DC-2: con dos cookies streambox_device solo se mira la primera; una plantada delante "
-            + "anula la legítima. Pendiente de decisión del agente security")
     @Test
     void conCookiesDuplicadasLaBasuraDelanteNoAnulaLaValida() throws Exception {
         String email = createUser(true).getEmail();
@@ -411,6 +405,62 @@ class DeviceCookieAbuseQaIntegrationTest {
         mockMvc.perform(loginRequest(email, PASSWORD, ip)
                         .cookie(new Cookie(DEVICE, "basura-plantada"), new Cookie(DEVICE, valid)))
                 .andExpect(status().isNoContent());
+    }
+
+    /**
+     * Tope de candidatas ({@value DeviceCookieService#MAX_CANDIDATES}): con la
+     * cuenta bloqueada, la cookie válida en la sexta posición se ignora y la
+     * respuesta es idéntica a la de sin cookie; en la quinta, cuenta y el
+     * titular entra. Falla si se quita el tope (la sexta también valdría) y
+     * sin el arreglo de QA-DC-2 (la quinta no valdría).
+     */
+    @Test
+    void soloSeMiranLasCincoPrimerasCookiesDeDispositivo() throws Exception {
+        String email = createUser(true).getEmail();
+        String valid = deviceCookie(login(email, PASSWORD, nextIp(), null).andReturn());
+        String ip = nextIp();
+        lockFrom(email, ip);
+
+        MvcResult without = login(email, PASSWORD, ip, null).andReturn();
+        MvcResult validSixth = mockMvc.perform(loginRequest(email, PASSWORD, ip)
+                        .cookie(deviceCookies(DeviceCookieService.MAX_CANDIDATES + 1, valid)))
+                .andReturn();
+        assertEquals(429, validSixth.getResponse().getStatus());
+        assertSameResponse(without, validSixth);
+
+        mockMvc.perform(loginRequest(email, PASSWORD, ip)
+                        .cookie(deviceCookies(DeviceCookieService.MAX_CANDIDATES, valid)))
+                .andExpect(status().isNoContent());
+    }
+
+    /**
+     * QA-DC-1 en las rutas del refresh token (el defecto era anterior a la
+     * cookie de dispositivo): un {@code %} mal formado en
+     * {@code streambox_refresh} da exactamente la respuesta de sin cookie, el
+     * 204 del logout (con las dos cookies borradas) y el 401
+     * {@code SESSION_EXPIRED} del refresh, nunca un 500.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = { "%zz", "%", "%E0%A4%A" })
+    void unaSecuenciaPorcentualInvalidaEnElRefreshTokenNoDa500(String value) throws Exception {
+        for (String path : List.of("/api/auth/logout", "/api/auth/refresh")) {
+            MockHttpServletResponse without = mockMvc.perform(post(path)
+                            .with(remoteAddr(nextIp()))
+                            .header("X-Requested-With", "StreamBox"))
+                    .andReturn().getResponse();
+            MockHttpServletResponse with = mockMvc.perform(post(path)
+                            .with(remoteAddr(nextIp()))
+                            .header("X-Requested-With", "StreamBox")
+                            .cookie(new Cookie(AuthCookieService.REFRESH_COOKIE_NAME, value)))
+                    .andReturn().getResponse();
+
+            assertEquals(path.endsWith("logout") ? 204 : 401, with.getStatus(), path + " " + with.getContentAsString());
+            assertEquals(without.getStatus(), with.getStatus(), path);
+            assertEquals(without.getHeaders(HttpHeaders.SET_COOKIE), with.getHeaders(HttpHeaders.SET_COOKIE), path);
+            if (with.getStatus() == 401) {
+                assertEquals(body(without), body(with), path);
+            }
+        }
     }
 
     /**
@@ -596,6 +646,16 @@ class DeviceCookieAbuseQaIntegrationTest {
         assertNotNull(cookie, "la respuesta no entrega la cookie " + name + ": "
                 + result.getResponse().getHeaders(HttpHeaders.SET_COOKIE));
         return cookie.getValue();
+    }
+
+    /** {@code count} cookies {@code streambox_device} basura con la válida en la última posición. */
+    private static Cookie[] deviceCookies(int count, String valid) {
+        Cookie[] cookies = new Cookie[count];
+        for (int i = 0; i < count - 1; i++) {
+            cookies[i] = new Cookie(DEVICE, "plantada-" + i);
+        }
+        cookies[count - 1] = new Cookie(DEVICE, valid);
+        return cookies;
     }
 
     private static List<String> setCookies(MockHttpServletResponse response) {

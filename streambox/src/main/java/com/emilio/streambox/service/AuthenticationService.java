@@ -1,5 +1,7 @@
 package com.emilio.streambox.service;
 
+import java.util.List;
+
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -131,8 +133,10 @@ public class AuthenticationService {
      * </ul>
      *
      * <p>
-     * <b>Cookie de dispositivo.</b> Si {@code deviceCookie} es válida para la
-     * cuenta de ese email, el intento usa el contador propio del dispositivo
+     * <b>Cookie de dispositivo.</b> Si alguna de las {@code deviceCookies} es
+     * válida para la cuenta de ese email (la primera que lo sea, entre las
+     * {@value DeviceCookieService#MAX_CANDIDATES} primeras; ver
+     * {@link DeviceCookieService#deviceIdForAny}), el intento usa el contador propio del dispositivo
      * y el bloqueo de la cuenta no le afecta (ver {@link DeviceCookieService} y
      * {@link LoginAttemptService}). Tras un login correcto se emite (o
      * renueva) siempre; nunca en un login fallido ni para una cuenta
@@ -145,8 +149,9 @@ public class AuthenticationService {
      *                 nunca {@code X-Forwarded-For} a mano): decide si el
      *                 bloqueo de la cuenta le aplica como IP conocida o
      *                 desconocida (ver {@link LoginAttemptService})
-     * @param deviceCookie valor de la cookie {@code streambox_device} tal como
-     *                 llega, o {@code null}; si no vale para la cuenta se trata
+     * @param deviceCookies valores de las cookies {@code streambox_device} tal
+     *                 como llegan (sin decodificar y en su orden), o
+     *                 {@code null}; si ninguna vale para la cuenta se trata
      *                 como ausente
      * @return JWT de acceso, refresh token y cookie de dispositivo; el
      *         controlador los entrega en cookies HttpOnly, nunca en el cuerpo
@@ -157,9 +162,9 @@ public class AuthenticationService {
      * @throws AccountLockedException si la cuenta está bloqueada temporalmente
      *         por demasiados intentos fallidos, o si este fallo agota los intentos
      */
-    public SessionTokens login(String email, String password, String clientIp, String deviceCookie) {
+    public SessionTokens login(String email, String password, String clientIp, List<String> deviceCookies) {
 
-        Authenticated authenticated = authenticate(email, password, clientIp, deviceCookie);
+        Authenticated authenticated = authenticate(email, password, clientIp, deviceCookies);
         User user = authenticated.user();
         // Versión explícita (ver el Javadoc): la entidad se acaba de leer en
         // su propia transacción y no ha pasado por ningún incremento.
@@ -214,16 +219,16 @@ public class AuthenticationService {
      * @param email    dirección de correo electrónico del usuario
      * @param password contraseña proporcionada durante el inicio de sesión
      * @param clientIp dirección remota del cliente
-     * @param deviceCookie valor de la cookie de dispositivo, o {@code null}
+     * @param deviceCookies valores de las cookies de dispositivo, o {@code null}
      * @return usuario autenticado correctamente y el id del dispositivo de su
-     *         cookie, si era válida
+     *         cookie, si alguna era válida
      * @throws InvalidCredentialsException si el correo electrónico no existe,
      *                          la contraseña proporcionada es incorrecta o la
      *                          cuenta está pendiente de confirmar el correo
      * @throws AccountLockedException si la cuenta está bloqueada o este fallo
      *                          agota los intentos
      */
-    private Authenticated authenticate(String email, String password, String clientIp, String deviceCookie) {
+    private Authenticated authenticate(String email, String password, String clientIp, List<String> deviceCookies) {
 
         // El registro guarda el email normalizado (trim + minúsculas); el login
         // debe normalizarlo igual o el usuario no podría entrar escribiéndolo
@@ -238,7 +243,7 @@ public class AuthenticationService {
         // Sin consultas nuevas: la cookie se comprueba contra el usuario
         // recién leído (id y token_version). La firma se verifica aunque el
         // usuario no exista, para que el trabajo no dependa de ello.
-        String deviceId = deviceCookieService.deviceIdFor(deviceCookie, user).orElse(null);
+        String deviceId = deviceCookieService.deviceIdForAny(deviceCookies, user).orElse(null);
 
         // Se reserva el intento antes de comprobar la contraseña: una cuenta
         // bloqueada rechaza el login aunque la contraseña sea correcta, y la

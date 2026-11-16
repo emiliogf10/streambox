@@ -12,16 +12,15 @@ import org.springframework.http.MediaType;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
-import org.springframework.web.util.WebUtils;
 
 import com.emilio.streambox.dto.ErrorCode;
 import com.emilio.streambox.security.AuthCookieService;
 import com.emilio.streambox.security.JwtAuthenticationFilter;
+import com.emilio.streambox.security.RequestCookies;
 import com.emilio.streambox.security.SecurityErrorResponseWriter;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -165,8 +164,8 @@ import jakarta.servlet.http.HttpServletResponse;
  * no es la aplicación: contarlo no perjudica a nadie legítimo y evita que esas
  * peticiones sean gratis. Y no abre un ataque nuevo contra los vecinos de NAT:
  * quien comparta la IP ya puede gastar el límite con tokens de buen formato
- * inventados. La cookie se lee con {@link WebUtils#getCookie}, igual que
- * {@code @CookieValue} en el controlador: si el filtro no cuenta una petición,
+ * inventados. La cookie se lee con {@link RequestCookies#first}, igual que
+ * en el controlador: si el filtro no cuenta una petición,
  * el controlador ve {@code null} o un valor en blanco y la rechaza antes del
  * servicio.
  * </p>
@@ -474,17 +473,17 @@ public class RateLimitingFilter extends OncePerRequestFilter {
      * clase).
      *
      * <p>
-     * Se busca con {@link WebUtils#getCookie}, el mismo método que usa
-     * {@code @CookieValue}: si hay varias cookies con ese nombre, el filtro y
-     * el controlador miran la misma (la primera).
+     * Se busca con {@link RequestCookies#first}, el mismo método que usa
+     * {@code AuthController}: si hay varias cookies con ese nombre, el filtro y
+     * el controlador miran la misma (la primera), y ninguno decodifica el valor.
      * </p>
      *
      * @param request petición de refresh
      * @return {@code true} si la cookie está y su valor no está en blanco
      */
     static boolean hasRefreshCookie(HttpServletRequest request) {
-        Cookie cookie = WebUtils.getCookie(request, AuthCookieService.REFRESH_COOKIE_NAME);
-        return cookie != null && cookie.getValue() != null && !cookie.getValue().isBlank();
+        String value = RequestCookies.first(request, AuthCookieService.REFRESH_COOKIE_NAME);
+        return value != null && !value.isBlank();
     }
 
     private void reject(

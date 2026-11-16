@@ -16,7 +16,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -136,14 +135,12 @@ class DeviceCookieTomcatQaIntegrationTest {
      * tratarlo como cookie ausente (401), no responder 500.
      *
      * <p>
-     * <b>Falla hoy (incidencia QA-DC-1):</b> 500 {@code INTERNAL_ERROR} por la
-     * decodificación de URL que hace {@code @CookieValue}
+     * <b>Regresión de la incidencia QA-DC-1:</b> con {@code @CookieValue} daba
+     * 500 {@code INTERNAL_ERROR} por la decodificación de URL
      * ({@code UrlPathHelper.decodeRequestString} lanza
      * {@code IllegalArgumentException("Invalid encoded sequence")}).
      * </p>
      */
-    @Disabled("QA-DC-1: @CookieValue URL-decodifica la cookie y un '%' inválido da 500 INTERNAL_ERROR; "
-            + "pendiente del agente security")
     @ParameterizedTest
     @ValueSource(strings = { "%", "%zz", "v1.%%.x" })
     void unPorcentajeEnLaCookieDeDispositivoNoDa500(String value) throws Exception {
@@ -161,11 +158,9 @@ class DeviceCookieTomcatQaIntegrationTest {
      * 401 / 204 de siempre, no un 500.
      *
      * <p>
-     * <b>Falla hoy (incidencia QA-DC-1).</b>
+     * <b>Regresión de la incidencia QA-DC-1.</b>
      * </p>
      */
-    @Disabled("QA-DC-1 (anterior a este cambio): @CookieValue de streambox_refresh también da 500 con un "
-            + "'%' inválido en refresh y logout; pendiente del agente security")
     @Test
     void unPorcentajeEnLaCookieDeRefreshNoDa500() throws Exception {
         for (String path : List.of("/api/auth/refresh", "/api/auth/logout")) {
@@ -178,17 +173,40 @@ class DeviceCookieTomcatQaIntegrationTest {
     }
 
     /**
+     * {@code POST /api/auth/logout} con {@code streambox_refresh=%zz} (y con
+     * la cookie de dispositivo también mal formada): el mismo 204 que sin
+     * cookie, con las dos cookies de sesión borradas. Falla sin el arreglo de
+     * QA-DC-1 (500 sin borrar nada).
+     */
+    @Test
+    void elLogoutConUnPorcentajeInvalidoRespondeComoSinCookie() throws Exception {
+        HttpResponse<String> without = send(HttpRequest.newBuilder(uri("/api/auth/logout"))
+                .header("X-Requested-With", "StreamBox")
+                .POST(HttpRequest.BodyPublishers.noBody()));
+        HttpResponse<String> with = send(HttpRequest.newBuilder(uri("/api/auth/logout"))
+                .header("X-Requested-With", "StreamBox")
+                .header("Cookie", AuthCookieService.REFRESH_COOKIE_NAME + "=%zz; " + DEVICE + "=%zz")
+                .POST(HttpRequest.BodyPublishers.noBody()));
+
+        assertEquals(204, without.statusCode(), without.body());
+        assertEquals(204, with.statusCode(), with.body());
+        assertEquals(without.headers().allValues("Set-Cookie"), with.headers().allValues("Set-Cookie"));
+        assertTrue(with.headers().allValues("Set-Cookie").stream()
+                .anyMatch(header -> header.startsWith(AuthCookieService.REFRESH_COOKIE_NAME + "=;")),
+                with.headers().allValues("Set-Cookie").toString());
+    }
+
+    /**
      * Con Tomcat real, dos {@code streambox_device} en la misma cabecera
-     * llegan en el orden en que se enviaron y solo se mira la primera: una
-     * basura delante (lo que pondría un navegador si alguien plantó una cookie
-     * con una ruta más específica) anula la válida.
+     * llegan en el orden en que se enviaron: una basura delante (lo que
+     * pondría un navegador si alguien plantó una cookie con una ruta más
+     * específica) no anula la válida, que se usa.
      *
      * <p>
-     * <b>Falla hoy (incidencia QA-DC-2, BAJA).</b> Lo esperado: si alguna de
-     * las cookies con ese nombre es válida para la cuenta, se usa.
+     * <b>Regresión de la incidencia QA-DC-2 (BAJA):</b> cuando solo se miraba
+     * la primera, la basura anulaba la válida.
      * </p>
      */
-    @Disabled("QA-DC-2: solo se mira la primera streambox_device; una plantada delante anula la legítima")
     @Test
     void conDosCookiesDeDispositivoBastaConQueUnaSeaValida() throws Exception {
         String email = createUser();

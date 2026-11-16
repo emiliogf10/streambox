@@ -121,6 +121,33 @@ class AuthOpenApiDocumentationIntegrationTest {
                                 + "renovación de sesión (POST /api/auth/refresh)")));
     }
 
+    /**
+     * Las cookies que leen login, refresh y logout siguen documentadas como
+     * parámetros {@code in: cookie} opcionales. Ya no se declaran con
+     * {@code @CookieValue} (decodificaba el valor y un {@code %} mal formado
+     * daba 500, incidencia QA-DC-1), sino con {@code @Parameter} en el método:
+     * si alguien lo quita, la documentación perdería las cookies sin que nada
+     * más fallara.
+     */
+    @Test
+    void lasCookiesDeLoginRefreshYLogoutSiguenDocumentadas() throws Exception {
+        // springdoc omite «required: false» (es el valor por defecto de OpenAPI):
+        // se comprueba que ninguno de esos parámetros sea obligatorio.
+        String params = ".post.parameters[?(@.in == 'cookie' && @.name == '%s')].name";
+        String required = ".post.parameters[?(@.required == true)]";
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paths['/api/auth/login']" + params.formatted("streambox_device"))
+                        .value(hasItem("streambox_device")))
+                .andExpect(jsonPath("$.paths['/api/auth/refresh']" + params.formatted("streambox_refresh"))
+                        .value(hasItem("streambox_refresh")))
+                .andExpect(jsonPath("$.paths['/api/auth/logout']" + params.formatted("streambox_refresh"))
+                        .value(hasItem("streambox_refresh")))
+                .andExpect(jsonPath("$.paths['/api/auth/login']" + required).isEmpty())
+                .andExpect(jsonPath("$.paths['/api/auth/refresh']" + required).isEmpty())
+                .andExpect(jsonPath("$.paths['/api/auth/logout']" + required).isEmpty());
+    }
+
     @Test
     void elRegistroDocumentaLaPoliticaDeContrasenas() throws Exception {
         mockMvc.perform(get("/v3/api-docs"))

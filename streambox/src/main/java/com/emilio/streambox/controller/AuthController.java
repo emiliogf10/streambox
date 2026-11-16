@@ -1,9 +1,10 @@
 package com.emilio.streambox.controller;
 
+import java.util.List;
+
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,6 +15,8 @@ import com.emilio.streambox.dto.LoginRequest;
 import com.emilio.streambox.exception.SessionExpiredException;
 import com.emilio.streambox.security.AuthCookieService;
 import com.emilio.streambox.security.AuthenticatedUser;
+import com.emilio.streambox.security.RequestCookies;
+import com.emilio.streambox.security.device.DeviceCookieService;
 import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.refresh.RefreshTokenService;
 import com.emilio.streambox.security.refresh.SessionTokens;
@@ -21,6 +24,8 @@ import com.emilio.streambox.service.AuthenticationService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -71,11 +76,19 @@ public class AuthController {
      * Inicia sesión: entrega el JWT de acceso y el refresh token en cookies
      * HttpOnly y no en el cuerpo.
      *
+     * <p>
+     * Las cookies {@code streambox_device} se leen con {@link RequestCookies}
+     * (sin decodificar, todas hasta el tope de
+     * {@link DeviceCookieService#MAX_CANDIDATES}) y no con
+     * {@code @CookieValue}, que decodifica el valor como una URL y con un
+     * {@code %} mal formado respondía 500. El servicio usa la primera que
+     * valga para la cuenta (una cookie plantada delante no anula la legítima).
+     * </p>
+     *
      * @param request     correo electrónico y contraseña
-     * @param deviceCookie valor de la cookie {@code streambox_device}, o
-     *                    {@code null}; el servicio decide si vale para la cuenta
-     * @param httpRequest petición HTTP, de la que se toma la IP de origen
+     * @param httpRequest petición HTTP, de la que se toman la IP de origen
      *                    ({@code getRemoteAddr()}) para el bloqueo por IP conocida
+     *                    y las cookies de dispositivo
      * @param response    respuesta en la que se añaden los {@code Set-Cookie}
      */
     @PostMapping("/login")
@@ -124,16 +137,21 @@ public class AuthController {
                     + "login desde esta IP")
     })
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Parameter(name = AuthCookieService.DEVICE_COOKIE_NAME, in = ParameterIn.COOKIE, required = false,
+            schema = @Schema(type = "string"),
+            description = "Cookie de dispositivo (HttpOnly streambox_device que fija un login "
+                    + "correcto; el navegador la envía sola). Opcional: si falta o no vale se ignora. Si llegan "
+                    + "varias con ese nombre, vale la primera que sea válida para la cuenta (se miran como mucho "
+                    + "las " + DeviceCookieService.MAX_CANDIDATES + " primeras)")
     public void login(@Valid @RequestBody LoginRequest request,
-            @Parameter(description = "Cookie de dispositivo (HttpOnly streambox_device que fija un login "
-                    + "correcto; el navegador la envía sola). Opcional: si falta o no vale se ignora")
-            @CookieValue(name = AuthCookieService.DEVICE_COOKIE_NAME, required = false) String deviceCookie,
             HttpServletRequest httpRequest, HttpServletResponse response) {
 
+        List<String> deviceCookies = RequestCookies.values(
+                httpRequest, AuthCookieService.DEVICE_COOKIE_NAME, DeviceCookieService.MAX_CANDIDATES);
         // getRemoteAddr() y no X-Forwarded-For: en prod la cabecera solo la
         // aplica Spring (forward-headers-strategy=native) y no se puede falsificar.
         SessionTokens tokens = authenticationService.login(
-                request.getEmail(), request.getPassword(), httpRequest.getRemoteAddr(), deviceCookie);
+                request.getEmail(), request.getPassword(), httpRequest.getRemoteAddr(), deviceCookies);
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.sessionCookie(tokens.accessToken()));
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.refreshCookie(tokens.refreshToken()));
         if (tokens.deviceToken() != null) {
@@ -151,8 +169,17 @@ public class AuthController {
      * {@code GlobalExceptionHandler} convierte en el 401 {@code SESSION_EXPIRED}.
      * </p>
      *
-     * @param refreshToken valor de la cookie {@code streambox_refresh}, o {@code null} si no viene
-     * @param response     respuesta en la que se añaden los {@code Set-Cookie}
+     * <p>
+     * La cookie se lee sin decodificar ({@link RequestCookies#first}, ver
+     * {@link #login}): un valor con un {@code %} mal formado es un token que no
+     * existe (401), no un 500. Si llegan varias, solo cuenta la primera, la
+     * misma que mira {@code RateLimitingFilter}: probar varias podría
+     * presentar un refresh token ya rotado y disparar la detección de
+     * reutilización, que revoca la sesión entera.
+     * </p>
+     *
+     * @param httpRequest petición HTTP, de la que se lee la cookie {@code streambox_refresh}
+     * @param response    respuesta en la que se añaden los {@code Set-Cookie}
      */
     @PostMapping("/refresh")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -183,12 +210,13 @@ public class AuthController {
                     + "X-Requested-With y con la cookie streambox_refresh: sin cookie (visita sin sesión) la "
                     + "respuesta es siempre el 401 SESSION_EXPIRED")
     })
-    public void refresh(
-            @Parameter(description = "Refresh token (cookie HttpOnly streambox_refresh que fija el login; "
+    @Parameter(name = AuthCookieService.REFRESH_COOKIE_NAME, in = ParameterIn.COOKIE, required = false,
+            schema = @Schema(type = "string"),
+            description = "Refresh token (cookie HttpOnly streambox_refresh que fija el login; "
                     + "el navegador la envía solo)")
-            @CookieValue(name = AuthCookieService.REFRESH_COOKIE_NAME, required = false) String refreshToken,
-            HttpServletResponse response) {
+    public void refresh(HttpServletRequest httpRequest, HttpServletResponse response) {
 
+        String refreshToken = RequestCookies.first(httpRequest, AuthCookieService.REFRESH_COOKIE_NAME);
         SessionTokens tokens;
         try {
             // Sin cookie (cada visita anónima: JavaScript no sabe si la cookie
@@ -232,8 +260,13 @@ public class AuthController {
      * El 403 {@code CSRF_REJECTED} no toca la base de datos ni las cookies.
      * </p>
      *
-     * @param refreshToken valor de la cookie {@code streambox_refresh}, o {@code null} si no viene
-     * @param response     respuesta en la que se añaden los {@code Set-Cookie}
+     * <p>
+     * La cookie se lee sin decodificar y solo la primera, como en el refresh:
+     * un valor mal formado no revoca nada y la respuesta es el 204 de siempre.
+     * </p>
+     *
+     * @param httpRequest petición HTTP, de la que se lee la cookie {@code streambox_refresh}
+     * @param response    respuesta en la que se añaden los {@code Set-Cookie}
      */
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -257,12 +290,13 @@ public class AuthController {
                     + "sesión sigue viva en el servidor y el cliente debe reintentar el logout en lugar de "
                     + "darla por cerrada")
     })
-    public void logout(
-            @Parameter(description = "Refresh token de la sesión que se cierra (cookie HttpOnly "
+    @Parameter(name = AuthCookieService.REFRESH_COOKIE_NAME, in = ParameterIn.COOKIE, required = false,
+            schema = @Schema(type = "string"),
+            description = "Refresh token de la sesión que se cierra (cookie HttpOnly "
                     + "streambox_refresh); opcional")
-            @CookieValue(name = AuthCookieService.REFRESH_COOKIE_NAME, required = false) String refreshToken,
-            HttpServletResponse response) {
+    public void logout(HttpServletRequest httpRequest, HttpServletResponse response) {
 
+        String refreshToken = RequestCookies.first(httpRequest, AuthCookieService.REFRESH_COOKIE_NAME);
         refreshTokenService.revokeFamilyOf(refreshToken);
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.clearingCookie());
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.clearingRefreshCookie());

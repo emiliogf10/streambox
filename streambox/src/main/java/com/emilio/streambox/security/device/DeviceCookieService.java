@@ -9,6 +9,7 @@ import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -118,6 +119,26 @@ public class DeviceCookieService {
     static final int MAX_LENGTH = 256;
 
     /**
+     * Cuántas cookies {@code streambox_device} de una misma petición se
+     * llegan a comprobar, como mucho (ver {@link #deviceIdForAny}).
+     *
+     * <p>
+     * Un navegador legítimo envía una sola. Varias solo aparecen si alguien
+     * con control de un subdominio hermano «planta» cookies con
+     * {@code Domain=} del dominio padre («cookie tossing»). El navegador las
+     * ordena por ruta más larga primero y, a igual ruta, por antigüedad, y
+     * de las rutas que viajan a {@code /api/auth/login} solo tres pueden ir
+     * delante de la legítima ({@code /api/auth/login}, {@code /api/auth/} y
+     * {@code /api/auth} creada antes): la legítima queda, como mucho, la
+     * cuarta. Con 5 cabe ese caso y un margen (p. ej. otro nivel de dominio
+     * padre), y el coste queda acotado a 5 HMAC sobre valores de 256
+     * caracteres como mucho (microsegundos), aunque la petición traiga
+     * cientos de cookies. Las que sobran se ignoran.
+     * </p>
+     */
+    public static final int MAX_CANDIDATES = 5;
+
+    /**
      * Margen para una fecha de emisión en el futuro (un ajuste del reloj del
      * servidor). Más allá, la cookie se descarta: solo podría haberla firmado
      * un servidor con la hora mal.
@@ -222,6 +243,51 @@ public class DeviceCookieService {
                 .filter(t -> t.userId() == user.getId().longValue())
                 .filter(t -> t.tokenVersion() == user.getTokenVersion())
                 .map(DeviceToken::deviceId);
+    }
+
+    /**
+     * Id del dispositivo de la <b>primera</b> de las cookies que sea válida
+     * para esta cuenta, mirando como mucho las {@value #MAX_CANDIDATES}
+     * primeras.
+     *
+     * <p>
+     * <b>Por qué todas y no solo la primera.</b> Una cookie
+     * {@code streambox_device} plantada desde otro subdominio con una ruta más
+     * específica viaja <em>delante</em> de la legítima («cookie tossing»). Si
+     * solo contara la primera, bastaría plantar basura para devolver al
+     * titular al «bloqueo de la cuenta como arma» aunque su navegador tenga
+     * una cookie válida. Aceptar cualquiera de ellas no da nada a quien no
+     * tenga ya una cookie válida para la cuenta: cada una se valida entera
+     * (firma, caducidad, usuario y {@code token_version}).
+     * </p>
+     *
+     * <p>
+     * <b>Sin revelar nada.</b> Se comprueban <em>todas</em> las candidatas
+     * aunque una anterior ya haya valido: el trabajo depende solo de cuántas
+     * cookies trae la petición, no de si la cuenta existe ni de cuál es la
+     * buena. Si ninguna vale, el resultado es el mismo vacío que sin cookie.
+     * </p>
+     *
+     * @param rawValues valores de las cookies en el orden en que llegan (sin
+     *                  decodificar); {@code null} o vacía equivale a sin cookie.
+     *                  Las que pasan de {@value #MAX_CANDIDATES} se ignoran
+     * @param user      cuenta del email del login, o {@code null} si no existe
+     * @return el id de dispositivo de la primera válida, o vacío si ninguna
+     *         vale para esa cuenta
+     */
+    public Optional<String> deviceIdForAny(List<String> rawValues, User user) {
+        if (rawValues == null) {
+            return Optional.empty();
+        }
+        Optional<String> found = Optional.empty();
+        int candidates = Math.min(rawValues.size(), MAX_CANDIDATES);
+        for (int i = 0; i < candidates; i++) {
+            Optional<String> deviceId = deviceIdFor(rawValues.get(i), user);
+            if (found.isEmpty()) {
+                found = deviceId;
+            }
+        }
+        return found;
     }
 
     /**

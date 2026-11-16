@@ -14,6 +14,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import com.emilio.streambox.exception.SessionExpiredException;
@@ -22,6 +23,8 @@ import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.refresh.RefreshTokenService;
 import com.emilio.streambox.security.refresh.SessionTokens;
 import com.emilio.streambox.service.AuthenticationService;
+
+import jakarta.servlet.http.Cookie;
 
 /**
  * Tests unitarios del refresh de {@link AuthController}: un refresh sin cookie
@@ -57,7 +60,7 @@ class AuthControllerRefreshTest {
         when(authCookieService.clearingRefreshCookie()).thenReturn("streambox_refresh=");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        assertThrows(SessionExpiredException.class, () -> controller.refresh(value, response));
+        assertThrows(SessionExpiredException.class, () -> controller.refresh(requestWith(value), response));
 
         verifyNoInteractions(refreshTokenService);
         assertEquals(List.of("streambox_token=", "streambox_refresh="), response.getHeaders(HttpHeaders.SET_COOKIE));
@@ -71,9 +74,18 @@ class AuthControllerRefreshTest {
         when(authCookieService.sessionCookie("jwt")).thenReturn("streambox_token=jwt");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        controller.refresh(token, response);
+        controller.refresh(requestWith(token), response);
 
         verify(refreshTokenService).refresh(token);
         assertEquals(List.of("streambox_token=jwt"), response.getHeaders(HttpHeaders.SET_COOKIE));
+    }
+
+    /** Petición con la cookie {@code streambox_refresh} de ese valor, o sin ella si es {@code null}. */
+    private static MockHttpServletRequest requestWith(String refreshToken) {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/refresh");
+        if (refreshToken != null) {
+            request.setCookies(new Cookie(AuthCookieService.REFRESH_COOKIE_NAME, refreshToken));
+        }
+        return request;
     }
 }
