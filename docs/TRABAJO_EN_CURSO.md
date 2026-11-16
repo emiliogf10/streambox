@@ -26,7 +26,9 @@ Con 5 fallos, cualquiera que conozca un email bloquea la cuenta 15 min. Hoy solo
 |---|---|---|
 | 1 | Línea base verificada (backend 3757/0 fallos, Vitest 1734, E2E 234) | ✅ |
 | 2 | Implementación + tests (agente `security`) | ✅ commit `eeea03d`; 3823 tests, 0 fallos (+66). Tocó además `PasswordController` y `PasswordResetController` (imprescindible para entregar el Set-Cookie; aceptado por el orquestador) |
-| 3 | Revisión independiente y tests de casos límite (agente `qa`) | 🔄 en curso |
+| 3 | Revisión independiente y tests de casos límite (agente `qa`) | ✅ commit `3bbda43` (56 tests; 3879 ejecutados, 0 fallos, 311 omitidos). Hallazgos: QA-DC-1 (MEDIA, `%` inválido en una cookie → 500; ya existía en refresh) y QA-DC-2 (BAJA, cookies duplicadas: solo cuenta la primera) |
+| 3b | Arreglo de QA-DC-1 y QA-DC-2 (agente `security`; decidido arreglar ambos) | 🔄 en curso |
+| 3c | Riesgo INFRA: la suite está en el tope de 32 contextos de Spring; al entrar el 33.º se cierra la H2 compartida aunque la URL tiene `DB_CLOSE_DELAY=-1` (causa sin investigar). Decidir tras 3b | ⬜ |
 | 4 | Verificación completa por el orquestador (backend, Vitest, E2E) | ⬜ |
 | 5 | Docs: manual (bloqueo de cuenta), ADR 0014, plan 2.5/2.1, CLAUDE.md, OpenAPI si cambia el contrato | 🔄 hechos ADR 0014, manual 11/11.2 bis/10.x, plan 2.1/2.5, CLAUDE.md (Seguridad). Faltan: OpenAPI (regenerar con backend en 8099, tras qa), historial del plan y cifras de tests |
 | 6 | Commit, push y borrar este archivo | ⬜ |
