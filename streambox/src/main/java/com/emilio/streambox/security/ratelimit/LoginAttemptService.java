@@ -117,6 +117,37 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter.Reservation;
  * seguida con la contraseña nueva.</li>
  * </ul>
  *
+ * <h2>Cookie de dispositivo: el bloqueo tampoco deja fuera al navegador del titular</h2>
+ * <p>
+ * Las IPs conocidas no bastan: viven en memoria (un reinicio las borra), no
+ * sirven desde una IP nueva y se comparten bajo una IP común. Por eso, tras un
+ * login correcto, el navegador recibe la cookie firmada {@code streambox_device}
+ * ({@code DeviceCookieService}), que va antes que la IP:
+ * </p>
+ * <ul>
+ * <li><b>Cookie válida para esa cuenta</b> (firma correcta, no caducada, del
+ * usuario de ese email y con su {@code token_version} actual): contador propio
+ * de (email, id de dispositivo), con los <b>mismos límites</b>
+ * ({@link #reserveAttempt(String, String, String)}). La fuerza bruta desde ese
+ * navegador sigue limitada a {@code maxFailures} fallos por ventana, sus fallos
+ * no bloquean la cuenta para nadie y el bloqueo de la cuenta (o de su IP) no
+ * le afecta. Un login correcto reinicia solo ese contador.</li>
+ * <li><b>Sin cookie válida</b> (ausente, falsificada, caducada, de otra cuenta
+ * o revocada): exactamente la lógica de las IPs de arriba.</li>
+ * <li><b>Indistinguibilidad.</b> Un email inexistente nunca tiene cookie
+ * válida (no hay usuario con el que cuadre), así que, sin cookie válida, las
+ * respuestas siguen siendo idénticas para un email que existe o no, con o sin
+ * cookie basura. Con una cookie válida la respuesta sí cambia (no le alcanza el
+ * bloqueo), pero solo la tiene quien ya entró en esa cuenta con su contraseña:
+ * no revela nada que no sepa.</li>
+ * <li><b>Revocación persistente:</b> cerrar sesión en todos los dispositivos,
+ * cambiar o restablecer la contraseña y confirmar el correo suben
+ * {@code token_version} y anulan todas las cookies anteriores, también tras un
+ * reinicio. El cambio y el restablecimiento entregan en su respuesta una
+ * cookie nueva (prueban la contraseña o el buzón, como
+ * {@link #forgetKnownIpsExcept(String, String)}).</li>
+ * </ul>
+ *
  * <p>
  * <b>Limitaciones conocidas</b> (se aceptan, ver el hallazgo NV-2):
  * </p>
@@ -125,10 +156,18 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter.Reservation;
  * al reiniciar y no se comparte entre réplicas, igual que los demás
  * contadores. Tras un reinicio nadie es «conocido» hasta su próximo login
  * correcto.</li>
- * <li>Un primer login desde una <b>IP nueva</b> (otro dispositivo, otra red)
- * durante un bloqueo de la cuenta sigue rechazado hasta que caduque: la
- * contraseña correcta no basta para entrar desde una IP desconocida, porque
- * entonces el bloqueo no protegería de la fuerza bruta.</li>
+ * <li>Un primer login desde un <b>navegador sin cookie de dispositivo</b> y
+ * una <b>IP nueva</b> (otro dispositivo, otra red, o el mismo tras borrar las
+ * cookies) durante un bloqueo de la cuenta sigue rechazado hasta que caduque:
+ * la contraseña correcta no basta para entrar desde un origen desconocido,
+ * porque entonces el bloqueo no protegería de la fuerza bruta. Un navegador
+ * con cookie válida entra aunque cambie de red.</li>
+ * <li>Una cookie de dispositivo por navegador: si en él se entra en varias
+ * cuentas, solo la última tiene cookie. Quien robe la cookie (p. ej. con
+ * acceso al disco) no se autentica con ella: solo obtiene un presupuesto
+ * propio de {@code maxFailures} fallos por ventana para esa cuenta, hasta que
+ * el titular cierre sesión en todos los dispositivos o cambie la
+ * contraseña.</li>
  * <li>Detrás de un proxy o NAT que agrupe a varios clientes (o un /64 con
  * varios usuarios), la «IP conocida» es la del proxy: cualquiera tras él que
  * comparta la IP del titular comparte su contador, y sus fallos pueden dejar
@@ -152,7 +191,8 @@ import com.emilio.streambox.security.ratelimit.SlidingWindowCounter.Reservation;
  * contraseñas siguen aplicándose.</li>
  * <li>Alguien puede seguir bloqueando a propósito la cuenta para las IPs
  * desconocidas fallando su login; el bloqueo es temporal (los fallos caducan
- * solos pasada la ventana) y el titular entra desde sus IPs conocidas.</li>
+ * solos pasada la ventana) y el titular entra desde sus navegadores con cookie
+ * de dispositivo y desde sus IPs conocidas.</li>
  * </ul>
  */
 @Service
@@ -173,6 +213,14 @@ public class LoginAttemptService {
     /** Fallos por cuenta e IP conocida (clave: email + IP), con los mismos límites. */
     private final SlidingWindowCounter knownIpFailures;
 
+    /**
+     * Fallos por cuenta y dispositivo con cookie válida (clave: email + id de
+     * dispositivo), con los mismos límites. Solo se crean claves con una cookie
+     * firmada por el servidor tras un login correcto, así que un atacante no
+     * puede inflarlo; además está acotado por {@code max-keys}.
+     */
+    private final SlidingWindowCounter deviceFailures;
+
     private final KnownIpRegistry knownIps;
 
     /**
@@ -184,6 +232,7 @@ public class LoginAttemptService {
         this.maxFailures = lockout.maxFailures();
         this.failures = new SlidingWindowCounter(lockout.window(), clock, properties.maxKeys());
         this.knownIpFailures = new SlidingWindowCounter(lockout.window(), clock, properties.maxKeys());
+        this.deviceFailures = new SlidingWindowCounter(lockout.window(), clock, properties.maxKeys());
         this.knownIps = new KnownIpRegistry(
                 properties.maxKeys(), lockout.maxKnownIps(), lockout.knownIpTtl(), clock);
     }
@@ -213,15 +262,43 @@ public class LoginAttemptService {
      *                                (aunque la contraseña fuera a ser correcta)
      */
     public LoginAttempt reserveAttempt(String email, String ip) {
+        return reserveAttempt(email, ip, null);
+    }
+
+    /**
+     * Como {@link #reserveAttempt(String, String)}, pero con el dispositivo de
+     * una cookie de dispositivo <b>ya validada para esta cuenta</b>.
+     *
+     * <p>
+     * Con {@code deviceId} se reserva en el contador propio de (email,
+     * dispositivo), con los mismos límites, sin mirar la IP: ni el bloqueo de
+     * la cuenta ni el de sus IPs le afectan, y sus fallos no cuentan para nadie
+     * más. Sin él ({@code null}), la lógica de siempre: IP conocida o cuenta.
+     * Ver «Cookie de dispositivo» en la explicación de la clase.
+     * </p>
+     *
+     * @param email    email con el que se intenta iniciar sesión
+     * @param ip       dirección remota del cliente ({@code getRemoteAddr()})
+     * @param deviceId id del dispositivo de una cookie válida para la cuenta de
+     *                 ese email (lo decide {@code DeviceCookieService}), o
+     *                 {@code null} si no hay cookie válida. Nunca un valor del
+     *                 cliente sin validar: daría a cualquiera un contador nuevo
+     * @return intento reservado
+     * @throws AccountLockedException si ya está bloqueado el contador que le toca
+     */
+    public LoginAttempt reserveAttempt(String email, String ip, String deviceId) {
         String key = normalize(email);
         String client = ClientAddress.counterKey(ip);
-        boolean known = knownIps.isKnown(key, client);
+        // Con cookie de dispositivo no se consulta el registro de IPs: el
+        // contador del dispositivo manda y la IP no cambia nada.
+        boolean known = deviceId == null && knownIps.isKnown(key, client);
 
-        SlidingWindowCounter counter = known ? knownIpFailures : failures;
-        String counterKey = counterKey(key, client, known);
+        LoginAttempt pending = new LoginAttempt(key, client, known, null, deviceId);
+        SlidingWindowCounter counter = counterOf(pending);
+        String counterKey = counterKeyOf(pending);
         Reservation reservation = counter.reserve(counterKey, maxFailures)
                 .orElseThrow(() -> alreadyLocked(counter, counterKey));
-        return new LoginAttempt(key, client, known, reservation);
+        return new LoginAttempt(key, client, known, reservation, deviceId);
     }
 
     /**
@@ -266,8 +343,12 @@ public class LoginAttemptService {
      * plazo).
      *
      * <p>
-     * Solo se borra el contador contra el que se reservó el intento: el de la
-     * cuenta si la IP era desconocida, el de (email, IP) si era conocida.
+     * Solo se borra el contador contra el que se reservó el intento: el de
+     * (email, dispositivo) si había cookie de dispositivo válida; si no, el de
+     * la cuenta si la IP era desconocida y el de (email, IP) si era conocida.
+     * La IP se anota como conocida también con cookie de dispositivo: la
+     * contraseña se ha verificado desde ella, que es la única condición, y así
+     * sigue habiendo respaldo si el navegador pierde la cookie.
      * También borra las reservas de otros intentos que estén en curso en ese
      * contador; si alguno de ellos falla después,
      * {@link #recordFailure(LoginAttempt)} lo vuelve a apuntar como un fallo
@@ -393,6 +474,15 @@ public class LoginAttemptService {
      * </p>
      *
      * <p>
+     * <b>Por qué no se borran los contadores (email, dispositivo).</b> El
+     * restablecimiento sube {@code token_version}: todas las cookies de
+     * dispositivo anteriores dejan de valer y sus contadores no vuelven a
+     * usarse (caducan solos). La cookie nueva que recibe quien restablece
+     * lleva un id de dispositivo nuevo y, por tanto, un contador vacío.
+     * Recorrerlos no protegería nada.
+     * </p>
+     *
+     * <p>
      * <b>Coste.</b> Los contadores (email, IP) se buscan recorriendo sus claves
      * ({@link SlidingWindowCounter#resetMatching}), como mucho
      * {@code max-keys}: aceptable para una operación así de rara. La clave de
@@ -414,10 +504,17 @@ public class LoginAttemptService {
     }
 
     private SlidingWindowCounter counterOf(LoginAttempt attempt) {
+        if (attempt.deviceId() != null) {
+            return deviceFailures;
+        }
         return attempt.knownIp() ? knownIpFailures : failures;
     }
 
     private static String counterKeyOf(LoginAttempt attempt) {
+        if (attempt.deviceId() != null) {
+            // El id de dispositivo es Base64URL: no contiene el separador.
+            return attempt.key() + KEY_SEPARATOR + attempt.deviceId();
+        }
         return counterKey(attempt.key(), attempt.ip(), attempt.knownIp());
     }
 
@@ -465,10 +562,25 @@ public class LoginAttemptService {
      * @param knownIp     si la IP era «conocida» de la cuenta al reservar: decide
      *                    contra qué contador se reservó y se cierra el intento
      *                    (se fija al reservar para no mezclar contadores si
-     *                    cambia mientras se comprueba la contraseña)
+     *                    cambia mientras se comprueba la contraseña). Siempre
+     *                    {@code false} si hay {@code deviceId}
      * @param reservation reserva en el contador correspondiente
+     * @param deviceId    id del dispositivo de una cookie válida (se reservó en
+     *                    el contador de email + dispositivo), o {@code null}
      */
-    public record LoginAttempt(String key, String ip, boolean knownIp, Reservation reservation) {
+    public record LoginAttempt(String key, String ip, boolean knownIp, Reservation reservation, String deviceId) {
+
+        /**
+         * Intento sin cookie de dispositivo.
+         *
+         * @param key         email normalizado
+         * @param ip          clave de la IP del cliente
+         * @param knownIp     si la IP era conocida al reservar
+         * @param reservation reserva en el contador correspondiente
+         */
+        public LoginAttempt(String key, String ip, boolean knownIp, Reservation reservation) {
+            this(key, ip, knownIp, reservation, null);
+        }
 
         /**
          * @return número de orden del intento en la ventana en el momento de

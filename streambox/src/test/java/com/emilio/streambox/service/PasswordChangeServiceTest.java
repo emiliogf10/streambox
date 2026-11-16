@@ -28,6 +28,8 @@ import com.emilio.streambox.exception.CurrentPasswordIncorrectException;
 import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.JwtService;
+import com.emilio.streambox.security.device.DeviceCookieService;
+import com.emilio.streambox.security.device.IssuedDeviceToken;
 import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.ratelimit.PasswordChangeAttemptService;
 import com.emilio.streambox.security.ratelimit.PasswordChangeAttemptService.Attempt;
@@ -58,6 +60,7 @@ class PasswordChangeServiceTest {
     private final RefreshTokenService refreshTokenService = mock(RefreshTokenService.class);
     private final JwtService jwtService = mock(JwtService.class);
     private final LoginAttemptService loginAttempts = mock(LoginAttemptService.class);
+    private final DeviceCookieService deviceCookieService = mock(DeviceCookieService.class);
     private final PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
     private final EntityManager entityManager = mock(EntityManager.class);
     private final Attempt attempt = new Attempt("7", new Reservation(1, 1));
@@ -67,7 +70,7 @@ class PasswordChangeServiceTest {
     @BeforeEach
     void setUp() {
         service = new PasswordChangeService(userRepository, passwordEncoder, attempts, refreshTokenService,
-                jwtService, loginAttempts, transactionManager);
+                jwtService, loginAttempts, deviceCookieService, transactionManager);
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user(HASH)));
@@ -92,16 +95,21 @@ class PasswordChangeServiceTest {
         when(userRepository.findTokenVersionById(USER_ID)).thenReturn(Optional.of(4));
         when(jwtService.generateToken(locked, 4)).thenReturn("jwt");
         when(refreshTokenService.startFamily(USER_ID)).thenReturn(issued);
+        IssuedDeviceToken device = new IssuedDeviceToken("v1.payload.firma", java.time.Duration.ofDays(30));
+        when(deviceCookieService.issueNew(USER_ID, 4)).thenReturn(device);
 
         SessionTokens tokens = service.changePassword(USER_ID, CURRENT, NEW, IP);
 
         assertEquals("$2a$10$hash-nuevo", locked.getPassword());
-        assertEquals(new SessionTokens("jwt", issued), tokens);
-        InOrder order = inOrder(refreshTokenService, userRepository, jwtService);
+        assertEquals(new SessionTokens("jwt", issued, device), tokens);
+        InOrder order = inOrder(refreshTokenService, userRepository, jwtService, deviceCookieService);
         order.verify(refreshTokenService).revokeAllSessions(USER_ID);
         order.verify(userRepository).findTokenVersionById(USER_ID);
         order.verify(jwtService).generateToken(locked, 4);
         order.verify(refreshTokenService).startFamily(USER_ID);
+        // La cookie de dispositivo, con la versión NUEVA (la releída): con la
+        // vieja nacería ya anulada.
+        order.verify(deviceCookieService).issueNew(USER_ID, 4);
         verify(jwtService, never()).generateToken(locked);
         verify(attempts).recordSuccess(attempt);
         // Las IPs conocidas se olvidan (salvo la de esta petición) después del commit.
@@ -125,7 +133,7 @@ class PasswordChangeServiceTest {
                 () -> service.changePassword(USER_ID, CURRENT, NEW, IP));
 
         assertEquals("$2a$10$hash-de-otro-cambio", locked.getPassword());
-        verifyNoInteractions(refreshTokenService, loginAttempts);
+        verifyNoInteractions(refreshTokenService, loginAttempts, deviceCookieService);
     }
 
     /** Con la actual incorrecta se anota el fallo y no se toca nada más. */
@@ -138,7 +146,8 @@ class PasswordChangeServiceTest {
 
         verify(attempts).recordFailure(attempt);
         verify(attempts, never()).recordSuccess(any());
-        verifyNoInteractions(transactionManager, refreshTokenService, entityManager, loginAttempts);
+        verifyNoInteractions(transactionManager, refreshTokenService, entityManager, loginAttempts,
+                deviceCookieService);
     }
 
     /**

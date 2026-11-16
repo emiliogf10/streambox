@@ -339,9 +339,9 @@ class RateLimitingFilterTest {
     }
 
     /**
-     * Con varias cookies del mismo nombre se mira la primera, igual que
-     * {@code @CookieValue}: si la primera está vacía no cuenta (el controlador
-     * también la ve vacía y responde 401 sin servicio).
+     * Con varias cookies del mismo nombre se mira la primera, igual que el
+     * controlador ({@code RequestCookies.first}): si la primera está vacía no
+     * cuenta (el controlador también la ve vacía y responde 401 sin servicio).
      */
     @Test
     void conVariasCookiesSeMiraLaPrimeraComoElControlador() {

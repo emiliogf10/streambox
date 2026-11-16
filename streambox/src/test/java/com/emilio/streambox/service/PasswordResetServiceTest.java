@@ -37,6 +37,7 @@ import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.exception.InvalidResetTokenException;
 import com.emilio.streambox.repository.AccountTokenRepository;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.security.device.DeviceCookieService;
 import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.refresh.RefreshTokenService;
 
@@ -55,6 +56,7 @@ class PasswordResetServiceTest {
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
     private final RefreshTokenService refreshTokenService = mock(RefreshTokenService.class);
     private final LoginAttemptService loginAttemptService = mock(LoginAttemptService.class);
+    private final DeviceCookieService deviceCookieService = mock(DeviceCookieService.class);
     private final PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
     private final EmailSender sender = mock(EmailSender.class);
 
@@ -63,7 +65,7 @@ class PasswordResetServiceTest {
 
     private final PasswordResetService service = new PasswordResetService(new AccountTokens(tokens, users), tokens,
             users, emailVerificationService, passwordEncoder, refreshTokenService, loginAttemptService,
-            new EmailDispatcher(sender, queued::add),
+            deviceCookieService, new EmailDispatcher(sender, queued::add),
             new EmailProperties("a@b.test", Duration.ofHours(24), Duration.ofHours(1), false,
                     new EmailProperties.Resend(3, Duration.ofHours(1), Duration.ofSeconds(60))),
             new PublicUrlProperties("https://streambox.test"), Clock.systemUTC(), transactionManager);
@@ -86,7 +88,8 @@ class PasswordResetServiceTest {
                 () -> service.confirm(token, "Una-Contrasena-Larga-2026", "10.0.0.1"));
 
         assertEquals(InvalidResetTokenException.MESSAGE, error.getMessage());
-        verifyNoInteractions(tokens, users, transactionManager, passwordEncoder, loginAttemptService);
+        verifyNoInteractions(tokens, users, transactionManager, passwordEncoder, loginAttemptService,
+                deviceCookieService);
     }
 
     /**
@@ -101,7 +104,7 @@ class PasswordResetServiceTest {
                 () -> service.confirm("q8Vb3c0mZ1yJx7pQ2rT5uW9aE4fH6kL1nB3dS8gV0iY", "Una-Contrasena-Larga-2026",
                         "10.0.0.1"));
 
-        verifyNoInteractions(passwordEncoder, refreshTokenService, loginAttemptService);
+        verifyNoInteractions(passwordEncoder, refreshTokenService, loginAttemptService, deviceCookieService);
         verify(tokens, never()).consume(any(), any(), any());
     }
 

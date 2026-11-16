@@ -13,7 +13,7 @@ Formato de cada ADR: **Estado** · **Contexto** · **Decisión** · **Alternativ
 | [0003](0003-flyway-y-sql-portable.md) | Esquema gestionado por Flyway; Hibernate solo valida; SQL portable | Aceptada; matizada por la 0013 |
 | [0004](0004-jwt-stateless.md) | Autenticación con JWT sin estado y rol consultado a la base en cada petición | Aceptada; sustituida en parte por la 0011 |
 | [0005](0005-endpoints-me-sin-ids.md) | Recursos personales en `/api/users/me/...` con el id del token | Aceptada |
-| [0006](0006-rate-limiting-en-memoria.md) | Rate limiting y bloqueo de cuentas en memoria | Aceptada (con límite conocido) |
+| [0006](0006-rate-limiting-en-memoria.md) | Rate limiting y bloqueo de cuentas en memoria | Aceptada (con límite conocido); matizada por la 0014 |
 | [0007](0007-favoritos-con-sql-directo.md) | Favoritos con `INSERT`/`DELETE` directos, sin cargar la colección | Aceptada |
 | [0008](0008-series-tablas-propias.md) | Series con tablas propias; las series sin episodios son invisibles | Aceptada |
 | [0009](0009-estrategia-de-tests.md) | Tests con H2 y, para lo que depende del motor, PostgreSQL real con Testcontainers | Aceptada |
@@ -21,6 +21,7 @@ Formato de cada ADR: **Estado** · **Contexto** · **Decisión** · **Alternativ
 | [0011](0011-token-corto-y-refresh-rotatorio.md) | Token de acceso de 15 minutos y *refresh token* rotatorio, revocable y con detección de reutilización | Aceptada |
 | [0012](0012-datos-del-servidor-con-tanstack-query.md) | Datos del servidor en el frontend con TanStack Query (caché, invalidación y mutaciones optimistas) | Aceptada |
 | [0013](0013-busqueda-sin-acentos-y-con-erratas.md) | Búsqueda por título sin acentos y tolerante a erratas (`unaccent` + `pg_trgm`, migración por motor) | Aceptada |
+| [0014](0014-cookie-de-dispositivo.md) | Cookie de dispositivo firmada (HMAC) para que el bloqueo de cuenta no deje fuera al titular | Aceptada |
 
 ## Cómo añadir uno
 

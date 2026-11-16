@@ -1,7 +1,7 @@
 # Plan de acción — StreamBox
 
 > **Fuente de verdad** de lo hecho y lo pendiente. Nació de la auditoría técnica inicial del proyecto (los códigos como C1, I5, S4 o U1 remiten a sus hallazgos).
-> Última actualización: **2026-10-15** (páginas de película y de serie que aprovechan el ancho).
+> Última actualización: **2026-11-16** (cookie de dispositivo firmada contra el bloqueo de cuenta como arma).
 
 **Contenido**
 
@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **4061** con Docker | Sin omitidos (2026-11-13; sin Docker se omiten los de PostgreSQL). Antes del lote posterior a la auditoría run-3 eran 3975 en el CI |
+| Backend (JUnit) | **4061** con Docker (2026-11-13) | Sin omitidos. Tras la cookie de dispositivo (2026-11-16): **3987** sin Docker (3648 con H2 y 339 de PostgreSQL omitidos); **los de PostgreSQL de ese cambio aún no se han ejecutado con Docker**. Antes del lote posterior a la auditoría run-3 eran 3975 en el CI |
 | Frontend (Vitest) | **1734** | |
-| E2E (Playwright) | **234** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
+| E2E (Playwright) | **234** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -65,7 +65,6 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 | Tema | Prioridad | Dónde |
 | :--- | :--- | :--- |
 | Revisión visual humana | Media | [2.3](#23-revisión-visual-humana-del-frontend) |
-| Bloqueo de cuenta como arma (residual) | Media | [2.5](#25-seguridad) |
 | CORS y cabeceras por perfil (S12) | Media | [2.5](#25-seguridad) |
 | Reproductor integrado y siguientes pasos de series | Media | [2.9](#29-funcionalidades-nuevas) |
 
@@ -179,11 +178,10 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 - **Auditoría 1: pistas sin verificar** — *Baja · BAJA*. Dos pistas de resultados descartados por mal formados, que los cazadores nuevos no repitieron. No son hallazgos: comprobar si interesan.
   - ✅ ~~Una pestaña restaurada desde la caché atrás/adelante (bfcache) podría seguir usando una sesión cerrada en otra pestaña~~: **resuelta por la tarea 29**. El token ya no está en la memoria de la pestaña sino en una cookie que el logout borra para todas, y una pestaña restaurada recibe 401 en su siguiente petición.
   - ⬜ Tras el NAT de Docker Desktop o un proxy TLS, el límite por IP podría volverse global.
-- **Bloqueo de cuenta como arma (residual)** — *Media · MEDIA*
-  - Resuelto para el titular que entra desde una **IP conocida** (NV-2 de la auditoría 1).
-  - Sigue siendo posible bloquear un primer login desde una IP **nueva** mientras dure el ataque, y la «IP conocida» se pierde al reiniciar (estado en memoria).
-  - Con una IP compartida con la víctima (NAT móvil, empresa, VPN, `/64`) se puede distinguir si una cuenta tiene un login reciente desde esa IP (limitación documentada).
-  - **Alternativa estructural pendiente de decidir:** cookie de dispositivo firmada (HMAC) y ligada al email, emitida en el login correcto; no depende de la IP ni de los reinicios. Otras: CAPTCHA o persistir las IPs conocidas.
+- ✅ ~~**Bloqueo de cuenta como arma (residual)**~~ — **hecho el 2026-11-16** con la **cookie de dispositivo firmada** ([ADR 0014](adr/0014-cookie-de-dispositivo.md); ver el [historial](#4-historial-de-trabajos)). El titular entra desde cualquier navegador en el que ya inició sesión, aunque la cuenta esté bloqueada, desde cualquier red y tras un reinicio.
+  - Queda, por diseño: un primer login desde un navegador **nuevo** durante un bloqueo sigue rechazado (para eso está «He olvidado mi contraseña»).
+  - Sigue la limitación de las IPs compartidas para quien entra **sin** cookie (las IPs conocidas se conservan como respaldo).
+- **Cookie de refresh plantada desde un subdominio (*cookie tossing*)** — *Baja · BAJA* (decisión tuya, 2026-11-16). Con varias `streambox_refresh`, refresh y logout usan solo la primera (a propósito: probar varias podría disparar la detección de reutilización y revocar la sesión de la víctima). Quien controle un subdominio hermano podría plantar una delante: la renovación de la víctima fallaría y su logout no revocaría la sesión real en el servidor. **Mejora posible:** que el logout revoque las familias de las primeras N cookies de refresh (solo revoca: es el lado seguro). Hoy no aplica (no hay subdominios). Ver cap. 10.4 bis del manual.
 - **CORS y cabeceras (S12)** — *Media · BAJA*. CORS explícito por perfil y CSP, para cuando el frontend esté en otro origen.
 - **Rate limiting en memoria** — *Baja (hasta escalar) · MEDIA*. Con varias réplicas el límite se multiplica y un reinicio lo borra. Si se escala: Redis/Bucket4j distribuido. También lo propone el informe de Gemini; sigue siendo condicional (ADR 0006: hoy hay una sola instancia).
 - **Contraseñas: lo que la política no cubre** — *Baja · MEDIA*
@@ -333,12 +331,13 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 ### 2.10 Tests, herramientas y notas informativas
 
 - ✅ ~~**agent-browser no lanza Chrome**~~ (2026-10-14) — **resuelto el mismo día**: `agent-browser doctor` pasa («Headless launch + about:blank in 1.56s») y un arranque desde cero tarda 3 s. El fallo («Chrome exited early (exit code: -1058471934)», `0xC0E90002`) coincide con un bloqueo de Windows: **Smart App Control está activado** en el equipo y suele bloquear un ejecutable recién descargado (el Chrome for Testing 155 de agent-browser) hasta que tiene reputación; también hay un antivirus (Bitdefender) que vigila los procesos. Tras lanzar ese Chrome a mano una vez y cerrar las sesiones atascadas (`agent-browser close --all`), funciona. Si vuelve a pasar: `agent-browser doctor`, `agent-browser close --all` y lanzar una vez a mano `%USERPROFILE%\.agent-browser\browsers\chrome-*\chrome.exe --headless=new about:blank`; mientras tanto, el Chromium de Playwright.
-- **E2E en el contenedor de Claude (Chromium 141)** — *Info*
+- ✅ ~~**E2E en el contenedor de Claude (Chromium 141)**~~ — *Info*. **Resuelto el 2026-11-16:** con Playwright 1.64.1 y el Chromium 1243 del contenedor pasan los 234 (el contenedor y Playwright cambiaron a la vez, así que no se aisló cuál de los dos lo arregló). Si Playwright pide otra versión de Chromium que el contenedor no trae, todos los E2E fallan con «Executable doesn't exist»: basta un enlace simbólico en `/opt/pw-browsers` a la que sí hay. Lo que se vio entonces:
   - `accessibility.spec.ts:189` (formulario de película: «Volver al listado» tapado por la barra, a 375 y 1280 px) falla con ese navegador. En una página de prueba sin la app, ese Chromium no aplica `scroll-margin-top` a `focus()` si el elemento ya cabe entero en la ventana; el enlace tiene `scroll-margin-top` de 89 px. La interfaz es correcta y en la máquina del autor (Chromium de Playwright 1.63) pasa.
   - Al fallar, los 7 tests del proyecto `catalogo-mutable` salen «did not run»; con `--project=catalogo-mutable --no-deps` pasan 7/7.
 - **E2E inestables con la máquina cargada** — *Baja · BAJA*
   - **Diagnóstico para cualquier inestable nuevo (2026-11-01):** dos que parecían «carga» resultaron ser carreras del test, con causa concreta (ver el historial de esa fecha). Antes de anotar uno como carga, mira la traza: qué elemento resolvió cada acción y qué peticiones seguían en vuelo. `trailer-layout.spec.ts:146` sigue sin ese análisis.
   - Un aviso que aparece bajo el cursor queda pausado por el *hover* y puede tapar un botón de la fila (p. ej. «Borrar» en Géneros, `admin.spec.ts:122`). Pausar solo con movimiento real del puntero, o colocar los avisos sin tapar acciones, cambia el comportamiento: queda como propuesta.
+  - El 2026-11-16, en el contenedor de Claude con la suite completa (4,5 min), falló una vez `favorite-genres.spec.ts:97` («Ahora no» no salió de `/bienvenida` en 7 s); `--repeat-each=5` dio 25/25 y la suite completa repetida pasó entera. **Sin analizar:** la traza se perdió al repetir (Playwright vacía `test-results/`); si vuelve, guarda la traza antes de repetir y mira si el `PUT /api/users/me/genres` falló o solo tardó.
   - El 2026-10-17, con la batería en 12,8 min, falló una vez `e2e/trailer-keyboard.spec.ts` («el foco no se escapa del diálogo»); repetido, 6/6.
   - El 2026-10-15, con la batería en 8 min (en vez de ~4), falló una vez `auth.spec.ts:484` (dos pestañas renuevan a la vez); por separado pasó 3/3.
   - El 2026-10-08, con la batería tardando casi 4 minutos en lugar de ~1, fallaron entre 2 y 4 E2E distintos por tiempo agotado; el último commit, sin los cambios del día, falló igual. Con la máquina menos cargada, 144/144.
@@ -483,6 +482,17 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-16 · Cookie de dispositivo firmada contra el bloqueo de cuenta como arma
+
+- **Problema** (punto «Bloqueo de cuenta como arma (residual)» de 2.5): con 5 fallos en 15 minutos, cualquiera que conozca un email bloquea la cuenta. Las IPs conocidas solo salvaban al titular desde una IP ya usada, se perdían al reiniciar y se compartían bajo una IP común.
+- **Solución** (decidida por el autor: opción 1; `security`, [ADR 0014](adr/0014-cookie-de-dispositivo.md), cap. 11.2 bis del manual): tras un login correcto, cookie `streambox_device` (HttpOnly, SameSite=Strict, `Path=/api/auth`, 30 días) firmada con HMAC-SHA256 y una clave derivada del `JWT_SECRET` (sin variable nueva). Con una cookie válida para la cuenta, el login usa un contador propio: el bloqueo de la cuenta no le afecta y sus fallos no bloquean a nadie. Sin cookie válida, todo sigue igual. Logout-all, cambio y restablecimiento de contraseña y confirmación del correo la anulan (`token_version`); cambio y restablecimiento entregan una nueva. Sin migración ni cambios en el frontend.
+- **Revisión independiente** (`qa`, 56 tests): no se pudo saltar el límite (24 fallos simultáneos con la misma cookie comprueban 5 contraseñas), ni sacar información, ni revivir una cookie revocada. Encontró dos fallos, arreglados por `security`:
+  - **QA-DC-1 (MEDIA):** un `%` mal formado en una cookie (`streambox_device=%zz`) daba 500, porque `@CookieValue` la decodifica como una URL. **Ya pasaba antes** con la cookie del refresh en refresh y logout. Ahora todas se leen sin decodificar (`security/RequestCookies`).
+  - **QA-DC-2 (BAJA):** con varias `streambox_device`, solo contaba la primera (*cookie tossing* desde un subdominio). Ahora se prueban hasta 5 y vale la primera válida para la cuenta. La de refresh sigue con la primera, a propósito (riesgo residual anotado en 2.5).
+- **Infraestructura de tests:** al añadir tests salió el mismo fallo de H2 que el autor resolvió en paralelo en `main` (ver la entrada del 2026-11-13): aquí se investigó por separado (la primera sospecha, DevTools, quedó descartada) y se llegó a la misma causa. Al integrar `main` se adoptó su solución (una base H2 por contexto y `hikari.max-lifetime=0`) y se retiró la de esta rama (`H2FlywaySessionTestAutoConfiguration`), que con bases por contexto habría dejado viva una conexión por cada contexto expulsado.
+- **Documentación:** `docs/api/openapi.yaml` regenerado desde el backend real, manual (10.4 bis, 10.6, 11, 11.2 bis y 22), ADR 0014, CLAUDE.md y este plan.
+- **Tests:** en la rama, backend de 3757 a **3903** (306 omitidos, sin Docker). Tras integrar `main` (b697bb5): backend **3987** sin Docker (339 omitidos, 0 fallos), Vitest **1734** y E2E **234** (+24 de capturas), todos en verde. Verificado por el orquestador. **Pendiente:** ejecutar los de PostgreSQL con Docker (`.\mvnw.cmd test "-Dtest=Postgres*"`).
 
 ### 2026-11-13 · Lote tras la auditoría run-3: NV-1, NV-2, test inestable y base H2 de los tests
 
