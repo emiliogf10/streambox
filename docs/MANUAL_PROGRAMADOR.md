@@ -2753,10 +2753,10 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 1887 | `.\mvnw.cmd test` (desde `streambox/`) |
-| Backend (PostgreSQL real) | Testcontainers | 352 | Se ejecutan con el anterior (2239 en total); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
-| Frontend (lógica y componentes) | Vitest, Testing Library | 1032 | `npm run test` (desde `frontend/`) |
-| Frontend (flujos completos) | Playwright (Chromium) | 150 (+24 de capturas, que se omiten) | `npm run test:e2e` |
+| Backend (H2) | JUnit 5, Spring Boot Test, MockMvc, Mockito | 3597 | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (PostgreSQL real) | Testcontainers | 306 omitidos sin Docker (521 con Docker el 2026-11-02) | Se ejecutan con el anterior (3903 en total sin Docker); se omiten si Docker no está en marcha. Sin Docker, Maven cuenta cada test parametrizado omitido como uno solo, así que la cifra de omitidos no coincide con la de métodos |
+| Frontend (lógica y componentes) | Vitest, Testing Library | 1734 | `npm run test` (desde `frontend/`) |
+| Frontend (flujos completos) | Playwright (Chromium) | 234 (+24 de capturas, que se omiten) | `npm run test:e2e` |
 
 ### 22.2 Tests del backend
 

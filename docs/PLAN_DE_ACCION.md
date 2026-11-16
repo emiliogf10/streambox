@@ -1,7 +1,7 @@
 # Plan de acción — StreamBox
 
 > **Fuente de verdad** de lo hecho y lo pendiente. Nació de la auditoría técnica inicial del proyecto (los códigos como C1, I5, S4 o U1 remiten a sus hallazgos).
-> Última actualización: **2026-10-15** (páginas de película y de serie que aprovechan el ancho).
+> Última actualización: **2026-11-16** (cookie de dispositivo firmada contra el bloqueo de cuenta como arma).
 
 **Contenido**
 
@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **3757** sin Docker | 3451 con H2 y 306 de PostgreSQL omitidos (cada parametrizado omitido cuenta como uno). El 2026-11-02 eran 3870 con Docker (3349 + 521); **tras el lote de seguridad del 2026-11-08 aún no se han ejecutado los de PostgreSQL** (Docker Desktop no arrancaba) |
+| Backend (JUnit) | **3903** sin Docker | 3597 con H2 y 306 de PostgreSQL omitidos (cada parametrizado omitido cuenta como uno). El 2026-11-02 eran 3870 con Docker (3349 + 521); **los de PostgreSQL no se han vuelto a ejecutar desde entonces** (ni tras el lote del 2026-11-08 ni tras la cookie de dispositivo del 2026-11-16) |
 | Frontend (Vitest) | **1734** | |
-| E2E (Playwright) | **234** | Más 24 de capturas que solo corren a petición. En el contenedor Linux de Claude (Chromium 141) fallan 2 por el navegador: ver [2.10](#210-tests-herramientas-y-notas-informativas) |
+| E2E (Playwright) | **234** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -326,7 +326,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 ### 2.10 Tests, herramientas y notas informativas
 
 - ✅ ~~**agent-browser no lanza Chrome**~~ (2026-10-14) — **resuelto el mismo día**: `agent-browser doctor` pasa («Headless launch + about:blank in 1.56s») y un arranque desde cero tarda 3 s. El fallo («Chrome exited early (exit code: -1058471934)», `0xC0E90002`) coincide con un bloqueo de Windows: **Smart App Control está activado** en el equipo y suele bloquear un ejecutable recién descargado (el Chrome for Testing 155 de agent-browser) hasta que tiene reputación; también hay un antivirus (Bitdefender) que vigila los procesos. Tras lanzar ese Chrome a mano una vez y cerrar las sesiones atascadas (`agent-browser close --all`), funciona. Si vuelve a pasar: `agent-browser doctor`, `agent-browser close --all` y lanzar una vez a mano `%USERPROFILE%\.agent-browser\browsers\chrome-*\chrome.exe --headless=new about:blank`; mientras tanto, el Chromium de Playwright.
-- **E2E en el contenedor de Claude (Chromium 141)** — *Info*
+- ✅ ~~**E2E en el contenedor de Claude (Chromium 141)**~~ — *Info*. **Resuelto el 2026-11-16:** con Playwright 1.64.1 y el Chromium 1243 del contenedor pasan los 234 (el contenedor y Playwright cambiaron a la vez, así que no se aisló cuál de los dos lo arregló). Si Playwright pide otra versión de Chromium que el contenedor no trae, todos los E2E fallan con «Executable doesn't exist»: basta un enlace simbólico en `/opt/pw-browsers` a la que sí hay. Lo que se vio entonces:
   - `accessibility.spec.ts:189` (formulario de película: «Volver al listado» tapado por la barra, a 375 y 1280 px) falla con ese navegador. En una página de prueba sin la app, ese Chromium no aplica `scroll-margin-top` a `focus()` si el elemento ya cabe entero en la ventana; el enlace tiene `scroll-margin-top` de 89 px. La interfaz es correcta y en la máquina del autor (Chromium de Playwright 1.63) pasa.
   - Al fallar, los 7 tests del proyecto `catalogo-mutable` salen «did not run»; con `--project=catalogo-mutable --no-deps` pasan 7/7.
 - **E2E inestables con la máquina cargada** — *Baja · BAJA*
@@ -476,6 +476,17 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-16 · Cookie de dispositivo firmada contra el bloqueo de cuenta como arma
+
+- **Problema** (punto «Bloqueo de cuenta como arma (residual)» de 2.5): con 5 fallos en 15 minutos, cualquiera que conozca un email bloquea la cuenta. Las IPs conocidas solo salvaban al titular desde una IP ya usada, se perdían al reiniciar y se compartían bajo una IP común.
+- **Solución** (decidida por el autor: opción 1; `security`, [ADR 0014](adr/0014-cookie-de-dispositivo.md), cap. 11.2 bis del manual): tras un login correcto, cookie `streambox_device` (HttpOnly, SameSite=Strict, `Path=/api/auth`, 30 días) firmada con HMAC-SHA256 y una clave derivada del `JWT_SECRET` (sin variable nueva). Con una cookie válida para la cuenta, el login usa un contador propio: el bloqueo de la cuenta no le afecta y sus fallos no bloquean a nadie. Sin cookie válida, todo sigue igual. Logout-all, cambio y restablecimiento de contraseña y confirmación del correo la anulan (`token_version`); cambio y restablecimiento entregan una nueva. Sin migración ni cambios en el frontend.
+- **Revisión independiente** (`qa`, 56 tests): no se pudo saltar el límite (24 fallos simultáneos con la misma cookie comprueban 5 contraseñas), ni sacar información, ni revivir una cookie revocada. Encontró dos fallos, arreglados por `security`:
+  - **QA-DC-1 (MEDIA):** un `%` mal formado en una cookie (`streambox_device=%zz`) daba 500, porque `@CookieValue` la decodifica como una URL. **Ya pasaba antes** con la cookie del refresh en refresh y logout. Ahora todas se leen sin decodificar (`security/RequestCookies`).
+  - **QA-DC-2 (BAJA):** con varias `streambox_device`, solo contaba la primera (*cookie tossing* desde un subdominio). Ahora se prueban hasta 5 y vale la primera válida para la cuenta. La de refresh sigue con la primera, a propósito (riesgo residual anotado en 2.5).
+- **Infraestructura de tests** (`qa`): la suite estaba en el tope de 32 contextos de Spring y, al pasarlo, se rompía la H2 compartida. **Causa real** (experimento con la caché a 1 contexto): H2 liga cada `CHECK ... IN (...)` a la sesión que ejecutó la migración; al cerrarse la conexión de Flyway con el primer contexto, `ck_users_role` fallaba para todos aunque la base seguía viva. La primera sospecha, DevTools, quedó descartada. Arreglo solo en tests (`support/H2FlywaySessionTestAutoConfiguration`): con él, la suite pasa incluso con la caché a 1 contexto. Las pilas de H2 con `spring-boot:run` (E2E y navegador) fijan `SPRING_DATASOURCE_HIKARI_MAX_LIFETIME=0`.
+- **Documentación:** `docs/api/openapi.yaml` regenerado desde el backend real, manual (10.4 bis, 10.6, 11, 11.2 bis y 22), ADR 0014, CLAUDE.md y este plan.
+- **Tests:** backend de 3757 a **3903** (306 omitidos, sin Docker), Vitest **1734** y E2E **234** (+24 de capturas), todos en verde. Verificado por el orquestador. **Pendiente:** ejecutar los de PostgreSQL con Docker (`.\mvnw.cmd test "-Dtest=Postgres*"`).
 
 ### 2026-11-08 · Lote de seguridad: revocación inmediata del JWT, límite del cuerpo y géneros sin escrituras
 
