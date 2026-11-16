@@ -166,6 +166,22 @@ class DeviceCookieServiceTest {
         assertEquals(Optional.empty(), service.deviceIdFor(value, user(42L, 4)));
     }
 
+    /**
+     * Cuenta pendiente de confirmar el correo (BAJA-2 de la revisión de la PR
+     * #33): una cookie auténtica, suya y de su versión actual no vale. La
+     * misma cookie, con la cuenta confirmada, sí (control).
+     */
+    @Test
+    void deUnaCuentaPendienteNoVale() {
+        String value = service.issueNew(42L, 3).value();
+        User pending = user(42L, 3);
+        pending.setEmailVerifiedAt(null);
+
+        assertFalse(pending.isEmailVerified());
+        assertEquals(Optional.empty(), service.deviceIdFor(value, pending));
+        assertTrue(service.deviceIdFor(value, user(42L, 3)).isPresent(), "control: confirmada sí vale");
+    }
+
     /** Email inexistente: nunca vale, aunque la cookie sea auténtica. */
     @Test
     void sinUsuarioNoVale() {
@@ -271,12 +287,14 @@ class DeviceCookieServiceTest {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(text.getBytes(StandardCharsets.US_ASCII));
     }
 
+    /** Cuenta con el correo confirmado (las únicas que pueden usar la cookie). */
     private static User user(Long id, int tokenVersion) {
         User user = new User();
         user.setId(id);
         user.setEmail("ana@device.test");
         user.setUsername("ana");
         user.setRole(Role.USER);
+        user.setEmailVerifiedAt(NOW.minus(Duration.ofDays(1)));
         org.springframework.test.util.ReflectionTestUtils.setField(user, "tokenVersion", tokenVersion);
         return user;
     }

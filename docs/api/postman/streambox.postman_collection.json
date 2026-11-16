@@ -5122,7 +5122,7 @@
                 "refresh"
               ]
             },
-            "description": "Sin cuerpo: el jar envía la cookie `streambox_refresh` (su `Path=/api/auth` hace que solo viaje aquí, a login y a logout). Responde 204 con un JWT nuevo y un refresh token nuevo; el anterior queda revocado."
+            "description": "Sin cuerpo: el jar envía la cookie `streambox_refresh` (su `Path=/api/auth` hace que solo viaje a las rutas de `/api/auth`, nunca al resto de la API; solo esta y el logout la leen). Responde 204 con un JWT nuevo y un refresh token nuevo; el anterior queda revocado."
           },
           "response": [],
           "event": [

@@ -346,6 +346,39 @@ class DeviceCookieLoginIntegrationTest {
     }
 
     /**
+     * BAJA-2 de la revisión de la PR #33 (defensa en profundidad): una cookie
+     * auténtica, de esta cuenta y de su versión actual no sirve si la cuenta
+     * está pendiente de confirmar el correo. Se obtiene con un login correcto
+     * y después la cuenta se deja pendiente en la base de datos sin tocar su
+     * {@code token_version} (el único modo de que una pendiente tenga una
+     * cookie que, por lo demás, valdría). Con la cuenta bloqueada y la
+     * contraseña correcta, la respuesta con la cookie es idéntica a la de sin
+     * ella (429 {@code ACCOUNT_LOCKED}, mismo {@code Retry-After}, sin
+     * cookies). Sin la comprobación, la cookie llevaría el intento al contador
+     * propio del dispositivo y respondería 401 con 4 intentos restantes.
+     */
+    @Test
+    void unaCookieValidaDeUnaCuentaPendienteSeTrataComoAusente() throws Exception {
+        String email = createUser(true).getEmail();
+        String device = deviceCookie(login(email, PASSWORD, nextIp(), null)
+                .andExpect(status().isNoContent()).andReturn());
+        int versionBefore = userRepository.findByEmail(email).orElseThrow().getTokenVersion();
+        jdbc.update("UPDATE users SET email_verified_at = NULL WHERE email = ?", email);
+        User pending = userRepository.findByEmail(email).orElseThrow();
+        assertFalse(pending.isEmailVerified());
+        assertEquals(versionBefore, pending.getTokenVersion(), "misma versión: solo cambia la confirmación");
+        lockFrom(email, nextIp());
+
+        // Desde una IP sin ningún login correcto: lo que se prueba es la cookie.
+        String ip = nextIp();
+        MvcResult without = login(email, PASSWORD, ip, null).andReturn();
+        MvcResult with = login(email, PASSWORD, ip, device).andReturn();
+
+        assertEquals(429, with.getResponse().getStatus(), with.getResponse().getContentAsString());
+        assertSameResponse(without, with);
+    }
+
+    /**
      * Un email inexistente responde igual con o sin cookie (basura o válida
      * de otra cuenta), e igual que un email registrado sin cookie: nunca hay
      * una cookie válida para una cuenta que no existe.

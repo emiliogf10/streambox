@@ -22,9 +22,10 @@ Dónde llega el correo: en `dev` sin SMTP, al log del backend (`LoggingEmailSend
 
 El login **no devuelve el token en el cuerpo**: la sesión viaja en dos cookies HttpOnly que JavaScript no puede leer (así un XSS no puede robarla).
 
-1. **`POST /api/auth/login`** con `{"email": ..., "password": ...}` responde **204 sin cuerpo** y dos `Set-Cookie` (HttpOnly; SameSite=Strict; `Secure` en producción):
+1. **`POST /api/auth/login`** con `{"email": ..., "password": ...}` responde **204 sin cuerpo** y tres `Set-Cookie` (HttpOnly; SameSite=Strict; `Secure` en producción):
    - `streambox_token`: JWT de acceso, vida de 15 minutos, `Path=/api` (viaja a toda la API).
-   - `streambox_refresh`: refresh token opaco, vida de 7 días, `Path=/api/auth` (solo viaja a login, refresh y logout).
+   - `streambox_refresh`: refresh token opaco, vida de 7 días, `Path=/api/auth` (solo viaja a las rutas de `/api/auth`: login, refresh, logout, logout-all, verificación del correo y restablecimiento de la contraseña; solo refresh y logout la leen).
+   - `streambox_device`: cookie de dispositivo firmada (HMAC-SHA256), vida de 30 días, `Path=/api/auth`. Solo la lee el login: con una válida para la cuenta, los fallos van a un contador propio y el bloqueo que provoquen otros no le afecta (ADR 0014, cap. 11.2 bis del manual).
 
    Errores: 401 `INVALID_CREDENTIALS` (con `remainingAttempts`; también, con el mismo cuerpo, la contraseña correcta de una cuenta que aún no ha confirmado su correo), 429 `ACCOUNT_LOCKED` o `RATE_LIMIT_EXCEEDED` (con `Retry-After`).
 2. **Peticiones normales**: el cliente reenvía la cookie sola. Si la petición es **no segura** (POST/PUT/PATCH/DELETE) y se autentica por cookie, debe llevar además **`X-Requested-With: StreamBox`**; si falta, 403 `CSRF_REJECTED`. Es la defensa CSRF: otra web puede hacer que el navegador envíe la cookie, pero no puede añadir esa cabecera.

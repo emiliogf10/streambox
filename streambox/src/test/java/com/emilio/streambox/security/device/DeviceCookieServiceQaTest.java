@@ -184,12 +184,14 @@ class DeviceCookieServiceQaTest {
         }
     }
 
+    /** Cuenta con el correo confirmado (las únicas que pueden usar la cookie). */
     private static User user(long id, int tokenVersion) {
         User user = new User();
         user.setId(id);
         user.setEmail("qa@device.test");
         user.setUsername("qa");
         user.setRole(Role.USER);
+        user.setEmailVerifiedAt(NOW.minus(Duration.ofDays(1)));
         ReflectionTestUtils.setField(user, "tokenVersion", tokenVersion);
         return user;
     }

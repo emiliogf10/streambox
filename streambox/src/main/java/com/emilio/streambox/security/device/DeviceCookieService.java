@@ -74,11 +74,12 @@ import com.emilio.streambox.security.JwtProperties;
  * <p>
  * Una cookie solo sirve si su firma es correcta, no ha caducado (vida
  * {@code streambox.security.device-cookie.ttl} desde su emisión), es del
- * usuario del email con el que se intenta entrar y lleva su
- * {@code token_version} actual. Cualquier otra cosa (vacía, enorme, mal
- * formada, otra versión, firma incorrecta, caducada, de otra cuenta o de una
- * versión anterior) se trata exactamente como si no hubiera cookie: nunca un
- * error ni un 500, y por tanto la misma respuesta que sin ella.
+ * usuario del email con el que se intenta entrar, lleva su
+ * {@code token_version} actual y esa cuenta tiene el correo confirmado.
+ * Cualquier otra cosa (vacía, enorme, mal formada, otra versión, firma
+ * incorrecta, caducada, de otra cuenta, de una versión anterior o de una cuenta
+ * pendiente) se trata exactamente como si no hubiera cookie: nunca un error ni
+ * un 500, y por tanto la misma respuesta que sin ella.
  * </p>
  *
  * <h2>Revocación persistente con {@code token_version}</h2>
@@ -206,6 +207,14 @@ public class DeviceCookieService {
      * que hace «conocida» una IP.
      * </p>
      *
+     * <p>
+     * La emisión no comprueba por sí misma que el correo esté confirmado:
+     * recibe solo el id y la versión (el restablecimiento ni siquiera carga la
+     * entidad, sino una proyección) y sus tres llamadores ya lo garantizan. La regla se hace cumplir
+     * al <b>validar</b> ({@link #deviceIdFor}): aunque se emitiera una cookie
+     * a una cuenta pendiente, no le serviría de nada.
+     * </p>
+     *
      * @param userId       id de la cuenta
      * @param tokenVersion {@code users.token_version} de la cuenta al emitir
      * @param deviceId     id del dispositivo de una cookie válida que se renueva
@@ -229,14 +238,32 @@ public class DeviceCookieService {
      * (email inexistente): el trabajo no depende de si la cuenta existe.
      * </p>
      *
+     * <p>
+     * <b>Solo cuentas con el correo confirmado.</b> Una cuenta pendiente no
+     * puede usar la cookie aunque sea auténtica, suya y de su versión actual:
+     * se comporta exactamente como sin cookie. Hoy ninguna pendiente puede
+     * tenerla (solo se emite tras un login correcto, que exige el correo
+     * confirmado, o tras cambiar o restablecer la contraseña, que también lo
+     * implican), así que es defensa en profundidad: la regla «las pendientes
+     * ni la obtienen ni la usan» queda escrita aquí y no depende de que todos
+     * los caminos de emisión la respeten siempre. Sin ella, una cookie que se
+     * colara (un camino nuevo de emisión, o una cuenta que vuelve a quedar
+     * pendiente sin cambiar su {@code token_version}) daría a una cuenta
+     * pendiente su propio presupuesto de 5 intentos al margen del bloqueo de
+     * la cuenta, y una respuesta distinta (401 con intentos en vez del 429)
+     * a la de sin cookie. El mismo criterio aplica el filtro JWT a las
+     * sesiones.
+     * </p>
+     *
      * @param rawValue valor de la cookie tal como llega, o {@code null}
      * @param user     cuenta del email del login, o {@code null} si no existe
      * @return el id de dispositivo, o vacío si la cookie falta o no vale para
-     *         esa cuenta (cualquier motivo, sin distinguirlos)
+     *         esa cuenta (cualquier motivo, sin distinguirlos; también si la
+     *         cuenta está pendiente de confirmar el correo)
      */
     public Optional<String> deviceIdFor(String rawValue, User user) {
         Optional<DeviceToken> token = verify(rawValue);
-        if (user == null || user.getId() == null) {
+        if (user == null || user.getId() == null || !user.isEmailVerified()) {
             return Optional.empty();
         }
         return token

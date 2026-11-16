@@ -59,6 +59,7 @@ Cada subagente arranca **sin memoria** de esta conversación. Cada encargo debe 
 - **Archivos o zonas** donde debe trabajar y dónde **no**.
 - **Restricciones del proyecto** relevantes (Javadoc en español, migración nueva, no commit, no tocar la BD de desarrollo...). Los agentes leen `CLAUDE.md`, pero recuérdalas si son críticas.
 - **Qué debe devolver**: archivos modificados, resultado real de tests/build, decisiones y pendientes.
+- **Trabajo web del cliente** (`frontend`, o `qa` revisando interfaz): pídele que use la skill `modern-web-guidance` antes de implementar o revisar (preferencia del autor, 2026-11-16). Si lo haces tú directamente, invócala tú.
 
 ### 5. Verificar (no te fíes del "hecho")
 Un informe de un subagente describe lo que *intentó*, no necesariamente lo que ocurrió:

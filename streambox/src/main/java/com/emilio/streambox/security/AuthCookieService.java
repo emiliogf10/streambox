@@ -23,7 +23,9 @@ import com.emilio.streambox.security.refresh.IssuedRefreshToken;
  *       la siguiente petición da 401, que el frontend resuelve con un
  *       refresh.</li>
  *   <li>{@value #REFRESH_COOKIE_NAME}: el refresh token.
- *       {@code Path=/api/auth}: solo viaja al login, al refresh y al logout,
+ *       {@code Path=/api/auth}: solo viaja a las rutas de {@code /api/auth}
+ *       (login, refresh, logout, logout-all, la verificación del correo y el
+ *       restablecimiento de la contraseña; solo refresh y logout la leen),
  *       nunca al resto de la API, así que no aparece en los logs ni en las
  *       peticiones normales. {@code Max-Age} = la vida que le queda al
  *       token.</li>
@@ -56,7 +58,10 @@ public class AuthCookieService {
     /** Nombre de la cookie de dispositivo (ver {@code DeviceCookieService}). */
     public static final String DEVICE_COOKIE_NAME = "streambox_device";
 
-    /** Ruta de la cookie de dispositivo: la del refresh, solo viaja a {@code /api/auth}. */
+    /**
+     * Ruta de la cookie de dispositivo: la del refresh. Viaja a todas las rutas
+     * de {@code /api/auth} (no solo al login), pero solo el login la lee.
+     */
     public static final String DEVICE_COOKIE_PATH = REFRESH_COOKIE_PATH;
 
     /** Aviso de arranque con {@code Secure} desactivado en {@code prod}. */

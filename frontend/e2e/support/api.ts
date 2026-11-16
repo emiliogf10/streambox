@@ -241,8 +241,8 @@ export async function registerVerifiedUser(request: APIRequestContext, user: Tes
 export const SESSION_COOKIE = 'streambox_token';
 
 /**
- * Nombre de la cookie del refresh token (HttpOnly, SameSite=Strict, Path=/api/auth: solo viaja al
- * login, al refresh y al logout). La fija el login junto a {@link SESSION_COOKIE}. `signIn` NO la
+ * Nombre de la cookie del refresh token (HttpOnly, SameSite=Strict, Path=/api/auth: viaja a todas
+ * las rutas de /api/auth, pero solo la leen el refresh y el logout). La fija el login junto a {@link SESSION_COOKIE}. `signIn` NO la
  * siembra (solo el JWT): los tests que necesitan una sesión renovable inician sesión con el formulario.
  */
 export const REFRESH_COOKIE = 'streambox_refresh';

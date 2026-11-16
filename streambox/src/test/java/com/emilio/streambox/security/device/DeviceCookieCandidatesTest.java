@@ -146,12 +146,14 @@ class DeviceCookieCandidatesTest {
         return values;
     }
 
+    /** Cuenta con el correo confirmado (las únicas que pueden usar la cookie). */
     private static User user(Long id, int tokenVersion) {
         User user = new User();
         user.setId(id);
         user.setEmail("ana@device.test");
         user.setUsername("ana");
         user.setRole(Role.USER);
+        user.setEmailVerifiedAt(CLOCK.instant().minus(Duration.ofDays(1)));
         ReflectionTestUtils.setField(user, "tokenVersion", tokenVersion);
         return user;
     }

@@ -94,14 +94,18 @@ Capas: `controller` → `service` → `repository` → `entity`, más `dto`, `ma
 - Cada bug corregido deja un test que falla sin el arreglo.
 - Lo que depende del motor (migraciones, SQL nativo, collation, `lower()`, concurrencia real) se prueba también contra PostgreSQL real en `src/test/.../postgres/` (extiende `PostgresIntegrationTestSupport`); H2 puede ocultar diferencias (ya ocultó un bug de búsqueda).
 - Frontend: lógica y componentes con Vitest + Testing Library (`*.test.ts(x)` junto al código, utilidades en `src/test/`); flujos completos con Playwright en `frontend/e2e/`. Localiza por rol/etiqueta, no con `data-testid`.
-- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 4061 con Docker, sin omitidos (2026-11-13); tras la cookie de dispositivo (2026-11-16), 3987 sin Docker —3648 con H2 y 339 de PostgreSQL omitidos— y los de PostgreSQL aún sin ejecutar con Docker; sin Docker se omiten los de PostgreSQL (cada parametrizado omitido cuenta como uno, así que el recuento de omitidos no coincide con el de métodos); 1734 de Vitest y 234 E2E + 24 de capturas omitidas; desde el 2026-11-16 pasan todos también en el contenedor de Claude).
+- Antes de dar algo por terminado, ejecuta la suite completa y cuenta los tests; informa del resultado real (hoy: backend 4207 con Docker, sin omitidos (2026-11-16, tras la cookie de dispositivo; 557 de ellos contra PostgreSQL); sin Docker se omiten los de PostgreSQL (cada parametrizado omitido cuenta como uno, así que el recuento de omitidos no coincide con el de métodos); 1734 de Vitest y 234 E2E + 24 de capturas omitidas; desde el 2026-11-16 pasan todos también en el contenedor de Claude).
 - Vitest no espera tiempo real: los debounces se prueban con `src/test/fakeTimers.ts`. Los E2E que modifican el catálogo van en el proyecto `catalogo-mutable` de Playwright, que corre al final.
 - **En E2E, `toHaveURL` no prueba que la ruta nueva esté pintada** (React Router usa `startTransition`): tras navegar con un clic, espera a algo propio de la página de destino (`waitForLoginPage`, `waitForAdminSearchResults`; cap. 22 del manual). Un test «inestable con carga» es una carrera hasta que se demuestre lo contrario: mira la traza antes de anotarlo.
 - **Una lectura empezada antes de escribir no vale:** cancélala con `cancelQueries` antes de `invalidateQueries` o `setQueryData` (cap. 19.3 del manual).
 
 ## Frontend: estado actual
 
-SPA en `frontend/src/` organizada en `pages/`, `components/`, `context/`, `hooks/` y `lib/` (la Fase 3 del plan está hecha). Reglas que ya se cumplen y no deben romperse:
+SPA en `frontend/src/` organizada en `pages/`, `components/`, `context/`, `hooks/` y `lib/` (la Fase 3 del plan está hecha).
+
+**Skill `modern-web-guidance` (petición del autor, 2026-11-16): úsala siempre antes de escribir o revisar HTML/CSS/JS del cliente** (modales y popovers, formularios y validación, accesibilidad, responsive, animaciones, rendimiento web, seguridad del cliente…): las APIs web cambian deprisa y lo que se recuerda puede estar desfasado. No hace falta para backend, CI/Docker, configuración de Vite/tsconfig/lint, tests ni cambios de texto.
+
+Reglas que ya se cumplen y no deben romperse:
 
 - **Todas las llamadas a la API pasan por `lib/api.ts` (`apiFetch`/`ApiError`)**: nada de `fetch` suelto. Maneja 401 (cierra sesión una vez; el 401 de login/registro no), 403 (no cierra sesión), 429 (`Retry-After`), 204 y red caída. Se decide por `status`/`code`, no por el texto.
 - **Registro y verificación del correo:** tras el 202, `RegisterPage` muestra «Revisa tu correo» (sin afirmar que la cuenta existe); `pages/VerifyEmailPage.tsx` (`/verificar-email`, pública y sin guarda) lee `#token`, lo quita de la URL y confirma al pulsar el botón; el login muestra en todo 401 (y en `ACCOUNT_LOCKED`) la pista neutra «¿Te acabas de registrar o aún no has confirmado tu correo?» con «Reenviar el correo de confirmación» (`hooks/useResendVerification.ts`); un 403 vuelve a ser solo «sin permisos». Los E2E confirman las cuentas leyendo la bandeja del perfil `e2e` (`e2e/support/api.ts`).

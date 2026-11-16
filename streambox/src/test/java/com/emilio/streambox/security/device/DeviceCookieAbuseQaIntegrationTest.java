@@ -225,8 +225,11 @@ class DeviceCookieAbuseQaIntegrationTest {
      * Confirmar el correo sube {@code token_version} y anula una cookie de
      * dispositivo anterior de la cuenta. Hoy una cuenta pendiente no puede
      * conseguir una por el login (no entra), así que se emite directamente
-     * con el servicio para probar la revocación en sí: antes de confirmar
-     * vale, después no, y con la cuenta bloqueada se comporta como ausente.
+     * con el servicio para probar la revocación en sí. Mientras la cuenta
+     * está pendiente tampoco vale (BAJA-2: las pendientes no usan la cookie);
+     * tras confirmar sigue sin valer porque su versión ya no es la actual
+     * (una emitida con la versión nueva sí vale: control), y con la cuenta
+     * bloqueada se comporta como ausente.
      */
     @Test
     void confirmarElCorreoAnulaUnaCookieAnterior() throws Exception {
@@ -241,7 +244,8 @@ class DeviceCookieAbuseQaIntegrationTest {
                 .andExpect(status().is2xxSuccessful());
         User pending = userRepository.findByEmail(email).orElseThrow();
         String device = deviceCookieService.issueNew(pending.getId(), pending.getTokenVersion()).value();
-        assertTrue(deviceCookieService.deviceIdFor(device, pending).isPresent(), "control: vale antes de confirmar");
+        assertEquals(Optional.empty(), deviceCookieService.deviceIdFor(device, pending),
+                "una cuenta pendiente no usa la cookie");
 
         mockMvc.perform(post("/api/auth/email-verification")
                         .with(remoteAddr(nextIp()))
@@ -251,7 +255,11 @@ class DeviceCookieAbuseQaIntegrationTest {
 
         User confirmed = userRepository.findByEmail(email).orElseThrow();
         assertTrue(confirmed.isEmailVerified());
+        assertTrue(confirmed.getTokenVersion() > pending.getTokenVersion(), "confirmar sube token_version");
         assertEquals(Optional.empty(), deviceCookieService.deviceIdFor(device, confirmed));
+        String current = deviceCookieService.issueNew(confirmed.getId(), confirmed.getTokenVersion()).value();
+        assertTrue(deviceCookieService.deviceIdFor(current, confirmed).isPresent(),
+                "control: con la versión nueva sí vale");
         String attacker = nextIp();
         lockFrom(email, attacker);
         assertLocked(login(email, PASSWORD, nextIp(), device));
