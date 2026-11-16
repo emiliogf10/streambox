@@ -37,7 +37,7 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **4061** con Docker | Sin omitidos (2026-11-13; sin Docker se omiten los de PostgreSQL). Antes del lote posterior a la auditoría run-3 eran 3975 en el CI |
+| Backend (JUnit) | **4061** con Docker (2026-11-13) | Sin omitidos. Tras la cookie de dispositivo (2026-11-16): **3987** sin Docker (3648 con H2 y 339 de PostgreSQL omitidos); **los de PostgreSQL de ese cambio aún no se han ejecutado con Docker**. Antes del lote posterior a la auditoría run-3 eran 3975 en el CI |
 | Frontend (Vitest) | **1734** | |
 | E2E (Playwright) | **234** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
@@ -337,6 +337,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 - **E2E inestables con la máquina cargada** — *Baja · BAJA*
   - **Diagnóstico para cualquier inestable nuevo (2026-11-01):** dos que parecían «carga» resultaron ser carreras del test, con causa concreta (ver el historial de esa fecha). Antes de anotar uno como carga, mira la traza: qué elemento resolvió cada acción y qué peticiones seguían en vuelo. `trailer-layout.spec.ts:146` sigue sin ese análisis.
   - Un aviso que aparece bajo el cursor queda pausado por el *hover* y puede tapar un botón de la fila (p. ej. «Borrar» en Géneros, `admin.spec.ts:122`). Pausar solo con movimiento real del puntero, o colocar los avisos sin tapar acciones, cambia el comportamiento: queda como propuesta.
+  - El 2026-11-16, en el contenedor de Claude con la suite completa (4,5 min), falló una vez `favorite-genres.spec.ts:97` («Ahora no» no salió de `/bienvenida` en 7 s); `--repeat-each=5` dio 25/25 y la suite completa repetida pasó entera. **Sin analizar:** la traza se perdió al repetir (Playwright vacía `test-results/`); si vuelve, guarda la traza antes de repetir y mira si el `PUT /api/users/me/genres` falló o solo tardó.
   - El 2026-10-17, con la batería en 12,8 min, falló una vez `e2e/trailer-keyboard.spec.ts` («el foco no se escapa del diálogo»); repetido, 6/6.
   - El 2026-10-15, con la batería en 8 min (en vez de ~4), falló una vez `auth.spec.ts:484` (dos pestañas renuevan a la vez); por separado pasó 3/3.
   - El 2026-10-08, con la batería tardando casi 4 minutos en lugar de ~1, fallaron entre 2 y 4 E2E distintos por tiempo agotado; el último commit, sin los cambios del día, falló igual. Con la máquina menos cargada, 144/144.
@@ -491,7 +492,7 @@ Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
   - **QA-DC-2 (BAJA):** con varias `streambox_device`, solo contaba la primera (*cookie tossing* desde un subdominio). Ahora se prueban hasta 5 y vale la primera válida para la cuenta. La de refresh sigue con la primera, a propósito (riesgo residual anotado en 2.5).
 - **Infraestructura de tests:** al añadir tests salió el mismo fallo de H2 que el autor resolvió en paralelo en `main` (ver la entrada del 2026-11-13): aquí se investigó por separado (la primera sospecha, DevTools, quedó descartada) y se llegó a la misma causa. Al integrar `main` se adoptó su solución (una base H2 por contexto y `hikari.max-lifetime=0`) y se retiró la de esta rama (`H2FlywaySessionTestAutoConfiguration`), que con bases por contexto habría dejado viva una conexión por cada contexto expulsado.
 - **Documentación:** `docs/api/openapi.yaml` regenerado desde el backend real, manual (10.4 bis, 10.6, 11, 11.2 bis y 22), ADR 0014, CLAUDE.md y este plan.
-- **Tests:** backend de 3757 a **3903** (306 omitidos, sin Docker), Vitest **1734** y E2E **234** (+24 de capturas), todos en verde. Verificado por el orquestador. **Pendiente:** ejecutar los de PostgreSQL con Docker (`.\mvnw.cmd test "-Dtest=Postgres*"`).
+- **Tests:** en la rama, backend de 3757 a **3903** (306 omitidos, sin Docker). Tras integrar `main` (b697bb5): backend **3987** sin Docker (339 omitidos, 0 fallos), Vitest **1734** y E2E **234** (+24 de capturas), todos en verde. Verificado por el orquestador. **Pendiente:** ejecutar los de PostgreSQL con Docker (`.\mvnw.cmd test "-Dtest=Postgres*"`).
 
 ### 2026-11-13 · Lote tras la auditoría run-3: NV-1, NV-2, test inestable y base H2 de los tests
 
