@@ -140,6 +140,12 @@ export default defineConfig({
         SPRING_DATASOURCE_DRIVER_CLASS_NAME: 'org.h2.Driver',
         SPRING_DATASOURCE_USERNAME: 'sa',
         SPRING_DATASOURCE_PASSWORD: '',
+        // Sin caducidad para las conexiones del pool (0 = ilimitada). H2 liga cada `CHECK ... IN (...)`
+        // (p. ej. `ck_users_role`) a la sesión que ejecutó la migración: si Hikari retirara esa conexión
+        // (por defecto a los 30 min), la restricción fallaría con el error 90098 aunque la base siga viva.
+        // Los tests de JUnit lo evitan con `H2FlywaySessionTestAutoConfiguration`, pero esta pila no carga
+        // las clases de test (`useTestClasspath` solo añade dependencias). Ver el cap. 22 del manual.
+        SPRING_DATASOURCE_HIKARI_MAX_LIFETIME: '0',
         JWT_SECRET: JWT_SECRET,
         JWT_ACCESS_TOKEN_TTL: '15m',
         // El backend E2E corre en http: sin esto la cookie de sesión llevaría `Secure` y

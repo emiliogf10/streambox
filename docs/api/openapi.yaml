@@ -1,7 +1,7 @@
 # Especificación OpenAPI 3.1 de la API de StreamBox.
 # Generada con springdoc (GET /v3/api-docs) desde el backend real y convertida a YAML;
 # solo se ha cambiado `servers`. Para regenerarla: ver docs/api/README.md.
-# Autenticación: cookies HttpOnly (streambox_token + streambox_refresh) o Authorization: Bearer; ver README.
+# Autenticación: cookies HttpOnly (streambox_token + streambox_refresh; streambox_device en /api/auth) o Authorization: Bearer; ver README.
 openapi: 3.1.0
 info:
   title: Streambox API
@@ -21,7 +21,8 @@ paths:
         y un streambox_refresh nuevos (una sesión nueva, así que tampoco sirve una copia anterior del refresh token de esta).
         Los JWT de acceso ya emitidos a las demás sesiones dejan de valer al momento (401). Si la contraseña actual es incorrecta
         no se cambia nada. Las IPs desde las que se inició sesión dejan de librarse del bloqueo de la cuenta por intentos
-        fallidos, salvo la de esta petición.'
+        fallidos, salvo la de esta petición, y las cookies streambox_device anteriores dejan de valer; esta respuesta entrega
+        una nueva.'
       operationId: changePassword
       requestBody:
         content:
@@ -31,7 +32,8 @@ paths:
         required: true
       responses:
         '204':
-          description: Contraseña cambiada; sin cuerpo, con las cookies streambox_token y streambox_refresh nuevas en Set-Cookie
+          description: Contraseña cambiada; sin cuerpo, con las cookies streambox_token, streambox_refresh y streambox_device
+            nuevas en Set-Cookie
         '400':
           description: 'Código CURRENT_PASSWORD_INCORRECT: la contraseña actual no es correcta (mensaje en validationErrors.currentPassword;
             gasta uno de los 5 intentos). Código VALIDATION_ERROR: datos no válidos, con un mensaje por campo en validationErrors:
@@ -1577,7 +1579,6 @@ paths:
       - name: streambox_refresh
         in: cookie
         description: Refresh token (cookie HttpOnly streambox_refresh que fija el login; el navegador la envía solo)
-        required: false
         schema:
           type: string
       responses:
@@ -1674,7 +1675,9 @@ paths:
         dejan de servir todos los enlaces pendientes de la cuenta (de restablecimiento y de confirmación), se cierran TODAS
         sus sesiones (los refresh tokens quedan revocados y los JWT de acceso ya emitidos dejan de valer al momento), se borran
         los intentos fallidos de login de la cuenta y se envía un aviso al correo. No inicia sesión: después hay que entrar
-        con la contraseña nueva. Si la contraseña nueva no cumple la política, el token NO se gasta.'
+        con la contraseña nueva. Las cookies streambox_device anteriores de la cuenta dejan de valer y la respuesta entrega
+        una nueva (HttpOnly, SameSite=Strict, Path=/api/auth): no abre sesión, pero protege el siguiente login de este navegador
+        frente al bloqueo de la cuenta. Si la contraseña nueva no cumple la política, el token NO se gasta.'
       operationId: confirmPasswordReset
       requestBody:
         content:
@@ -1684,7 +1687,7 @@ paths:
         required: true
       responses:
         '204':
-          description: Contraseña cambiada; sin cuerpo y sin cookies
+          description: 'Contraseña cambiada; sin cuerpo. Sin cookies de sesión: solo streambox_device en Set-Cookie'
         '400':
           description: 'Código INVALID_RESET_TOKEN (mensaje «El enlace para restablecer la contraseña no es válido o ha caducado.»):
             el token no existe, ha caducado, ya se usó, se invalidó al pedir otro enlace, falta o no tiene el formato de un
@@ -1720,14 +1723,15 @@ paths:
         servir para renovar) y borra las cookies streambox_token y streambox_refresh (Set-Cookie con Max-Age=0). Es público
         e idempotente: responde 204 haya o no sesión, y con un refresh token desconocido o ya revocado. Exige la cabecera
         X-Requested-With: StreamBox (defensa CSRF, también con Authorization: Bearer): sin ella otra web podría borrar las
-        cookies de la víctima. El logout no revoca el JWT de acceso: una copia seguiría valiendo hasta su caducidad (como
-        mucho 15 minutos por defecto), pero ya no se podría renovar. Para anularlo también, usa POST /api/auth/logout-all.'
+        cookies de la víctima. No borra la cookie de dispositivo streambox_device: no abre sesión y protege el siguiente login
+        de este navegador frente al bloqueo de la cuenta. El logout no revoca el JWT de acceso: una copia seguiría valiendo
+        hasta su caducidad (como mucho 15 minutos por defecto), pero ya no se podría renovar. Para anularlo también, usa POST
+        /api/auth/logout-all.'
       operationId: logout
       parameters:
       - name: streambox_refresh
         in: cookie
         description: Refresh token de la sesión que se cierra (cookie HttpOnly streambox_refresh); opcional
-        required: false
         schema:
           type: string
       responses:
@@ -1756,7 +1760,8 @@ paths:
       description: 'Revoca todas las sesiones de la cuenta autenticada, incluida la actual: ningún refresh token suyo vuelve
         a servir para renovar. Borra las cookies streambox_token y streambox_refresh de esta petición (Set-Cookie con Max-Age=0).
         Sin cuerpo. Los JWT de acceso ya emitidos a la cuenta, en cualquier dispositivo, dejan de valer al momento (401).
-        Además, ninguna IP de la cuenta sigue librándose del bloqueo por intentos fallidos del login.'
+        Además, ninguna IP de la cuenta sigue librándose del bloqueo por intentos fallidos del login, y las cookies streambox_device
+        de la cuenta dejan de valer en todos los navegadores (no se borran: se ignoran hasta el siguiente login correcto).'
       operationId: logoutAll
       responses:
         '204':
@@ -1795,8 +1800,21 @@ paths:
         refresh y logout), Max-Age = su vida (7 días). Cuando el JWT caduca, POST /api/auth/refresh entrega uno nuevo sin
         volver a pedir la contraseña. Las peticiones POST/PUT/PATCH/DELETE autenticadas por cookie deben llevar la cabecera
         X-Requested-With: StreamBox (403 CSRF_REJECTED si falta). También se acepta Authorization: Bearer con el JWT de acceso
-        (clientes de API), sin esa cabecera extra.'
+        (clientes de API), sin esa cabecera extra. Además, un login correcto entrega (o renueva) la cookie de dispositivo
+        streambox_device (HttpOnly, SameSite=Strict, Path=/api/auth, Max-Age = 30 días por defecto): firmada por el servidor,
+        no abre sesión, pero en los siguientes logins de esa cuenta desde ese navegador da un contador de intentos propio
+        (los mismos 5 fallos cada 15 minutos), de modo que el bloqueo que provoquen otros no le deja fuera. Deja de valer
+        al cerrar sesión en todos los dispositivos, cambiar o restablecer la contraseña y confirmar el correo; una cookie
+        que no vale se ignora.'
       operationId: login
+      parameters:
+      - name: streambox_device
+        in: cookie
+        description: 'Cookie de dispositivo (HttpOnly streambox_device que fija un login correcto; el navegador la envía sola).
+          Opcional: si falta o no vale se ignora. Si llegan varias con ese nombre, vale la primera que sea válida para la
+          cuenta (se miran como mucho las 5 primeras)'
+        schema:
+          type: string
       requestBody:
         content:
           application/json:
@@ -1805,7 +1823,8 @@ paths:
         required: true
       responses:
         '204':
-          description: Autenticación correcta; sin cuerpo, con las cookies streambox_token y streambox_refresh en Set-Cookie
+          description: Autenticación correcta; sin cuerpo, con las cookies streambox_token, streambox_refresh y streambox_device
+            en Set-Cookie
         '400':
           description: 'Los datos proporcionados no son válidos (VALIDATION_ERROR: email vacío, con formato incorrecto o de
             más de 100 caracteres, contraseña vacía o de más de 1024 caracteres; MALFORMED_REQUEST: un campo que no es texto,
@@ -1830,9 +1849,10 @@ paths:
         '429':
           description: 'Demasiados intentos; la cabecera Retry-After indica los segundos que hay que esperar. Código ACCOUNT_LOCKED:
             la cuenta está bloqueada por logins fallidos (lo devuelve el fallo que agota los intentos y cualquier intento
-            durante el bloqueo, aunque la contraseña sea correcta; el mensaje dice cuántos minutos dura; no se aplica a una
-            IP desde la que el titular ya inició sesión con éxito, que tiene su propio contador con los mismos límites). Código
-            RATE_LIMIT_EXCEEDED: demasiadas peticiones de login desde esta IP'
+            durante el bloqueo, aunque la contraseña sea correcta; el mensaje dice cuántos minutos dura; no se aplica a un
+            navegador con una cookie streambox_device válida para la cuenta ni a una IP desde la que el titular ya inició
+            sesión con éxito, que tienen su propio contador con los mismos límites). Código RATE_LIMIT_EXCEEDED: demasiadas
+            peticiones de login desde esta IP'
           headers:
             Retry-After:
               description: Segundos que hay que esperar antes de volver a intentarlo (entero, mínimo 1).
