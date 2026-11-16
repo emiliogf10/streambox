@@ -25,7 +25,7 @@ Con 5 fallos, cualquiera que conozca un email bloquea la cuenta 15 min. Hoy solo
 | # | Paso | Estado |
 |---|---|---|
 | 1 | Línea base verificada (backend 3757/0 fallos, Vitest 1734, E2E 234) | ✅ |
-| 2 | Implementación + tests (agente `security`) | ⬜ |
+| 2 | Implementación + tests (agente `security`) | 🔄 en curso (autorizado a tocar solo la integración en AuthenticationService, AuthController, PasswordChangeService y PasswordResetService) |
 | 3 | Revisión independiente y tests de casos límite (agente `qa`) | ⬜ |
 | 4 | Verificación completa por el orquestador (backend, Vitest, E2E) | ⬜ |
 | 5 | Docs: manual (bloqueo de cuenta), ADR 0014, plan 2.5/2.1, CLAUDE.md, OpenAPI si cambia el contrato | ⬜ |
