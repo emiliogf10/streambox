@@ -8,6 +8,9 @@ import com.emilio.streambox.exception.AccountLockedException;
 import com.emilio.streambox.exception.InvalidCredentialsException;
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.JwtService;
+import com.emilio.streambox.security.device.DeviceCookieService;
+import com.emilio.streambox.security.device.IssuedDeviceToken;
+import com.emilio.streambox.security.refresh.IssuedRefreshToken;
 import com.emilio.streambox.security.refresh.RefreshTokenService;
 import com.emilio.streambox.security.refresh.SessionTokens;
 import com.emilio.streambox.security.ratelimit.LoginAttemptService;
@@ -41,6 +44,8 @@ public class AuthenticationService {
 
     private final RefreshTokenService refreshTokenService;
 
+    private final DeviceCookieService deviceCookieService;
+
     /**
      * Hash válido que se comprueba cuando el email no existe, para que el
      * tiempo de respuesta no delate si la cuenta está registrada.
@@ -59,19 +64,22 @@ public class AuthenticationService {
      *                            autenticado
      * @param refreshTokenService servicio que abre la familia de refresh
      *                            tokens de la sesión
+     * @param deviceCookieService valida y emite la cookie de dispositivo
      */
     public AuthenticationService(
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             LoginAttemptService loginAttemptService,
             JwtService jwtService,
-            RefreshTokenService refreshTokenService) {
+            RefreshTokenService refreshTokenService,
+            DeviceCookieService deviceCookieService) {
 
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.loginAttemptService = loginAttemptService;
         this.jwtService = jwtService;
         this.refreshTokenService = refreshTokenService;
+        this.deviceCookieService = deviceCookieService;
         this.dummyPasswordHash = passwordEncoder.encode("contraseña-que-nadie-usa");
     }
 
@@ -122,14 +130,26 @@ public class AuthenticationService {
      *       por una carrera que ya existía antes de la versión.</li>
      * </ul>
      *
+     * <p>
+     * <b>Cookie de dispositivo.</b> Si {@code deviceCookie} es válida para la
+     * cuenta de ese email, el intento usa el contador propio del dispositivo
+     * y el bloqueo de la cuenta no le afecta (ver {@link DeviceCookieService} y
+     * {@link LoginAttemptService}). Tras un login correcto se emite (o
+     * renueva) siempre; nunca en un login fallido ni para una cuenta
+     * pendiente de confirmar, que no llegan hasta aquí.
+     * </p>
+     *
      * @param email    correo electrónico del usuario
      * @param password contraseña en texto plano
      * @param clientIp dirección remota del cliente ({@code request.getRemoteAddr()},
      *                 nunca {@code X-Forwarded-For} a mano): decide si el
      *                 bloqueo de la cuenta le aplica como IP conocida o
      *                 desconocida (ver {@link LoginAttemptService})
-     * @return JWT de acceso y refresh token; el controlador los entrega en
-     *         cookies HttpOnly, nunca en el cuerpo
+     * @param deviceCookie valor de la cookie {@code streambox_device} tal como
+     *                 llega, o {@code null}; si no vale para la cuenta se trata
+     *                 como ausente
+     * @return JWT de acceso, refresh token y cookie de dispositivo; el
+     *         controlador los entrega en cookies HttpOnly, nunca en el cuerpo
      * @throws InvalidCredentialsException si el email no existe, la contraseña es
      *         incorrecta o la cuenta aún no ha confirmado su correo (aunque la
      *         contraseña sea correcta: ver {@code isUsableForLogin}); lleva los
@@ -137,13 +157,21 @@ public class AuthenticationService {
      * @throws AccountLockedException si la cuenta está bloqueada temporalmente
      *         por demasiados intentos fallidos, o si este fallo agota los intentos
      */
-    public SessionTokens login(String email, String password, String clientIp) {
+    public SessionTokens login(String email, String password, String clientIp, String deviceCookie) {
 
-        User user = authenticate(email, password, clientIp);
+        Authenticated authenticated = authenticate(email, password, clientIp, deviceCookie);
+        User user = authenticated.user();
         // Versión explícita (ver el Javadoc): la entidad se acaba de leer en
         // su propia transacción y no ha pasado por ningún incremento.
         String accessToken = jwtService.generateToken(user, user.getTokenVersion());
-        return new SessionTokens(accessToken, refreshTokenService.startFamily(user.getId()));
+        IssuedRefreshToken refreshToken = refreshTokenService.startFamily(user.getId());
+        // Con la misma versión que el JWT: si un «cerrar todas las sesiones»
+        // la sube a la vez, la cookie nace ya anulada (lado seguro) y el
+        // siguiente login correcto la sustituye. Conserva el id de dispositivo
+        // de una cookie válida: el navegador sigue siendo el mismo.
+        IssuedDeviceToken deviceToken = deviceCookieService.issue(
+                user.getId(), user.getTokenVersion(), authenticated.deviceId());
+        return new SessionTokens(accessToken, refreshToken, deviceToken);
     }
 
     /**
@@ -176,17 +204,26 @@ public class AuthenticationService {
      * {@link LoginAttemptService}).
      * </p>
      *
+     * <p>
+     * Una cookie de dispositivo solo cuenta si es válida para <b>esta</b>
+     * cuenta. Con un email inexistente nunca lo es (no hay usuario con el que
+     * cuadre), así que la respuesta a un email inexistente es la misma con o
+     * sin cookie, y la misma que la de un email registrado sin cookie válida.
+     * </p>
+     *
      * @param email    dirección de correo electrónico del usuario
      * @param password contraseña proporcionada durante el inicio de sesión
      * @param clientIp dirección remota del cliente
-     * @return usuario autenticado correctamente
+     * @param deviceCookie valor de la cookie de dispositivo, o {@code null}
+     * @return usuario autenticado correctamente y el id del dispositivo de su
+     *         cookie, si era válida
      * @throws InvalidCredentialsException si el correo electrónico no existe,
      *                          la contraseña proporcionada es incorrecta o la
      *                          cuenta está pendiente de confirmar el correo
      * @throws AccountLockedException si la cuenta está bloqueada o este fallo
      *                          agota los intentos
      */
-    private User authenticate(String email, String password, String clientIp) {
+    private Authenticated authenticate(String email, String password, String clientIp, String deviceCookie) {
 
         // El registro guarda el email normalizado (trim + minúsculas); el login
         // debe normalizarlo igual o el usuario no podría entrar escribiéndolo
@@ -198,12 +235,18 @@ public class AuthenticationService {
         // bloqueando cuentas durante una caída.
         User user = userRepository.findByEmail(normalizedEmail).orElse(null);
 
+        // Sin consultas nuevas: la cookie se comprueba contra el usuario
+        // recién leído (id y token_version). La firma se verifica aunque el
+        // usuario no exista, para que el trabajo no dependa de ello.
+        String deviceId = deviceCookieService.deviceIdFor(deviceCookie, user).orElse(null);
+
         // Se reserva el intento antes de comprobar la contraseña: una cuenta
         // bloqueada rechaza el login aunque la contraseña sea correcta, y la
         // reserva atómica impide que muchas peticiones simultáneas prueben más
         // contraseñas de las permitidas. Se cuenta tanto si el usuario existe
         // como si no, para que el bloqueo no revele qué emails están registrados.
-        LoginAttempt attempt = loginAttemptService.reserveAttempt(normalizedEmail, clientIp);
+        // Con cookie de dispositivo válida, en el contador del dispositivo.
+        LoginAttempt attempt = loginAttemptService.reserveAttempt(normalizedEmail, clientIp, deviceId);
 
         // Con usuario inexistente se compara contra un hash falso para que el
         // coste (BCrypt) y, por tanto, el tiempo de respuesta sean parecidos.
@@ -231,7 +274,16 @@ public class AuthenticationService {
         // LoginAttemptService).
         loginAttemptService.recordSuccess(attempt);
 
-        return user;
+        return new Authenticated(user, deviceId);
+    }
+
+    /**
+     * Resultado de una autenticación correcta.
+     *
+     * @param user     cuenta autenticada
+     * @param deviceId id del dispositivo de una cookie válida, o {@code null}
+     */
+    private record Authenticated(User user, String deviceId) {
     }
 
     /**

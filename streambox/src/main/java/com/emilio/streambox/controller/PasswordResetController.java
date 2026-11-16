@@ -1,5 +1,6 @@
 package com.emilio.streambox.controller;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -10,6 +11,8 @@ import com.emilio.streambox.dto.AcceptedResponse;
 import com.emilio.streambox.dto.PasswordResetConfirmRequest;
 import com.emilio.streambox.dto.PasswordResetRequest;
 import com.emilio.streambox.exception.InvalidResetTokenException;
+import com.emilio.streambox.security.AuthCookieService;
+import com.emilio.streambox.security.device.IssuedDeviceToken;
 import com.emilio.streambox.security.ratelimit.RateLimitingFilter;
 import com.emilio.streambox.service.PasswordResetService;
 
@@ -17,6 +20,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 
 /**
@@ -48,13 +52,17 @@ public class PasswordResetController {
 
     private final PasswordResetService passwordResetService;
 
+    private final AuthCookieService authCookieService;
+
     /**
      * Crea el controlador.
      *
      * @param passwordResetService servicio de «He olvidado mi contraseña»
+     * @param authCookieService    construye la cookie de dispositivo que entrega la confirmación
      */
-    public PasswordResetController(PasswordResetService passwordResetService) {
+    public PasswordResetController(PasswordResetService passwordResetService, AuthCookieService authCookieService) {
         this.passwordResetService = passwordResetService;
+        this.authCookieService = authCookieService;
     }
 
     /**
@@ -95,6 +103,7 @@ public class PasswordResetController {
      * @param httpRequest petición HTTP: su IP ({@code getRemoteAddr()}, nunca
      *                    {@code X-Forwarded-For} a mano) queda como la única «IP
      *                    conocida» de la cuenta para el bloqueo del login
+     * @param response    respuesta en la que se añade la cookie de dispositivo nueva
      * @throws InvalidResetTokenException si el token no sirve (400)
      */
     @PostMapping(RateLimitingFilter.PASSWORD_RESET_CONFIRM_PATH)
@@ -106,9 +115,13 @@ public class PasswordResetController {
             + "confirmación), se cierran TODAS sus sesiones (los refresh tokens quedan revocados y los JWT de "
             + "acceso ya emitidos dejan de valer al momento), se borran los intentos fallidos "
             + "de login de la cuenta y se envía un aviso al correo. No inicia sesión: después hay que entrar con "
-            + "la contraseña nueva. Si la contraseña nueva no cumple la política, el token NO se gasta.")
+            + "la contraseña nueva. Las cookies streambox_device anteriores de la cuenta dejan de valer y la "
+            + "respuesta entrega una nueva (HttpOnly, SameSite=Strict, Path=/api/auth): no abre sesión, pero "
+            + "protege el siguiente login de este navegador frente al bloqueo de la cuenta. Si la contraseña "
+            + "nueva no cumple la política, el token NO se gasta.")
     @ApiResponses({
-            @ApiResponse(responseCode = "204", description = "Contraseña cambiada; sin cuerpo y sin cookies"),
+            @ApiResponse(responseCode = "204", description = "Contraseña cambiada; sin cuerpo. Sin cookies de "
+                    + "sesión: solo streambox_device en Set-Cookie"),
             @ApiResponse(responseCode = "400", description = "Código INVALID_RESET_TOKEN (mensaje «"
                     + InvalidResetTokenException.MESSAGE + "»): el token no existe, ha caducado, ya se usó, se "
                     + "invalidó al pedir otro enlace, falta o no tiene el formato de un token; mismo cuerpo en "
@@ -122,10 +135,15 @@ public class PasswordResetController {
                     + "que hay que esperar")
     })
     public void confirmPasswordReset(@Valid @RequestBody PasswordResetConfirmRequest request,
-            HttpServletRequest httpRequest) {
+            HttpServletRequest httpRequest, HttpServletResponse response) {
 
         // getRemoteAddr() y no X-Forwarded-For: en prod la cabecera solo la
         // traduce el servidor si viene de un proxy de confianza (como el login).
-        passwordResetService.confirm(request.token(), request.newPassword(), httpRequest.getRemoteAddr());
+        IssuedDeviceToken deviceToken = passwordResetService.confirm(
+                request.token(), request.newPassword(), httpRequest.getRemoteAddr());
+        // Solo la cookie de dispositivo (no abre sesión): ver PasswordResetService.confirm.
+        if (deviceToken != null) {
+            response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.deviceCookie(deviceToken));
+        }
     }
 }

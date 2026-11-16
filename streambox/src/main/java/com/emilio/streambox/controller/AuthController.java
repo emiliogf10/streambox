@@ -72,6 +72,8 @@ public class AuthController {
      * HttpOnly y no en el cuerpo.
      *
      * @param request     correo electrónico y contraseña
+     * @param deviceCookie valor de la cookie {@code streambox_device}, o
+     *                    {@code null}; el servicio decide si vale para la cuenta
      * @param httpRequest petición HTTP, de la que se toma la IP de origen
      *                    ({@code getRemoteAddr()}) para el bloqueo por IP conocida
      * @param response    respuesta en la que se añaden los {@code Set-Cookie}
@@ -85,10 +87,16 @@ public class AuthController {
             + "JWT caduca, POST /api/auth/refresh entrega uno nuevo sin volver a pedir la contraseña. Las "
             + "peticiones POST/PUT/PATCH/DELETE autenticadas por cookie deben llevar la cabecera "
             + "X-Requested-With: StreamBox (403 CSRF_REJECTED si falta). También se acepta "
-            + "Authorization: Bearer con el JWT de acceso (clientes de API), sin esa cabecera extra.")
+            + "Authorization: Bearer con el JWT de acceso (clientes de API), sin esa cabecera extra. "
+            + "Además, un login correcto entrega (o renueva) la cookie de dispositivo streambox_device "
+            + "(HttpOnly, SameSite=Strict, Path=/api/auth, Max-Age = 30 días por defecto): firmada por el "
+            + "servidor, no abre sesión, pero en los siguientes logins de esa cuenta desde ese navegador da un "
+            + "contador de intentos propio (los mismos 5 fallos cada 15 minutos), de modo que el bloqueo que "
+            + "provoquen otros no le deja fuera. Deja de valer al cerrar sesión en todos los dispositivos, "
+            + "cambiar o restablecer la contraseña y confirmar el correo; una cookie que no vale se ignora.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Autenticación correcta; sin cuerpo, "
-                    + "con las cookies streambox_token y streambox_refresh en Set-Cookie"),
+                    + "con las cookies streambox_token, streambox_refresh y streambox_device en Set-Cookie"),
             @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos "
                     + "(VALIDATION_ERROR: email vacío, con formato incorrecto o de más de 100 caracteres, "
                     + "contraseña vacía o de más de 1024 caracteres; MALFORMED_REQUEST: un campo que no "
@@ -109,21 +117,28 @@ public class AuthController {
                     + "indica los segundos que hay que esperar. Código ACCOUNT_LOCKED: la cuenta está "
                     + "bloqueada por logins fallidos (lo devuelve el fallo que agota los intentos y "
                     + "cualquier intento durante el bloqueo, aunque la contraseña sea correcta; el mensaje "
-                    + "dice cuántos minutos dura; no se aplica a una IP desde la que el titular ya inició "
-                    + "sesión con éxito, que tiene su propio contador con los mismos límites). "
+                    + "dice cuántos minutos dura; no se aplica a un navegador con una cookie streambox_device "
+                    + "válida para la cuenta ni a una IP desde la que el titular ya inició "
+                    + "sesión con éxito, que tienen su propio contador con los mismos límites). "
                     + "Código RATE_LIMIT_EXCEEDED: demasiadas peticiones de "
                     + "login desde esta IP")
     })
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest,
-            HttpServletResponse response) {
+    public void login(@Valid @RequestBody LoginRequest request,
+            @Parameter(description = "Cookie de dispositivo (HttpOnly streambox_device que fija un login "
+                    + "correcto; el navegador la envía sola). Opcional: si falta o no vale se ignora")
+            @CookieValue(name = AuthCookieService.DEVICE_COOKIE_NAME, required = false) String deviceCookie,
+            HttpServletRequest httpRequest, HttpServletResponse response) {
 
         // getRemoteAddr() y no X-Forwarded-For: en prod la cabecera solo la
         // aplica Spring (forward-headers-strategy=native) y no se puede falsificar.
         SessionTokens tokens = authenticationService.login(
-                request.getEmail(), request.getPassword(), httpRequest.getRemoteAddr());
+                request.getEmail(), request.getPassword(), httpRequest.getRemoteAddr(), deviceCookie);
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.sessionCookie(tokens.accessToken()));
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.refreshCookie(tokens.refreshToken()));
+        if (tokens.deviceToken() != null) {
+            response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.deviceCookie(tokens.deviceToken()));
+        }
     }
 
     /**
@@ -227,7 +242,9 @@ public class AuthController {
             + "streambox_token y streambox_refresh (Set-Cookie con Max-Age=0). Es público e idempotente: "
             + "responde 204 haya o no sesión, y con un refresh token desconocido o ya revocado. Exige la "
             + "cabecera X-Requested-With: StreamBox (defensa CSRF, también con Authorization: Bearer): sin "
-            + "ella otra web podría borrar las cookies de la víctima. El logout no revoca el JWT de "
+            + "ella otra web podría borrar las cookies de la víctima. No borra la cookie de dispositivo "
+            + "streambox_device: no abre sesión y protege el siguiente login de este navegador frente al "
+            + "bloqueo de la cuenta. El logout no revoca el JWT de "
             + "acceso: una copia seguiría valiendo hasta su caducidad (como mucho 15 minutos por defecto), "
             + "pero ya no se podría renovar. Para anularlo también, usa POST /api/auth/logout-all.")
     @ApiResponses({
@@ -285,7 +302,8 @@ public class AuthController {
             + "renovar. Borra las cookies streambox_token y streambox_refresh de esta petición (Set-Cookie con "
             + "Max-Age=0). Sin cuerpo. Los JWT de acceso ya emitidos a la cuenta, en cualquier dispositivo, "
             + "dejan de valer al momento (401). Además, ninguna IP de la cuenta sigue librándose del bloqueo "
-            + "por intentos fallidos del login.")
+            + "por intentos fallidos del login, y las cookies streambox_device de la cuenta dejan de valer en "
+            + "todos los navegadores (no se borran: se ignoran hasta el siguiente login correcto).")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Todas las sesiones revocadas y cookies borradas"),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado (no se revoca ni "
@@ -296,6 +314,8 @@ public class AuthController {
     })
     public void logoutAll(@AuthenticationPrincipal AuthenticatedUser principal, HttpServletResponse response) {
 
+        // Sube token_version: anula también todas las cookies de dispositivo
+        // de la cuenta (DeviceCookieService), sin borrarlas ni guardar nada.
         refreshTokenService.revokeAllSessions(principal.id());
         // Después de revocar (si falla, 500 y no se olvida nada). Sin re-registrar
         // la IP: esta petición no prueba la contraseña (ver LoginAttemptService).

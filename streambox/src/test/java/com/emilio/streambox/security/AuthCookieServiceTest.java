@@ -12,6 +12,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.mock.env.MockEnvironment;
 
+import com.emilio.streambox.security.device.IssuedDeviceToken;
 import com.emilio.streambox.security.refresh.IssuedRefreshToken;
 
 import ch.qos.logback.classic.Level;
@@ -40,6 +41,25 @@ class AuthCookieServiceTest {
         assertTrue(cookie.contains("Max-Age=" + Duration.ofDays(6).toSeconds() + ";"), cookie);
         assertTrue(cookie.contains("HttpOnly") && cookie.contains("Secure") && cookie.contains("SameSite=Strict"),
                 cookie);
+    }
+
+    /**
+     * Cookie de dispositivo: solo viaja a {@code /api/auth}, dura lo
+     * configurado y lleva los mismos atributos de seguridad; {@code Secure}
+     * sigue la propiedad, como las de sesión.
+     */
+    @ParameterizedTest
+    @CsvSource({ "true", "false" })
+    void laCookieDeDispositivoSoloViajaAAuthYRespetaSecure(boolean secure) {
+        AuthCookieService service = new AuthCookieService(new AuthCookieProperties(secure), JWT, env());
+
+        String cookie = service.deviceCookie(new IssuedDeviceToken("v1.p.f", Duration.ofDays(30)));
+
+        assertTrue(cookie.startsWith("streambox_device=v1.p.f;"), cookie);
+        assertTrue(cookie.contains("Path=/api/auth;"), cookie);
+        assertTrue(cookie.contains("Max-Age=" + Duration.ofDays(30).toSeconds() + ";"), cookie);
+        assertTrue(cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"), cookie);
+        assertEquals(secure, cookie.contains("Secure"), cookie);
     }
 
     @Test

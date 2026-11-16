@@ -77,10 +77,11 @@ public class PasswordController {
             + "token de esta). Los JWT de acceso ya emitidos a las demás sesiones dejan de valer al momento "
             + "(401). Si la contraseña "
             + "actual es incorrecta no se cambia nada. Las IPs desde las que se inició sesión dejan de librarse "
-            + "del bloqueo de la cuenta por intentos fallidos, salvo la de esta petición.")
+            + "del bloqueo de la cuenta por intentos fallidos, salvo la de esta petición, y las cookies "
+            + "streambox_device anteriores dejan de valer; esta respuesta entrega una nueva.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Contraseña cambiada; sin cuerpo, con las cookies "
-                    + "streambox_token y streambox_refresh nuevas en Set-Cookie"),
+                    + "streambox_token, streambox_refresh y streambox_device nuevas en Set-Cookie"),
             @ApiResponse(responseCode = "400", description = "Código CURRENT_PASSWORD_INCORRECT: la contraseña "
                     + "actual no es correcta (mensaje en validationErrors.currentPassword; gasta uno de los 5 "
                     + "intentos). Código VALIDATION_ERROR: datos no válidos, con un mensaje por campo en "
@@ -103,5 +104,10 @@ public class PasswordController {
                 principal.id(), request.currentPassword(), request.newPassword(), httpRequest.getRemoteAddr());
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.sessionCookie(tokens.accessToken()));
         response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.refreshCookie(tokens.refreshToken()));
+        // Cookie de dispositivo nueva (Path=/api/auth: el navegador la acepta
+        // aunque la respuesta venga de otra ruta y la enviará al login).
+        if (tokens.deviceToken() != null) {
+            response.addHeader(HttpHeaders.SET_COOKIE, authCookieService.deviceCookie(tokens.deviceToken()));
+        }
     }
 }

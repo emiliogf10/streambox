@@ -14,6 +14,8 @@ import com.emilio.streambox.exception.TooManyRequestsException;
 import com.emilio.streambox.exception.UserNotFoundException;
 import com.emilio.streambox.repository.UserRepository;
 import com.emilio.streambox.security.JwtService;
+import com.emilio.streambox.security.device.DeviceCookieService;
+import com.emilio.streambox.security.device.IssuedDeviceToken;
 import com.emilio.streambox.security.password.PasswordPolicy;
 import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.ratelimit.PasswordChangeAttemptService;
@@ -44,7 +46,10 @@ import jakarta.persistence.PersistenceContext;
  *   <li>En una transacción: guarda el hash nuevo, <b>revoca todas las
  *       sesiones</b> del usuario (refresh tokens y JWT de acceso) y abre una
  *       familia nueva para la sesión actual, con un JWT de la versión
- *       nueva.</li>
+ *       nueva, y una <b>cookie de dispositivo</b> nueva con esa misma versión
+ *       ({@link DeviceCookieService}): las anteriores quedan anuladas (las de
+ *       un intruso también) y el navegador de quien cambia la contraseña sigue
+ *       protegido frente al bloqueo del login, igual que su IP.</li>
  *   <li>Tras confirmar la transacción, olvida las «IPs conocidas» del login
  *       salvo la de esta petición ({@link LoginAttemptService#forgetKnownIpsExcept}).</li>
  * </ol>
@@ -111,6 +116,7 @@ public class PasswordChangeService {
     private final RefreshTokenService refreshTokenService;
     private final JwtService jwtService;
     private final LoginAttemptService loginAttemptService;
+    private final DeviceCookieService deviceCookieService;
     private final TransactionTemplate transactionTemplate;
 
     @PersistenceContext
@@ -125,6 +131,7 @@ public class PasswordChangeService {
      * @param refreshTokenService revoca las sesiones y abre la nueva
      * @param jwtService          emite el JWT de acceso de la sesión actual
      * @param loginAttemptService olvida las «IPs conocidas» de la cuenta tras el cambio
+     * @param deviceCookieService emite la cookie de dispositivo nueva de la sesión actual
      * @param transactionManager  gestor de transacciones (para la parte de escritura)
      */
     public PasswordChangeService(
@@ -134,6 +141,7 @@ public class PasswordChangeService {
             RefreshTokenService refreshTokenService,
             JwtService jwtService,
             LoginAttemptService loginAttemptService,
+            DeviceCookieService deviceCookieService,
             PlatformTransactionManager transactionManager) {
 
         this.userRepository = userRepository;
@@ -142,6 +150,7 @@ public class PasswordChangeService {
         this.refreshTokenService = refreshTokenService;
         this.jwtService = jwtService;
         this.loginAttemptService = loginAttemptService;
+        this.deviceCookieService = deviceCookieService;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -154,7 +163,8 @@ public class PasswordChangeService {
      * @param clientIp        dirección remota de la petición ({@code getRemoteAddr()}):
      *                        queda como la única «IP conocida» de la cuenta
      * @return JWT de acceso y refresh token de la familia nueva de la sesión
-     *         actual; el controlador los entrega en cookies
+     *         actual y la cookie de dispositivo nueva; el controlador los
+     *         entrega en cookies
      * @throws InvalidParameterException          si la nueva no cumple la política
      *         o es igual a la actual (400 en {@code newPassword})
      * @throws CurrentPasswordIncorrectException  si la actual no es correcta (400)
@@ -222,9 +232,13 @@ public class PasswordChangeService {
                 .orElseThrow(() -> new UserNotFoundException("Usuario no encontrado"));
         String accessToken = jwtService.generateToken(locked, tokenVersion);
         IssuedRefreshToken refreshToken = refreshTokenService.startFamily(userId);
+        // Cookie de dispositivo nueva con la versión NUEVA: las anteriores
+        // (también la de un intruso) acaban de quedar anuladas. Dispositivo
+        // nuevo porque el navegador no envía aquí la anterior (Path=/api/auth).
+        IssuedDeviceToken deviceToken = deviceCookieService.issueNew(userId, tokenVersion);
 
         LOGGER.info("Contraseña cambiada por el usuario {}: {} refresh tokens revocados; la sesión actual "
                 + "continúa con una familia nueva", userId, revoked);
-        return new SessionTokens(accessToken, refreshToken);
+        return new SessionTokens(accessToken, refreshToken, deviceToken);
     }
 }

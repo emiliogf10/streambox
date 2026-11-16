@@ -9,10 +9,12 @@ import org.springframework.core.env.Profiles;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
+import com.emilio.streambox.security.device.IssuedDeviceToken;
 import com.emilio.streambox.security.refresh.IssuedRefreshToken;
 
 /**
- * Construye las dos cookies de la sesión del navegador.
+ * Construye las dos cookies de la sesión del navegador y la cookie de
+ * dispositivo ({@value #DEVICE_COOKIE_NAME}, ver {@link #deviceCookie}).
  *
  * <ul>
  *   <li>{@value #COOKIE_NAME}: el JWT de acceso. {@code Path=/api} (viaja a
@@ -51,10 +53,17 @@ public class AuthCookieService {
     /** Ruta a la que se limita la cookie del refresh token. */
     public static final String REFRESH_COOKIE_PATH = "/api/auth";
 
+    /** Nombre de la cookie de dispositivo (ver {@code DeviceCookieService}). */
+    public static final String DEVICE_COOKIE_NAME = "streambox_device";
+
+    /** Ruta de la cookie de dispositivo: la del refresh, solo viaja a {@code /api/auth}. */
+    public static final String DEVICE_COOKIE_PATH = REFRESH_COOKIE_PATH;
+
     /** Aviso de arranque con {@code Secure} desactivado en {@code prod}. */
     static final String INSECURE_IN_PROD_WARNING =
             "streambox.auth.cookie.secure=false con el perfil prod: las cookies de sesión "
-                    + "(" + COOKIE_NAME + " y " + REFRESH_COOKIE_NAME + ") se enviarán también por HTTP sin "
+                    + "(" + COOKIE_NAME + ", " + REFRESH_COOKIE_NAME + " y " + DEVICE_COOKIE_NAME
+                    + ") se enviarán también por HTTP sin "
                     + "cifrar y cualquiera en la red podría copiarlas. Si la aplicación se sirve por HTTPS, "
                     + "pon STREAMBOX_AUTH_COOKIE_SECURE=true. Solo es aceptable en una prueba local por HTTP "
                     + "(p. ej. docker compose en http://localhost:8088)";
@@ -125,6 +134,31 @@ public class AuthCookieService {
      */
     public String clearingRefreshCookie() {
         return base(REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH, "").maxAge(Duration.ZERO).build().toString();
+    }
+
+    /**
+     * Cookie de dispositivo ({@value #DEVICE_COOKIE_NAME}; ver
+     * {@code DeviceCookieService}).
+     *
+     * <p>
+     * Mismos atributos que las de sesión ({@code HttpOnly}: un XSS no la lee;
+     * {@code SameSite=Strict}; {@code Secure} según la configuración) y la ruta
+     * del refresh, {@code /api/auth}: solo hace falta en el login y no debe
+     * viajar al resto de la API. <b>No se borra en ningún logout</b>: no abre
+     * sesión, solo recuerda que este navegador ya entró con la contraseña, y
+     * borrarla al cerrar sesión dejaría al titular sin protección frente al
+     * bloqueo justo en el siguiente login. Cuando debe dejar de valer
+     * («cerrar sesión en todos los dispositivos», cambio o restablecimiento de
+     * la contraseña) se anula en el servidor con {@code token_version}, no
+     * borrándola.
+     * </p>
+     *
+     * @param deviceToken cookie recién emitida y su vida
+     * @return valor de la cabecera {@code Set-Cookie}
+     */
+    public String deviceCookie(IssuedDeviceToken deviceToken) {
+        return base(DEVICE_COOKIE_NAME, DEVICE_COOKIE_PATH, deviceToken.value())
+                .maxAge(deviceToken.maxAge()).build().toString();
     }
 
     private ResponseCookie.ResponseCookieBuilder base(String name, String path, String value) {

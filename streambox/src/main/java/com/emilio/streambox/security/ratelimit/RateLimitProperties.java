@@ -45,7 +45,8 @@ import jakarta.validation.constraints.Positive;
  *                 memoria, el de login, el de registro, el de refresh, los dos
  *                 de la verificación del correo, los dos del restablecimiento
  *                 de contraseña, el de bloqueo por
- *                 cuenta y el de IP conocida, lo aplica por separado). Al
+ *                 cuenta, el de IP conocida y el de cookie de dispositivo, lo
+ *                 aplica por separado). Al
  *                 llenarse se purgan las caducadas y, si sigue lleno, se
  *                 expulsa la clave con la actividad más antigua; ver
  *                 {@link SlidingWindowCounter}

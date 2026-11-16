@@ -270,7 +270,7 @@ class RequestBodySizeLimitTomcatIntegrationTest {
 
         assertPayloadTooLarge(response, LOGIN);
         assertNoErrorLogged(output, logStart);
-        verify(authenticationService, never()).login(any(), any(), any());
+        verify(authenticationService, never()).login(any(), any(), any(), any());
     }
 
     /**
@@ -295,7 +295,7 @@ class RequestBodySizeLimitTomcatIntegrationTest {
         assertEquals("MALFORMED_REQUEST", body.path("code").asText(), response.body());
         assertEquals(LOGIN, body.path("path").asText(), response.body());
         assertNoErrorLogged(output, logStart);
-        verify(authenticationService, never()).login(any(), any(), any());
+        verify(authenticationService, never()).login(any(), any(), any(), any());
     }
 
     /**
@@ -328,7 +328,7 @@ class RequestBodySizeLimitTomcatIntegrationTest {
         for (int i = 0; i < 5; i++) {
             assertPayloadTooLarge(send(post(LOGIN, oversized, false)), LOGIN);
         }
-        verify(authenticationService, never()).login(any(), any(), any());
+        verify(authenticationService, never()).login(any(), any(), any(), any());
 
         String normal = "{\"email\":\"nadie" + DOMAIN + "\",\"password\":\"Una-Contraseña-Cualquiera\"}";
         assertEquals(401, send(post(LOGIN, normal, false)).statusCode());

@@ -307,7 +307,8 @@ class PasswordResetIntegrationTest {
     // ------------------------------------------------------------------
 
     /**
-     * Con el enlace: 204 sin cuerpo ni cookies (no inicia sesión), la
+     * Con el enlace: 204 sin cuerpo ni cookies de sesión (no inicia sesión;
+     * solo la cookie de dispositivo), la
      * contraseña nueva entra y la vieja ya no, el enlace no sirve dos veces y
      * llega el aviso «Tu contraseña de StreamBox ha cambiado», sin token y con
      * el enlace para pedir otro si no fue el dueño.
@@ -322,7 +323,11 @@ class PasswordResetIntegrationTest {
                 .andReturn().getResponse();
 
         assertEquals("", response.getContentAsString());
-        assertEquals(0, response.getCookies().length, "Restablecer no inicia sesión");
+        // No inicia sesión: ninguna cookie de sesión. La única es la de
+        // dispositivo (no autentica; ver DeviceCookieService).
+        assertEquals(List.of("streambox_device"),
+                java.util.Arrays.stream(response.getCookies()).map(jakarta.servlet.http.Cookie::getName).toList(),
+                "Restablecer no inicia sesión");
         login(email, NEW_PASSWORD, "10.250.0.1").andExpect(status().isNoContent());
         login(email, OLD_PASSWORD, "10.250.0.1").andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"));

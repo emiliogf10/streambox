@@ -23,6 +23,8 @@ import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.exception.InvalidResetTokenException;
 import com.emilio.streambox.repository.AccountTokenRepository;
 import com.emilio.streambox.repository.UserRepository;
+import com.emilio.streambox.security.device.DeviceCookieService;
+import com.emilio.streambox.security.device.IssuedDeviceToken;
 import com.emilio.streambox.security.password.PasswordPolicy;
 import com.emilio.streambox.security.ratelimit.LoginAttemptService;
 import com.emilio.streambox.security.refresh.RefreshTokenService;
@@ -114,6 +116,7 @@ public class PasswordResetService {
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
     private final LoginAttemptService loginAttemptService;
+    private final DeviceCookieService deviceCookieService;
     private final EmailDispatcher emailDispatcher;
     private final EmailProperties emailProperties;
     private final PublicUrlProperties publicUrl;
@@ -131,6 +134,7 @@ public class PasswordResetService {
      * @param passwordEncoder          BCrypt
      * @param refreshTokenService      revoca todas las sesiones al cambiar la contraseña
      * @param loginAttemptService      olvida las «IPs conocidas» y borra los fallos de login
+     * @param deviceCookieService      emite la cookie de dispositivo nueva
      * @param emailDispatcher          envía los correos tras el commit
      * @param emailProperties          vida del enlace y límites de correos por cuenta
      * @param publicUrl                URL pública con la que se construyen los enlaces
@@ -145,6 +149,7 @@ public class PasswordResetService {
             PasswordEncoder passwordEncoder,
             RefreshTokenService refreshTokenService,
             LoginAttemptService loginAttemptService,
+            DeviceCookieService deviceCookieService,
             EmailDispatcher emailDispatcher,
             EmailProperties emailProperties,
             PublicUrlProperties publicUrl,
@@ -158,6 +163,7 @@ public class PasswordResetService {
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
         this.loginAttemptService = loginAttemptService;
+        this.deviceCookieService = deviceCookieService;
         this.emailDispatcher = emailDispatcher;
         this.emailProperties = emailProperties;
         this.publicUrl = publicUrl;
@@ -263,25 +269,34 @@ public class PasswordResetService {
      *       debe poder entrar ya, no dentro de 15 minutos.</li>
      *   <li>El aviso «Tu contraseña de StreamBox ha cambiado» (lo programa la
      *       transacción para después del commit).</li>
+     *   <li>Una <b>cookie de dispositivo</b> nueva ({@link DeviceCookieService})
+     *       con la {@code token_version} ya subida (que anula todas las
+     *       anteriores). Mismo criterio que conservar la IP: quien confirma ha
+     *       demostrado controlar el buzón, y sin ella cualquiera podría
+     *       bloquearle la cuenta antes de su primer login con la contraseña
+     *       nueva, también desde otra red.</li>
      * </ul>
      *
      * <p>
      * No inicia sesión: el usuario entra después con la contraseña nueva. Así
      * el enlace, que viaja por correo, no se convierte en una forma de entrar
-     * sin conocerla.
+     * sin conocerla. La cookie de dispositivo no abre sesión: solo le da un
+     * contador de intentos propio en el login.
      * </p>
      *
      * @param token       token del enlace, tal como llega
      * @param newPassword contraseña nueva (longitud ya validada)
      * @param clientIp    dirección remota de la petición ({@code getRemoteAddr()}):
      *                    queda como la única «IP conocida» de la cuenta
+     * @return la cookie de dispositivo nueva; el controlador la entrega en
+     *         {@code Set-Cookie}
      * @throws InvalidResetTokenException si el token no tiene formato de token,
      *         no existe, caducó, ya se usó o se invalidó (mismo error en todos
      *         los casos); la contraseña no cambia
      * @throws InvalidParameterException  si la contraseña nueva no cumple la
      *         política (400 en {@code newPassword}); el token no se gasta
      */
-    public void confirm(String token, String newPassword, String clientIp) {
+    public IssuedDeviceToken confirm(String token, String newPassword, String clientIp) {
 
         if (!AccountTokens.isWellFormed(token)) {
             // Sin consultar la base de datos: no puede ser un token propio.
@@ -294,10 +309,13 @@ public class PasswordResetService {
         checkPolicy(newPassword, target.username(), target.email());
         String newHash = passwordEncoder.encode(newPassword);
 
-        String email = transactionTemplate.execute(
+        ResetAccount account = transactionTemplate.execute(
                 status -> replacePassword(hash, target.userId(), newPassword, newHash));
-        loginAttemptService.forgetKnownIpsExcept(email, clientIp);
-        loginAttemptService.clearFailures(email);
+        loginAttemptService.forgetKnownIpsExcept(account.email(), clientIp);
+        loginAttemptService.clearFailures(account.email());
+        // Tras el commit y con la versión ya subida: las cookies anteriores
+        // están anuladas y esta es la única válida de la cuenta.
+        return deviceCookieService.issueNew(account.userId(), account.tokenVersion());
     }
 
     /**
@@ -323,9 +341,10 @@ public class PasswordResetService {
     /**
      * Parte transaccional de la confirmación (ver {@link #confirm}).
      *
-     * @return el email de la cuenta, para lo que se hace tras el commit
+     * @return email, id y {@code token_version} (ya subida) de la cuenta, para
+     *         lo que se hace tras el commit
      */
-    private String replacePassword(String hash, Long userId, String newPassword, String newHash) {
+    private ResetAccount replacePassword(String hash, Long userId, String newPassword, String newHash) {
 
         Instant now = clock.instant();
         // Primero el bloqueo: dos confirmaciones con el mismo token quedan en
@@ -349,11 +368,15 @@ public class PasswordResetService {
         userRepository.markEmailVerified(userId, now);
         int invalidated = accountTokenRepository.invalidateAllActiveTokens(userId, now);
         int revoked = refreshTokenService.revokeAllSessions(userId);
+        // La versión NUEVA, releída de la base de datos (el UPDATE masivo no
+        // refresca la entidad), para la cookie de dispositivo. La fila sigue
+        // bloqueada por esta transacción: nadie la cambia entre medias.
+        int tokenVersion = userRepository.findTokenVersionById(userId).orElseThrow(InvalidResetTokenException::new);
         emailDispatcher.sendAfterCommit(AccountEmails.passwordChanged(email, publicUrl, now));
 
         LOGGER.info("Contraseña restablecida de la cuenta {}: {} enlaces invalidados y {} refresh tokens revocados",
                 userId, invalidated, revoked);
-        return email;
+        return new ResetAccount(email, userId, tokenVersion);
     }
 
     /** Comprueba la contraseña nueva con la política contra los datos de la cuenta. */
@@ -372,5 +395,15 @@ public class PasswordResetService {
      * @param email    email (para la política de contraseñas)
      */
     private record ResetTarget(Long userId, String username, String email) {
+    }
+
+    /**
+     * Cuenta ya restablecida (tras la transacción).
+     *
+     * @param email        email (para olvidar las IPs y borrar los fallos)
+     * @param userId       id de la cuenta
+     * @param tokenVersion {@code token_version} tras el incremento de esta operación
+     */
+    private record ResetAccount(String email, Long userId, int tokenVersion) {
     }
 }
