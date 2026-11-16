@@ -61,7 +61,7 @@ RUN mvn -B -q package -Dmaven.test.skip=true \
 #     HEALTHCHECK, y el proyecto no necesita ese extra.
 #   - Temurin publica la variante Alpine (musl) con soporte oficial.
 # Versión fijada hasta el parche de Java y la versión de Alpine.
-FROM eclipse-temurin:21.0.12.1_1-jre-alpine-3.24 AS runtime
+FROM eclipse-temurin:21-jre-alpine-3.24 AS runtime
 
 LABEL org.opencontainers.image.title="streambox-backend" \
       org.opencontainers.image.description="API REST de StreamBox (Spring Boot 4.1, Java 21)"
