@@ -411,6 +411,7 @@ Cada lunes revisa Maven, npm, las *actions*, las imágenes de los Dockerfile y l
 - **Ignora las mayores** que el CI no puede validar o que exigen cambios coordinados:
   - **PostgreSQL**: el CI arranca con una base vacía y daría verde mientras tu volumen real no arrancaría, porque pasar de una mayor a otra exige `pg_upgrade`.
   - **Java, Node, Maven y `@types/node`**: su versión está repetida en varios archivos.
+- **Ignora también las «menores» de `eclipse-temurin`**, que en Java no existen (la 21 es siempre `21.0.N`): Dependabot junta la versión de Alpine con la de Java, lee la etiqueta flotante `21-jre-alpine-3.24` como «21.3.24», más nueva que la exacta `21.0.12.1_1-jre-alpine-3.24`, y proponía cambiar una por otra (una imagen que deja de ser reproducible). Los parches exactos (`21.0.13_9-…`) siguen llegando.
 - Espera **7 días** antes de proponer una versión nueva de npm, Maven, una *action* o Mailpit (imagen de un desarrollador, no oficial, que publica casi cada semana), por si la versión resulta secuestrada. Las imágenes oficiales (PostgreSQL y las bases de los Dockerfile) van sin espera: lo urgente es tener sus parches de seguridad.
 - **La imagen de compilación del backend no está fijada hasta el parche** (`maven:3.9-eclipse-temurin-26` solo fija Maven 3.9 y Temurin 26), a diferencia de las demás; no llega a la imagen final, que es la del JRE.
 

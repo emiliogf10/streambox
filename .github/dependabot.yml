@@ -143,8 +143,19 @@ updates:
       # Java 21 → 25 y Node 24 → 26 se deciden a mano: la versión está
       # también en el pom.xml (java.version), en el CI (JAVA_VERSION,
       # NODE_VERSION) y en @types/node, que Dependabot no cambiaría a la vez.
+      #
+      # eclipse-temurin ignora también las "menores", que en Java no existen
+      # (las versiones de la 21 son siempre 21.0.N) y que aquí solo aparecen
+      # por un error de lectura de Dependabot: junta la versión de Alpine con
+      # la de Java, así que la etiqueta FLOTANTE 21-jre-alpine-3.24 la lee como
+      # "21.3.24", más nueva que la exacta 21.0.12.1_1-jre-alpine-3.24
+      # ("21.0.12.1"), y propone cambiar una por otra (PR #27). Sería un
+      # retroceso: "21" se mueve con cada parche y la imagen dejaría de ser
+      # reproducible. Esta regla descarta el rango 21.1 – 22 (calculado desde
+      # la versión actual, así que sigue valiendo al pasar a la 25) y deja
+      # pasar los parches exactos (21.0.13_9-jre-alpine-3.24...).
       - dependency-name: eclipse-temurin
-        update-types: ['version-update:semver-major']
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
       - dependency-name: node
         update-types: ['version-update:semver-major']
       # Maven 3 → 4 cambia el modelo del pom y debe ir junto al wrapper
