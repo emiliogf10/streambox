@@ -86,6 +86,8 @@ describe('HomePage: estados', () => {
 
     expect(screen.getByText('Cargando catálogo...')).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    // E-6: la portada tiene películas Y series; el h1 (oculto a la vista) ya no dice «Catálogo de películas».
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Películas y series');
   });
 
   it('sin películas ni series, a un usuario: «El catálogo está vacío» (las dos cosas), sin banner ni botón', async () => {

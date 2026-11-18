@@ -50,3 +50,15 @@ export function splitValidationErrors<K extends string>(
   }
   return { perField, unmatched };
 }
+
+/**
+ * Si hay algún campo con error. Lo usan los formularios para decidir adónde va
+ * el foco tras un envío fallido: con errores de campo, al primero de ellos (y el
+ * aviso general se anuncia sin llevarse el foco: `FormAlert` con
+ * `takeFocus={false}`); sin ellos, al aviso general.
+ *
+ * @param errors errores por campo (un campo sin error no aparece, es `undefined` o vacío)
+ */
+export function hasFieldErrors(errors: Partial<Record<string, string | undefined>>): boolean {
+  return Object.values(errors).some(Boolean);
+}

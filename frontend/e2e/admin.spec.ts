@@ -20,15 +20,36 @@ function movieRow(page: Page, title: string) {
   return page.getByRole('row', { name: new RegExp(`^${escapeRegExp(title)}(\\s|$)`) });
 }
 
+/**
+ * Peticiones del código del panel, que se carga bajo demanda (`React.lazy` en `App.tsx`, módulo
+ * `pages/admin/adminPages.ts`). Con Vite en desarrollo (el servidor del E2E) cada pantalla es su propio
+ * archivo; en una compilación, un trozo `adminPages-<hash>.js`. NO cuenta `adminPaths.ts` ni `formErrors.ts`,
+ * que van en el paquete principal (los importan el router y los formularios de cuenta).
+ */
+const ADMIN_CODE_REQUEST =
+  /\/pages\/admin\/(adminPages|AdminLayout|AdminMoviesPage|MovieFormPage|AdminSeriesPage|SeriesFormPage|AdminGenresPage)\.tsx?|\/assets\/adminPages-[\w-]+\.js/;
+
+/** Empieza a apuntar las peticiones del código del panel que haga `page` (llámalo antes de navegar). */
+function recordAdminCodeRequests(page: Page): string[] {
+  const urls: string[] = [];
+  page.on('request', (request) => {
+    if (ADMIN_CODE_REQUEST.test(request.url())) urls.push(request.url());
+  });
+  return urls;
+}
+
 test.describe('Acceso al panel', () => {
   test('el administrador ve «Administrar» y llega al listado paginado del catálogo', async ({ page, request, signIn }) => {
     await signIn({ token: await loginAdmin(request) });
+    const adminCode = recordAdminCodeRequests(page);
     await page.goto('/');
 
     await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Administrar' }).click();
 
     await expect(page).toHaveURL(/\/admin\/peliculas$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Administración' })).toBeVisible();
+    // Control del test del USER de más abajo: el patrón SÍ reconoce la descarga del panel cuando ocurre.
+    expect(adminCode.length, 'el código del panel se descarga al entrar un ADMIN').toBeGreaterThan(0);
     await expect(page).toHaveTitle('Películas · Administración — StreamBox');
     const sections = page.getByRole('navigation', { name: 'Secciones de administración' });
     await expect(sections.getByRole('link', { name: 'Películas' })).toHaveAttribute('aria-current', 'page');
@@ -85,17 +106,24 @@ test.describe('Acceso al panel', () => {
     await expect(page.getByRole('table')).toHaveAccessibleName('Resultados para «Blade», página 1 de 1');
   });
 
-  test('un usuario normal que navega a /admin acaba en la portada y no ve «Administrar»', async ({ page, user, signIn }) => {
+  test('un usuario normal que navega a /admin acaba en la portada, no ve «Administrar» ni descarga el panel', async ({
+    page,
+    user,
+    signIn,
+  }) => {
     await signIn(user);
+    // La carga diferida del panel va DENTRO de `RequireAdmin`: a un USER se le redirige antes de pedir el código.
+    const adminCode = recordAdminCodeRequests(page);
     await page.goto('/admin/peliculas');
 
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole('heading', { level: 1, name: 'Catálogo de películas' })).toBeAttached();
+    await expect(page.getByRole('heading', { level: 1, name: 'Películas y series' })).toBeAttached();
     // Primero se espera a que el usuario esté cargado (su nombre en el menú): así la ausencia del enlace significa algo.
     await page.getByRole('button', { name: 'Menú de usuario' }).click();
     await expect(page.getByText(user.username, { exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Administrar' })).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Administración' })).toHaveCount(0);
+    expect(adminCode, 'un USER no descarga el código del panel').toEqual([]);
   });
 
   test('editar una película que no existe explica que no se encontró y enlaza al listado', async ({

@@ -126,13 +126,20 @@ describe('Redirección a /bienvenida', () => {
 
     const title = await screen.findByRole('heading', { level: 1, name: 'Cuéntanos qué te gusta' });
     expect(screen.getByText('ruta:/bienvenida')).toBeInTheDocument();
-    expect(title).toHaveFocus();
+    // El foco se mueve en un `useEffect`, que React ejecuta DESPUÉS de pintar. Este render llega por la
+    // respuesta de `fetch` (fuera de `act`) y no es síncrono, así que React aplaza el efecto a otra tarea:
+    // `findByRole` puede resolver en el mismo instante en que el `<h1>` entra en el DOM, con el foco aún en
+    // `<body>` (fallaba ~1 de cada 10 ejecuciones; 2026-11-18). Se espera a que llegue, no a que llegue a tiempo.
+    await waitFor(() => expect(title).toHaveFocus());
     expect(screen.getByText('Hola, ana')).toBeInTheDocument();
     expect(
       screen.getByText(
         'Elige entre 3 y 5 géneros y te recomendaremos películas y series desde el primer día. Podrás cambiarlos cuando quieras en tu perfil.',
       ),
     ).toBeInTheDocument();
+    // Y nada se lo quita cuando llegan los géneros (el selector no se lleva el foco al aparecer).
+    await picker();
+    expect(title).toHaveFocus();
   });
 
   it('quien no la tiene pendiente no es desviado, y si escribe /bienvenida vuelve al inicio sin aviso', async () => {

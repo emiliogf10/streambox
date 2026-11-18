@@ -16,6 +16,8 @@ import { AppRoutes } from '../App';
 import { RESET_REQUEST_DONE_MESSAGE } from '../lib/passwordReset';
 import { apiCalls, errorResponse, jsonResponse, renderWithProviders, routeFetch } from '../test/helpers';
 import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
+import { expectFocusedFormAlert } from '../test/formAlert';
+import { waitForLazyRoutes } from '../test/lazyRoutes';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -32,12 +34,14 @@ const REQUEST = 'POST /api/auth/password-reset';
 const accepted = () => jsonResponse({ message: 'Texto fijo del servidor' }, 202);
 
 /** Monta las rutas reales en `/recuperar-contrasena`, con el estado de navegación indicado. */
-function renderForgot(options: { state?: unknown; session?: boolean } = {}) {
-  return renderWithProviders(<AppRoutes />, {
+async function renderForgot(options: { state?: unknown; session?: boolean } = {}) {
+  const result = renderWithProviders(<AppRoutes />, {
     route: '/recuperar-contrasena',
     routeState: options.state,
     session: options.session,
   });
+  await waitForLazyRoutes();
+  return result;
 }
 
 const emailField = () => screen.getByLabelText('Correo electrónico');
@@ -57,7 +61,7 @@ async function submitEmail(user: ReturnType<typeof userEvent.setup>, email: stri
 describe('ForgotPasswordPage: el formulario', () => {
   it('muestra el título, el campo con etiqueta y la vuelta al login, sin llamar al servidor', async () => {
     routeFetch(fetchMock, {});
-    renderForgot();
+    await renderForgot();
 
     expect(screen.getByRole('heading', { level: 1, name: '¿Has olvidado tu contraseña?' })).toBeInTheDocument();
     expect(
@@ -73,16 +77,16 @@ describe('ForgotPasswordPage: el formulario', () => {
     expect(apiCalls(fetchMock)).toEqual([]);
   });
 
-  it('rellena el correo que llega en el estado de la navegación (desde el login)', () => {
+  it('rellena el correo que llega en el estado de la navegación (desde el login)', async () => {
     routeFetch(fetchMock, {});
-    renderForgot({ state: { email: 'ana@example.com' } });
+    await renderForgot({ state: { email: 'ana@example.com' } });
 
     expect(emailField()).toHaveValue('ana@example.com');
   });
 
-  it('ignora un estado de navegación que no es un correo válido', () => {
+  it('ignora un estado de navegación que no es un correo válido', async () => {
     routeFetch(fetchMock, {});
-    renderForgot({ state: { email: '<no-es-un-correo>' } });
+    await renderForgot({ state: { email: '<no-es-un-correo>' } });
 
     expect(emailField()).toHaveValue('');
   });
@@ -90,7 +94,7 @@ describe('ForgotPasswordPage: el formulario', () => {
   it('valida en el cliente: sin correo o mal formado no se envía y el foco va al campo', async () => {
     routeFetch(fetchMock, {});
     const user = userEvent.setup();
-    renderForgot();
+    await renderForgot();
 
     await user.click(submitButton());
     expect(emailField()).toHaveAttribute('aria-invalid', 'true');
@@ -110,7 +114,7 @@ describe('ForgotPasswordPage: el formulario', () => {
         }),
     });
     const user = userEvent.setup();
-    renderForgot();
+    await renderForgot();
 
     await submitEmail(user, 'ana@example');
 
@@ -128,14 +132,14 @@ describe('ForgotPasswordPage: el formulario', () => {
       [REQUEST]: () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x', {}, { 'Retry-After': '30' }),
     });
     const user = userEvent.setup({ delay: null });
-    renderForgot();
+    await renderForgot();
 
     await submitEmail(user, 'ana@example.com');
 
     expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 30 s' }));
-    expect(
+    expectFocusedFormAlert(
       screen.getByText('Has pedido demasiados correos seguidos. Podrás pedir otro en 30 s.'),
-    ).toHaveAttribute('role', 'alert');
+    );
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
@@ -153,10 +157,10 @@ describe('ForgotPasswordPage: el formulario', () => {
       },
     });
     const user = userEvent.setup();
-    renderForgot();
+    await renderForgot();
 
     await submitEmail(user, 'ana@example.com');
-    expect(await screen.findByText(/No se pudo conectar con el servidor/)).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText(/No se pudo conectar con el servidor/));
 
     await user.click(submitButton());
 
@@ -169,7 +173,7 @@ describe('ForgotPasswordPage: «Revisa tu correo» (202)', () => {
   it('no afirma que la cuenta exista, explica el enlace y ofrece las salidas', async () => {
     routeFetch(fetchMock, { [REQUEST]: accepted });
     const user = userEvent.setup();
-    renderForgot();
+    await renderForgot();
 
     await submitEmail(user, '  ana@example.com ');
 
@@ -207,7 +211,7 @@ describe('ForgotPasswordPage: «Revisa tu correo» (202)', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     routeFetch(fetchMock, { [REQUEST]: accepted });
     const user = userEvent.setup({ delay: null });
-    renderForgot();
+    await renderForgot();
     await submitEmail(user, 'ana@example.com');
     expectButtonUnavailable(await screen.findByRole('button', { name: 'Reenviar en 1 min' }));
 
@@ -232,7 +236,7 @@ describe('ForgotPasswordPage: «Revisa tu correo» (202)', () => {
       },
     });
     const user = userEvent.setup({ delay: null });
-    renderForgot();
+    await renderForgot();
     await submitEmail(user, 'ana@example.com');
     await screen.findByRole('heading', { name: 'Revisa tu correo' });
     act(() => {
@@ -250,7 +254,7 @@ describe('ForgotPasswordPage: «Revisa tu correo» (202)', () => {
   it('«Corregir el correo» vuelve al formulario con lo escrito y el foco en el campo', async () => {
     routeFetch(fetchMock, { [REQUEST]: accepted });
     const user = userEvent.setup();
-    renderForgot();
+    await renderForgot();
     await submitEmail(user, 'ana@exampel.com');
     await screen.findByRole('heading', { name: 'Revisa tu correo' });
 
@@ -271,7 +275,7 @@ describe('ForgotPasswordPage: es pública y funciona con o sin sesión', () => {
   it('con sesión abierta no redirige y el pie lleva al inicio (el login redirigiría allí)', async () => {
     routeFetch(fetchMock, { [REQUEST]: accepted });
     const user = userEvent.setup();
-    renderForgot({ session: true });
+    await renderForgot({ session: true });
 
     expect(await screen.findByRole('link', { name: 'Ir al inicio' })).toHaveAttribute('href', '/');
     expect(screen.queryByRole('link', { name: 'Inicia sesión' })).not.toBeInTheDocument();

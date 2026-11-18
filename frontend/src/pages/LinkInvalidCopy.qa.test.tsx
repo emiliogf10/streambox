@@ -39,8 +39,10 @@ describe('Textos de «enlace no válido» (QA): no prometen un envío que el ser
     routeFetch(fetchMock, {});
     renderWithProviders(<AppRoutes />, { route, session });
 
-    const main = await screen.findByRole('main');
     await screen.findByRole('heading', { level: 1, name: 'El enlace no es válido o ha caducado' });
+    // Después del título: mientras la pantalla se carga bajo demanda hay OTRO `<main>` (el de su espera), que se
+    // sustituye; mirar su texto no probaría nada.
+    const main = screen.getByRole('main');
     // Sigue habiendo una forma de pedir otro (la salida no se pierde)...
     expect(screen.getByRole('button', { name: 'Enviar un enlace nuevo' })).toBeInTheDocument();
     // ...pero sin afirmar que vaya a llegar: puede no haber cuenta o haber saltado el límite silencioso.

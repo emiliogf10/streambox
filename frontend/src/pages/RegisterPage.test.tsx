@@ -9,7 +9,7 @@
  * sus textos (que no afirman que la cuenta exista), el reenvío y la vuelta al
  * formulario.
  */
-import { act, screen } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +17,7 @@ import { RESEND_DONE_MESSAGE } from '../lib/emailVerification';
 import { apiCalls, errorResponse, jsonResponse, renderWithProviders, routeFetch } from '../test/helpers';
 import { RegisterPage } from './RegisterPage';
 import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
+import { expectFocusedFormAlert } from '../test/formAlert';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -51,6 +52,15 @@ const submit = () => screen.getByRole('button', { name: 'Crear cuenta' });
 /** Ayuda permanente del campo de contraseña: anuncia la política (12-64) y las reglas que solo comprueba el servidor. */
 const PASSWORD_HINT =
   'Entre 12 y 64 caracteres. Evita contraseñas comunes y no incluyas tu usuario ni tu correo.';
+
+describe('RegisterPage: textos', () => {
+  it('el subtítulo habla de películas Y series (E-7): ya no es «tu lista de películas»', () => {
+    renderRegister();
+
+    expect(screen.getByText('Guarda películas y series en tu lista y recibe recomendaciones a tu gusto.')).toBeInTheDocument();
+    expect(screen.queryByText(/lista de películas/)).not.toBeInTheDocument();
+  });
+});
 
 describe('RegisterPage: autocompletado', () => {
   it('el gestor de contraseñas guarda el CORREO como usuario (con lo que se inicia sesión), no el nombre', () => {
@@ -237,21 +247,31 @@ describe('RegisterPage: respuesta del servidor', () => {
         /es correcta, en unos minutos te llegará un correo con un enlace para confirmar tu cuenta\. El enlace caduca en 24 horas\./,
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText('Si ya tenías una cuenta con ese correo, te lo recordaremos en ese mensaje: no hace falta crear otra.'),
-    ).toBeInTheDocument();
+    // D-3: a la vista solo lo esencial (las dos frases de arriba y la de spam); el caso de quien ya tenía cuenta va
+    // plegado en un <details> cerrado cuyo título es una PREGUNTA (no afirma que la cuenta exista ni que no).
+    const disclosure = screen.getByText('¿Ya tenías una cuenta con este correo?').closest('details');
+    expect(disclosure).not.toBeNull();
+    expect(disclosure).not.toHaveAttribute('open');
+    expect(disclosure!.querySelector('summary')).toHaveTextContent('¿Ya tenías una cuenta con este correo?');
+    expect(within(disclosure!).getByText('Si es así, te lo recordaremos en el correo que te enviemos: no hace falta crear otra.')).toBeInTheDocument();
     // Una cuenta que ya existía conserva SU contraseña (verificada, pendiente con el enlace vigente o heredada de
     // antes de la verificación, que nunca recibió enlace): se avisa para que nadie intente entrar con la nueva.
     // La única excepción es la que el servidor sustituye: un registro cuyo enlace de alta (y los posteriores)
     // ya caducó. Una cuenta heredada no tuvo enlace de alta, así que la condición no la incluye.
     expect(
-      screen.getByText(
-        'Si este correo ya tenía una cuenta, la contraseña que vale es la de esa cuenta, no la que acabas de escribir. ' +
+      within(disclosure!).getByText(
+        'La contraseña que vale es la de esa cuenta, no la que acabas de escribir. ' +
           'Solo hay una excepción: si ya te habías registrado, nunca confirmaste el correo y el enlace que te enviamos ' +
           'al registrarte (y cualquier otro que pidieras) ya ha caducado, aquel registro se sustituye por este y vale ' +
           'la contraseña nueva.',
       ),
     ).toBeInTheDocument();
+    // Lo esencial (el enlace y su caducidad, y qué hacer si no llega) NO está plegado.
+    expect(disclosure!.contains(screen.getByText(/El enlace caduca en 24 horas\./))).toBe(false);
+    expect(disclosure!.contains(screen.getByText(/Mira en la carpeta de spam/))).toBe(false);
+    // Se abre al pulsar su título (un <summary> nativo: también con Intro o Espacio).
+    await user.click(disclosure!.querySelector('summary')!);
+    expect(disclosure).toHaveAttribute('open');
     expect(screen.queryByText(/la de entonces/)).not.toBeInTheDocument();
     expect(screen.getByText(/Mira en la carpeta de spam/)).toBeInTheDocument();
     // La respuesta es igual exista o no el correo: nada puede decir que la cuenta se ha creado.
@@ -352,7 +372,7 @@ describe('RegisterPage: respuesta del servidor', () => {
     await fillValid(user);
     await user.click(submit());
 
-    expect(await screen.findByText('El rol no se puede elegir')).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText('El rol no se puede elegir'));
     expect(screen.queryByText('Revisa los campos marcados.')).not.toBeInTheDocument();
   });
 
@@ -434,7 +454,7 @@ describe('RegisterPage: respuesta del servidor', () => {
     await fillValid(user);
     await user.click(submit());
 
-    expect(await screen.findByText('Conflicto inesperado')).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText('Conflicto inesperado'));
     expect(username()).toHaveAttribute('aria-invalid', 'false');
   });
 

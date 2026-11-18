@@ -119,6 +119,35 @@ describe('Rutas de series', () => {
   });
 });
 
+describe('Ruta desconocida: «Página no encontrada» (E-12)', () => {
+  for (const role of ['USER', 'ADMIN'] as const) {
+    it(`a un ${role}: lo dice (dentro de la aplicación, con la barra) y ofrece «Ir al inicio», sin redirigir`, async () => {
+      routesFor(role);
+      const user = userEvent.setup();
+      renderWithProviders(<AppRoutes />, { route: '/esto-no-existe', session: true });
+
+      expect(await screen.findByRole('heading', { level: 1, name: 'Página no encontrada' })).toBeInTheDocument();
+      expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+      expect(screen.getByText(/no corresponde a ninguna página de StreamBox/)).toBeInTheDocument();
+      // Antes llevaba a `/` sin decir nada: ahora la dirección se queda y la página lo explica.
+      expect(screen.getByText('ruta:/esto-no-existe')).toBeInTheDocument();
+      expect(screen.getByRole('navigation', { name: 'Principal' })).toBeInTheDocument();
+      expect(document.title).toBe('Página no encontrada — StreamBox');
+
+      await user.click(screen.getByRole('link', { name: 'Ir al inicio' }));
+      expect(await screen.findByText('ruta:/')).toBeInTheDocument();
+    });
+  }
+
+  it('sin sesión, una ruta desconocida lleva al login (no revela nada de la aplicación)', async () => {
+    routesFor('USER');
+    renderWithProviders(<AppRoutes />, { route: '/esto-no-existe' });
+
+    expect(await screen.findByText('ruta:/login')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Página no encontrada' })).not.toBeInTheDocument();
+  });
+});
+
 describe('Ruta del perfil', () => {
   it('/perfil muestra la página dentro de la aplicación (barra incluida), con el nombre del usuario como único h1', async () => {
     routesFor('USER');
@@ -206,7 +235,8 @@ describe('Rutas del panel de administración', () => {
 
     await user.click(within(adminSections()).getByRole('link', { name: 'Series' }));
 
-    expect(screen.getByText('ruta:/admin/series')).toBeInTheDocument();
+    // `findBy`: la navegación va en una transición y la pantalla de series puede estar aún cargándose (lazy).
+    expect(await screen.findByText('ruta:/admin/series')).toBeInTheDocument();
     expect(within(adminSections()).getByRole('link', { name: 'Series' })).toHaveAttribute('aria-current', 'page');
     expect(within(adminSections()).getByRole('link', { name: 'Películas' })).not.toHaveAttribute('aria-current');
     expect(await screen.findByRole('row', { name: /^Dark/ })).toBeInTheDocument();
@@ -237,7 +267,8 @@ describe('Rutas del panel de administración', () => {
 
     await user.click(within(adminSections()).getByRole('link', { name: 'Géneros' }));
 
-    expect(screen.getByText('ruta:/admin/generos')).toBeInTheDocument();
+    // `findBy`: la navegación va en una transición y la pantalla de géneros puede estar aún cargándose (lazy).
+    expect(await screen.findByText('ruta:/admin/generos')).toBeInTheDocument();
     expect(within(adminSections()).getByRole('link', { name: 'Géneros' })).toHaveAttribute('aria-current', 'page');
     expect(await screen.findByRole('list', { name: 'Géneros' })).toBeInTheDocument();
   });

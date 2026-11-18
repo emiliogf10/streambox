@@ -30,6 +30,8 @@ import {
 } from '../test/helpers';
 import { UserStatusProbe } from '../test/UserStatusProbe';
 import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
+import { expectFocusedFormAlert } from '../test/formAlert';
+import { waitForLazyRoutes } from '../test/lazyRoutes';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -69,8 +71,8 @@ function OpenLinkProbe() {
 }
 
 /** Monta las rutas reales en `/restablecer-contrasena` con el fragmento indicado. */
-function renderReset(hash: string, options: { session?: boolean } = {}) {
-  return renderWithProviders(
+async function renderReset(hash: string, options: { session?: boolean } = {}) {
+  const result = renderWithProviders(
     <>
       <AppRoutes />
       <HashProbe />
@@ -79,6 +81,8 @@ function renderReset(hash: string, options: { session?: boolean } = {}) {
     </>,
     { route: `/restablecer-contrasena${hash}`, session: options.session },
   );
+  await waitForLazyRoutes();
+  return result;
 }
 
 const newPasswordField = () => screen.getByLabelText('Contraseña nueva');
@@ -106,7 +110,7 @@ async function submitPasswords(
 describe('ResetPasswordPage: con un token en el enlace', () => {
   it('muestra el formulario con las reglas y el autocompletado de contraseña nueva, sin llamar al servidor', async () => {
     routeFetch(fetchMock, {});
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Elige una contraseña nueva' })).toBeInTheDocument();
     expect(screen.getByText('Escríbela dos veces. Después podrás iniciar sesión con ella.')).toBeInTheDocument();
@@ -129,7 +133,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
   it('quita el token de la barra de direcciones (sustituyendo la entrada del historial) y lo conserva en memoria', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => noContentResponse() });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
 
     expect(await screen.findByText('hash: navegación:REPLACE')).toBeInTheDocument();
     expect(screen.getByText('ruta:/restablecer-contrasena')).toBeInTheDocument();
@@ -143,7 +147,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
   it('valida en el cliente: longitud y que coincidan, sin llamar al servidor y con el foco en el primer error', async () => {
     routeFetch(fetchMock, {});
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
 
     await user.click(submitButton());
     expect(newPasswordField()).toHaveAccessibleDescription('La contraseña debe tener entre 12 y 64 caracteres.');
@@ -160,7 +164,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
   it('204 sin sesión: «Contraseña cambiada», con el foco en el título y el camino a «Iniciar sesión»', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => noContentResponse() });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
     await screen.findByText('estado:idle');
 
     await submitPasswords(user);
@@ -183,7 +187,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
   it('204 con sesión en este navegador: la cierra en silencio (sin «sesión caducada») y lleva al login', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => noContentResponse(), [LOGOUT]: () => noContentResponse() });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`, { session: true });
+    await renderReset(`#token=${TOKEN}`, { session: true });
     await screen.findByText('estado:ready');
 
     await submitPasswords(user);
@@ -210,7 +214,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
       },
     });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`, { session: true });
+    await renderReset(`#token=${TOKEN}`, { session: true });
     await screen.findByText('estado:ready');
 
     await submitPasswords(user);
@@ -237,7 +241,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
   it('mientras cambia la contraseña, el botón queda bloqueado (no se envía dos veces)', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => new Promise<Response>(() => {}) });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
 
     await submitPasswords(user);
 
@@ -250,7 +254,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
       [REQUEST]: () => jsonResponse({ message: 'x' }, 202),
     });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
 
     await submitPasswords(user);
 
@@ -284,7 +288,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
       },
     });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
 
     await submitPasswords(user, 'contraseña123');
 
@@ -310,7 +314,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
         errorResponse(400, 'VALIDATION_ERROR', 'x', { validationErrors: { token: 'El token no es válido.' } }),
     });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
 
     await submitPasswords(user);
 
@@ -327,10 +331,10 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
       },
     });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
 
     await submitPasswords(user);
-    expect(await screen.findByText(/No se pudo conectar con el servidor/)).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText(/No se pudo conectar con el servidor/));
     // Lo escrito se conserva: no hay que volver a teclearlo.
     expect(newPasswordField()).toHaveValue(PASSWORD);
 
@@ -346,12 +350,12 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
       [CONFIRM]: () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x', {}, { 'Retry-After': '30' }),
     });
     const user = userEvent.setup({ delay: null });
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
 
     await submitPasswords(user);
 
     expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 30 s' }));
-    expect(screen.getByText('Demasiados intentos. Inténtalo de nuevo en 30 s.')).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(screen.getByText('Demasiados intentos. Inténtalo de nuevo en 30 s.'));
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
@@ -368,7 +372,7 @@ describe('ResetPasswordPage: sin token válido en el enlace', () => {
     ['token con caracteres que un token nuestro no tiene', '#token=abc%3Cscript%3E'],
   ])('%s: «enlace no válido» directamente, sin llamar al servidor', async (_case, hash) => {
     routeFetch(fetchMock, {});
-    renderReset(hash);
+    await renderReset(hash);
 
     expect(screen.getByRole('heading', { level: 1, name: 'El enlace no es válido o ha caducado' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Contraseña nueva')).not.toBeInTheDocument();
@@ -390,7 +394,7 @@ describe('ResetPasswordPage: otro enlace con la página ya abierta', () => {
           : noContentResponse(),
     });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
     await submitPasswords(user);
     await screen.findByRole('heading', { name: 'El enlace no es válido o ha caducado' });
 
@@ -412,7 +416,7 @@ describe('ResetPasswordPage: otro enlace con la página ya abierta', () => {
   it('desde «enlace no válido» sin token al cargar, el enlace nuevo también sirve', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => noContentResponse() });
     const user = userEvent.setup();
-    renderReset('');
+    await renderReset('');
     expect(screen.getByRole('heading', { name: 'El enlace no es válido o ha caducado' })).toBeInTheDocument();
 
     await user.click(openNewLink());
@@ -428,7 +432,7 @@ describe('ResetPasswordPage: otro enlace con la página ya abierta', () => {
       [CONFIRM]: () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x', {}, { 'Retry-After': '30' }),
     });
     const user = userEvent.setup();
-    renderReset(`#token=${TOKEN}`);
+    await renderReset(`#token=${TOKEN}`);
     await submitPasswords(user);
     expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 30 s' }));
 
@@ -443,7 +447,7 @@ describe('ResetPasswordPage: otro enlace con la página ya abierta', () => {
 describe('ResetPasswordPage: es pública y funciona con o sin sesión', () => {
   it('con sesión abierta no redirige a la portada; con el enlace no válido, el pie lleva al inicio', async () => {
     routeFetch(fetchMock, {});
-    renderReset('', { session: true });
+    await renderReset('', { session: true });
 
     expect(await screen.findByRole('link', { name: 'Ir al inicio' })).toHaveAttribute('href', '/');
     expect(screen.queryByRole('link', { name: 'Inicia sesión' })).not.toBeInTheDocument();

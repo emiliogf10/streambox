@@ -168,7 +168,9 @@ export function HomePage() {
 
   return (
     <div className="pb-12">
-      <h1 className="sr-only">Catálogo de películas</h1>
+      {/* Oculto a la vista; para los lectores, el nombre de la página. «Películas y series» (E-6): antes decía
+          «Catálogo de películas», pero la portada también tiene filas de series. */}
+      <h1 className="sr-only">Películas y series</h1>
       {content}
     </div>
   );

@@ -299,7 +299,7 @@ test.describe('Login y cierre de sesión', () => {
     await skipGenresQuestionIfAsked(page);
 
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole('heading', { level: 1, name: 'Catálogo de películas' })).toBeAttached();
+    await expect(page.getByRole('heading', { level: 1, name: 'Películas y series' })).toBeAttached();
     await expect(page.getByRole('heading', { level: 2, name: HERO_TITLE })).toBeVisible();
 
     // El JWT vive en una cookie HttpOnly: el navegador la tiene, pero JavaScript no la ve

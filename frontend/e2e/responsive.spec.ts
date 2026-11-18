@@ -58,6 +58,10 @@ async function expectFullyInsideViewportWidth(locator: Locator, page: Page, labe
  */
 async function expectNavbarFits(page: Page, withAdminLink: boolean): Promise<void> {
   const nav = page.getByRole('navigation', { name: 'Principal' });
+  const searchToggle = page.getByRole('button', { name: 'Buscar películas y series' });
+  const folded = (page.viewportSize()?.width ?? 0) < 768;
+  if (folded) await expect(searchToggle).toBeVisible();
+  else await expect(searchToggle).toBeHidden();
   const items: [Locator, string][] = [
     [page.getByRole('link', { name: 'streambox' }), 'logo'],
     [nav.getByRole('link', { name: 'Inicio' }), 'Inicio'],
@@ -65,7 +69,10 @@ async function expectNavbarFits(page: Page, withAdminLink: boolean): Promise<voi
     [nav.getByRole('link', { name: 'Series' }), 'Series'],
     [nav.getByRole('link', { name: 'Mi lista' }), 'Mi lista'],
     ...(withAdminLink ? ([[nav.getByRole('link', { name: 'Administrar' }), 'Administrar']] as [Locator, string][]) : []),
-    [page.getByRole('combobox', { name: 'Buscar películas y series por título' }), 'buscador'],
+    // Por debajo de 768 px el buscador va plegado tras la lupa (D-1); desde ahí, el campo está en la barra.
+    folded
+      ? [searchToggle, 'lupa del buscador']
+      : [page.getByRole('combobox', { name: 'Buscar películas y series por título' }), 'buscador'],
     [page.getByRole('button', { name: 'Menú de usuario' }), 'menú de usuario'],
   ];
 
@@ -83,6 +90,50 @@ async function expectNavbarFits(page: Page, withAdminLink: boolean): Promise<voi
       expect(overlap, `«${a.label}» y «${b.label}» se solapan en la barra`).toBe(false);
     }
   }
+  if (folded) {
+    await searchToggle.click();
+    await expectFullyInsideViewportWidth(
+      page.getByRole('combobox', { name: 'Buscar películas y series por título' }),
+      page,
+      'buscador desplegado',
+    );
+    await searchToggle.click();
+    await expect(searchToggle).toHaveAttribute('aria-expanded', 'false');
+  }
+}
+
+/**
+ * En el panel, «Administrar» marca que es la sección actual SIN depender solo del color (WCAG 1.4.1, revisión de
+ * `qa`): por debajo de 1024 px solo se ve su escudo (el texto, que lleva el subrayado de las pestañas, es `sr-only`),
+ * así que el enlace lleva una raya de 2 px bajo el icono (borde de `::after`); desde ahí se ve el texto subrayado.
+ */
+async function expectCurrentAdminLinkNotOnlyByColor(page: Page): Promise<void> {
+  const link = page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Administrar' });
+  await expect(link).toHaveAttribute('aria-current', 'page');
+  const iconOnly = (page.viewportSize()?.width ?? 0) < 1024;
+  const mark = await link.evaluate((element) => {
+    const after = getComputedStyle(element, '::after');
+    const text = element.querySelector('span')!;
+    return {
+      borderStyle: after.borderBottomStyle,
+      borderWidth: after.borderBottomWidth,
+      underline: getComputedStyle(element).textDecorationLine,
+      textVisible: text.getBoundingClientRect().width > 1,
+    };
+  });
+  expect(mark.textVisible, 'el texto «Administrar» solo se ve desde 1024 px').toBe(!iconOnly);
+  if (iconOnly) {
+    expect(mark.borderStyle, 'falta la raya bajo el escudo de «Administrar»').toBe('solid');
+    expect(mark.borderWidth).toBe('2px');
+  } else {
+    expect(mark.underline, 'con el texto a la vista, el subrayado de las pestañas').toContain('underline');
+    // El reinicio de Tailwind deja `border: 0 solid` en todo `::after`: lo que cuenta es el grosor.
+    expect(mark.borderWidth, 'con el texto a la vista sobra la raya bajo el escudo').toBe('0px');
+  }
+  // La marca no cambia el tamaño del objetivo táctil.
+  const box = (await link.boundingBox())!;
+  expect(box.width).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(44);
 }
 
 /**
@@ -499,6 +550,7 @@ for (const viewport of VIEWPORTS) {
 
         // Con el quinto enlace, la barra sigue cabiendo sin solaparse (en 375 y 768 px «Administrar» queda en icono).
         await expectNavbarFits(page, true);
+        await expectCurrentAdminLinkNotOnlyByColor(page);
         await expectNoHorizontalScroll(page);
 
         const sections = page.getByRole('navigation', { name: 'Secciones de administración' });

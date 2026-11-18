@@ -203,8 +203,8 @@ test.describe('Teclado', () => {
  * WCAG 2.2 · 2.4.11 (Foco no tapado): la barra superior está pegada arriba (`sticky`) y, al
  * desplazar la página hasta el elemento enfocado, el navegador solo comprueba que quepa en la
  * ventana, no que no lo tape la barra. El arreglo (`scroll-margin-top` en el contenido con la
- * altura medida de la barra, ver `index.css`) se prueba a 375 px (barra de tres filas, 165 px) y a
- * 1280 px (una fila, 57 px). 1280x800 es el tamaño de la captura en que se vio el fallo: el campo
+ * altura medida de la barra, ver `index.css`) se prueba a 375 px (barra de dos filas, unos 105 px, que
+ * además se aparta al bajar y vuelve al subir o al recibir el foco) y a 1280 px (una fila, 57 px). 1280x800 es el tamaño de la captura en que se vio el fallo: el campo
  * «Título» quedaba justo debajo de la barra.
  */
 test.describe('El foco no queda tapado por la barra superior (WCAG 2.2 · 2.4.11)', () => {
@@ -239,6 +239,10 @@ test.describe('El foco no queda tapado por la barra superior (WCAG 2.2 · 2.4.11
         const back = page.getByRole('link', { name: 'Volver al listado' });
         const backBox = await back.boundingBox();
         await page.evaluate((dy) => window.scrollBy(0, dy), backBox!.y - 8);
+        // En móvil la barra se aparta al bajar (D-1) y solo puede tapar algo cuando vuelve, al subir: un gesto
+        // mínimo hacia arriba la trae de vuelta (en escritorio no cambia nada). Se espera a que acabe de deslizarse.
+        await page.evaluate(() => window.scrollBy(0, -1));
+        await expect.poll(async () => (await page.getByRole('banner').boundingBox())!.y).toBeGreaterThanOrEqual(-0.5);
         const hiddenBox = await back.boundingBox();
         const navbarBox = await page.getByRole('banner').boundingBox();
         expect(hiddenBox!.y + hiddenBox!.height, 'precondición: el enlace está debajo de la barra').toBeLessThanOrEqual(
@@ -262,9 +266,24 @@ test.describe('El foco no queda tapado por la barra superior (WCAG 2.2 · 2.4.11
         const scrolled = await page.evaluate(() => window.scrollY);
         expect(scrolled, 'precondición: la página está desplazada').toBeGreaterThan(0);
 
-        await page.getByRole('combobox', { name: 'Buscar películas y series por título' }).focus();
+        // En móvil el buscador va plegado tras la lupa (y la barra, apartada al bajar: el foco la trae de vuelta).
+        const banner = page.getByRole('banner');
+        const bannerTop = async () => (await banner.boundingBox())!.y;
+        if (viewport.width < 768) {
+          // Precondición: tras bajar, la barra está apartada; si no, este test no probaría que el foco la trae.
+          await expect.poll(bannerTop, { message: 'precondición: la barra se aparta al bajar' }).toBeLessThan(-50);
+        }
+        const firstControl =
+          viewport.width < 768
+            ? page.getByRole('button', { name: 'Buscar películas y series' })
+            : page.getByRole('combobox', { name: 'Buscar películas y series por título' });
+        await firstControl.focus();
+        // Vuelve EN EL ACTO, sin deslizarse (`focus-within:transition-none`): sin `poll`, a propósito. A mitad de
+        // deslizamiento el control enfocado aún estaría fuera de la ventana y el navegador desplazaría la página.
+        expect(await bannerTop(), 'con el foco dentro, la barra está a la vista').toBeGreaterThanOrEqual(-0.5);
         await page.keyboard.press('Tab');
         await expect(page.getByRole('button', { name: 'Menú de usuario' })).toBeFocused();
+        expect(await bannerTop()).toBeGreaterThanOrEqual(-0.5);
         expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
       });
     });

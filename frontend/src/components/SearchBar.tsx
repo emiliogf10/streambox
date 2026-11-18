@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { KeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
+import type { KeyboardEvent, MouseEvent as ReactMouseEvent, Ref } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { ApiError, apiFetch, getErrorMessage } from '../lib/api';
@@ -89,6 +89,15 @@ function summarizeApproximate(results: SearchResults): ApproximateSummary | null
   return { lead, mixed: otherError === null, kindPlural };
 }
 
+/** Propiedades de {@link SearchBar}. */
+interface SearchBarProps {
+  /**
+   * Referencia al campo de búsqueda. La usa la barra de móvil (`Navbar`) para
+   * llevar el foco al campo en cuanto despliega el buscador con la lupa.
+   */
+  inputRef?: Ref<HTMLInputElement>;
+}
+
 /**
  * Buscador de películas Y series por título con el patrón ARIA "combobox con
  * lista" y opciones agrupadas (WAI-ARIA APG, "Listbox with grouped options").
@@ -134,6 +143,10 @@ function summarizeApproximate(results: SearchResults): ApproximateSummary | null
  *   como en el patrón «combobox» de WAI-ARIA, va por pasos: el primero cierra
  *   la lista y CONSERVA lo escrito (quizá solo se quería ver lo que había
  *   debajo; ↓ o seguir escribiendo la vuelven a abrir) y el segundo vacía el campo.
+ *   Si no hay nada a la vista que cerrar (recién enfocado, sin texto ni
+ *   resultados) ni nada que borrar, Escape no se consume: así la barra de móvil
+ *   puede usarlo para plegar el buscador (ver `Navbar`) sin que haga falta un
+ *   Escape «en vacío» antes.
  * - **Cada opción es un enlace de verdad** (`<a href>` con `role="option"`,
  *   uno de los roles que HTML permite en un enlace): para el lector de pantalla
  *   sigue siendo una opción de la lista, pero con el ratón se puede abrir en otra
@@ -143,7 +156,7 @@ function summarizeApproximate(results: SearchResults): ApproximateSummary | null
  *   películas y 1 serie"), "sin resultados", el error o el fallo parcial: el
  *   desplegable aparece sin mover el foco y, si no, un lector de pantalla no se enteraría.
  */
-export function SearchBar() {
+export function SearchBar({ inputRef }: SearchBarProps = {}) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [query, setQuery] = useState('');
@@ -332,7 +345,8 @@ export function SearchBar() {
         handleSelect(options[activeIndex >= 0 ? activeIndex : 0]);
         break;
       case 'Escape':
-        if (open) {
+        // Solo cuenta como «abierto» si se ve algo (la lista o un mensaje): cerrar algo invisible no es un paso.
+        if (open && (expanded || showMessage)) {
           // 1.º: cierra la lista y conserva el texto.
           event.preventDefault();
           setOpen(false);
@@ -341,6 +355,9 @@ export function SearchBar() {
           // 2.º (con la lista ya cerrada): vacía el campo.
           event.preventDefault();
           resetSearch();
+        } else {
+          // Nada que cerrar ni que borrar: el desplegable (vacío) queda cerrado y Escape sigue su curso.
+          setOpen(false);
         }
         // Sin nada que cerrar ni que borrar, Escape sigue su curso (otros componentes pueden usarlo).
         break;
@@ -418,6 +435,7 @@ export function SearchBar() {
       <div className="flex items-center gap-2 rounded-full border border-field-border bg-surface-raised px-4 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent">
         <Search aria-hidden="true" className="size-4 shrink-0 text-muted" />
         <input
+          ref={inputRef}
           id={inputId}
           type="search"
           role="combobox"

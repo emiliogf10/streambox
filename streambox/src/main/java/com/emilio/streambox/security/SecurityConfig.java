@@ -291,6 +291,14 @@ public class SecurityConfig {
                         SecurityErrorResponseWriter errorWriter) throws Exception {
 
                 http
+                                // CSRF de Spring desactivado A PROPÓSITO (CodeQL lo marca como
+                                // java/spring-disabled-csrf-protection; alerta revisada y descartada).
+                                // Su token CSRF protege sesiones de servidor y esta API es stateless.
+                                // La defensa propia, probada en los tests (cap. 9.3 del manual):
+                                // cookies SameSite=Strict, cabecera obligatoria X-Requested-With en
+                                // toda petición no segura autenticada por cookie (403 CSRF_REJECTED
+                                // en JwtAuthenticationFilter), sin CORS (otra web no puede añadir esa
+                                // cabecera sin preflight) y solo JSON (nada de formularios).
                                 .csrf(csrf -> csrf.disable())
 
                                 // La API es stateless: cada peticion se autentica con el token JWT.

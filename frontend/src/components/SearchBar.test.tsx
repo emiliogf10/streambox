@@ -463,19 +463,39 @@ describe('SearchBar: teclado', () => {
     expect(input).toHaveFocus();
   });
 
-  it('Escape con el buscador ya cerrado y vacío no se consume (otros componentes pueden usarlo)', async () => {
+  it('Escape sin nada a la vista que cerrar ni texto que borrar no se consume (otros componentes pueden usarlo)', async () => {
     const { user } = setup();
     const prevented: boolean[] = [];
     const record = (event: KeyboardEvent) => prevented.push(event.defaultPrevented);
     // Escucha en `document`: ahí llega el evento DESPUÉS de que React lo haya gestionado.
     document.addEventListener('keydown', record);
 
-    await user.click(screen.getByRole('combobox')); // al enfocar se "abre" aunque no haya nada
-    await user.keyboard('{Escape}'); // 1.º: cierra el desplegable y se consume
-    await user.keyboard('{Escape}'); // 2.º: ya no hay nada que cerrar
+    // Al enfocar se "abre" aunque no haya nada que ver: cerrar algo invisible no es un paso de Escape. Así la
+    // barra de móvil pliega el buscador con UN Escape (antes hacía falta uno «en vacío» primero; ver `Navbar`).
+    await user.click(screen.getByRole('combobox'));
+    await user.keyboard('{Escape}');
+    await user.keyboard('{Escape}');
     document.removeEventListener('keydown', record);
 
-    expect(prevented).toEqual([true, false]);
+    expect(prevented).toEqual([false, false]);
+    expect(screen.getByRole('combobox')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('con un mensaje a la vista («Sin resultados»), el 1.º Escape lo cierra (y se consume) y conserva el texto', async () => {
+    const { user, input } = setup(() => jsonResponse(makePage([])));
+    await user.type(input, 'matrix');
+    passDebounce();
+    expect(await screen.findByText('Sin resultados para «matrix».')).toBeInTheDocument();
+    const prevented: boolean[] = [];
+    const record = (event: KeyboardEvent) => prevented.push(event.defaultPrevented);
+    document.addEventListener('keydown', record);
+
+    await user.keyboard('{Escape}');
+    document.removeEventListener('keydown', record);
+
+    expect(prevented).toEqual([true]);
+    expect(screen.queryByText('Sin resultados para «matrix».')).not.toBeInTheDocument();
+    expect(input).toHaveValue('matrix');
   });
 });
 

@@ -22,6 +22,7 @@ import { installManualTimers, passTime } from '../../test/fakeTimers';
 import { errorResponse, jsonResponse, makeSeriesDetail, renderWithProviders, routeFetch } from '../../test/helpers';
 import { SeriesFormPage } from './SeriesFormPage';
 import { expectButtonAvailable, expectButtonUnavailable } from '../../test/buttonState';
+import { expectFocusedFormAlert } from '../../test/formAlert';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -486,7 +487,7 @@ describe('SeriesFormPage: edición', () => {
     await fill(user, field.title(), 'Otro título');
     await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
 
-    expect(await screen.findByText('Serie no encontrada')).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText('Serie no encontrada'));
     expect(field.title()).toHaveValue('Otro título');
   });
 
@@ -504,7 +505,7 @@ describe('SeriesFormPage: edición', () => {
 
     await user.click(submitNew());
 
-    expect(await screen.findByText('Alguno de los géneros indicados ya no existe')).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText('Alguno de los géneros indicados ya no existe'));
     expect(screen.queryByText('Serie no encontrada')).not.toBeInTheDocument();
     expect(field.title()).toHaveValue('  Severance ');
     expect(screen.getByText('ruta:/admin/series/nueva')).toBeInTheDocument();

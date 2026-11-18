@@ -1,4 +1,6 @@
+import { Suspense } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import { LoadingState } from '../../components/LoadingState';
 import { Clapperboard, Tags, Tv } from 'lucide-react';
 import { ADMIN_GENRES_PATH, ADMIN_MOVIES_PATH, ADMIN_SERIES_PATH } from './adminPaths';
 
@@ -34,6 +36,11 @@ const tabClass = ({ isActive }: { isActive: boolean }) =>
  * grandes sin provocar scroll horizontal.
  *
  * Se monta dentro de `RequireAdmin`: no decide nada sobre permisos.
+ *
+ * **Carga bajo demanda.** Las pantallas del panel llegan con `React.lazy` (ver
+ * `App.tsx`). El `Suspense` alrededor del `<Outlet />` hace que, si una sección
+ * aún no está lista, la espera ocupe solo su hueco: el título y las secciones
+ * del panel no desaparecen.
  */
 export function AdminLayout() {
   return (
@@ -56,7 +63,9 @@ export function AdminLayout() {
           </NavLink>
         </nav>
       </header>
-      <Outlet />
+      <Suspense fallback={<LoadingState />}>
+        <Outlet />
+      </Suspense>
     </div>
   );
 }

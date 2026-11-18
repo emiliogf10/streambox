@@ -21,7 +21,7 @@ import {
 import type { EpisodeFormErrors, EpisodeFormValues } from '../../lib/episodeValidation';
 import { episodeCode } from '../../lib/series';
 import type { Episode, Season } from '../../lib/types';
-import { focusFirstInvalidField, splitValidationErrors } from './formErrors';
+import { focusFirstInvalidField, hasFieldErrors, splitValidationErrors } from './formErrors';
 
 /** Orden de los campos en pantalla: el foco va al primero con error. */
 const FIELD_ORDER: (keyof EpisodeFormValues)[] = [
@@ -369,7 +369,7 @@ export function EpisodeFormDialog({
         </div>
 
         <div className="mt-6">
-          <FormAlert message={formError} />
+          <FormAlert message={formError} takeFocus={!hasFieldErrors(errors)} />
         </div>
         {/*
           Pie pegajoso: si el diálogo no cabe (pantallas bajas, errores a la vista) sus campos se

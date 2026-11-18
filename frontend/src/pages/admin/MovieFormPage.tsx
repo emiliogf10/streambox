@@ -29,7 +29,7 @@ import type { Movie } from '../../lib/types';
 import { validateTrailerUrl } from '../../lib/youtube';
 import { ADMIN_MOVIES_PATH, getReturnTo } from './adminPaths';
 import { CoverPreview } from './CoverPreview';
-import { focusFirstInvalidField, splitValidationErrors } from './formErrors';
+import { focusFirstInvalidField, hasFieldErrors, splitValidationErrors } from './formErrors';
 import { GenreCheckboxes } from './GenreCheckboxes';
 
 /** Orden de los campos en pantalla: el foco va al primero con error. */
@@ -403,7 +403,7 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
 
         <div className="lg:col-start-1">
           {/* Junto a los botones (y no arriba del todo): es donde está quien acaba de pulsar «Guardar». */}
-          <FormAlert message={formError} />
+          <FormAlert message={formError} takeFocus={!hasFieldErrors(errors)} />
           <div className="flex flex-col-reverse gap-3 border-t border-line pt-6 sm:flex-row sm:justify-end">
             <Link to={returnTo} className={buttonClasses('outline')}>
               Cancelar

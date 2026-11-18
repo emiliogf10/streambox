@@ -49,6 +49,7 @@ import type { Movie, Series, User } from '../lib/types';
 import { Navbar } from '../components/Navbar';
 import { ProfilePage } from './ProfilePage';
 import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
+import { expectFocusedFormAlert } from '../test/formAlert';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -546,7 +547,7 @@ describe('ProfilePage: cambiar el nombre', () => {
 
     await changeName(user, 'beto');
 
-    expect(await screen.findByText(/El servidor ha tenido un problema/)).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText(/El servidor ha tenido un problema/));
     expectButtonAvailable(screen.getByRole('button', { name: 'Guardar' }));
     expectSessionStillOpen();
 
@@ -729,7 +730,7 @@ describe('ProfilePage: icono de perfil', () => {
     await user.click(within(group).getByRole('radio', { name: 'Corona' }));
     await user.click(screen.getByRole('button', { name: 'Guardar icono' }));
 
-    expect(await screen.findByText(text)).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText(text));
     expect(within(group).getByRole('radio', { name: 'Corona' })).toBeChecked();
     expectButtonAvailable(screen.getByRole('button', { name: 'Guardar icono' }));
     expect(headerAvatar()).toHaveAttribute('data-avatar', 'initial');
@@ -943,7 +944,7 @@ describe('ProfilePage: cambiar la contraseña', () => {
       await user.click(submitButton());
 
       expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 1 min 30 s' }));
-      expect(screen.getByText(passwordRateLimitMessage('1 min 30 s'))).toHaveAttribute('role', 'alert');
+      expectFocusedFormAlert(screen.getByText(passwordRateLimitMessage('1 min 30 s')));
 
       act(() => {
         vi.advanceTimersByTime(30_000);
@@ -1018,7 +1019,7 @@ describe('ProfilePage: cerrar sesión en todos los dispositivos', () => {
     const dialog = await openDialog(user);
     await user.click(within(dialog).getByRole('button', { name: 'Cerrar todas las sesiones' }));
 
-    expect(await within(dialog).findByText(LOGOUT_ALL_FAILED_SERVER)).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await within(dialog).findByText(LOGOUT_ALL_FAILED_SERVER));
     expectSessionStillOpen();
     expect(screen.queryByText(LOGOUT_ALL_DONE)).not.toBeInTheDocument();
 

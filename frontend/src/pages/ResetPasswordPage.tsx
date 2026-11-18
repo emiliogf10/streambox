@@ -22,7 +22,7 @@ import {
 import { formatWaitTime } from '../lib/utils';
 import { PASSWORD_MAX, PASSWORD_MIN, validatePasswordReset } from '../lib/validation';
 import type { PasswordResetErrors, PasswordResetValues } from '../lib/validation';
-import { focusFirstInvalidField } from './admin/formErrors';
+import { focusFirstInvalidField, hasFieldErrors } from './admin/formErrors';
 
 /**
  * Estado de la página:
@@ -327,7 +327,7 @@ function ResetFlow({ token, announce }: ResetFlowProps) {
       subtitle="Escríbela dos veces. Después podrás iniciar sesión con ella."
       titleRef={titleRef}
     >
-      <FormAlert message={formError} />
+      <FormAlert message={formError} takeFocus={!hasFieldErrors(fieldErrors)} />
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
         <FormField
           id={FIELD_IDS.newPassword}

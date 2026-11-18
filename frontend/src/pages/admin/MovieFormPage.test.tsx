@@ -17,6 +17,7 @@ import { installManualTimers, passTime } from '../../test/fakeTimers';
 import { errorResponse, jsonResponse, makeMovie, renderWithProviders, routeFetch } from '../../test/helpers';
 import { MovieFormPage } from './MovieFormPage';
 import { expectButtonAvailable, expectButtonUnavailable } from '../../test/buttonState';
+import { expectFocusedFormAlert } from '../../test/formAlert';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -317,7 +318,7 @@ describe('MovieFormPage: alta', () => {
 
     await user.click(submitNew());
 
-    expect(await screen.findByText('No tienes permisos para realizar esta acción.')).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText('No tienes permisos para realizar esta acción.'));
     expect(field.title()).toHaveValue('  Interstellar ');
     expectButtonAvailable(submitNew());
   });
@@ -357,7 +358,7 @@ describe('MovieFormPage: alta', () => {
 
     await user.click(submitNew());
 
-    expect(await screen.findByText('Alguno de los géneros indicados ya no existe')).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText('Alguno de los géneros indicados ya no existe'));
     expect(screen.queryByText('Película no encontrada')).not.toBeInTheDocument();
     expect(field.title()).toHaveValue('  Interstellar ');
     await waitFor(() => expect(genreRequests()).toBeGreaterThan(before));

@@ -11,7 +11,7 @@ import type { ChangePasswordRequest } from '../../lib/types';
 import { formatWaitTime } from '../../lib/utils';
 import { PASSWORD_MAX, PASSWORD_MIN, validatePasswordChange } from '../../lib/validation';
 import type { PasswordChangeErrors, PasswordChangeValues } from '../../lib/validation';
-import { focusFirstInvalidField, splitValidationErrors } from '../../pages/admin/formErrors';
+import { focusFirstInvalidField, hasFieldErrors, splitValidationErrors } from '../../pages/admin/formErrors';
 
 /** Campos en el orden en que se ven (para llevar el foco al primero con error). */
 const FIELD_ORDER: (keyof PasswordChangeValues)[] = ['currentPassword', 'newPassword', 'confirmPassword'];
@@ -154,7 +154,7 @@ export function PasswordForm({ id, email, onClose }: PasswordFormProps) {
 
   return (
     <form id={id} onSubmit={handleSubmit} noValidate aria-label="Cambiar contraseña" className="mt-3">
-      <FormAlert message={formError} />
+      <FormAlert message={formError} takeFocus={!hasFieldErrors(fieldErrors)} />
       {/*
         Campo de identificación solo para el gestor de contraseñas. Es un `input`
         real (los gestores ignoran `type="hidden"`) dentro del formulario, con el

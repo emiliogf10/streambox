@@ -25,6 +25,8 @@ import {
   routeFetch,
 } from '../test/helpers';
 import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
+import { expectFocusedFormAlert } from '../test/formAlert';
+import { waitForLazyRoutes } from '../test/lazyRoutes';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -67,8 +69,8 @@ function OpenLinkProbe() {
 }
 
 /** Monta las rutas reales en `/verificar-email` con el fragmento indicado. */
-function renderVerify(hash: string, options: { session?: boolean } = {}) {
-  return renderWithProviders(
+async function renderVerify(hash: string, options: { session?: boolean } = {}) {
+  const result = renderWithProviders(
     <>
       <AppRoutes />
       <HashProbe />
@@ -76,6 +78,8 @@ function renderVerify(hash: string, options: { session?: boolean } = {}) {
     </>,
     { route: `/verificar-email${hash}`, session: options.session },
   );
+  await waitForLazyRoutes();
+  return result;
 }
 
 const confirmButton = () => screen.getByRole('button', { name: 'Confirmar mi correo' });
@@ -84,7 +88,7 @@ const confirmCalls = () => apiCalls(fetchMock).filter(([url]) => url === '/api/a
 describe('VerifyEmailPage: con un token en el enlace', () => {
   it('pide pulsar el botón y NO confirma al cargar (un robot que abra el enlace no gasta el token)', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => noContentResponse() });
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Confirma tu correo' })).toBeInTheDocument();
     expect(screen.getByText('Pulsa el botón para activar tu cuenta y poder iniciar sesión.')).toBeInTheDocument();
@@ -99,7 +103,7 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
   it('quita el token de la barra de direcciones (sustituyendo la entrada del historial) y lo conserva en memoria', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => noContentResponse() });
     const user = userEvent.setup();
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
 
     expect(await screen.findByText('hash: navegación:REPLACE')).toBeInTheDocument();
     expect(screen.getByText('ruta:/verificar-email')).toBeInTheDocument();
@@ -114,7 +118,7 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
   it('204: «Correo confirmado», con el foco en el título y el camino a «Iniciar sesión»', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => noContentResponse() });
     const user = userEvent.setup();
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
 
     await user.click(confirmButton());
 
@@ -133,7 +137,7 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
   it('mientras confirma, el botón queda bloqueado (no se envía dos veces)', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => new Promise<Response>(() => {}) });
     const user = userEvent.setup();
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
 
     await user.click(confirmButton());
 
@@ -145,7 +149,7 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
       [CONFIRM]: () => errorResponse(400, 'INVALID_VERIFICATION_TOKEN', 'Texto interno del servidor'),
     });
     const user = userEvent.setup();
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
 
     await user.click(confirmButton());
 
@@ -164,7 +168,7 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
   it('400 VALIDATION_ERROR (token mal formado según el servidor) también es «enlace no válido»', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => errorResponse(400, 'VALIDATION_ERROR', 'x') });
     const user = userEvent.setup();
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
 
     await user.click(confirmButton());
 
@@ -181,10 +185,10 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
       },
     });
     const user = userEvent.setup();
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
 
     await user.click(confirmButton());
-    expect(await screen.findByText(/No se pudo conectar con el servidor/)).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText(/No se pudo conectar con el servidor/));
     expect(screen.getByRole('heading', { name: 'Confirma tu correo' })).toBeInTheDocument();
 
     await user.click(confirmButton());
@@ -199,12 +203,12 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
       [CONFIRM]: () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x', {}, { 'Retry-After': '30' }),
     });
     const user = userEvent.setup({ delay: null });
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
 
     await user.click(confirmButton());
 
     expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 30 s' }));
-    expect(screen.getByText('Demasiados intentos. Inténtalo de nuevo en 30 s.')).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(screen.getByText('Demasiados intentos. Inténtalo de nuevo en 30 s.'));
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
@@ -221,7 +225,7 @@ describe('VerifyEmailPage: sin token válido en el enlace', () => {
     ['token con caracteres que un token nuestro no tiene', '#token=abc%3Cscript%3E'],
   ])('%s: «enlace no válido» directamente, sin llamar al servidor', async (_case, hash) => {
     routeFetch(fetchMock, {});
-    renderVerify(hash);
+    await renderVerify(hash);
 
     expect(screen.getByRole('heading', { level: 1, name: 'El enlace no es válido o ha caducado' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Confirmar mi correo' })).not.toBeInTheDocument();
@@ -235,7 +239,7 @@ describe('VerifyEmailPage: sin token válido en el enlace', () => {
   it('pedir un enlace nuevo: valida el correo en el cliente, lo envía recortado y avisa sin afirmar nada', async () => {
     routeFetch(fetchMock, { [RESEND]: () => jsonResponse({ message: 'x' }, 202) });
     const user = userEvent.setup();
-    renderVerify('');
+    await renderVerify('');
     const field = screen.getByLabelText('Correo electrónico');
 
     await user.click(screen.getByRole('button', { name: 'Enviar un enlace nuevo' }));
@@ -262,7 +266,7 @@ describe('VerifyEmailPage: sin token válido en el enlace', () => {
       [RESEND]: () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x', {}, { 'Retry-After': '45' }),
     });
     const user = userEvent.setup({ delay: null });
-    renderVerify('');
+    await renderVerify('');
 
     await user.type(screen.getByLabelText('Correo electrónico'), 'ana@example.com');
     await user.click(screen.getByRole('button', { name: 'Enviar un enlace nuevo' }));
@@ -286,7 +290,7 @@ describe('VerifyEmailPage: otro enlace con la página ya abierta', () => {
           : noContentResponse(),
     });
     const user = userEvent.setup();
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
     await user.click(confirmButton());
     await screen.findByRole('heading', { name: 'El enlace no es válido o ha caducado' });
 
@@ -309,7 +313,7 @@ describe('VerifyEmailPage: otro enlace con la página ya abierta', () => {
   it('desde «enlace no válido» sin token al cargar, el enlace nuevo también se puede confirmar', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => noContentResponse() });
     const user = userEvent.setup();
-    renderVerify('');
+    await renderVerify('');
     expect(screen.getByRole('heading', { name: 'El enlace no es válido o ha caducado' })).toBeInTheDocument();
 
     await user.click(openNewLink());
@@ -324,7 +328,7 @@ describe('VerifyEmailPage: otro enlace con la página ya abierta', () => {
       [CONFIRM]: () => errorResponse(429, 'RATE_LIMIT_EXCEEDED', 'x', {}, { 'Retry-After': '30' }),
     });
     const user = userEvent.setup();
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
     await user.click(confirmButton());
     expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 30 s' }));
 
@@ -346,7 +350,7 @@ describe('VerifyEmailPage: otro enlace con la página ya abierta', () => {
           : noContentResponse(),
     });
     const user = userEvent.setup();
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
     await user.click(confirmButton());
     expectButtonUnavailable(await screen.findByRole('button', { name: 'Confirmando...' }), { busy: true });
 
@@ -364,7 +368,7 @@ describe('VerifyEmailPage: otro enlace con la página ya abierta', () => {
 describe('VerifyEmailPage: es pública y funciona con o sin sesión', () => {
   it('sin sesión no manda al login', async () => {
     routeFetch(fetchMock, {});
-    renderVerify(`#token=${TOKEN}`);
+    await renderVerify(`#token=${TOKEN}`);
 
     await vi.waitFor(() => expect(fetchMock.mock.calls.map(([url]) => url)).toContain('/api/auth/refresh'));
     expect(screen.getByText('ruta:/verificar-email')).toBeInTheDocument();
@@ -374,7 +378,7 @@ describe('VerifyEmailPage: es pública y funciona con o sin sesión', () => {
   it('con sesión abierta no redirige a la portada y, tras confirmar, ofrece «Ir al inicio»', async () => {
     routeFetch(fetchMock, { [CONFIRM]: () => noContentResponse() });
     const user = userEvent.setup();
-    renderVerify(`#token=${TOKEN}`, { session: true });
+    await renderVerify(`#token=${TOKEN}`, { session: true });
 
     // Espera a que la sesión se conozca: con ella, la página sigue aquí.
     await vi.waitFor(() =>
@@ -391,7 +395,7 @@ describe('VerifyEmailPage: es pública y funciona con o sin sesión', () => {
 
   it('con sesión abierta y enlace no válido: no ofrece registrarse y lleva al inicio', async () => {
     routeFetch(fetchMock, {});
-    renderVerify('', { session: true });
+    await renderVerify('', { session: true });
 
     expect(await screen.findByRole('link', { name: 'Ir al inicio' })).toHaveAttribute('href', '/');
     expect(screen.queryByRole('link', { name: 'Regístrate' })).not.toBeInTheDocument();

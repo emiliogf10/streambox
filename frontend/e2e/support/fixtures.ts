@@ -107,13 +107,13 @@ export const WELCOME_TITLE = 'Cuéntanos qué te gusta';
  * nueva que nunca la contestó), pulsa «Ahora no» y espera a salir de `/bienvenida`; si no, no hace nada.
  *
  * Es determinista: a quien tiene la pregunta pendiente la guarda le lleva a `/bienvenida` ANTES de pintar la
- * portada (su `<h1>` «Catálogo de películas» nunca llega a existir), así que lo primero que aparezca de los dos
+ * portada (su `<h1>` «Películas y series» nunca llega a existir), así que lo primero que aparezca de los dos
  * dice en qué caso se está. Para los tests que entran con una cuenta registrada a mano y no tratan de la
  * bienvenida (la prueban `favorite-genres.spec.ts`).
  */
 export async function skipGenresQuestionIfAsked(page: Page): Promise<void> {
   const welcome = page.getByRole('heading', { level: 1, name: WELCOME_TITLE });
-  const home = page.getByRole('heading', { level: 1, name: 'Catálogo de películas' });
+  const home = page.getByRole('heading', { level: 1, name: 'Películas y series' });
   await expect(welcome.or(home)).toBeAttached();
   if (await welcome.isVisible()) {
     await page.getByRole('button', { name: 'Ahora no' }).click();
@@ -181,13 +181,19 @@ export function movieCard(scope: Page | Locator, title: string): Locator {
 }
 
 /**
- * Aviso de error de un formulario (`role="alert"` con texto). Hay que filtrar por
- * texto porque la zona de avisos (`ToastViewport`) mantiene SIEMPRE una región
- * `role="alert"` vacía en el DOM (una región viva debe existir antes de recibir
- * contenido para que los lectores de pantalla lo anuncien).
+ * Aviso de error de un formulario (`FormAlert`), en cualquiera de sus dos modos:
+ * el que se lleva el foco (lo normal: un grupo enfocable, `tabindex="-1"`, sin
+ * región viva, para que se lea una sola vez) y el que acompaña a errores de
+ * campo (`role="alert"`, con el foco en el primer campo con error). Hay que
+ * filtrar por texto porque la zona de avisos (`ToastViewport`) mantiene SIEMPRE
+ * una región `role="alert"` vacía en el DOM (una región viva debe existir antes
+ * de recibir contenido para que los lectores de pantalla lo anuncien).
  */
 export function formAlert(page: Page): Locator {
-  return page.getByRole('alert').filter({ hasText: /\S/ });
+  return page
+    .getByRole('alert')
+    .or(page.locator('[role="group"][tabindex="-1"]'))
+    .filter({ hasText: /\S/ });
 }
 
 /**

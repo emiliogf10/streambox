@@ -38,7 +38,7 @@ beforeEach(() => {
  * Monta la barra con sesión iniciada y espera a que el arranque la confirme
  * (`GET /users/me`); `currentUser` decide qué responde `/users/me`.
  */
-async function renderNavbar(currentUser: () => Response | Promise<Response>) {
+async function renderNavbar(currentUser: () => Response | Promise<Response>, route = '/') {
   routeFetch(fetchMock, { ...FAVORITES, [CURRENT_USER]: currentUser });
   const user = userEvent.setup();
   renderWithProviders(
@@ -46,7 +46,7 @@ async function renderNavbar(currentUser: () => Response | Promise<Response>) {
       <Navbar />
       <UserStatusProbe />
     </FavoritesProvider>,
-    { session: true },
+    { session: true, route },
   );
   await screen.findByRole('button', { name: 'Menú de usuario' });
   return user;
@@ -87,6 +87,27 @@ describe('Navbar: enlace «Administrar»', () => {
     expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     // Donde solo se ve el escudo, el enlace sigue midiendo 44×44 (alto de la barra y este ancho mínimo).
     expect(link).toHaveClass('min-h-11', 'min-w-11');
+  });
+
+  it('en el panel, «Administrar» marca que estás ahí sin depender del color también cuando solo se ve el escudo (WCAG 1.4.1)', async () => {
+    await renderNavbar(() => jsonResponse(makeUser({ role: 'ADMIN' })), '/admin/peliculas');
+
+    const link = await within(mainNav()).findByRole('link', { name: 'Administrar' });
+    expect(link).toHaveAttribute('aria-current', 'page');
+    // Por debajo de `lg` el texto (con el subrayado de las demás pestañas) es solo para lectores de pantalla...
+    expect(within(link).getByText('Administrar')).toHaveClass('max-lg:sr-only');
+    // ...así que el enlace lleva su propia raya bajo el escudo: un BORDE (sigue visible con colores forzados), no un
+    // fondo ni solo el color del icono. jsdom no aplica las media queries: se comprueban las clases; el aspecto real
+    // a 375, 640 y 768 px lo comprueba `e2e/responsive.spec.ts`.
+    expect(link).toHaveClass('relative', 'max-lg:after:absolute', 'max-lg:after:border-b-2', 'max-lg:after:border-accent');
+  });
+
+  it('fuera del panel, «Administrar» no lleva la raya de «estás aquí»', async () => {
+    await renderNavbar(() => jsonResponse(makeUser({ role: 'ADMIN' })), '/peliculas');
+
+    const link = await within(mainNav()).findByRole('link', { name: 'Administrar' });
+    expect(link).not.toHaveAttribute('aria-current');
+    expect(link).not.toHaveClass('max-lg:after:border-b-2');
   });
 
   it('un usuario normal NO lo ve: solo «Inicio», «Películas», «Series» y «Mi lista»', async () => {
@@ -471,5 +492,97 @@ describe('Navbar: «Cerrar sesión» espera al servidor', () => {
     expect(retry).not.toHaveAttribute('aria-disabled');
     expect(retry).toHaveFocus();
     expect(screen.queryByRole('link', { name: 'Iniciar sesión' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Navbar en móvil: buscador tras una lupa (D-1)', () => {
+  const toggle = () => screen.getByRole('button', { name: 'Buscar películas y series' });
+  const combobox = () => screen.getByRole('combobox', { name: 'Buscar películas y series por título' });
+
+  it('la lupa despliega el buscador con el foco en el campo y lo pliega al volver a pulsarla', async () => {
+    const user = await renderNavbar(() => jsonResponse(makeUser()));
+    // Un solo buscador para todos los tamaños: plegado, su fila no se ve por debajo de `md` (CSS).
+    expect(screen.getAllByRole('combobox')).toHaveLength(1);
+    const area = document.getElementById(toggle().getAttribute('aria-controls') ?? '');
+    expect(area).toContainElement(combobox());
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(area).toHaveClass('max-md:hidden');
+
+    await user.click(toggle());
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
+    expect(area).not.toHaveClass('max-md:hidden');
+    expect(combobox()).toHaveFocus();
+
+    await user.click(toggle());
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(area).toHaveClass('max-md:hidden');
+  });
+
+  it('Escape va por pasos: primero borra lo escrito (es del buscador) y después pliega y vuelve a la lupa', async () => {
+    const user = await renderNavbar(() => jsonResponse(makeUser()));
+    await user.click(toggle());
+    await user.keyboard('ab');
+
+    await user.keyboard('{Escape}');
+    expect(combobox()).toHaveValue('');
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
+    expect(combobox()).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle()).toHaveFocus();
+  });
+
+  it('al cambiar de página se pliega solo', async () => {
+    const user = await renderNavbar(() => jsonResponse(makeUser()));
+    await user.click(toggle());
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(within(screen.getByRole('navigation', { name: 'Principal' })).getByRole('link', { name: 'Series' }));
+
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+describe('Navbar en móvil: se aparta al bajar y vuelve al subir (D-1)', () => {
+  /** Clase que la aparta (solo por debajo de `md` y nunca con el foco dentro: lo decide CSS). */
+  const AWAY = 'max-md:not-focus-within:-translate-y-full';
+
+  function scrollTo(y: number) {
+    act(() => {
+      Object.defineProperty(window, 'scrollY', { configurable: true, value: y });
+      window.dispatchEvent(new Event('scroll'));
+    });
+  }
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+    Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 4000 });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 });
+  });
+
+  it('bajando se aparta; subiendo vuelve; y se desliza solo si no se pide reducir el movimiento', async () => {
+    await renderNavbar(() => jsonResponse(makeUser()));
+    const header = screen.getByRole('banner');
+    expect(header).not.toHaveClass(AWAY);
+    expect(header).toHaveClass('max-md:motion-safe:transition-transform');
+
+    scrollTo(500);
+    expect(header).toHaveClass(AWAY);
+
+    scrollTo(450);
+    expect(header).not.toHaveClass(AWAY);
+  });
+
+  it('con el menú de usuario abierto no se aparta (en un móvil, tocar el botón no siempre le da el foco)', async () => {
+    const user = await renderNavbar(() => jsonResponse(makeUser()));
+    await openMenu(user);
+
+    scrollTo(500);
+
+    expect(screen.getByRole('banner')).not.toHaveClass(AWAY);
   });
 });

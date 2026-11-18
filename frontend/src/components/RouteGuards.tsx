@@ -13,9 +13,10 @@ import { MAIN_CONTENT_ID } from './SkipLink';
  * («Comprobando tu sesión...», «No se pudo comprobar tu sesión»): sin barra ni
  * `AppShell`, no habría ningún landmark principal y el enlace «Saltar al
  * contenido» (que busca `#contenido`) no tendría destino. Mismo `id` y
- * `tabIndex` que el `<main>` de `AppShell` y `AuthLayout`.
+ * `tabIndex` que el `<main>` de `AppShell` y `AuthLayout`. También lo usa la
+ * espera de las pantallas públicas que se cargan bajo demanda (`App.tsx`).
  */
-function GuardScreen({ children }: { children: ReactNode }) {
+export function GuardScreen({ children }: { children: ReactNode }) {
   return (
     <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-hidden">
       {children}

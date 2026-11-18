@@ -327,7 +327,8 @@ test.describe('Editar perfil', () => {
     await expect(page).toHaveURL(/\/login$/);
     await loginWithForm(page, user.email, user.password);
     await expect(formAlert(page)).toContainText('Correo o contraseña incorrectos.');
-    await page.getByLabel('Contraseña').fill(newPassword);
+    // `exact`: el aviso (que ahora recibe el foco) se llama por su texto, «Correo o contraseña incorrectos…».
+    await page.getByLabel('Contraseña', { exact: true }).fill(newPassword);
     await page.getByRole('button', { name: 'Iniciar sesión' }).click();
     await expect(page).toHaveURL(/\/$/);
   });
@@ -379,7 +380,7 @@ test.describe('Editar perfil', () => {
       await waitForLoginPage(otherPage);
       await loginWithForm(otherPage, user.email, user.password);
       await expect(otherPage).toHaveURL(/\/$/);
-      await expect(otherPage.getByRole('heading', { level: 1, name: 'Catálogo de películas' })).toBeVisible();
+      await expect(otherPage.getByRole('heading', { level: 1, name: 'Películas y series' })).toBeVisible();
 
       await signIn(user);
       await page.goto('/perfil');

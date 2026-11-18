@@ -98,9 +98,13 @@ function RemainingAttemptsNotice({ remaining }: { remaining: number }) {
  * nada; el aviso del reenvío tampoco (el 202 es igual siempre).
  *
  * **Es una pista, no un error:** tono neutro (superficie y borde suaves, sin el
- * rojo del aviso ni el ámbar del acento) y DEBAJO del aviso, para que el orden
- * de lectura sea error (con los intentos que quedan) → pista → botón y no tape
- * ni compita con `remainingAttempts`.
+ * rojo del aviso ni el ámbar del acento) y DEBAJO DEL FORMULARIO, no entre el
+ * aviso y los campos (revisión de 2026-11, D-2): ocupa unos 300 px y, encima del
+ * formulario, dejaba el botón «Iniciar sesión» fuera de la pantalla a 375 px, así
+ * que quien solo se había equivocado de contraseña tenía que desplazarse para
+ * reintentar. Ahora el orden es aviso (con los intentos que quedan) → campos →
+ * botón → pista: reintentar no exige desplazarse y la pista sigue a la vista
+ * justo debajo para quien la necesita.
  *
  * **Accesibilidad.** El texto va en una región `role="status"` (cortés): el
  * lector lee primero la alerta del error y después la pista, sin interrumpirla.
@@ -133,7 +137,7 @@ function UnconfirmedEmailHint({ email }: { email: string | null }) {
   const { resend, sending, remaining, notice } = useResendVerification();
   const waiting = remaining > 0;
   return (
-    <div className={email ? 'mb-5 rounded-lg border border-line bg-surface px-4 py-3 text-sm text-gray-300' : undefined}>
+    <div className={email ? 'mt-5 rounded-lg border border-line bg-surface px-4 py-3 text-sm text-gray-300' : undefined}>
       <div role="status">
         {email && (
           <>
@@ -284,7 +288,6 @@ export function LoginPage() {
       <FormAlert message={error}>
         {remainingAttempts !== undefined && <RemainingAttemptsNotice remaining={remainingAttempts} />}
       </FormAlert>
-      <UnconfirmedEmailHint email={error ? hintEmail : null} />
 
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
         <FormField
@@ -318,6 +321,8 @@ export function LoginPage() {
           ¿Has olvidado tu contraseña?
         </Link>
       </p>
+      {/* Debajo del formulario (D-2): con la pista encima, el botón quedaba fuera de la pantalla en móvil. */}
+      <UnconfirmedEmailHint email={error ? hintEmail : null} />
     </AuthLayout>
   );
 }

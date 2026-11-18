@@ -9,8 +9,9 @@
  *     manda al `<body>`) y quien usa el teclado vuelve a empezar la página. Ahora el botón en curso usa
  *     `aria-disabled` + `aria-busy` (`Button`, prop `pending`). Ojo: `toBeDisabled()` de Playwright también da por
  *     desactivado un `aria-disabled`, así que NO sirve para distinguirlo: se comprueba que el atributo `disabled` no está.
- *  2. **Login con contraseña errónea pulsando el botón** (clic e Intro): el foco sigue en «Iniciar sesión» al llegar el
- *     401 y el aviso aparece una sola vez.
+ *  2. **Login con contraseña errónea pulsando el botón** (clic e Intro): mientras se espera, el botón conserva el foco;
+ *     al llegar el 401, el foco va al aviso (decisión del autor, revisión de 2026-11), que aparece una sola vez y no es
+ *     una región viva (se leería dos veces), y el siguiente Tab lleva al correo para reintentar.
  *  3. **Tráiler con un reproductor que se enfoca solo al cargar** (lo hace el de YouTube con un vídeo que no existe o no
  *     se puede incrustar): el foco vuelve a «Cerrar el tráiler» y Escape cierra. El E2E `trailer-keyboard.spec.ts` no lo
  *     veía porque su reproductor simulado no robaba el foco.
@@ -121,7 +122,7 @@ test.describe('«Mi lista» con el teclado: el foco no se pierde mientras se gua
   });
 });
 
-test.describe('Login con contraseña errónea enviado desde el botón: el foco sigue en «Iniciar sesión»', () => {
+test.describe('Login con contraseña errónea enviado desde el botón: el foco no se pierde y acaba en el aviso', () => {
   for (const how of ['clic', 'Intro'] as const) {
     test(`con ${how} sobre el botón`, async ({ page, user }) => {
       await page.goto('/login');
@@ -150,7 +151,14 @@ test.describe('Login con contraseña errónea enviado desde el botón: el foco s
       await expect(formAlert(page)).toHaveCount(1);
       await expect(button).toHaveText('Iniciar sesión');
       await expect(button).not.toHaveAttribute('aria-disabled');
-      await expect(button).toBeFocused();
+      // El foco va al aviso: un grupo nombrado por su texto, sin región viva (con foco Y `role="alert"` se oiría dos veces).
+      const alert = page.getByRole('group', { name: /Correo o contraseña incorrectos\./ });
+      await expect(alert).toBeFocused();
+      await expect(alert).not.toHaveAttribute('role', 'alert');
+      await expect(alert.locator('[role="alert"], [role="status"], [aria-live]')).toHaveCount(0);
+      // Y desde ahí, Tab lleva al correo: reintentar no exige buscar el formulario.
+      await page.keyboard.press('Tab');
+      await expect(page.getByLabel('Correo electrónico')).toBeFocused();
     });
   }
 });
@@ -404,7 +412,12 @@ test.describe('Móvil (375 px): campos a 16 px, autocompletado y zonas táctiles
       await expect(filter).toBeVisible();
       expect.soft(await fontSize(filter), `filtro «${name}»`).toBeGreaterThanOrEqual(16);
     }
+    // A 375 px el buscador va plegado tras la lupa (D-1): la lupa mide 44×44 y el campo aparece al pulsarla.
+    const searchToggle = page.getByRole('button', { name: 'Buscar películas y series' });
+    await expectTouchTarget(searchToggle, 'lupa del buscador', ['width', 'height']);
+    await searchToggle.click();
     const search = page.getByRole('combobox', { name: 'Buscar películas y series por título' });
+    await expect(search).toBeFocused();
     expect.soft(await fontSize(search), 'buscador').toBeGreaterThanOrEqual(16);
     // La zona que se puede pulsar es el propio campo: con 40 px, un toque en el borde de la cápsula no lo enfocaba.
     await expectTouchTarget(search, 'campo del buscador', ['height']);
@@ -423,6 +436,91 @@ test.describe('Móvil (375 px): campos a 16 px, autocompletado y zonas táctiles
         ['height'],
       );
     }
+  });
+
+  test('la barra (dos filas, unos 105 px) se aparta al bajar, vuelve al subir y nunca se va con el foco dentro', async ({
+    page,
+    user,
+    signIn,
+  }) => {
+    await signIn(user);
+    await page.goto('/');
+    await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
+    const banner = page.getByRole('banner');
+    const top = async () => (await banner.boundingBox())!.y;
+    // Plegado el buscador, la barra son dos filas de 44 px: logo, lupa y menú; y las pestañas (antes 165 px, tres filas).
+    expect((await banner.boundingBox())!.height).toBeLessThanOrEqual(110);
+
+    await page.mouse.wheel(0, 600);
+    await expect.poll(top, { message: 'al bajar, la barra se aparta' }).toBeLessThan(-50);
+    await page.mouse.wheel(0, -60);
+    await expect.poll(top, { message: 'al subir, vuelve' }).toBeGreaterThanOrEqual(-0.5);
+
+    // Con el foco en la barra (aquí, en el buscador desplegado con la lupa) no se aparta al bajar. Llegar a ella
+    // con el teclado (Shift+Tab desde el contenido) lo prueba el test siguiente.
+    await page.getByRole('button', { name: 'Buscar películas y series' }).click();
+    await expect(page.getByRole('combobox', { name: 'Buscar películas y series por título' })).toBeFocused();
+    await page.mouse.wheel(0, 600);
+    await page.waitForTimeout(400); // más que los 200 ms del deslizamiento: si fuera a apartarse, ya lo habría hecho
+    expect(await top()).toBeGreaterThanOrEqual(-0.5);
+  });
+
+  /**
+   * La barra apartada y el TECLADO (revisión QA del lote D-1): quien navega con el teclado nunca debe quedarse
+   * con el foco en un control fuera de la pantalla. Al llegar el foco a la barra apartada (Shift+Tab desde el
+   * contenido), vuelve en el acto, sin deslizarse y sin que el navegador desplace la página para enseñar el
+   * control; y la lupa y los tres Escape del buscador (cerrar la lista, vaciar, plegar) funcionan sin ratón.
+   */
+  test('con el teclado: Shift+Tab desde el contenido trae la barra apartada sin mover la página; lupa y Escape por pasos', async ({
+    page,
+    user,
+    signIn,
+  }) => {
+    await signIn(user);
+    await page.goto('/');
+    await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
+    const banner = page.getByRole('banner');
+    const top = async () => (await banner.boundingBox())!.y;
+    const scrollY = () => page.evaluate(() => window.scrollY);
+
+    await page.mouse.wheel(0, 600);
+    await expect.poll(top, { message: 'precondición: al bajar, la barra se aparta' }).toBeLessThan(-50);
+    const scrolled = await scrollY();
+
+    // Punto de partida: el `<main>`, donde deja el foco `RouteChangeFocus` tras cambiar de página.
+    await page.locator('#contenido').evaluate((main) => (main as HTMLElement).focus({ preventScroll: true }));
+    await page.keyboard.press('Shift+Tab');
+    const menuButton = page.getByRole('button', { name: 'Menú de usuario' });
+    await expect(menuButton).toBeFocused();
+    // Sin `poll`: vuelve en el acto (sin transición) y la página no se mueve.
+    expect(await top(), 'con el foco dentro, la barra está a la vista').toBeGreaterThanOrEqual(-0.5);
+    expect(await scrollY(), 'enfocar la barra no desplaza la página').toBe(scrolled);
+
+    const searchToggle = page.getByRole('button', { name: 'Buscar películas y series' });
+    await page.keyboard.press('Shift+Tab');
+    await expect(searchToggle).toBeFocused();
+    await page.keyboard.press('Enter');
+    const search = page.getByRole('combobox', { name: 'Buscar películas y series por título' });
+    await expect(searchToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(search).toBeFocused();
+
+    await page.keyboard.type('zzqqxx');
+    const noResults = page.getByText('Sin resultados para «zzqqxx».');
+    await expect(noResults).toBeVisible();
+    expect(await top()).toBeGreaterThanOrEqual(-0.5);
+
+    await page.keyboard.press('Escape'); // 1.º: cierra el mensaje y conserva lo escrito
+    await expect(noResults).toBeHidden();
+    await expect(search).toHaveValue('zzqqxx');
+    await expect(search).toBeFocused();
+    await page.keyboard.press('Escape'); // 2.º: vacía el campo
+    await expect(search).toHaveValue('');
+    await expect(search).toBeFocused();
+    await page.keyboard.press('Escape'); // 3.º: pliega y devuelve el foco a la lupa
+    await expect(searchToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(search).toBeHidden();
+    await expect(searchToggle).toBeFocused();
+    expect(await top()).toBeGreaterThanOrEqual(-0.5);
   });
 
   test('administración: el enlace «Administrar» (solo el escudo en móvil) mide 44×44', async ({ page, request, signIn }) => {

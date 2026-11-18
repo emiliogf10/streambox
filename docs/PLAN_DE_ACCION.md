@@ -38,8 +38,8 @@
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
 | Backend (JUnit) | **4061** con Docker (2026-11-13) | Sin omitidos. Tras la cookie de dispositivo (2026-11-16): **3987** sin Docker (3648 con H2 y 339 de PostgreSQL omitidos); **los de PostgreSQL de ese cambio aún no se han ejecutado con Docker**. Antes del lote posterior a la auditoría run-3 eran 3975 en el CI |
-| Frontend (Vitest) | **1760** | |
-| E2E (Playwright) | **247** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
+| Frontend (Vitest) | **1794** | |
+| E2E (Playwright) | **252** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -482,6 +482,14 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-19 · Lote de frontend: barra móvil, foco al aviso, carga bajo demanda y textos
+
+- **Qué** (`frontend`, con `modern-web-guidance`, `impeccable`, `design-taste-frontend` y `emil-design-eng`; aprobado por el autor): **D-1** barra en móvil propuesta por `frontend`: buscador tras una lupa por debajo de 768 px y barra que se aparta al bajar y vuelve al subir (nunca con el foco dentro): 105 px arriba a 375 (antes 165) y 0 al leer; **D-2** la pista del login va debajo del formulario (el botón ya no queda fuera de la pantalla tras un error); **foco al aviso** tras un error del servidor (decisión del autor; `FormAlert` enfocable sin región viva; con errores de campo, al primero); **M3** `/admin` y las pantallas de cuenta con `React.lazy` (JS inicial de 160,7 a 146 kB gzip; adiós al aviso de >500 kB); **D-3** «Revisa tu correo» en dos frases + `<details>`; **E-6/E-7/E-12** título del inicio, subtítulo del registro y página 404.
+- **Revisión de `qa`:** encontró una **regresión MEDIA** (si falla la descarga de una pantalla diferida, la app se quedaba en blanco), «Administrar» activo marcado solo por el color (WCAG 1.4.1) y un texto descolgado; arreglados por `frontend` (`LazyRouteBoundary` + `importChunk`, raya bajo el escudo, texto), que además corrigió el foco perdido en la primera navegación a una pantalla diferida (`LazyScreenFocus`). `qa` arregló el test intermitente de `WelcomePage` (era del test: esperaba el foco antes de que corriera el efecto; 30/30) y añadió E2E de la barra con teclado y de que un USER no descarga el panel.
+- **Tests:** Vitest de 1760 a **1794**; E2E de 247 a **252** + 24 omitidos. Verificado por el orquestador: build 0, lint 0, Vitest 1794/1794.
+- **Para la revisión humana:** la barra en un móvil real (iOS y Android: los 200 ms, la lupa, el rebote de iOS); el foco en el aviso con un lector real (NVDA/VoiceOver); la raya de «Administrar» en alto contraste de Windows; el caso real de despliegue con una pestaña abierta (`docker compose`). Capturas de la barra antes/después en `Pruebas/streambox-capturas/lote-movil-2026-11/`.
+- **Pendiente:** el resto de propuestas de diseño de la revisión (D-4 y las bajas/informativas de `visual-ux.md`), NV-3 y fijar la imagen `maven:…-temurin-26`.
 
 ### 2026-11-18 · Revisión del frontend con skills y lote de errores
 

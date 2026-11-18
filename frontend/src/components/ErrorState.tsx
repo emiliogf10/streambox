@@ -12,6 +12,12 @@ interface ErrorStateProps {
   /** Si se indica, se muestra el botón "Reintentar" que lo invoca. */
   onRetry?: () => void;
   /**
+   * Texto del botón (por defecto «Reintentar»). Para cuando lo que arregla el
+   * fallo no es repetir la petición sino otra acción, como «Recargar la página»
+   * (ver `LazyRouteBoundary`): el botón debe decir lo que hace.
+   */
+  retryLabel?: string;
+  /**
    * `true` cuando el error afecta a UNA zona de la página (una tarjeta, una
    * sección) y no a la página entera: no reserva media pantalla de alto.
    */
@@ -50,6 +56,7 @@ export function ErrorState({
   title = 'No se pudo cargar el contenido',
   message,
   onRetry,
+  retryLabel = 'Reintentar',
   compact = false,
   headingLevel = 2,
   retryFocusRef,
@@ -67,7 +74,7 @@ export function ErrorState({
         <p className="text-sm leading-relaxed text-muted">{message}</p>
         {onRetry && (
           <Button ref={retryRef} variant="outline" onClick={handleRetry} className="mt-2">
-            Reintentar
+            {retryLabel}
           </Button>
         )}
       </div>

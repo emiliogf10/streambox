@@ -18,6 +18,7 @@ import { apiCalls, errorResponse, jsonResponse, makeUser, noContentResponse, ren
 import { AppRoutes } from '../App';
 import { LoginPage } from './LoginPage';
 import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
+import { expectFocusedFormAlert } from '../test/formAlert';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -62,7 +63,7 @@ describe('LoginPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
 
-    expect(screen.getByText('Introduce tu correo electrónico y tu contraseña.')).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(screen.getByText('Introduce tu correo electrónico y tu contraseña.'));
     expect(apiCalls(fetchMock)).toEqual([]);
   });
 
@@ -132,13 +133,15 @@ describe('LoginPage', () => {
 
     await fillAndSubmit(user);
 
-    expect(await screen.findByText('Correo o contraseña incorrectos.')).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText('Correo o contraseña incorrectos.'));
     expect(screen.queryByText('Texto interno del servidor')).not.toBeInTheDocument();
     expect(localStorage.getItem('token')).toBeNull();
-    // Sigue pudiendo reintentar, y el foco sigue en el botón que se pulsó (no se pierde al <body>).
+    // El foco va al aviso (decisión del autor): se oye una vez y el siguiente Tab lleva al correo para reintentar.
     const submit = screen.getByRole('button', { name: 'Iniciar sesión' });
     expectButtonAvailable(submit);
-    expect(submit).toHaveFocus();
+    expect(submit).not.toHaveFocus();
+    await user.tab();
+    expect(screen.getByLabelText('Correo electrónico')).toHaveFocus();
   });
 
   describe('intentos restantes (401 con remainingAttempts)', () => {
@@ -152,8 +155,8 @@ describe('LoginPage', () => {
       await fillAndSubmit(user);
 
       const notice = await screen.findByText('Te quedan 3 intentos antes de que la cuenta se bloquee 15 minutos.');
-      // Un solo aviso (role="alert") con el error y los intentos: se anuncian juntos.
-      expect(notice.closest('[role="alert"]')).toHaveTextContent('Correo o contraseña incorrectos.');
+      // Un solo aviso (el que recibe el foco) con el error y los intentos: se leen juntos, una vez.
+      expect(expectFocusedFormAlert(notice)).toHaveTextContent('Correo o contraseña incorrectos.');
       expect(notice.querySelector('svg')).toBeNull();
       expectButtonAvailable(screen.getByRole('button', { name: 'Iniciar sesión' }));
     });
@@ -168,7 +171,7 @@ describe('LoginPage', () => {
       await fillAndSubmit(user);
 
       const notice = await screen.findByText('Te queda 1 intento antes de que la cuenta se bloquee 15 minutos.');
-      expect(notice.closest('[role="alert"]')).not.toBeNull();
+      expectFocusedFormAlert(notice);
       // No depende solo del color: lleva un icono (decorativo, oculto a los lectores) y va en negrita.
       expect(notice.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
       expect(notice).toHaveClass('font-semibold');
@@ -226,7 +229,7 @@ describe('LoginPage', () => {
     /** Llamadas al reenvío del correo de confirmación. */
     const resendCalls = () => apiCalls(fetchMock).filter(([url]) => url === RESEND_URL);
 
-    it('en un 401 sale DEBAJO del error (que conserva los intentos), en tono neutro y como región cortés', async () => {
+    it('en un 401 sale DEBAJO del formulario (el error conserva los intentos), en tono neutro y como región cortés', async () => {
       routeFetch(fetchMock, {
         'POST /api/auth/login': () =>
           errorResponse(401, 'INVALID_CREDENTIALS', 'Texto interno del servidor', { remainingAttempts: 3 }),
@@ -236,7 +239,7 @@ describe('LoginPage', () => {
 
       await fillAndSubmit(user);
 
-      const alert = (await screen.findByText('Correo o contraseña incorrectos.')).closest('[role="alert"]');
+      const alert = expectFocusedFormAlert(await screen.findByText('Correo o contraseña incorrectos.'));
       expect(alert).toHaveTextContent('Te quedan 3 intentos antes de que la cuenta se bloquee 15 minutos.');
       const title = screen.getByText(HINT_TITLE);
       const hint = title.closest('[role="status"]');
@@ -246,6 +249,11 @@ describe('LoginPage', () => {
       expect(alert?.contains(title)).toBe(false);
       expect(alert!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
       expect(hint?.parentElement?.className).not.toMatch(/red|accent|danger/);
+      // D-2: debajo del formulario, no entre el aviso y los campos. Encima (~300 px) dejaba el botón
+      // «Iniciar sesión» fuera de la pantalla a 375 px: reintentar exigía desplazarse.
+      const submit = screen.getByRole('button', { name: 'Iniciar sesión' });
+      expect(submit.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+      expect(submit.closest('form')?.contains(title)).toBe(false);
       // El botón va después del texto y FUERA de la región viva (no se leería como parte del mensaje).
       const button = screen.getByRole('button', { name: RESEND_BUTTON });
       expect(hint?.contains(button)).toBe(false);
@@ -374,7 +382,7 @@ describe('LoginPage', () => {
 
       await fillAndSubmit(user);
 
-      expect(await screen.findByText(message)).toHaveAttribute('role', 'alert');
+      expectFocusedFormAlert(await screen.findByText(message));
       expect(screen.queryByText(HINT_TITLE)).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: RESEND_BUTTON })).not.toBeInTheDocument();
     });
@@ -408,7 +416,7 @@ describe('LoginPage', () => {
 
         await fillAndSubmit(user);
 
-        expect(await screen.findByText('No tienes permisos para realizar esta acción.')).toHaveAttribute('role', 'alert');
+        expectFocusedFormAlert(await screen.findByText('No tienes permisos para realizar esta acción.'));
         expect(screen.queryByText('Tienes que confirmar tu correo antes de entrar.')).not.toBeInTheDocument();
         expect(screen.queryByText(/confirmar tu correo|confirmado tu correo/)).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /Reenviar/ })).not.toBeInTheDocument();
@@ -426,7 +434,7 @@ describe('LoginPage', () => {
 
     await fillAndSubmit(user);
 
-    expect(await screen.findByText(/No se pudo conectar con el servidor/)).toHaveAttribute('role', 'alert');
+    expectFocusedFormAlert(await screen.findByText(/No se pudo conectar con el servidor/));
   });
 
   describe('429 (demasiados intentos)', () => {
@@ -446,7 +454,7 @@ describe('LoginPage', () => {
 
       const blocked = await screen.findByRole('button', { name: 'Reintentar en 30 s' });
       expectButtonUnavailable(blocked);
-      expect(screen.getByText('Demasiados intentos. Inténtalo de nuevo en 30 s.')).toHaveAttribute('role', 'alert');
+      expectFocusedFormAlert(screen.getByText('Demasiados intentos. Inténtalo de nuevo en 30 s.'));
 
       act(() => {
         vi.advanceTimersByTime(10_000);
@@ -485,7 +493,7 @@ describe('LoginPage', () => {
 
       const message =
         'Tu cuenta está bloqueada temporalmente por demasiados intentos fallidos. Podrás volver a intentarlo en 15 min.';
-      expect(await screen.findByText(message)).toHaveAttribute('role', 'alert');
+      expectFocusedFormAlert(await screen.findByText(message));
       expect(screen.queryByText(/Demasiados intentos\./)).not.toBeInTheDocument();
       expectButtonUnavailable(screen.getByRole('button', { name: 'Reintentar en 15 min' }));
       // Una cuenta pendiente que reintenta con la contraseña correcta acaba aquí: también lleva la pista,

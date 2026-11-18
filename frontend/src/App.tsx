@@ -1,34 +1,105 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
+import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from './components/AppShell';
+import { LazyRouteBoundary } from './components/LazyRouteBoundary';
+import { FallbackFocusHandoff, RestoreContentFocus } from './components/LazyScreenFocus';
+import { LoadingState } from './components/LoadingState';
 import { RouteChangeFocus } from './components/RouteChangeFocus';
-import { RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './components/RouteGuards';
+import { GuardScreen, RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './components/RouteGuards';
 import { SkipLink } from './components/SkipLink';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { WELCOME_PATH } from './lib/favoriteGenres';
+import { importChunk } from './lib/lazyChunks';
 import { createQueryClient } from './lib/queryClient';
-import { AdminGenresPage } from './pages/admin/AdminGenresPage';
-import { AdminLayout } from './pages/admin/AdminLayout';
-import { AdminMoviesPage } from './pages/admin/AdminMoviesPage';
 import { ADMIN_MOVIES_PATH } from './pages/admin/adminPaths';
-import { AdminSeriesPage } from './pages/admin/AdminSeriesPage';
-import { MovieFormPage } from './pages/admin/MovieFormPage';
-import { SeriesFormPage } from './pages/admin/SeriesFormPage';
-import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { MovieDetailPage } from './pages/MovieDetailPage';
 import { MoviesPage } from './pages/MoviesPage';
 import { MyListPage } from './pages/MyListPage';
+import { NotFoundPage } from './pages/NotFoundPage';
 import { ProfilePage } from './pages/ProfilePage';
-import { RegisterPage } from './pages/RegisterPage';
-import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { SeriesDetailPage } from './pages/SeriesDetailPage';
 import { SeriesPage } from './pages/SeriesPage';
-import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { WelcomePage } from './pages/WelcomePage';
+
+/*
+ * Pantallas que se cargan BAJO DEMANDA (`React.lazy` + `import()`; revisión de
+ * 2026-11, M3). Antes todo iba en un único paquete de 542 kB (161 kB con gzip),
+ * también el panel de administración, que un USER nunca puede abrir.
+ *
+ * - **Panel** (`/admin/*`): un solo trozo con todas sus pantallas (ver
+ *   `pages/admin/adminPages.ts`); `loadAdmin` comparte la misma descarga.
+ * - **Pantallas de cuenta sin sesión** (registro, recuperar y restablecer la
+ *   contraseña, confirmar el correo): se visitan pocas veces y casi nunca con la
+ *   sesión abierta, así que cada una va en su trozo.
+ * - Se quedan en el paquete principal el login (la primera pantalla de quien no
+ *   tiene sesión) y todo lo de la zona con sesión que se usa a diario.
+ *
+ * `lazy` pide un `default`: las páginas exportan con nombre (como el resto del
+ * proyecto), así que cada carga lo adapta con `.then`.
+ *
+ * Cada `import()` pasa por `importChunk`, que marca un fallo de descarga como
+ * `ChunkLoadError`; cada `Suspense` diferido va dentro de un
+ * `LazyRouteBoundary`, que lo convierte en «No se pudo cargar esta pantalla» con
+ * «Recargar la página» en vez de dejar la aplicación en blanco (ver los dos).
+ */
+const loadAdmin = () => importChunk(() => import('./pages/admin/adminPages'));
+const AdminLayout = lazy(() => loadAdmin().then((m) => ({ default: m.AdminLayout })));
+const AdminMoviesPage = lazy(() => loadAdmin().then((m) => ({ default: m.AdminMoviesPage })));
+const MovieFormPage = lazy(() => loadAdmin().then((m) => ({ default: m.MovieFormPage })));
+const AdminSeriesPage = lazy(() => loadAdmin().then((m) => ({ default: m.AdminSeriesPage })));
+const SeriesFormPage = lazy(() => loadAdmin().then((m) => ({ default: m.SeriesFormPage })));
+const AdminGenresPage = lazy(() => loadAdmin().then((m) => ({ default: m.AdminGenresPage })));
+const RegisterPage = lazy(() =>
+  importChunk(() => import('./pages/RegisterPage')).then((m) => ({ default: m.RegisterPage })),
+);
+const ForgotPasswordPage = lazy(() =>
+  importChunk(() => import('./pages/ForgotPasswordPage')).then((m) => ({ default: m.ForgotPasswordPage })),
+);
+const ResetPasswordPage = lazy(() =>
+  importChunk(() => import('./pages/ResetPasswordPage')).then((m) => ({ default: m.ResetPasswordPage })),
+);
+const VerifyEmailPage = lazy(() =>
+  importChunk(() => import('./pages/VerifyEmailPage')).then((m) => ({ default: m.VerifyEmailPage })),
+);
+
+/**
+ * Espera de una pantalla pública que se carga bajo demanda: el estado
+ * «Cargando...» de siempre dentro de un `<main>` propio (sin `AppShell` no hay
+ * otro), como las pantallas de las guardas. Al navegar desde otra página casi
+ * nunca se ve: React Router cambia de ruta dentro de una transición y deja la
+ * página anterior a la vista hasta que la nueva está lista.
+ *
+ * Si la pantalla no llega (falla la descarga de su trozo), `LazyRouteBoundary`
+ * pinta el aviso en su lugar, también dentro de un `<main>` propio.
+ *
+ * El foco: al llegar navegando, `RouteChangeFocus` lo pone en el `<main>` de la
+ * espera, que desaparece al llegar la pantalla (trae el suyo).
+ * `FallbackFocusHandoff` y `RestoreContentFocus` lo pasan al `<main>` nuevo
+ * para que no caiga en `<body>` (ver `LazyScreenFocus`).
+ */
+function PublicPage({ children }: { children: ReactNode }) {
+  return (
+    <LazyRouteBoundary standalone>
+      <Suspense
+        fallback={
+          <FallbackFocusHandoff>
+            <GuardScreen>
+              <LoadingState />
+            </GuardScreen>
+          </FallbackFocusHandoff>
+        }
+      >
+        {children}
+        <RestoreContentFocus />
+      </Suspense>
+    </LazyRouteBoundary>
+  );
+}
 
 /**
  * Mapa de rutas de la aplicación.
@@ -56,6 +127,9 @@ import { WelcomePage } from './pages/WelcomePage';
  *   de películas, lo mismo para series (`series`, `series/nueva`,
  *   `series/:id/editar`) y los géneros (`generos`). Una ruta desconocida del
  *   panel vuelve al listado de películas.
+ * - Cualquier otra ruta: `NotFoundPage` («Página no encontrada» con «Ir al
+ *   inicio»), dentro de `AppShell` y tras `RequireAuth` (sin sesión, al login).
+ *   Antes redirigía a `/` sin explicar nada.
  *
  * Está separado de {@link App} (que añade el enrutador del navegador y los
  * proveedores) para que los tests puedan montar estas MISMAS rutas con un
@@ -76,13 +150,36 @@ export function AppRoutes() {
         path="/registro"
         element={
           <RedirectIfAuthenticated>
-            <RegisterPage />
+            <PublicPage>
+              <RegisterPage />
+            </PublicPage>
           </RedirectIfAuthenticated>
         }
       />
-      <Route path="/verificar-email" element={<VerifyEmailPage />} />
-      <Route path="/recuperar-contrasena" element={<ForgotPasswordPage />} />
-      <Route path="/restablecer-contrasena" element={<ResetPasswordPage />} />
+      <Route
+        path="/verificar-email"
+        element={
+          <PublicPage>
+            <VerifyEmailPage />
+          </PublicPage>
+        }
+      />
+      <Route
+        path="/recuperar-contrasena"
+        element={
+          <PublicPage>
+            <ForgotPasswordPage />
+          </PublicPage>
+        }
+      />
+      <Route
+        path="/restablecer-contrasena"
+        element={
+          <PublicPage>
+            <ResetPasswordPage />
+          </PublicPage>
+        }
+      />
       <Route
         path={WELCOME_PATH}
         element={
@@ -111,7 +208,13 @@ export function AppRoutes() {
           path="/admin"
           element={
             <RequireAdmin>
-              <AdminLayout />
+              {/* Tras confirmar el rol: el código del panel solo se descarga para un ADMIN. Si la descarga falla, el
+                  aviso ocupa el sitio del panel y la barra sigue a la vista (ver LazyRouteBoundary). */}
+              <LazyRouteBoundary>
+                <Suspense fallback={<LoadingState label="Cargando el panel..." />}>
+                  <AdminLayout />
+                </Suspense>
+              </LazyRouteBoundary>
             </RequireAdmin>
           }
         >
@@ -127,8 +230,9 @@ export function AppRoutes() {
           <Route path="generos" element={<AdminGenresPage />} />
           <Route path="*" element={<Navigate to={ADMIN_MOVIES_PATH} replace />} />
         </Route>
+        {/* Cualquier otra dirección: «Página no encontrada», con la barra (antes llevaba al inicio sin explicar nada). */}
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

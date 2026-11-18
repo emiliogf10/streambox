@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { ChevronDown } from 'lucide-react';
 import { AuthLayout } from '../components/AuthLayout';
 import { Button } from '../components/Button';
 import { FormAlert } from '../components/FormAlert';
@@ -13,6 +14,7 @@ import { VERIFICATION_LINK_TTL_HOURS } from '../lib/emailVerification';
 import type { AcceptedResponse, RegisterRequest } from '../lib/types';
 import { PASSWORD_MAX, PASSWORD_MIN, USERNAME_MAX, USERNAME_MIN, validateRegistration } from '../lib/validation';
 import type { RegisterErrors } from '../lib/validation';
+import { hasFieldErrors } from './admin/formErrors';
 
 /** Orden de los campos en el formulario (para llevar el foco al primero con error). */
 const FIELD_ORDER: (keyof RegisterRequest)[] = ['username', 'email', 'password'];
@@ -72,6 +74,18 @@ interface CheckYourEmailProps {
  * «el enlace que te enviamos al registrarte» a propósito: una cuenta heredada no
  * lo tuvo, así que el texto no le promete una sustitución que no ocurre.
  *
+ * **Lo que se ve y lo que se pliega** (revisión de 2026-11, D-3). A la vista,
+ * solo dos frases: qué llegará y cuánto dura el enlace, y qué hacer si no llega.
+ * El caso de quien ya tenía cuenta con ese correo (el recordatorio y la regla de
+ * la contraseña) va en un `<details>` cerrado, «¿Ya tenías una cuenta con este
+ * correo?»: antes eran cuatro párrafos y el tercero (64 palabras) explicaba a
+ * todo el que se registraba un caso raro, justo en el momento de «ya casi está».
+ * El texto plegado es el mismo de antes y el título es una PREGUNTA, así que la
+ * pantalla sigue sin afirmar que la cuenta exista ni que no (el registro
+ * responde igual en los dos casos). Un `<details>` nativo funciona con teclado y
+ * lector de pantalla sin JavaScript, y su contenido lo encuentra «Buscar en la
+ * página» aunque esté cerrado (Chrome lo abre solo).
+ *
  * Al aparecer, el foco va al título: el formulario (y el botón pulsado) ya no
  * existen, y así el lector de pantalla anuncia «Revisa tu correo».
  */
@@ -93,20 +107,33 @@ function CheckYourEmail({ email, onEditEmail }: CheckYourEmailProps) {
         </>
       }
     >
+      {/* Lo esencial a la vista (dos frases) y el caso raro, plegado: ver «Lo que se ve y lo que se pliega». */}
       <div className="flex flex-col gap-4 text-sm leading-relaxed text-gray-300">
         <p>
           Si la dirección <strong className="font-semibold break-all text-white">{email}</strong> es correcta, en unos
           minutos te llegará un correo con un enlace para confirmar tu cuenta. El enlace caduca en{' '}
           {VERIFICATION_LINK_TTL_HOURS} horas.
         </p>
-        <p>Si ya tenías una cuenta con ese correo, te lo recordaremos en ese mensaje: no hace falta crear otra.</p>
-        <p>
-          Si este correo ya tenía una cuenta, la contraseña que vale es la de esa cuenta, no la que acabas de escribir.
-          Solo hay una excepción: si ya te habías registrado, nunca confirmaste el correo y el enlace que te enviamos al
-          registrarte (y cualquier otro que pidieras) ya ha caducado, aquel registro se sustituye por este y vale la
-          contraseña nueva.
-        </p>
         <p>¿No lo encuentras? Mira en la carpeta de spam o de correo no deseado. Si no ha llegado, pide otro.</p>
+        <details className="group rounded-lg border border-line bg-surface">
+          {/* `list-none` + `::-webkit-details-marker` (Safari): sin el triángulo del navegador; lo sustituye el
+              chevrón, que gira al abrir (solo si no se ha pedido reducir el movimiento). */}
+          <summary className="focus-ring flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-4 py-2 font-medium text-white [&::-webkit-details-marker]:hidden">
+            ¿Ya tenías una cuenta con este correo?
+            <ChevronDown
+              aria-hidden="true"
+              className="size-4 shrink-0 text-muted motion-safe:transition-transform group-open:rotate-180"
+            />
+          </summary>
+          <div className="flex flex-col gap-3 border-t border-line px-4 pt-3 pb-4">
+            <p>Si es así, te lo recordaremos en el correo que te enviemos: no hace falta crear otra.</p>
+            <p>
+              La contraseña que vale es la de esa cuenta, no la que acabas de escribir. Solo hay una excepción: si ya te
+              habías registrado, nunca confirmaste el correo y el enlace que te enviamos al registrarte (y cualquier
+              otro que pidieras) ya ha caducado, aquel registro se sustituye por este y vale la contraseña nueva.
+            </p>
+          </div>
+        </details>
       </div>
 
       <div className="mt-6 flex flex-col gap-3">
@@ -254,7 +281,7 @@ export function RegisterPage() {
   return (
     <AuthLayout
       title="Crea tu cuenta"
-      subtitle="Regístrate para guardar tu lista de películas."
+      subtitle="Guarda películas y series en tu lista y recibe recomendaciones a tu gusto."
       footer={
         <>
           ¿Ya tienes cuenta?{' '}
@@ -264,7 +291,7 @@ export function RegisterPage() {
         </>
       }
     >
-      <FormAlert message={formError} />
+      <FormAlert message={formError} takeFocus={!hasFieldErrors(fieldErrors)} />
 
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
         <FormField
