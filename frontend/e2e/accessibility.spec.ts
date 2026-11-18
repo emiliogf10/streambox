@@ -238,11 +238,25 @@ test.describe('El foco no queda tapado por la barra superior (WCAG 2.2 · 2.4.11
         // Sin el arreglo el navegador no desplaza nada (para él ya es visible) y el foco queda oculto.
         const back = page.getByRole('link', { name: 'Volver al listado' });
         const backBox = await back.boundingBox();
-        await page.evaluate((dy) => window.scrollBy(0, dy), backBox!.y - 8);
+        const bannerTop = async () => (await page.getByRole('banner').boundingBox())!.y;
+        // El navegador no emite un evento `scroll` por cada `scrollBy`, sino UNO por fotograma con la posición
+        // final. Si este desplazamiento y el de -1 px de abajo caen en el mismo fotograma (pasaba con varios
+        // workers: el registro de eventos daba [0, 264] en vez de [0, 265, 264]), `useHideOnScroll` solo ve un
+        // movimiento neto hacia abajo y la barra se queda apartada. Por eso se espera a dos fotogramas: los
+        // eventos `scroll` pendientes se despachan antes que los `requestAnimationFrame` del mismo fotograma.
+        await page.evaluate(async (dy) => {
+          window.scrollBy(0, dy);
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }, backBox!.y - 8);
         // En móvil la barra se aparta al bajar (D-1) y solo puede tapar algo cuando vuelve, al subir: un gesto
-        // mínimo hacia arriba la trae de vuelta (en escritorio no cambia nada). Se espera a que acabe de deslizarse.
+        // mínimo hacia arriba la trae de vuelta (en escritorio no cambia nada). Precondición: que de verdad se
+        // apartó; si no, el -1 px no probaría nada.
+        if (viewport.width < 768) {
+          await expect.poll(bannerTop, { message: 'precondición: la barra se aparta al bajar' }).toBeLessThan(-50);
+        }
         await page.evaluate(() => window.scrollBy(0, -1));
-        await expect.poll(async () => (await page.getByRole('banner').boundingBox())!.y).toBeGreaterThanOrEqual(-0.5);
+        // Se espera a que acabe de deslizarse.
+        await expect.poll(bannerTop).toBeGreaterThanOrEqual(-0.5);
         const hiddenBox = await back.boundingBox();
         const navbarBox = await page.getByRole('banner').boundingBox();
         expect(hiddenBox!.y + hiddenBox!.height, 'precondición: el enlace está debajo de la barra').toBeLessThanOrEqual(

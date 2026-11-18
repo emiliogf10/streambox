@@ -54,8 +54,12 @@ const TAB_INTENT_MS = 500;
  *
  * **Por qué.** El documento de YouTube es de otro origen y puede enfocarse
  * solo: con un vídeo que no existe o no se puede incrustar lo hace siempre
- * (medido en Chromium: el foco entra en el marco unos 100 ms ANTES de su evento
- * `load`). Desde ese momento las teclas las recibe YouTube, Escape ya no llega
+ * (medido en Chromium 155: el foco entra en el marco unos 100 ms ANTES de su
+ * evento `load`). Desde Chromium 158, el `sandbox` del `<iframe>` ya impide que
+ * un marco de otro origen se enfoque sin activación de usuario
+ * (`focus-without-user-activation`), pero el guardia sigue haciendo falta para
+ * otros navegadores, versiones anteriores y un reproductor que sí tenga
+ * activación (p. ej. tras un clic dentro). Desde ese momento las teclas las recibe YouTube, Escape ya no llega
  * a StreamBox y el diálogo no se cierra, aunque el pie diga «Pulsa Esc para
  * cerrar». La página no puede ver ni impedir lo que pasa dentro del marco (es
  * una barrera de seguridad del navegador), pero sí darse cuenta de que el foco

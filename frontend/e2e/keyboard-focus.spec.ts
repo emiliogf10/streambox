@@ -165,18 +165,97 @@ test.describe('Login con contraseña errónea enviado desde el botón: el foco n
 
 test.describe('Tráiler con un reproductor que se queda el foco al cargar', () => {
   /**
-   * Reproductores simulados (servidos en el origen real de YouTube con `page.route`, así que son de OTRO origen, como el
-   * de verdad) que se enfocan solos: uno mientras se analiza el documento (antes de su `load`, como el de YouTube con un
-   * vídeo que no se puede ver) y otro un poco después de cargar. Al recibir el foco escriben «foco tomado»: así el test
-   * sabe que el robo ha ocurrido de verdad antes de comprobar que el foco ha vuelto.
+   * Script que el reproductor simulado carga a mitad de su documento. El test **retiene** su petición: mientras no la
+   * suelta, el documento del reproductor sigue a medio analizar (`readyState === 'loading'`) y su `load` no ha llegado.
+   * Así el test decide el momento exacto del robo («mientras carga» de verdad) en vez de competir con la red.
+   */
+  const HOLD_URL = 'https://www.youtube-nocookie.com/e2e-retener-carga.js';
+
+  /**
+   * Reproductor simulado (servido en el origen real de YouTube con `page.route`, así que es de OTRO origen, como el de
+   * verdad) que se enfoca solo con `robarFoco()`. Deja constancia en `#estado`:
+   * - «foco tomado» si su botón recibe el evento `focus` (el robo ha ocurrido de verdad);
+   * - «foco bloqueado por el navegador» si `focus()` no movió el foco. Sin esto, un robo bloqueado solo se notaba como
+   *   «no aparece "foco tomado"» tras agotar la espera, sin decir por qué (es lo que pasó en el CI, ver más abajo).
    */
   const STEAL_SCRIPT =
-    "const b=document.querySelector('button');" +
-    "b.addEventListener('focus',()=>{document.getElementById('estado').textContent='foco tomado';});";
+    "const b=document.querySelector('button');const estado=document.getElementById('estado');" +
+    "b.addEventListener('focus',()=>{estado.textContent='foco tomado';});" +
+    "function robarFoco(){b.focus();if(document.activeElement!==b)estado.textContent='foco bloqueado por el navegador';}";
+  const player = (steal: string) =>
+    `<!doctype html><title>Reproductor</title><button type="button">Reproducir</button><p id="estado"></p>` +
+    `<script>${STEAL_SCRIPT}</script><script src="${HOLD_URL}"></script><script>${steal}</script>`;
+  /**
+   * Uno se enfoca mientras se analiza el documento (antes de su `load`, como el de YouTube con un vídeo que no se puede
+   * ver: el foco entraba unos 100 ms antes del `load`) y otro un poco después de cargar.
+   */
   const PLAYERS = {
-    'mientras carga': `<!doctype html><title>Reproductor</title><button type="button">Reproducir</button><p id="estado"></p><script>${STEAL_SCRIPT}b.focus();</script>`,
-    'justo después de cargar': `<!doctype html><title>Reproductor</title><button type="button">Reproducir</button><p id="estado"></p><script>${STEAL_SCRIPT}addEventListener('load',()=>setTimeout(()=>b.focus(),300));</script>`,
+    'mientras carga': player('robarFoco();'),
+    'justo después de cargar': player("addEventListener('load',()=>setTimeout(robarFoco,300));"),
   } as const;
+
+  /**
+   * Abre el tráiler de Tenet con el teclado sirviendo `html` como reproductor y lo deja robar el foco. Termina cuando el
+   * robo ha ocurrido (o falla diciendo que el navegador lo bloqueó).
+   *
+   * **Por qué se da activación de usuario al marco.** Desde Chromium 158 (Playwright 1.65) un `<iframe>` con `sandbox`
+   * de otro origen —el de StreamBox lo lleva— **no puede enfocarse sin activación de usuario**: `focus()` no hace nada y
+   * la consola dice «Permissions policy violation: focus-without-user-activation is not allowed in this document».
+   * Comprobado con cada atributo por separado: lo provoca `sandbox`, no `allow`; y da igual el momento (al analizar, en
+   * el `load` o 1,5 s después) y que el diálogo se abra con el teclado (la activación de la página no pasa al marco).
+   * Por eso fallaba en el CI (que instala la 1.65 del `package-lock.json`) y no en un equipo con la 1.64 aún instalada.
+   * Y por eso el caso «justo después de cargar» seguía pasando: por casualidad, porque cada evaluación de Playwright en
+   * un marco (la espera de `getByText`) lleva el indicador de gesto de usuario y le daba esa activación antes de los
+   * 300 ms; el caso «mientras carga» se enfoca antes de que Playwright toque el marco.
+   *
+   * Aquí esa activación se da **a propósito y antes del robo**, con el documento todavía a medio analizar, y se comprueba
+   * que la tiene. Equivale a un navegador que no aplica ese bloqueo (otros navegadores, Chrome anterior) o a un
+   * reproductor que ya la tiene: el test sigue demostrando que, si el reproductor se queda el foco por su cuenta, el
+   * guardia de `TrailerDialog` lo devuelve. Nada de esto pulsa Tab ni toca la página de StreamBox, así que para el
+   * guardia sigue siendo un robo, no un cambio de foco del usuario.
+   */
+  async function openTrailerAndLetPlayerSteal(page: Page, html: string) {
+    let releasePlayer!: () => void;
+    const playerReleased = new Promise<void>((resolve) => {
+      releasePlayer = resolve;
+    });
+    await page.route(HOLD_URL, async (route) => {
+      await playerReleased;
+      await route.fulfill({ contentType: 'text/javascript', body: '' });
+    });
+    await page.route('https://www.youtube-nocookie.com/embed/**', (route) =>
+      route.fulfill({ contentType: 'text/html', body: html }),
+    );
+
+    const tenet = MOVIES.find((movie) => movie.title === 'Tenet')!;
+    await page.goto(`/peliculas?anio=${tenet.releaseYear}`);
+    await movieCard(page.getByRole('region', { name: 'Resultados' }), 'Tenet').click();
+    const open = page.getByRole('region', { name: 'Tenet' }).getByRole('button', { name: 'Ver tráiler de Tenet' });
+    await expect(open).toBeVisible();
+
+    await open.focus();
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Tráiler de Tenet' });
+    await expect(dialog).toBeVisible();
+    const close = dialog.getByRole('button', { name: 'Cerrar el tráiler' });
+    const frame = page.frameLocator('iframe[title="Tráiler de Tenet (YouTube)"]');
+    try {
+      await expect(close, 'antes del robo, el foco inicial del diálogo').toBeFocused();
+      await expect(frame.getByRole('button', { name: 'Reproducir' })).toBeAttached();
+      const before = await frame
+        .locator('body')
+        .evaluate(() => ({ activation: navigator.userActivation.isActive, readyState: document.readyState }));
+      expect(before, 'el reproductor sigue cargando y ya puede enfocarse (tiene activación de usuario)').toEqual({
+        activation: true,
+        readyState: 'loading',
+      });
+    } finally {
+      releasePlayer();
+    }
+    // El reproductor se ha quedado el foco (al menos un instante). Si el navegador lo bloquea, el mensaje lo dice.
+    await expect(frame.locator('#estado'), 'el reproductor simulado debe haber robado el foco').toHaveText('foco tomado');
+    return { open, dialog, close, frame };
+  }
 
   for (const [when, html] of Object.entries(PLAYERS)) {
     test(`se enfoca ${when}: el foco vuelve a «Cerrar el tráiler», Escape cierra y vuelve a «Ver tráiler»`, async ({
@@ -184,26 +263,9 @@ test.describe('Tráiler con un reproductor que se queda el foco al cargar', () =
       user,
       signIn,
     }) => {
-      await page.route('https://www.youtube-nocookie.com/**', (route) =>
-        route.fulfill({ contentType: 'text/html', body: html }),
-      );
       await signIn(user);
-      const tenet = MOVIES.find((movie) => movie.title === 'Tenet')!;
-      await page.goto(`/peliculas?anio=${tenet.releaseYear}`);
-      await movieCard(page.getByRole('region', { name: 'Resultados' }), 'Tenet').click();
-      const header = page.getByRole('region', { name: 'Tenet' });
-      const open = header.getByRole('button', { name: 'Ver tráiler de Tenet' });
-      await expect(open).toBeVisible();
-
-      await open.focus();
-      await page.keyboard.press('Enter');
-      const dialog = page.getByRole('dialog', { name: 'Tráiler de Tenet' });
-      await expect(dialog).toBeVisible();
-      const player = page.frameLocator('iframe[title="Tráiler de Tenet (YouTube)"]');
-      // El reproductor se ha quedado el foco (al menos un instante)...
-      await expect(player.getByText('foco tomado')).toBeVisible();
+      const { open, close } = await openTrailerAndLetPlayerSteal(page, html);
       // ...y StreamBox lo ha recuperado: el pie («Pulsa Esc para cerrar») vuelve a ser verdad.
-      const close = dialog.getByRole('button', { name: 'Cerrar el tráiler' });
       await expect(close).toBeFocused();
 
       await page.keyboard.press('Escape');
@@ -217,19 +279,8 @@ test.describe('Tráiler con un reproductor que se queda el foco al cargar', () =
     user,
     signIn,
   }) => {
-    await page.route('https://www.youtube-nocookie.com/**', (route) =>
-      route.fulfill({ contentType: 'text/html', body: PLAYERS['mientras carga'] }),
-    );
     await signIn(user);
-    const tenet = MOVIES.find((movie) => movie.title === 'Tenet')!;
-    await page.goto(`/peliculas?anio=${tenet.releaseYear}`);
-    await movieCard(page.getByRole('region', { name: 'Resultados' }), 'Tenet').click();
-    const open = page.getByRole('region', { name: 'Tenet' }).getByRole('button', { name: 'Ver tráiler de Tenet' });
-    await open.focus();
-    await page.keyboard.press('Enter');
-    const dialog = page.getByRole('dialog', { name: 'Tráiler de Tenet' });
-    const player = page.frameLocator('iframe[title="Tráiler de Tenet (YouTube)"]');
-    await expect(player.getByText('foco tomado')).toBeVisible();
+    const { dialog, frame: player } = await openTrailerAndLetPlayerSteal(page, PLAYERS['mientras carga']);
     await expect(dialog.getByRole('button', { name: 'Cerrar el tráiler' })).toBeFocused();
 
     await page.keyboard.press('Tab');
