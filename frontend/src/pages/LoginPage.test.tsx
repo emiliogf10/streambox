@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiCalls, errorResponse, jsonResponse, makeUser, noContentResponse, renderWithProviders, routeFetch } from '../test/helpers';
 import { AppRoutes } from '../App';
 import { LoginPage } from './LoginPage';
+import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -45,6 +46,14 @@ describe('LoginPage', () => {
     expect(screen.getByLabelText('Contraseña')).toHaveAttribute('type', 'password');
     expect(screen.getByRole('link', { name: 'Regístrate' })).toHaveAttribute('href', '/registro');
     expect(document.title).toBe('Iniciar sesión — StreamBox');
+  });
+
+  it('autocompletado: el correo es el «username» del gestor de contraseñas (el mismo que guarda el registro)', () => {
+    renderWithProviders(<LoginPage />, { route: '/login' });
+
+    // Con `email`, el gestor rellenaría aquí lo que guardó como usuario; ver RegisterPage.
+    expect(screen.getByLabelText('Correo electrónico')).toHaveAttribute('autocomplete', 'username');
+    expect(screen.getByLabelText('Contraseña')).toHaveAttribute('autocomplete', 'current-password');
   });
 
   it('con campos vacíos avisa y no llama al servidor', async () => {
@@ -105,7 +114,14 @@ describe('LoginPage', () => {
 
     await fillAndSubmit(user);
 
-    expect(await screen.findByRole('button', { name: 'Entrando...' })).toBeDisabled();
+    const busy = await screen.findByRole('button', { name: 'Entrando...' });
+    expectButtonUnavailable(busy, { busy: true });
+    // El foco no cae al <body>: sigue en el botón pulsado.
+    expect(busy).toHaveFocus();
+    // Ni otro clic ni Intro en un campo envían otra vez.
+    await user.click(busy);
+    await user.type(screen.getByLabelText('Contraseña'), '{Enter}');
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/auth/login')).toHaveLength(1);
   });
 
   it('credenciales incorrectas (401): mensaje genérico en un alert, sin guardar nada', async () => {
@@ -119,8 +135,10 @@ describe('LoginPage', () => {
     expect(await screen.findByText('Correo o contraseña incorrectos.')).toHaveAttribute('role', 'alert');
     expect(screen.queryByText('Texto interno del servidor')).not.toBeInTheDocument();
     expect(localStorage.getItem('token')).toBeNull();
-    // Sigue pudiendo reintentar.
-    expect(screen.getByRole('button', { name: 'Iniciar sesión' })).toBeEnabled();
+    // Sigue pudiendo reintentar, y el foco sigue en el botón que se pulsó (no se pierde al <body>).
+    const submit = screen.getByRole('button', { name: 'Iniciar sesión' });
+    expectButtonAvailable(submit);
+    expect(submit).toHaveFocus();
   });
 
   describe('intentos restantes (401 con remainingAttempts)', () => {
@@ -137,7 +155,7 @@ describe('LoginPage', () => {
       // Un solo aviso (role="alert") con el error y los intentos: se anuncian juntos.
       expect(notice.closest('[role="alert"]')).toHaveTextContent('Correo o contraseña incorrectos.');
       expect(notice.querySelector('svg')).toBeNull();
-      expect(screen.getByRole('button', { name: 'Iniciar sesión' })).toBeEnabled();
+      expectButtonAvailable(screen.getByRole('button', { name: 'Iniciar sesión' }));
     });
 
     it('en singular y más visible con el último intento (icono y texto destacado)', async () => {
@@ -233,7 +251,7 @@ describe('LoginPage', () => {
       expect(hint?.contains(button)).toBe(false);
       expect(title.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
       // Se puede pedir al momento (no se acaba de enviar ninguno) y no se ha pedido nada solo.
-      expect(button).toBeEnabled();
+      expectButtonAvailable(button);
       expect(resendCalls()).toHaveLength(0);
       expect(screen.queryByText('Texto interno del servidor')).not.toBeInTheDocument();
     });
@@ -269,7 +287,7 @@ describe('LoginPage', () => {
       ).toBeInTheDocument();
       expect(resendCalls()).toHaveLength(1);
       expect(JSON.parse(String(resendCalls()[0][1]?.body))).toEqual({ email: 'ana@example.com' });
-      expect(screen.getByRole('button', { name: /^Reenviar en/ })).toBeDisabled();
+      expectButtonUnavailable(screen.getByRole('button', { name: /^Reenviar en/ }));
     });
 
     it('la pista usa el correo del intento aunque después se edite el campo', async () => {
@@ -299,7 +317,7 @@ describe('LoginPage', () => {
       renderWithProviders(<LoginPage />, { route: '/login' });
       await fillAndSubmit(user);
       await user.click(await screen.findByRole('button', { name: RESEND_BUTTON }));
-      expect(await screen.findByRole('button', { name: /^Reenviar en/ })).toBeDisabled();
+      expectButtonUnavailable(await screen.findByRole('button', { name: /^Reenviar en/ }));
 
       // Vuelve a intentarlo antes de confirmar: otro 401 y la pista vuelve, pero el botón sigue esperando.
       await user.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
@@ -307,7 +325,7 @@ describe('LoginPage', () => {
         expect(apiCalls(fetchMock).filter(([url]) => url === '/api/auth/login')).toHaveLength(2),
       );
       expect(await screen.findByText(HINT_TITLE)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /^Reenviar en/ })).toBeDisabled();
+      expectButtonUnavailable(screen.getByRole('button', { name: /^Reenviar en/ }));
       expect(screen.queryByRole('button', { name: RESEND_BUTTON })).not.toBeInTheDocument();
       expect(resendCalls()).toHaveLength(1);
     });
@@ -326,7 +344,7 @@ describe('LoginPage', () => {
       expect(
         await screen.findByText('Has pedido demasiados correos seguidos. Podrás pedir otro en 30 s.'),
       ).toHaveAttribute('role', 'alert');
-      expect(screen.getByRole('button', { name: /^Reenviar en (30|29) s$/ })).toBeDisabled();
+      expectButtonUnavailable(screen.getByRole('button', { name: /^Reenviar en (30|29) s$/ }));
       // El error del login sigue en su sitio: el aviso del reenvío no lo sustituye.
       expect(screen.getByText('Correo o contraseña incorrectos.')).toBeInTheDocument();
     });
@@ -427,18 +445,18 @@ describe('LoginPage', () => {
       await fillAndSubmit(user);
 
       const blocked = await screen.findByRole('button', { name: 'Reintentar en 30 s' });
-      expect(blocked).toBeDisabled();
+      expectButtonUnavailable(blocked);
       expect(screen.getByText('Demasiados intentos. Inténtalo de nuevo en 30 s.')).toHaveAttribute('role', 'alert');
 
       act(() => {
         vi.advanceTimersByTime(10_000);
       });
-      expect(screen.getByRole('button', { name: 'Reintentar en 20 s' })).toBeDisabled();
+      expectButtonUnavailable(screen.getByRole('button', { name: 'Reintentar en 20 s' }));
 
       act(() => {
         vi.advanceTimersByTime(20_000);
       });
-      expect(screen.getByRole('button', { name: 'Iniciar sesión' })).toBeEnabled();
+      expectButtonAvailable(screen.getByRole('button', { name: 'Iniciar sesión' }));
       // Al acabar la espera desaparece el aviso de "demasiados intentos".
       expect(screen.queryByText(/Demasiados intentos/)).not.toBeInTheDocument();
     });
@@ -469,28 +487,28 @@ describe('LoginPage', () => {
         'Tu cuenta está bloqueada temporalmente por demasiados intentos fallidos. Podrás volver a intentarlo en 15 min.';
       expect(await screen.findByText(message)).toHaveAttribute('role', 'alert');
       expect(screen.queryByText(/Demasiados intentos\./)).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Reintentar en 15 min' })).toBeDisabled();
+      expectButtonUnavailable(screen.getByRole('button', { name: 'Reintentar en 15 min' }));
       // Una cuenta pendiente que reintenta con la contraseña correcta acaba aquí: también lleva la pista,
       // y su botón de reenvío no depende del bloqueo del login.
       expect(screen.getByText('¿Te acabas de registrar o aún no has confirmado tu correo?')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Reenviar el correo de confirmación' })).toBeEnabled();
+      expectButtonAvailable(screen.getByRole('button', { name: 'Reenviar el correo de confirmación' }));
 
       act(() => {
         vi.advanceTimersByTime(1_000);
       });
-      expect(screen.getByRole('button', { name: 'Reintentar en 14 min 59 s' })).toBeDisabled();
+      expectButtonUnavailable(screen.getByRole('button', { name: 'Reintentar en 14 min 59 s' }));
 
       act(() => {
         vi.advanceTimersByTime(834_000); // quedan 65 s
       });
-      expect(screen.getByRole('button', { name: 'Reintentar en 1 min 5 s' })).toBeDisabled();
+      expectButtonUnavailable(screen.getByRole('button', { name: 'Reintentar en 1 min 5 s' }));
       // El aviso es estático: no se reescribe con cada segundo (se volvería a leer entero).
       expect(screen.getByText(message)).toBeInTheDocument();
 
       act(() => {
         vi.advanceTimersByTime(65_000);
       });
-      expect(screen.getByRole('button', { name: 'Iniciar sesión' })).toBeEnabled();
+      expectButtonAvailable(screen.getByRole('button', { name: 'Iniciar sesión' }));
       expect(screen.queryByText(/bloqueada/)).not.toBeInTheDocument();
       // La pista se va con el aviso al que acompaña: sola no tendría contexto.
       expect(screen.queryByText(/aún no has confirmado tu correo/)).not.toBeInTheDocument();
@@ -508,7 +526,7 @@ describe('LoginPage', () => {
           'Tu cuenta está bloqueada temporalmente por demasiados intentos fallidos. Inténtalo de nuevo más tarde.',
         ),
       ).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Iniciar sesión' })).toBeEnabled();
+      expectButtonAvailable(screen.getByRole('button', { name: 'Iniciar sesión' }));
     });
 
     it('sin cabecera Retry-After avisa pero no inventa una cuenta atrás', async () => {
@@ -519,7 +537,7 @@ describe('LoginPage', () => {
       await fillAndSubmit(user);
 
       expect(await screen.findByText(/Inténtalo de nuevo en unos instantes/)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Iniciar sesión' })).toBeEnabled();
+      expectButtonAvailable(screen.getByRole('button', { name: 'Iniciar sesión' }));
     });
   });
 });

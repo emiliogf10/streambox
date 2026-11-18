@@ -408,7 +408,7 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
             <Link to={returnTo} className={buttonClasses('outline')}>
               Cancelar
             </Link>
-            <Button type="submit" disabled={submitting}>
+            <Button type="submit" pending={submitting}>
               {submitting ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear película'}
             </Button>
           </div>

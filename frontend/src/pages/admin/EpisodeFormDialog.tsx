@@ -1,9 +1,10 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Button } from '../../components/Button';
 import { FormAlert } from '../../components/FormAlert';
 import { FormField } from '../../components/FormField';
 import { Modal } from '../../components/Modal';
+import type { ModalCloseReason } from '../../components/Modal';
 import { TextAreaField } from '../../components/TextAreaField';
 import { ApiError, apiFetch, getErrorMessage } from '../../lib/api';
 import {
@@ -54,7 +55,10 @@ interface EpisodeFormDialogProps {
   seasons: readonly Season[];
   /** `null` = añadir un episodio nuevo; un episodio = editarlo. */
   episode: Episode | null;
-  /** Cerrar sin guardar (Cancelar, Escape, clic en el fondo). */
+  /**
+   * Cerrar sin guardar: «Cancelar», «Descartar cambios», o Escape / clic en el
+   * fondo cuando no hay nada que perder (ver «Cambios sin guardar» en el componente).
+   */
   onClose: () => void;
   /**
    * El servidor ha guardado el episodio. El diálogo sigue «Guardando...» hasta
@@ -97,8 +101,22 @@ interface EpisodeFormDialogProps {
  *   temporada, el foco va ahí, y la temporada también se marca como inválida y
  *   apunta a ese mensaje (cualquiera de los dos lo arregla). Al cambiar
  *   cualquiera de los dos el aviso desaparece: ya no se sabe si sigue ocupado.
- * - Mientras se envía, el botón queda desactivado y el diálogo no se puede
- *   cerrar (`dismissible`), para no dejar una petición a medias sin respuesta visible.
+ * - Mientras se envía, el botón queda bloqueado (`pending`: sin soltar el foco
+ *   ni permitir un doble envío) y el diálogo no se puede cerrar
+ *   (`dismissible`), para no dejar una petición a medias sin respuesta visible.
+ * - **Cambios sin guardar.** Un Escape o un clic despistado fuera del diálogo
+ *   no deben tirar seis campos escritos. Si algo ha cambiado desde que se abrió,
+ *   esos gestos no cierran: el pie pasa a «Tienes cambios sin guardar» con
+ *   «Descartar cambios» y «Seguir editando» (el foco va a esta, la acción
+ *   segura; las dos tienen el mensaje como descripción, así que el lector de
+ *   pantalla explica por qué el diálogo sigue abierto). Con la pregunta a la
+ *   vista, otro clic en el fondo no hace nada (no puede descartar por
+ *   accidente) y **otro Escape sí descarta**: no es un capricho, los
+ *   navegadores no dejan anular dos Escape seguidos sin otra interacción
+ *   (protegen así de páginas que no dejan salir) y cierran el diálogo igual
+ *   (`forced`), así que el texto lo dice y el comportamiento es el mismo en
+ *   todos. «Cancelar» es una decisión explícita y cierra sin preguntar. Sin
+ *   cambios, Escape y el fondo cierran como siempre.
  */
 export function EpisodeFormDialog({
   seriesId,
@@ -114,9 +132,11 @@ export function EpisodeFormDialog({
   const descriptionId = useId();
   const titleInputRef = useRef<HTMLInputElement>(null);
 
-  const [values, setValues] = useState<EpisodeFormValues>(() =>
+  /** Valores al abrir: con ellos se sabe si hay cambios que se perderían al cerrar. */
+  const [initialValues] = useState<EpisodeFormValues>(() =>
     episode ? toEpisodeFormValues(episode) : newEpisodeFormValues(seasons),
   );
+  const [values, setValues] = useState<EpisodeFormValues>(initialValues);
   const [errors, setErrors] = useState<EpisodeFormErrors>({});
   /** Mensaje del 409 (temporada + número ya usados). Aparte de `errors` porque afecta a los dos campos. */
   const [conflict, setConflict] = useState('');
@@ -124,11 +144,61 @@ export function EpisodeFormDialog({
   const [submitting, setSubmitting] = useState(false);
   /** `true` en cuanto el admin escribe en «Número»: desde entonces no se le cambia al elegir temporada. */
   const [numberTouched, setNumberTouched] = useState(isEdit);
+  /** Se ha pedido cerrar (Escape o fondo) con cambios sin guardar: el pie pregunta si descartarlos. */
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const discardMessageId = useId();
+  const keepEditingRef = useRef<HTMLButtonElement>(null);
+  /** Dónde estaba el foco al pedir el cierre: «Seguir editando» lo devuelve allí. */
+  const focusBeforeDiscard = useRef<HTMLElement | null>(null);
 
-  /** Actualiza un campo y borra su error: ya lo está corrigiendo. */
+  const dirty = FIELD_ORDER.some((field) => values[field] !== initialValues[field]);
+
+  // Al aparecer la pregunta, el foco va a «Seguir editando» (la acción segura), que la lee como descripción.
+  useEffect(() => {
+    if (confirmingDiscard) keepEditingRef.current?.focus();
+  }, [confirmingDiscard]);
+
+  /**
+   * Actualiza un campo y borra su error: ya lo está corrigiendo. Si seguía a la
+   * vista la pregunta de descartar, se retira: ha vuelto a editar.
+   */
   const setField = (field: keyof EpisodeFormValues, value: string) => {
     setValues((previous) => ({ ...previous, [field]: value }));
     setErrors((previous) => ({ ...previous, [field]: undefined }));
+    setConfirmingDiscard(false);
+  };
+
+  /**
+   * Escape, clic en el fondo o cierre impuesto por el navegador (ver «Cambios
+   * sin guardar» arriba): sin cambios cierra; con cambios, la primera vez
+   * pregunta y, con la pregunta a la vista, Escape descarta y el fondo no hace nada.
+   *
+   * @param reason por qué pide cerrarse el diálogo (lo dice `Modal`)
+   */
+  const requestClose = (reason: ModalCloseReason) => {
+    if (!dirty || reason === 'forced') {
+      onClose();
+      return;
+    }
+    if (confirmingDiscard) {
+      if (reason === 'escape') onClose();
+      return;
+    }
+    focusBeforeDiscard.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setConfirmingDiscard(true);
+  };
+
+  /**
+   * «Seguir editando»: quita la pregunta y devuelve el foco al campo en el que
+   * estaba. Si no estaba en un campo del formulario (p. ej. tras un clic en el
+   * fondo, el foco queda en el propio diálogo), al título, el primer campo.
+   */
+  const keepEditing = () => {
+    setConfirmingDiscard(false);
+    const previous = focusBeforeDiscard.current;
+    const form = titleInputRef.current?.form;
+    const backToField = previous?.isConnected && previous !== form && form?.contains(previous);
+    (backToField ? previous : titleInputRef.current)?.focus();
   };
 
   const changeSeason = (value: string) => {
@@ -175,6 +245,7 @@ export function EpisodeFormDialog({
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (submitting) return;
+    setConfirmingDiscard(false);
     setFormError('');
     setConflict('');
     const found = validateEpisodeForm(values);
@@ -206,7 +277,7 @@ export function EpisodeFormDialog({
 
   return (
     <Modal
-      onClose={onClose}
+      onClose={requestClose}
       dismissible={!submitting}
       labelledBy={titleId}
       describedBy={descriptionId}
@@ -306,13 +377,51 @@ export function EpisodeFormDialog({
           En móvil, los dos botones en una fila (mitad y mitad, con menos relleno para que el texto
           quepa en una línea) para no comerse media pantalla.
         */}
-        <div className="sticky bottom-0 -mx-5 flex gap-3 border-t border-line bg-surface px-5 py-4 sm:-mx-7 sm:justify-end sm:px-7">
-          <Button variant="outline" onClick={onClose} disabled={submitting} className="flex-1 max-sm:px-3 sm:flex-none">
-            Cancelar
-          </Button>
-          <Button type="submit" disabled={submitting} className="flex-1 max-sm:px-3 sm:flex-none">
-            {submitting ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Añadir episodio'}
-          </Button>
+        <div className="sticky bottom-0 -mx-5 border-t border-line bg-surface px-5 py-4 sm:-mx-7 sm:px-7">
+          {confirmingDiscard ? (
+            <>
+              {/* No es una región viva: el foco llega a «Seguir editando», que lo tiene como descripción. */}
+              <p id={discardMessageId} className="mb-3 text-sm leading-relaxed text-gray-300 sm:text-right">
+                <span className="font-semibold text-white">Tienes cambios sin guardar.</span> Si cierras ahora, se
+                perderán.
+                {/* Solo con teclado (en pantallas táctiles nadie pulsa Esc): ver «Cambios sin guardar» arriba. */}
+                <span className="pointer-coarse:hidden"> Pulsa Esc otra vez para descartarlos.</span>
+              </p>
+              <div className="flex gap-3 sm:justify-end">
+                <Button
+                  variant="danger"
+                  onClick={onClose}
+                  aria-describedby={discardMessageId}
+                  className="flex-1 max-sm:px-3 sm:flex-none"
+                >
+                  Descartar cambios
+                </Button>
+                <Button
+                  ref={keepEditingRef}
+                  variant="outline"
+                  onClick={keepEditing}
+                  aria-describedby={discardMessageId}
+                  className="flex-1 max-sm:px-3 sm:flex-none"
+                >
+                  Seguir editando
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex gap-3 sm:justify-end">
+              <Button
+                variant="outline"
+                onClick={onClose}
+                disabled={submitting}
+                className="flex-1 max-sm:px-3 sm:flex-none"
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" pending={submitting} className="flex-1 max-sm:px-3 sm:flex-none">
+                {submitting ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Añadir episodio'}
+              </Button>
+            </div>
+          )}
         </div>
       </form>
     </Modal>

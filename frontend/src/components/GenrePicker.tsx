@@ -86,11 +86,17 @@ export function GenrePicker({
   };
 
   return (
-    <fieldset ref={ref} tabIndex={-1} aria-describedby={counterId} className="min-w-0 outline-hidden">
+    // Con error, el grupo también lo describe: tras un envío fallido el foco viene aquí y así se lee el motivo.
+    <fieldset
+      ref={ref}
+      tabIndex={-1}
+      aria-describedby={error ? `${errorId} ${counterId}` : counterId}
+      className="min-w-0 outline-hidden"
+    >
       <legend className="mb-1 text-base font-semibold text-white">{legend}</legend>
       {description && <div className="mb-3 text-sm leading-relaxed text-muted">{description}</div>}
       {error && (
-        <p id={errorId} role="alert" className="mb-3 text-sm font-medium text-danger">
+        <p id={errorId} className="mb-3 text-sm font-medium text-danger">
           {error}
         </p>
       )}

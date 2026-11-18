@@ -27,6 +27,7 @@ import { FavoritesProvider, useFavorites } from './FavoritesContext';
 import { AuthProvider, useAuth } from './AuthContext';
 import { ToastProvider } from './ToastContext';
 import { createTestQueryClient } from '../test/queryClient';
+import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
 import { queryKeys } from '../lib/queryKeys';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -96,12 +97,18 @@ describe('FavoriteButton (interfaz)', () => {
 
     // El servidor aún no ha respondido, pero la interfaz ya muestra el resultado.
     const button = screen.getByRole('button', { name: IN_LIST });
-    expect(button).toBeDisabled();
+    // Bloqueado con `aria-disabled` y no con `disabled`: quien pulsó con el teclado no pierde el foco.
+    expectButtonUnavailable(button, { busy: true });
+    expect(button).toHaveFocus();
+    // Un segundo clic mientras tanto no lanza otra petición.
+    await user.click(button);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/users/me/favorites/1')).toHaveLength(1);
     expect(screen.queryByText(/se ha añadido a tu lista/)).not.toBeInTheDocument();
 
     await act(async () => pending.resolve(jsonResponse({}, 201)));
 
-    expect(screen.getByRole('button', { name: IN_LIST })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: IN_LIST }));
+    expect(screen.getByRole('button', { name: IN_LIST })).toHaveFocus();
     expect(screen.getByText('«Uno» se ha añadido a tu lista.')).toBeInTheDocument();
   });
 
@@ -113,7 +120,7 @@ describe('FavoriteButton (interfaz)', () => {
     await user.click(screen.getByRole('button', { name: NOT_IN_LIST }));
 
     expect(await screen.findByText('El servidor ha tenido un problema. Inténtalo de nuevo en unos minutos.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: NOT_IN_LIST })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: NOT_IN_LIST }));
     expect(screen.queryByText(/se ha añadido/)).not.toBeInTheDocument();
   });
 
@@ -170,7 +177,7 @@ describe('FavoriteButton (interfaz)', () => {
     await user.click(screen.getByRole('button', { name: IN_LIST }));
 
     expect(await screen.findByText(/El servidor ha tenido un problema/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: IN_LIST })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: IN_LIST }));
   });
 
   it('un 404 al AÑADIR (película borrada) NO se toma por "ya estaba": se revierte y avisa', async () => {

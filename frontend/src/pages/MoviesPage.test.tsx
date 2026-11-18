@@ -303,7 +303,7 @@ describe('MoviesPage: filtros leídos de la URL', () => {
     expect(callsWith('/movies/search')).toHaveLength(0);
     // Ni error de carga ni error en el campo del año: la URL rara no es culpa de quien la abre.
     expect(screen.queryByText(/No se pudieron/)).not.toBeInTheDocument();
-    expect(yearInput()).not.toHaveAttribute('aria-invalid');
+    expect(yearInput()).toHaveAttribute('aria-invalid', 'false');
   });
 
   it('un género que no existe (?genero=999) se ignora en cuanto se conocen los géneros', async () => {
@@ -463,7 +463,7 @@ describe('MoviesPage: cambiar filtros', () => {
     passTime(CATALOG_FILTER_DEBOUNCE_MS);
 
     expect(await screen.findByText('busqueda:?anio=2014')).toBeInTheDocument();
-    expect(yearInput()).not.toHaveAttribute('aria-invalid');
+    expect(yearInput()).toHaveAttribute('aria-invalid', 'false');
     await expectCount('1 película');
   });
 
@@ -472,11 +472,26 @@ describe('MoviesPage: cambiar filtros', () => {
 
     await user.type(yearInput(), '20');
     passTime(CATALOG_FILTER_DEBOUNCE_MS);
-    expect(yearInput()).not.toHaveAttribute('aria-invalid');
+    expect(yearInput()).toHaveAttribute('aria-invalid', 'false');
 
     await user.tab();
     expect(yearInput()).toHaveAttribute('aria-invalid', 'true');
     expect(callsWith('/movies/search')).toHaveLength(0);
+
+    // El error aparece sin enviar nada y el foco ya está en otro control: lo anuncia UNA región cortés de la
+    // barra, medio segundo después (para no pisar la lectura del control al que se ha pasado). El mensaje bajo
+    // el campo no es una región viva.
+    const announcement = 'Año: Escribe un año entre 1888 y 2100.';
+    expect(screen.queryByText(announcement)).not.toBeInTheDocument();
+    passTime(499);
+    expect(screen.queryByText(announcement)).not.toBeInTheDocument();
+    passTime(1);
+    expect(screen.getByText(announcement)).toHaveAttribute('role', 'status');
+    expect(screen.getByText('Escribe un año entre 1888 y 2100.')).not.toHaveAttribute('role');
+
+    // Al corregirlo, el anuncio se vacía al momento (no queda un aviso viejo en la página).
+    await user.clear(yearInput());
+    expect(screen.queryByText(announcement)).not.toBeInTheDocument();
   });
 
   it('Intro en el campo del año aplica sin esperar', async () => {

@@ -85,6 +85,8 @@ describe('Navbar: enlace «Administrar»', () => {
     ]);
     // El icono es decorativo: el nombre lo da el texto (visible u oculto según el ancho), no el dibujo.
     expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    // Donde solo se ve el escudo, el enlace sigue midiendo 44×44 (alto de la barra y este ancho mínimo).
+    expect(link).toHaveClass('min-h-11', 'min-w-11');
   });
 
   it('un usuario normal NO lo ve: solo «Inicio», «Películas», «Series» y «Mi lista»', async () => {

@@ -4,12 +4,13 @@
  * Protegen: que el botón solo exista con un tráiler válido, que el `<iframe>`
  * reciba exactamente la dirección construida (nunca el texto de la API) con los
  * atributos de seguridad, que el diálogo tenga nombre accesible, que se cierre
- * con Escape y con su botón devolviendo el foco a «Ver tráiler», y que al
- * cerrarlo el `<iframe>` desaparezca (el vídeo se detiene).
+ * con Escape y con su botón devolviendo el foco a «Ver tráiler», que al
+ * cerrarlo el `<iframe>` desaparezca (el vídeo se detiene) y que el reproductor
+ * no se quede el foco al cargar (si no, Escape dejaba de cerrar).
  */
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../context/ToastContext';
 import { TrailerButton } from './TrailerButton';
 
@@ -154,5 +155,91 @@ describe('TrailerDialog', () => {
     const dialog = screen.getByRole('dialog', { name: 'Tráiler de Dune' });
     expect(dialog.parentElement).toBe(document.body);
     expect(button.parentElement?.querySelector('dialog')).toBeNull();
+  });
+});
+
+/**
+ * El reproductor de YouTube (otro origen) a veces se queda el foco él solo al cargar: entonces
+ * Escape ya no llega a StreamBox y el diálogo no cierra, aunque el pie diga «Pulsa Esc para
+ * cerrar». En jsdom no hay reproductor, así que se imita lo que hace el navegador: el foco entra
+ * en el `<iframe>`, la ventana recibe `blur` y, después, el marco dispara `load`.
+ */
+describe('TrailerDialog: el reproductor no se queda el foco al cargar', () => {
+  /** Lo que hace el reproductor al robar el foco, visto desde la página. */
+  function playerStealsFocus(iframe: HTMLIFrameElement) {
+    iframe.focus();
+    fireEvent.blur(window);
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('si se lo queda ANTES de cargar, vuelve a «Cerrar el tráiler» (y Escape cierra)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    renderButton(TRAILER);
+    fireEvent.click(screen.getByRole('button', { name: 'Ver tráiler de Dune' }));
+    const iframe = document.querySelector('iframe')!;
+    const close = screen.getByRole('button', { name: 'Cerrar el tráiler' });
+    expect(close).toHaveFocus();
+
+    playerStealsFocus(iframe);
+    expect(iframe).toHaveFocus();
+    act(() => vi.runOnlyPendingTimers());
+
+    expect(close).toHaveFocus();
+  });
+
+  it('si aún lo tiene al cargar, también vuelve a «Cerrar el tráiler»', async () => {
+    const { dialog } = await openTrailer();
+    const iframe = dialog.querySelector('iframe')!;
+
+    iframe.focus();
+    fireEvent.load(iframe);
+
+    expect(within(dialog).getByRole('button', { name: 'Cerrar el tráiler' })).toHaveFocus();
+  });
+
+  it('no mueve el foco si el usuario ya está en otro control (p. ej. «Ver en YouTube»)', async () => {
+    const { dialog } = await openTrailer();
+    const link = within(dialog).getByRole('link', { name: /Ver en YouTube/ });
+
+    link.focus();
+    fireEvent.load(dialog.querySelector('iframe')!);
+
+    expect(link).toHaveFocus();
+  });
+
+  it('respeta que el usuario entre en el vídeo con Tab', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    renderButton(TRAILER);
+    fireEvent.click(screen.getByRole('button', { name: 'Ver tráiler de Dune' }));
+    const iframe = document.querySelector('iframe')!;
+
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
+    playerStealsFocus(iframe);
+    act(() => vi.runOnlyPendingTimers());
+    expect(iframe).toHaveFocus();
+
+    // Aunque el reproductor termine de cargar después, sigue siendo decisión suya.
+    fireEvent.load(iframe);
+    expect(iframe).toHaveFocus();
+  });
+
+  it('pasado un segundo desde la carga, el foco en el vídeo es del usuario (un clic): no se toca', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let now = 1_000;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    renderButton(TRAILER);
+    fireEvent.click(screen.getByRole('button', { name: 'Ver tráiler de Dune' }));
+    const iframe = document.querySelector('iframe')!;
+    fireEvent.load(iframe);
+
+    now += 1_001;
+    playerStealsFocus(iframe);
+    act(() => vi.runOnlyPendingTimers());
+
+    expect(iframe).toHaveFocus();
   });
 });

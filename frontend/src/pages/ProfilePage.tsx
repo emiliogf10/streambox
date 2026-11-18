@@ -50,7 +50,7 @@ interface ProfileHeaderProps {
  * - «Editar perfil» no es un botón de la cabecera: cada dato se cambia en su
  *   fila de la tarjeta «Cuenta» ({@link AccountCard}), junto al valor que cambia.
  * - «Cerrar sesión» espera la confirmación del servidor: mientras tanto dice
- *   «Cerrando sesión...» con `aria-disabled` (no `disabled`, que sacaría el foco
+ *   «Cerrando sesión...» con `pending` de `Button` (`aria-disabled` + `aria-busy`; no `disabled`, que sacaría el foco
  *   del botón y obligaría a buscarlo de nuevo si falla y hay que reintentar).
  */
 function ProfileHeader({ user, isAdmin, onLogout, isLoggingOut }: ProfileHeaderProps) {
@@ -80,7 +80,7 @@ function ProfileHeader({ user, isAdmin, onLogout, isLoggingOut }: ProfileHeaderP
             Panel de administración
           </Link>
         )}
-        <Button variant="outline" onClick={onLogout} aria-disabled={isLoggingOut || undefined}>
+        <Button variant="outline" onClick={onLogout} pending={isLoggingOut}>
           <LogOut aria-hidden="true" className="size-4" />
           {isLoggingOut ? 'Cerrando sesión...' : 'Cerrar sesión'}
         </Button>

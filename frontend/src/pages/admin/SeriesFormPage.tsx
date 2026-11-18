@@ -416,7 +416,8 @@ function SeriesEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string }
               </Link>
               <Button
                 type="submit"
-                disabled={submitting || !genres.loaded}
+                pending={submitting}
+                inactive={!genres.loaded}
                 aria-describedby={genres.loaded ? undefined : 'series-submit-hint'}
               >
                 {submitting ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear serie'}

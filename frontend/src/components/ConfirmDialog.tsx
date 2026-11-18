@@ -72,7 +72,7 @@ export function ConfirmDialog({
           <Button ref={cancelRef} variant="outline" onClick={onCancel} disabled={busy}>
             Cancelar
           </Button>
-          <Button variant="danger" onClick={onConfirm} disabled={busy}>
+          <Button variant="danger" onClick={onConfirm} pending={busy}>
             {busy ? busyLabel : confirmLabel}
           </Button>
         </div>

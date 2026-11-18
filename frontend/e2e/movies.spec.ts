@@ -273,7 +273,8 @@ test.describe('Página Películas', () => {
     await expect(bar.year).toBeFocused();
     await expect(bar.year).toHaveAttribute('aria-invalid', 'true');
     await expect(bar.year).toHaveAccessibleDescription(YEAR_ERROR);
-    await expect(page.getByRole('alert').filter({ hasText: YEAR_ERROR })).toBeVisible();
+    // El mensaje bajo el campo no es una región viva: lo anuncia UNA región cortés de la barra, un instante después.
+    await expect(page.getByRole('status').filter({ hasText: YEAR_ERROR })).toHaveText(`Año: ${YEAR_ERROR}`);
 
     // Mientras se escribe «99» (podría ser «1999») no se riñe; al salir del campo, sí.
     await bar.year.fill('99');

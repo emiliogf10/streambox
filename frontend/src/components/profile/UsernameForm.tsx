@@ -105,6 +105,10 @@ export function UsernameForm({ id, currentUsername, onClose }: UsernameFormProps
         // `nickname` y no `username`: el «usuario» con el que se inicia sesión es
         // el correo, así que con `username` el navegador propondría el correo aquí.
         autoComplete="nickname"
+        // Es un identificador, no texto: sin mayúscula inicial ni autocorrección del teclado del móvil.
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
         required
         hint={`Entre ${USERNAME_MIN} y ${USERNAME_MAX} caracteres.`}
         error={fieldError}
@@ -115,7 +119,7 @@ export function UsernameForm({ id, currentUsername, onClose }: UsernameFormProps
         }}
       />
       <div className="mt-4 flex flex-wrap gap-3">
-        <Button type="submit" disabled={submitting}>
+        <Button type="submit" pending={submitting}>
           {submitting ? 'Guardando...' : 'Guardar'}
         </Button>
         <Button variant="outline" onClick={onClose} disabled={submitting}>

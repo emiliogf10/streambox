@@ -130,8 +130,10 @@ function summarizeApproximate(results: SearchResults): ApproximateSummary | null
  *   puede seguir escribiendo): la opción resaltada se señala con `aria-activedescendant`.
  * - Teclado: ↑/↓ recorren TODOS los resultados en el orden en que se ven
  *   (primero películas, luego series; circular), Intro abre el resaltado (o el
- *   primero) y lleva a su página (`/peliculas/:id` o `/series/:id`). Escape
- *   cierra la lista y vacía el campo.
+ *   primero) y lleva a su página (`/peliculas/:id` o `/series/:id`). Escape,
+ *   como en el patrón «combobox» de WAI-ARIA, va por pasos: el primero cierra
+ *   la lista y CONSERVA lo escrito (quizá solo se quería ver lo que había
+ *   debajo; ↓ o seguir escribiendo la vuelven a abrir) y el segundo vacía el campo.
  * - **Cada opción es un enlace de verdad** (`<a href>` con `role="option"`,
  *   uno de los roles que HTML permite en un enlace): para el lector de pantalla
  *   sigue siendo una opción de la lista, pero con el ratón se puede abrir en otra
@@ -152,7 +154,7 @@ export function SearchBar() {
   const [invalid, setInvalid] = useState(false);
   // Índice (en la lista completa: películas y luego series) de la opción resaltada; -1 = ninguna.
   const [activeIndex, setActiveIndex] = useState(-1);
-  // Si el desplegable está visible. Escape y elegir un resultado lo cierran; escribir o enfocar lo abre.
+  // Si el desplegable está visible. Escape y elegir un resultado lo cierran; escribir, enfocar o ↓/↑ lo abren.
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
@@ -330,9 +332,17 @@ export function SearchBar() {
         handleSelect(options[activeIndex >= 0 ? activeIndex : 0]);
         break;
       case 'Escape':
-        if (!open && !query) return; // sin nada que cerrar: que Escape siga su curso
-        event.preventDefault();
-        resetSearch();
+        if (open) {
+          // 1.º: cierra la lista y conserva el texto.
+          event.preventDefault();
+          setOpen(false);
+          setActiveIndex(-1);
+        } else if (query) {
+          // 2.º (con la lista ya cerrada): vacía el campo.
+          event.preventDefault();
+          resetSearch();
+        }
+        // Sin nada que cerrar ni que borrar, Escape sigue su curso (otros componentes pueden usarlo).
         break;
     }
   };
@@ -404,7 +414,8 @@ export function SearchBar() {
       <label htmlFor={inputId} className="sr-only">
         Buscar películas y series por título
       </label>
-      <div className="flex min-h-11 items-center gap-2 rounded-full border border-field-border bg-surface-raised px-4 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent">
+      {/* Sin alto mínimo propio: lo da el campo (44 px), que es la zona que de verdad se puede pulsar. */}
+      <div className="flex items-center gap-2 rounded-full border border-field-border bg-surface-raised px-4 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent">
         <Search aria-hidden="true" className="size-4 shrink-0 text-muted" />
         <input
           id={inputId}
@@ -427,7 +438,9 @@ export function SearchBar() {
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
           // El anillo de foco lo dibuja el contenedor (focus-within), así que aquí no se pierde el indicador.
-          className="w-full min-w-0 bg-transparent py-2 text-base text-white outline-hidden placeholder:text-muted md:text-sm"
+          // `min-h-11`: 44 px de zona táctil en el propio campo (con 40 px, un toque en el borde de la
+          // cápsula no lo enfocaba; WCAG 2.5.5).
+          className="min-h-11 w-full min-w-0 bg-transparent py-2 text-base text-white outline-hidden placeholder:text-muted md:text-sm"
         />
       </div>
 

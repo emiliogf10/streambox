@@ -121,7 +121,13 @@ function CheckYourEmail({ email, onEditEmail }: CheckYourEmailProps) {
 
       <div className="mt-6 flex flex-col gap-3">
         <div>
-          <Button variant="outline" className="w-full" disabled={sending || waiting} onClick={() => void request(email)}>
+          <Button
+            variant="outline"
+            className="w-full"
+            pending={sending}
+            inactive={waiting}
+            onClick={() => void request(email)}
+          >
             {sending ? 'Enviando...' : waiting ? `Reenviar en ${formatWaitTime(remaining)}` : 'Reenviar el enlace'}
           </Button>
           <ResendNotice notice={notice} />
@@ -232,7 +238,8 @@ export function ForgotPasswordPage() {
           id={EMAIL_ID}
           label="Correo electrónico"
           type="email"
-          autoComplete="email"
+          // `username`, como en el login: así el gestor de contraseñas ofrece la cuenta guardada.
+          autoComplete="username"
           placeholder="tu@correo.com"
           required
           error={fieldError}
@@ -242,7 +249,7 @@ export function ForgotPasswordPage() {
             setFieldError(undefined);
           }}
         />
-        <Button type="submit" disabled={submitting || blocked} className="mt-2 w-full">
+        <Button type="submit" pending={submitting} inactive={blocked} className="mt-2 w-full">
           {submitting ? 'Enviando...' : blocked ? `Reintentar en ${formatWaitTime(remaining)}` : 'Enviar el enlace'}
         </Button>
       </form>

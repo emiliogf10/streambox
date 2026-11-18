@@ -27,7 +27,8 @@ interface Props {
  * puede pulsar; no se confía solo en el color) y su nombre accesible empieza
  * por el texto visible («Drama, ver todas las series del género»), así que
  * también se puede activar por voz diciendo lo que se ve (WCAG 2.5.3). Altura
- * mínima de 36 px, por encima de los 24 px de WCAG 2.5.8.
+ * mínima de 44 px (`min-h-11`), la zona táctil cómoda de WCAG 2.5.5 que usan
+ * todos los botones de la aplicación (con 36 px se quedaba corta en el móvil).
  *
  * El nombre va en `aria-label` y no en un `<span class="sr-only">` tras el
  * texto visible: ese span lleva `position: absolute`, que lo convierte en
@@ -43,7 +44,7 @@ export function GenreLinks({ kind, genres }: Props) {
           <Link
             to={catalogByGenrePath(kind, genre.id)}
             aria-label={`${genre.name}, ${LABEL_SUFFIX[kind]}`}
-            className="focus-ring inline-flex min-h-9 items-center gap-1 rounded-full border border-white/20 bg-white/5 pr-2.5 pl-3.5 text-sm font-medium text-white/90 transition-colors duration-150 hover:border-white/40 hover:bg-white/10 hover:text-white"
+            className="focus-ring inline-flex min-h-11 items-center gap-1 rounded-full border border-white/20 bg-white/5 pr-2.5 pl-3.5 text-sm font-medium text-white/90 transition-colors duration-150 hover:border-white/40 hover:bg-white/10 hover:text-white"
           >
             {genre.name}
             <ChevronRight aria-hidden="true" className="size-3.5 text-white/60" />

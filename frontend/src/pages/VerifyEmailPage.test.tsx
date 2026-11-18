@@ -24,6 +24,7 @@ import {
   renderWithProviders,
   routeFetch,
 } from '../test/helpers';
+import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -92,7 +93,7 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
     // Se deja terminar el arranque (chequeo de la sesión) y no ha salido ninguna confirmación.
     await vi.waitFor(() => expect(fetchMock.mock.calls.map(([url]) => url)).toContain('/api/auth/refresh'));
     expect(confirmCalls()).toEqual([]);
-    expect(confirmButton()).toBeEnabled();
+    expectButtonAvailable(confirmButton());
   });
 
   it('quita el token de la barra de direcciones (sustituyendo la entrada del historial) y lo conserva en memoria', async () => {
@@ -136,7 +137,7 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
 
     await user.click(confirmButton());
 
-    expect(await screen.findByRole('button', { name: 'Confirmando...' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Confirmando...' }), { busy: true });
   });
 
   it('400 INVALID_VERIFICATION_TOKEN: «El enlace no es válido o ha caducado», con el foco en el título y salidas', async () => {
@@ -155,7 +156,7 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
     expect(screen.getByText(/Si ya habías confirmado tu correo, no tienes que hacer nada más/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'inicia sesión' })).toHaveAttribute('href', '/login');
     expect(screen.getByLabelText('Correo electrónico')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Enviar un enlace nuevo' })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: 'Enviar un enlace nuevo' }));
     expect(screen.getByRole('link', { name: 'Regístrate' })).toHaveAttribute('href', '/registro');
     expect(screen.queryByText('Texto interno del servidor')).not.toBeInTheDocument();
   });
@@ -202,12 +203,12 @@ describe('VerifyEmailPage: con un token en el enlace', () => {
 
     await user.click(confirmButton());
 
-    expect(await screen.findByRole('button', { name: 'Reintentar en 30 s' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 30 s' }));
     expect(screen.getByText('Demasiados intentos. Inténtalo de nuevo en 30 s.')).toHaveAttribute('role', 'alert');
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
-    expect(confirmButton()).toBeEnabled();
+    expectButtonAvailable(confirmButton());
     expect(screen.queryByText(/Demasiados intentos/)).not.toBeInTheDocument();
   });
 });
@@ -225,6 +226,8 @@ describe('VerifyEmailPage: sin token válido en el enlace', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'El enlace no es válido o ha caducado' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Confirmar mi correo' })).not.toBeInTheDocument();
     expect(screen.getByText(/comprueba también que esté completo/)).toBeInTheDocument();
+    // El correo del formulario «pedir otro enlace» es el «usuario» de la cuenta para el gestor de contraseñas.
+    expect(screen.getByLabelText('Correo electrónico')).toHaveAttribute('autocomplete', 'username');
     await vi.waitFor(() => expect(fetchMock.mock.calls.map(([url]) => url)).toContain('/api/auth/refresh'));
     expect(apiCalls(fetchMock)).toEqual([]);
   });
@@ -242,7 +245,7 @@ describe('VerifyEmailPage: sin token válido en el enlace', () => {
     expect(apiCalls(fetchMock)).toEqual([]);
 
     await user.type(field, '  ana@example.com ');
-    expect(field).not.toHaveAttribute('aria-invalid');
+    expect(field).toHaveAttribute('aria-invalid', 'false');
     await user.click(screen.getByRole('button', { name: 'Enviar un enlace nuevo' }));
 
     const done = await screen.findByText(RESEND_DONE_MESSAGE('ana@example.com'));
@@ -250,7 +253,7 @@ describe('VerifyEmailPage: sin token válido en el enlace', () => {
     const resend = apiCalls(fetchMock).filter(([url]) => url === '/api/auth/email-verification/resend');
     expect(resend).toHaveLength(1);
     expect(JSON.parse(String(resend[0][1]?.body))).toEqual({ email: 'ana@example.com' });
-    expect(screen.getByRole('button', { name: /^Pedir otro en/ })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: /^Pedir otro en/ }));
   });
 
   it('pedir un enlace nuevo con 429: avisa de la espera y bloquea el botón', async () => {
@@ -267,7 +270,7 @@ describe('VerifyEmailPage: sin token válido en el enlace', () => {
     expect(
       await screen.findByText('Has pedido demasiados correos seguidos. Podrás pedir otro en 45 s.'),
     ).toHaveAttribute('role', 'alert');
-    expect(screen.getByRole('button', { name: 'Pedir otro en 45 s' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Pedir otro en 45 s' }));
   });
 });
 
@@ -294,7 +297,7 @@ describe('VerifyEmailPage: otro enlace con la página ya abierta', () => {
     // El token nuevo también sale de la URL; al quedar vacío el fragmento NO se vuelve a «no válido».
     expect(await screen.findByText('hash: navegación:REPLACE')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'Confirma tu correo' })).toBeInTheDocument();
-    expect(confirmButton()).toBeEnabled();
+    expectButtonAvailable(confirmButton());
     expect(confirmedTokens()).toEqual([TOKEN]);
 
     await user.click(confirmButton());
@@ -323,12 +326,12 @@ describe('VerifyEmailPage: otro enlace con la página ya abierta', () => {
     const user = userEvent.setup();
     renderVerify(`#token=${TOKEN}`);
     await user.click(confirmButton());
-    expect(await screen.findByRole('button', { name: 'Reintentar en 30 s' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 30 s' }));
 
     await user.click(openNewLink());
 
     expect(await screen.findByRole('heading', { name: 'Confirma tu correo' })).toHaveFocus();
-    expect(confirmButton()).toBeEnabled();
+    expectButtonAvailable(confirmButton());
     expect(screen.queryByText(/Demasiados intentos/)).not.toBeInTheDocument();
   });
 
@@ -345,7 +348,7 @@ describe('VerifyEmailPage: otro enlace con la página ya abierta', () => {
     const user = userEvent.setup();
     renderVerify(`#token=${TOKEN}`);
     await user.click(confirmButton());
-    expect(await screen.findByRole('button', { name: 'Confirmando...' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Confirmando...' }), { busy: true });
 
     await user.click(openNewLink());
     await screen.findByRole('heading', { name: 'Confirma tu correo' });
@@ -354,7 +357,7 @@ describe('VerifyEmailPage: otro enlace con la página ya abierta', () => {
     });
 
     expect(screen.getByRole('heading', { name: 'Confirma tu correo' })).toBeInTheDocument();
-    expect(confirmButton()).toBeEnabled();
+    expectButtonAvailable(confirmButton());
   });
 });
 

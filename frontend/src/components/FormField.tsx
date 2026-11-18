@@ -22,13 +22,27 @@ interface FormFieldProps extends ComponentProps<'input'> {
  * Campo de formulario accesible: etiqueta + input + ayuda + error.
  *
  * - `<label htmlFor>` asocia el texto al campo (clic en la etiqueta y lectores de pantalla).
- * - `aria-invalid` marca el campo erróneo y `aria-describedby` apunta a lo que
- *   se ve debajo (la ayuda o el error), de modo que se lee al enfocar el campo.
+ * - `aria-invalid` marca el campo erróneo (`"true"`) y vale `"false"` mientras no
+ *   hay error: si faltara, Firefox y Safari expondrían un campo `required` vacío
+ *   como inválido desde que carga la página, y un lector de pantalla diría «no
+ *   válido» antes de que el usuario escriba nada. `aria-describedby` apunta a lo
+ *   que se ve debajo (la ayuda o el error), de modo que se lee al enfocar el campo.
  * - Con error, el error SUSTITUYE a la ayuda en lugar de sumarse: los mensajes
  *   ya incluyen el requisito ("debe tener entre 3 y 50 caracteres"), y ver
  *   "Entre 3 y 50 caracteres." justo encima del error era decir lo mismo dos
  *   veces. Al corregir el campo el error desaparece y la ayuda vuelve.
- * - El error va en `role="alert"` para anunciarse en cuanto aparece.
+ * - **El error NO es una región viva** (`role="alert"`). Quien muestra el error
+ *   se encarga de que se oiga UNA vez: tras un envío fallido, el formulario
+ *   lleva el foco al primer campo con error (que lee su error por
+ *   `aria-describedby`) y, si hace falta, un único aviso general (`FormAlert`).
+ *   Con un `role="alert"` por campo, varios errores a la vez se interrumpían
+ *   entre sí y el campo enfocado los repetía. Un error que aparece sin envío
+ *   (p. ej. al salir del campo) lo anuncia la página con una región cortés.
+ * - **Texto de 16 px en móvil** (`text-base`, 14 px desde `sm`): con menos de
+ *   16 px, Safari en iOS amplía la página al enfocar el campo y el usuario
+ *   tiene que pellizcar para volver a ver el formulario.
+ * - Con `type="email"`, `spellcheck="false"` por defecto: el correo es un
+ *   identificador y el corrector lo subrayaría como falta.
  * - El error no depende solo del color: lleva texto y borde, y el foco es visible.
  * - El marcador (`placeholder`) usa `text-muted` sin transparencia: con `/70` el
  *   contraste bajaba a 3.5:1 y no llegaba al 4.5:1 exigido.
@@ -49,10 +63,13 @@ export function FormField({ id, label, error, hint, hideLabel = false, className
       </label>
       <input
         id={id}
-        aria-invalid={error ? true : undefined}
+        aria-invalid={Boolean(error)}
         aria-describedby={describedBy}
+        // Un correo es un identificador, no texto: sin corrector ortográfico que lo subraye o lo «arregle»
+        // (el navegador ya quita la mayúscula inicial y la autocorrección en `type="email"`). Se puede sobrescribir.
+        spellCheck={inputProps.type === 'email' ? false : undefined}
         className={
-          'focus-ring min-h-11 w-full rounded-lg border bg-surface px-4 py-2.5 text-sm text-white transition-colors ' +
+          'focus-ring min-h-11 w-full rounded-lg border bg-surface px-4 py-2.5 text-base text-white transition-colors sm:text-sm ' +
           'placeholder:text-muted ' +
           (error ? 'border-danger ' : 'border-field-border hover:border-muted ') +
           className
@@ -65,7 +82,7 @@ export function FormField({ id, label, error, hint, hideLabel = false, className
         </p>
       )}
       {error && (
-        <p id={errorId} role="alert" className="mt-1 text-xs font-medium text-danger">
+        <p id={errorId} className="mt-1 text-xs font-medium text-danger">
           {error}
         </p>
       )}

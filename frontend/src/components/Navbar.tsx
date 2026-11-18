@@ -139,7 +139,12 @@ export function Navbar() {
             </NavLink>
             {/* Solo con el rol ya confirmado por el servidor: mientras carga `isAdmin` es false y no aparece. */}
             {isAdmin && (
-              <NavLink to="/admin" title="Administrar" className={(state) => `${navLinkClass(state)} gap-1.5`}>
+              // `min-w-11 justify-center`: donde solo se ve el escudo, el enlace mide 44×44 (zona táctil, WCAG 2.5.5).
+              <NavLink
+                to="/admin"
+                title="Administrar"
+                className={(state) => `${navLinkClass(state)} min-w-11 justify-center gap-1.5`}
+              >
                 <ShieldCheck aria-hidden="true" className="size-4 shrink-0" />
                 {/* El texto se oculta (solo a la vista) donde no cabe: ver «Enlace de administración» arriba. */}
                 <span className="max-sm:sr-only md:max-lg:sr-only">Administrar</span>

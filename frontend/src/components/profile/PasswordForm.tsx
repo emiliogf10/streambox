@@ -210,7 +210,7 @@ export function PasswordForm({ id, email, onClose }: PasswordFormProps) {
         Se cerrarán tus otras sesiones; en este dispositivo seguirás dentro.
       </p>
       <div className="mt-4 flex flex-wrap gap-3">
-        <Button type="submit" disabled={submitting || blocked}>
+        <Button type="submit" pending={submitting} inactive={blocked}>
           {submitLabel}
         </Button>
         <Button variant="outline" onClick={onClose} disabled={submitting}>

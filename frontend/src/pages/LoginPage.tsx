@@ -151,7 +151,8 @@ function UnconfirmedEmailHint({ email }: { email: string | null }) {
           <Button
             variant="outline"
             className="mt-3 w-full"
-            disabled={sending || waiting}
+            pending={sending}
+            inactive={waiting}
             onClick={() => void resend(email)}
           >
             {sending
@@ -290,7 +291,9 @@ export function LoginPage() {
           id="login-email"
           label="Correo electrónico"
           type="email"
-          autoComplete="email"
+          // `username` y no `email`: el correo ES el usuario de la cuenta, y los gestores de contraseñas
+          // rellenan aquí lo que guardaron como `username` en el registro (el correo, no el nombre).
+          autoComplete="username"
           placeholder="tu@correo.com"
           required
           value={email}
@@ -305,7 +308,7 @@ export function LoginPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        <Button type="submit" disabled={loading || blocked} className="mt-2 w-full">
+        <Button type="submit" pending={loading} inactive={blocked} className="mt-2 w-full">
           {loading ? 'Entrando...' : blocked ? `Reintentar en ${formatWaitTime(remaining)}` : 'Iniciar sesión'}
         </Button>
       </form>

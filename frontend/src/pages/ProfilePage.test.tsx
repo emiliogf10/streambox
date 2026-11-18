@@ -48,6 +48,7 @@ import {
 import type { Movie, Series, User } from '../lib/types';
 import { Navbar } from '../components/Navbar';
 import { ProfilePage } from './ProfilePage';
+import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -150,7 +151,7 @@ describe('ProfilePage: cabecera', () => {
 
     await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
 
-    expect(screen.getByRole('button', { name: 'Cerrando sesión...' })).toHaveAttribute('aria-disabled', 'true');
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Cerrando sesión...' }), { busy: true });
     // Aún sin respuesta, la sesión (y con ella el perfil) sigue ahí.
     expect(screen.getByRole('heading', { level: 1, name: 'ana' })).toBeInTheDocument();
     answer(noContentResponse());
@@ -481,7 +482,12 @@ describe('ProfilePage: cambiar el nombre', () => {
     await findName('ana');
     await user.click(screen.getByRole('button', { name: 'Cambiar nombre' }));
 
-    expect(screen.getByRole('textbox', { name: 'Nuevo nombre de usuario' })).toHaveAttribute('autocomplete', 'nickname');
+    const field = screen.getByRole('textbox', { name: 'Nuevo nombre de usuario' });
+    expect(field).toHaveAttribute('autocomplete', 'nickname');
+    // Un identificador, no texto: sin mayúscula inicial ni autocorrección en el móvil.
+    expect(field).toHaveAttribute('autocapitalize', 'none');
+    expect(field).toHaveAttribute('autocorrect', 'off');
+    expect(field).toHaveAttribute('spellcheck', 'false');
   });
 
   it('409: «ya está en uso» junto al campo, con el foco en él; la sesión sigue abierta', async () => {
@@ -494,7 +500,8 @@ describe('ProfilePage: cambiar el nombre', () => {
 
     const input = await changeName(user, 'beto');
 
-    expect(await screen.findByText('El nombre de usuario ya está en uso')).toHaveAttribute('role', 'alert');
+    // Sin región viva propia (varias se pisarían): se oye al llegar el foco al campo, que lo tiene de descripción.
+    expect(await screen.findByText('El nombre de usuario ya está en uso')).not.toHaveAttribute('role');
     expect(input).toHaveAttribute('aria-invalid', 'true');
     expect(input).toHaveAccessibleDescription('El nombre de usuario ya está en uso');
     expect(input).toHaveFocus();
@@ -540,7 +547,7 @@ describe('ProfilePage: cambiar el nombre', () => {
     await changeName(user, 'beto');
 
     expect(await screen.findByText(/El servidor ha tenido un problema/)).toHaveAttribute('role', 'alert');
-    expect(screen.getByRole('button', { name: 'Guardar' })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: 'Guardar' }));
     expectSessionStillOpen();
 
     await user.click(screen.getByRole('button', { name: 'Cancelar' }));
@@ -695,7 +702,8 @@ describe('ProfilePage: icono de perfil', () => {
     await user.click(within(group).getByRole('radio', { name: 'Hoja' }));
     await user.click(screen.getByRole('button', { name: 'Guardar icono' }));
 
-    expect(await within(group).findByText(message)).toHaveAttribute('role', 'alert');
+    // Sin región viva propia (varias se pisarían): se oye al llegar el foco al campo, que lo tiene de descripción.
+    expect(await within(group).findByText(message)).not.toHaveAttribute('role');
     const leaf = within(group).getByRole('radio', { name: 'Hoja' });
     expect(leaf).toHaveAccessibleDescription(message);
     expect(leaf).toHaveFocus();
@@ -723,7 +731,7 @@ describe('ProfilePage: icono de perfil', () => {
 
     expect(await screen.findByText(text)).toHaveAttribute('role', 'alert');
     expect(within(group).getByRole('radio', { name: 'Corona' })).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Guardar icono' })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: 'Guardar icono' }));
     expect(headerAvatar()).toHaveAttribute('data-avatar', 'initial');
     expectSessionStillOpen();
   });
@@ -841,7 +849,7 @@ describe('ProfilePage: cambiar la contraseña', () => {
     expect(submitButton()).toHaveTextContent('Cambiar contraseña');
     await user.click(submitButton());
 
-    expect(screen.getByRole('button', { name: 'Cambiando contraseña...' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Cambiando contraseña...' }), { busy: true });
     // Dentro de `act`: la respuesta llega desde el test, fuera de cualquier evento de user-event. Sin `act`,
     // React aplicaba el cierre del formulario en una tarea y el efecto que devuelve el foco a «Cambiar» en
     // OTRA posterior, y `findByText` podía terminar entre las dos: el foco aún estaba en el `body` y la
@@ -934,19 +942,19 @@ describe('ProfilePage: cambiar la contraseña', () => {
       await fillPasswordForm(user);
       await user.click(submitButton());
 
-      expect(await screen.findByRole('button', { name: 'Reintentar en 1 min 30 s' })).toBeDisabled();
+      expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 1 min 30 s' }));
       expect(screen.getByText(passwordRateLimitMessage('1 min 30 s'))).toHaveAttribute('role', 'alert');
 
       act(() => {
         vi.advanceTimersByTime(30_000);
       });
-      expect(screen.getByRole('button', { name: 'Reintentar en 1 min' })).toBeDisabled();
+      expectButtonUnavailable(screen.getByRole('button', { name: 'Reintentar en 1 min' }));
 
       act(() => {
         vi.advanceTimersByTime(60_000);
       });
       expect(submitButton()).toHaveTextContent('Cambiar contraseña');
-      expect(submitButton()).toBeEnabled();
+      expectButtonAvailable(submitButton());
       expect(screen.queryByText(/Demasiados intentos/)).not.toBeInTheDocument();
       expectSessionStillOpen();
     });
@@ -986,7 +994,7 @@ describe('ProfilePage: cerrar sesión en todos los dispositivos', () => {
 
     const dialog = await openDialog(user);
     await user.click(within(dialog).getByRole('button', { name: 'Cerrar todas las sesiones' }));
-    expect(within(dialog).getByRole('button', { name: 'Cerrando sesiones...' })).toBeDisabled();
+    expectButtonUnavailable(within(dialog).getByRole('button', { name: 'Cerrando sesiones...' }), { busy: true });
     expect(within(dialog).getByRole('button', { name: 'Cancelar' })).toBeDisabled();
     expect(screen.getByRole('heading', { level: 1, name: 'ana' })).toBeInTheDocument();
 

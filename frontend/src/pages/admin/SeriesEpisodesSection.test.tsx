@@ -26,6 +26,7 @@ import {
   routeFetch,
 } from '../../test/helpers';
 import { SeriesEpisodesSection } from './SeriesEpisodesSection';
+import { expectButtonAvailable, expectButtonUnavailable } from '../../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -123,7 +124,7 @@ describe('SeriesEpisodesSection: lista', () => {
     expect(within(section()).getByText(/los usuarios no la ven/)).toBeInTheDocument();
     expect(within(section()).queryByText('Visible para los usuarios')).not.toBeInTheDocument();
     expect(within(section()).queryAllByRole('heading', { level: 4 })).toHaveLength(0);
-    expect(addButton()).toBeEnabled();
+    expectButtonAvailable(addButton());
   });
 });
 
@@ -198,7 +199,7 @@ describe('SeriesEpisodesSection: añadir', () => {
     await user.type(field(form, 'URL del vídeo (opcional)'), ' https://v.example.com/t2e3 ');
     await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
 
-    expect(within(form).getByRole('button', { name: 'Guardando...' })).toBeDisabled();
+    expectButtonUnavailable(within(form).getByRole('button', { name: 'Guardando...' }), { busy: true });
     expect(sentBody('POST', EPISODES_ROUTE)).toEqual({
       seasonNumber: 2,
       episodeNumber: 3,
@@ -284,13 +285,13 @@ describe('SeriesEpisodesSection: añadir', () => {
     expect(number).toHaveAttribute('aria-invalid', 'true');
     expect(field(form, 'Temporada')).toHaveAttribute('aria-invalid', 'true');
     expect(field(form, 'Temporada')).toHaveAccessibleDescription('Ya existe el episodio 2 de la temporada 2');
-    expect(within(form).getByRole('button', { name: 'Añadir episodio' })).toBeEnabled();
+    expectButtonAvailable(within(form).getByRole('button', { name: 'Añadir episodio' }));
     expect(detailRequests()).toBe(0);
 
     // Cambiar la temporada quita el aviso de los dos campos (ya no se sabe si está ocupado).
     await fill(user, field(form, 'Temporada'), '3');
-    expect(number).not.toHaveAttribute('aria-invalid');
-    expect(field(form, 'Temporada')).not.toHaveAttribute('aria-invalid');
+    expect(number).toHaveAttribute('aria-invalid', 'false');
+    expect(field(form, 'Temporada')).toHaveAttribute('aria-invalid', 'false');
   });
 
   it('400 del servidor: cada error junto a su campo y foco al primero', async () => {
@@ -327,6 +328,133 @@ describe('SeriesEpisodesSection: añadir', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(addButton()).toHaveFocus();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
+});
+
+describe('SeriesEpisodesSection: cambios sin guardar en el diálogo', () => {
+  const DISCARD_QUESTION = /^Tienes cambios sin guardar\. Si cierras ahora, se perderán\./;
+  const posted = () => fetchMock.mock.calls.some(([, init]) => init?.method === 'POST');
+  /** El párrafo de la pregunta (su texto va repartido entre varios elementos). */
+  const question = (form: HTMLElement) =>
+    within(form).queryByText((_, element) => element?.tagName === 'P' && DISCARD_QUESTION.test(element.textContent ?? ''));
+
+  /** Clic en el fondo del diálogo: el destino del clic es el propio `<dialog>` (empieza y acaba allí). */
+  async function clickBackdrop(user: ReturnType<typeof setupUser>, element: HTMLElement) {
+    await user.pointer([{ keys: '[MouseLeft>]', target: element }, { keys: '[/MouseLeft]', target: element }]);
+  }
+
+  /** Abre «Añadir episodio» y escribe un título: el formulario ya tiene algo que perder. */
+  async function openWithChanges(user: ReturnType<typeof setupUser>) {
+    await user.click(addButton());
+    const form = dialog('Añadir episodio');
+    await user.type(field(form, 'Título'), 'Episodio largo con datos');
+    return form;
+  }
+
+  it('sin cambios, Escape cierra como siempre y el foco vuelve a «Añadir episodio»', async () => {
+    routeFetch(fetchMock, {});
+    const user = setupUser();
+    renderSection(detail());
+
+    await user.click(addButton());
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(addButton()).toHaveFocus();
+  });
+
+  it('con cambios, Escape NO cierra: pregunta, con el foco en «Seguir editando», que vuelve al campo sin perder nada', async () => {
+    routeFetch(fetchMock, {});
+    const user = setupUser();
+    renderSection(detail());
+    const form = await openWithChanges(user);
+
+    await user.keyboard('{Escape}');
+
+    expect(dialog('Añadir episodio')).toBeInTheDocument();
+    const keep = within(form).getByRole('button', { name: 'Seguir editando' });
+    // El lector de pantalla oye POR QUÉ sigue abierto: la pregunta es la descripción del botón enfocado.
+    expect(keep).toHaveFocus();
+    expect(keep).toHaveAccessibleDescription(DISCARD_QUESTION);
+    expect(within(form).getByRole('button', { name: 'Descartar cambios' })).toHaveAccessibleDescription(DISCARD_QUESTION);
+    // Mientras pregunta, no se ofrecen «Cancelar» ni «Añadir episodio» (la decisión pendiente es otra).
+    expect(within(form).queryByRole('button', { name: 'Cancelar' })).not.toBeInTheDocument();
+
+    await user.click(keep);
+
+    expect(question(form)).not.toBeInTheDocument();
+    expect(field(form, 'Título')).toHaveValue('Episodio largo con datos');
+    expect(field(form, 'Título')).toHaveFocus();
+    expect(posted()).toBe(false);
+  });
+
+  it('con cambios, un clic fuera tampoco cierra; otro clic fuera no descarta; «Descartar cambios» sí', async () => {
+    routeFetch(fetchMock, {});
+    const user = setupUser();
+    renderSection(detail());
+    const form = await openWithChanges(user);
+
+    await clickBackdrop(user, form);
+    expect(question(form)).toBeInTheDocument();
+    // Un segundo clic en el mismo sitio no puede tirar lo escrito por accidente.
+    await clickBackdrop(user, form);
+    expect(dialog('Añadir episodio')).toBeInTheDocument();
+    expect(field(form, 'Título')).toHaveValue('Episodio largo con datos');
+
+    // «Seguir editando» tras un clic fuera (el foco no estaba en un campo): vuelve al primer campo.
+    await user.click(within(form).getByRole('button', { name: 'Seguir editando' }));
+    expect(field(form, 'Título')).toHaveFocus();
+
+    await clickBackdrop(user, form);
+    await user.click(within(form).getByRole('button', { name: 'Descartar cambios' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(addButton()).toHaveFocus();
+    expect(posted()).toBe(false);
+  });
+
+  it('con la pregunta a la vista, otro Escape descarta (lo mismo que hace el navegador con dos Escape seguidos)', async () => {
+    routeFetch(fetchMock, {});
+    const user = setupUser();
+    renderSection(detail());
+    await openWithChanges(user);
+
+    await user.keyboard('{Escape}');
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(addButton()).toHaveFocus();
+    expect(posted()).toBe(false);
+  });
+
+  it('volver a escribir retira la pregunta: el siguiente Escape vuelve a preguntar, no descarta', async () => {
+    routeFetch(fetchMock, {});
+    const user = setupUser();
+    renderSection(detail());
+    const form = await openWithChanges(user);
+
+    await user.keyboard('{Escape}');
+    await user.click(field(form, 'Título'));
+    await user.type(field(form, 'Título'), ' bis');
+    expect(question(form)).not.toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+
+    expect(dialog('Añadir episodio')).toBeInTheDocument();
+    expect(question(form)).toBeInTheDocument();
+  });
+
+  it('si el navegador cierra el diálogo por su cuenta, se cierra también para React (aunque haya cambios)', async () => {
+    routeFetch(fetchMock, {});
+    const user = setupUser();
+    renderSection(detail());
+    const form = await openWithChanges(user);
+
+    // Lo que hace Chromium con un segundo Escape sin interacción: cierra sin pasar por `cancel`.
+    (form as HTMLDialogElement).close();
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(posted()).toBe(false);
   });
 });
 
@@ -413,7 +541,7 @@ describe('SeriesEpisodesSection: borrar', () => {
     expect(within(confirm).getByRole('button', { name: 'Cancelar' })).toHaveFocus();
 
     await user.click(within(confirm).getByRole('button', { name: 'Sí, borrar episodio' }));
-    expect(within(confirm).getByRole('button', { name: 'Procesando...' })).toBeDisabled();
+    expectButtonUnavailable(within(confirm).getByRole('button', { name: 'Procesando...' }), { busy: true });
     // No es optimista: la fila sigue hasta que responde el servidor.
     expect(within(section()).getByText('Temporada 1 · 3 episodios')).toBeInTheDocument();
 

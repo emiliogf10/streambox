@@ -17,7 +17,8 @@ interface TextAreaFieldProps extends Omit<ComponentProps<'textarea'>, 'value'> {
  * Área de texto accesible con contador de caracteres (p. ej. la sinopsis).
  *
  * Sigue las mismas reglas que {@link FormField} (etiqueta visible, error que
- * sustituye a la ayuda, `aria-invalid`, `role="alert"`) y añade un contador
+ * sustituye a la ayuda, `aria-invalid` siempre presente, error sin región viva
+ * y 16 px en móvil) y añade un contador
  * "123 / 1000":
  * - **No se usa el atributo `maxLength`**: cortaría en silencio un texto pegado
  *   y el usuario no sabría qué ha perdido. Se deja escribir de más y el
@@ -42,10 +43,10 @@ export function TextAreaField({ id, label, value, maxChars, error, hint, classNa
       <textarea
         id={id}
         value={value}
-        aria-invalid={error ? true : undefined}
+        aria-invalid={Boolean(error)}
         aria-describedby={describedBy}
         className={
-          'focus-ring block min-h-36 w-full resize-y rounded-lg border bg-surface px-4 py-2.5 text-sm leading-relaxed text-white transition-colors ' +
+          'focus-ring block min-h-36 w-full resize-y rounded-lg border bg-surface px-4 py-2.5 text-base leading-relaxed text-white transition-colors sm:text-sm ' +
           'placeholder:text-muted ' +
           (error ? 'border-danger ' : 'border-field-border hover:border-muted ') +
           className
@@ -59,7 +60,7 @@ export function TextAreaField({ id, label, value, maxChars, error, hint, classNa
           </p>
         )}
         {error && (
-          <p id={errorId} role="alert" className="text-xs font-medium text-danger">
+          <p id={errorId} className="text-xs font-medium text-danger">
             {error}
           </p>
         )}

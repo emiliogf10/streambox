@@ -61,7 +61,13 @@ export function ResendVerificationButton({
   const waiting = remaining > 0;
   return (
     <div>
-      <Button variant={variant} className={className} disabled={sending || waiting} onClick={() => void resend(email)}>
+      <Button
+        variant={variant}
+        className={className}
+        pending={sending}
+        inactive={waiting}
+        onClick={() => void resend(email)}
+      >
         {sending ? 'Enviando...' : waiting ? `Reenviar en ${formatWaitTime(remaining)}` : 'Reenviar el correo'}
       </Button>
       <ResendNotice notice={notice} />

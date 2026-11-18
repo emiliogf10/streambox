@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RESEND_DONE_MESSAGE } from '../lib/emailVerification';
 import { apiCalls, errorResponse, jsonResponse, renderWithProviders, routeFetch } from '../test/helpers';
 import { RegisterPage } from './RegisterPage';
+import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -51,6 +52,26 @@ const submit = () => screen.getByRole('button', { name: 'Crear cuenta' });
 const PASSWORD_HINT =
   'Entre 12 y 64 caracteres. Evita contraseñas comunes y no incluyas tu usuario ni tu correo.';
 
+describe('RegisterPage: autocompletado', () => {
+  it('el gestor de contraseñas guarda el CORREO como usuario (con lo que se inicia sesión), no el nombre', () => {
+    renderRegister();
+
+    // Si el nombre fuera `username`, el gestor lo guardaría con la contraseña y luego lo pondría en el
+    // campo de correo del login: el login fallaría y contaría como intento para el bloqueo de la cuenta.
+    const username = screen.getByLabelText('Nombre de usuario');
+    expect(username).toHaveAttribute('autocomplete', 'nickname');
+    // Un identificador, no texto: sin mayúscula inicial ni autocorrección en el móvil.
+    expect(username).toHaveAttribute('autocapitalize', 'none');
+    expect(username).toHaveAttribute('autocorrect', 'off');
+    expect(username).toHaveAttribute('spellcheck', 'false');
+
+    const email = screen.getByLabelText('Correo electrónico');
+    expect(email).toHaveAttribute('type', 'email');
+    expect(email).toHaveAttribute('autocomplete', 'username');
+    expect(screen.getByLabelText('Contraseña')).toHaveAttribute('autocomplete', 'new-password');
+  });
+});
+
 describe('RegisterPage: validación en el cliente', () => {
   it('con todo vacío marca los tres campos como inválidos, no llama al servidor y enfoca el primero', async () => {
     const user = userEvent.setup();
@@ -69,7 +90,7 @@ describe('RegisterPage: validación en el cliente', () => {
     expect(apiCalls(fetchMock)).toEqual([]);
   });
 
-  it('los mensajes de error se anuncian (role="alert") junto al campo, no solo con color', async () => {
+  it('los errores van junto a su campo (texto, aria-invalid y descripción), sin una alerta por campo: se oyen al llegar el foco', async () => {
     const user = userEvent.setup();
     renderRegister();
 
@@ -78,12 +99,15 @@ describe('RegisterPage: validación en el cliente', () => {
     await user.type(password(), 'Faro-nube-2026');
     await user.click(submit());
 
-    const alert = screen.getByText('Introduce un correo electrónico válido.');
-    expect(alert).toHaveAttribute('role', 'alert');
+    // Ni el mensaje es una región viva ni hay otras: se oye una vez, al recibir el foco el campo que describe.
+    expect(screen.getByText('Introduce un correo electrónico válido.')).not.toHaveAttribute('role');
+    // (La zona de avisos de la app es una región `alert` permanente: se cuentan solo las que dicen algo.)
+    expect(screen.queryAllByRole('alert').filter((region) => region.textContent)).toHaveLength(0);
     expect(email()).toHaveAttribute('aria-invalid', 'true');
+    expect(email()).toHaveAccessibleDescription('Introduce un correo electrónico válido.');
     expect(email()).toHaveFocus();
-    expect(username()).not.toHaveAttribute('aria-invalid');
-    expect(password()).not.toHaveAttribute('aria-invalid');
+    expect(username()).toHaveAttribute('aria-invalid', 'false');
+    expect(password()).toHaveAttribute('aria-invalid', 'false');
   });
 
   it('la ayuda describe el campo; con error se sustituye por el error (no se repiten) y vuelve al corregir', async () => {
@@ -147,7 +171,7 @@ describe('RegisterPage: validación en el cliente', () => {
 
     await user.type(username(), 'a');
 
-    expect(username()).not.toHaveAttribute('aria-invalid');
+    expect(username()).toHaveAttribute('aria-invalid', 'false');
     // El resto de errores siguen hasta que se corrijan.
     expect(email()).toHaveAttribute('aria-invalid', 'true');
   });
@@ -263,7 +287,7 @@ describe('RegisterPage: respuesta del servidor', () => {
     await fillValid(user);
     await user.click(submit());
 
-    expect(await screen.findByRole('button', { name: 'Creando cuenta...' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Creando cuenta...' }), { busy: true });
   });
 
   it('400 con validationErrors: cada mensaje va junto a su campo y el foco al primero', async () => {
@@ -278,11 +302,14 @@ describe('RegisterPage: respuesta del servidor', () => {
     await fillValid(user);
     await user.click(submit());
 
-    expect(await screen.findByText('El correo ya tiene un formato inválido')).toHaveAttribute('role', 'alert');
+    expect(await screen.findByText('El correo ya tiene un formato inválido')).not.toHaveAttribute('role');
+    // Con dos campos mal, UN solo anuncio (el aviso general); antes cada error era otra alerta y se pisaban.
+    // (La zona de avisos de la app es una región `alert` permanente: se cuentan solo las que dicen algo.)
+    expect(screen.getAllByRole('alert').filter((region) => region.textContent)).toHaveLength(1);
     expect(email()).toHaveAttribute('aria-invalid', 'true');
     expect(email()).toHaveAccessibleDescription('El correo ya tiene un formato inválido');
     expect(password()).toHaveAccessibleDescription(/Contraseña demasiado débil/);
-    expect(username()).not.toHaveAttribute('aria-invalid');
+    expect(username()).toHaveAttribute('aria-invalid', 'false');
     expect(email()).toHaveFocus();
     // Aviso general de formulario con instrucciones.
     expect(screen.getByText('Revisa los campos marcados.')).toBeInTheDocument();
@@ -302,11 +329,11 @@ describe('RegisterPage: respuesta del servidor', () => {
     await user.type(password(), 'contraseña123');
     await user.click(submit());
 
-    expect(await screen.findByText(reason)).toHaveAttribute('role', 'alert');
+    expect(await screen.findByText(reason)).not.toHaveAttribute('role');
     expect(password()).toHaveAttribute('aria-invalid', 'true');
     expect(password()).toHaveAccessibleDescription(reason);
     expect(password()).toHaveFocus();
-    expect(username()).not.toHaveAttribute('aria-invalid');
+    expect(username()).toHaveAttribute('aria-invalid', 'false');
     expect(screen.getByText('ruta:/registro')).toBeInTheDocument();
     // Al corregirla, el error del servidor desaparece y vuelve la ayuda.
     await user.type(password(), 'x');
@@ -339,15 +366,15 @@ describe('RegisterPage: respuesta del servidor', () => {
     await fillValid(user);
     await user.click(submit());
 
-    expect(await screen.findByText('El nombre de usuario ya está en uso')).toHaveAttribute('role', 'alert');
+    expect(await screen.findByText('El nombre de usuario ya está en uso')).not.toHaveAttribute('role');
     expect(username()).toHaveAttribute('aria-invalid', 'true');
     expect(username()).toHaveAccessibleDescription('El nombre de usuario ya está en uso');
     expect(username()).toHaveFocus();
-    expect(email()).not.toHaveAttribute('aria-invalid');
+    expect(email()).toHaveAttribute('aria-invalid', 'false');
     expect(screen.getByText('Revisa los campos marcados.')).toBeInTheDocument();
     expect(screen.getByText('ruta:/registro')).toBeInTheDocument(); // no navega
     expect(email()).toHaveValue('ana@example.com');
-    expect(submit()).toBeEnabled();
+    expectButtonAvailable(submit());
   });
 
   /** El primer registro se acepta (202) y el siguiente da 409 de nombre, como tras «Corregir el correo». */
@@ -378,7 +405,7 @@ describe('RegisterPage: respuesta del servidor', () => {
     const message =
       'El nombre de usuario ya está en uso. Si es el que usaste hace un momento, lo tiene reservado aquel registro ' +
       'hasta que caduque su enlace (24 h): elige otro.';
-    expect(await screen.findByText(message)).toHaveAttribute('role', 'alert');
+    expect(await screen.findByText(message)).not.toHaveAttribute('role');
     expect(username()).toHaveAccessibleDescription(message);
     expect(username()).toHaveFocus();
   });
@@ -394,7 +421,7 @@ describe('RegisterPage: respuesta del servidor', () => {
     await user.type(username(), '_bis');
     await user.click(submit());
 
-    expect(await screen.findByText('El nombre de usuario ya está en uso')).toHaveAttribute('role', 'alert');
+    expect(await screen.findByText('El nombre de usuario ya está en uso')).not.toHaveAttribute('role');
     expect(username()).toHaveAccessibleDescription('El nombre de usuario ya está en uso');
     expect(screen.queryByText(/reservado/)).not.toBeInTheDocument();
   });
@@ -408,7 +435,7 @@ describe('RegisterPage: respuesta del servidor', () => {
     await user.click(submit());
 
     expect(await screen.findByText('Conflicto inesperado')).toHaveAttribute('role', 'alert');
-    expect(username()).not.toHaveAttribute('aria-invalid');
+    expect(username()).toHaveAttribute('aria-invalid', 'false');
   });
 
   it('429: bloquea el botón con cuenta atrás y lo reactiva al terminar', async () => {
@@ -422,12 +449,12 @@ describe('RegisterPage: respuesta del servidor', () => {
     await fillValid(user);
     await user.click(submit());
 
-    expect(await screen.findByRole('button', { name: 'Reintentar en 5 s' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 5 s' }));
 
     act(() => {
       vi.advanceTimersByTime(5_000);
     });
-    expect(screen.getByRole('button', { name: 'Crear cuenta' })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: 'Crear cuenta' }));
   });
 });
 
@@ -458,11 +485,11 @@ describe('RegisterPage: «Revisa tu correo» y reenviar el correo', () => {
     const user = await registerAndWait(() => jsonResponse({ message: 'x' }, 202));
 
     // Reenviar al instante invalidaría el enlace que va de camino.
-    expect(screen.getByRole('button', { name: 'Reenviar en 1 min' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Reenviar en 1 min' }));
     act(() => {
       vi.advanceTimersByTime(15_000);
     });
-    expect(screen.getByRole('button', { name: 'Reenviar en 45 s' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Reenviar en 45 s' }));
     act(() => {
       vi.advanceTimersByTime(45_000);
     });
@@ -483,7 +510,7 @@ describe('RegisterPage: «Revisa tu correo» y reenviar el correo', () => {
     expect(JSON.parse(String(init?.body))).toEqual({ email: 'ana@example.com' });
     expect(new Headers(init?.headers).get('X-Requested-With')).toBe('StreamBox');
     // Y vuelve a esperar otro minuto antes de dejar pedir otro.
-    expect(screen.getByRole('button', { name: 'Reenviar en 1 min' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Reenviar en 1 min' }));
   });
 
   it('429: avisa de la espera de Retry-After, bloquea el botón y retira el aviso al terminar', async () => {
@@ -499,13 +526,13 @@ describe('RegisterPage: «Revisa tu correo» y reenviar el correo', () => {
     expect(
       await screen.findByText('Has pedido demasiados correos seguidos. Podrás pedir otro en 2 min.'),
     ).toHaveAttribute('role', 'alert');
-    expect(screen.getByRole('button', { name: 'Reenviar en 2 min' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Reenviar en 2 min' }));
     expect(screen.queryByText(/te llegará un enlace nuevo/)).not.toBeInTheDocument();
 
     act(() => {
       vi.advanceTimersByTime(120_000);
     });
-    expect(screen.getByRole('button', { name: 'Reenviar el correo' })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: 'Reenviar el correo' }));
     expect(screen.queryByText(/demasiados correos/)).not.toBeInTheDocument();
   });
 
@@ -520,7 +547,7 @@ describe('RegisterPage: «Revisa tu correo» y reenviar el correo', () => {
     expect(
       await screen.findByText('Has pedido demasiados correos seguidos. Inténtalo de nuevo más tarde.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Reenviar el correo' })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: 'Reenviar el correo' }));
   });
 
   it('red caída al reenviar: lo dice y deja reintentar', async () => {
@@ -534,6 +561,6 @@ describe('RegisterPage: «Revisa tu correo» y reenviar el correo', () => {
     await user.click(screen.getByRole('button', { name: 'Reenviar el correo' }));
 
     expect(await screen.findByText(/No se pudo conectar con el servidor/)).toHaveAttribute('role', 'alert');
-    expect(screen.getByRole('button', { name: 'Reenviar el correo' })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: 'Reenviar el correo' }));
   });
 });

@@ -354,7 +354,7 @@ function ResetFlow({ token, announce }: ResetFlowProps) {
           Al cambiarla se cerrarán todas las sesiones abiertas con tu cuenta, también en otros dispositivos. Si aún no
           habías confirmado tu correo, quedará confirmado.
         </p>
-        <Button type="submit" disabled={status === 'saving' || blocked} className="w-full">
+        <Button type="submit" pending={status === 'saving'} inactive={blocked} className="w-full">
           {submitLabel}
         </Button>
       </form>

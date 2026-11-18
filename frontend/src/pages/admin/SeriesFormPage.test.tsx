@@ -21,6 +21,7 @@ import type { Genre, SeriesDetail } from '../../lib/types';
 import { installManualTimers, passTime } from '../../test/fakeTimers';
 import { errorResponse, jsonResponse, makeSeriesDetail, renderWithProviders, routeFetch } from '../../test/helpers';
 import { SeriesFormPage } from './SeriesFormPage';
+import { expectButtonAvailable, expectButtonUnavailable } from '../../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -123,7 +124,7 @@ describe('SeriesFormPage: alta', () => {
     routeFetch(fetchMock, { 'GET /api/genres': () => new Promise<Response>((resolve) => (resolveGenres = resolve)) });
     renderForm('/admin/series/nueva');
 
-    expect(submitNew()).toBeDisabled();
+    expectButtonUnavailable(submitNew());
     expect(submitNew()).toHaveAccessibleDescription('Podrás guardar cuando se carguen los géneros.');
 
     resolveGenres(jsonResponse(GENRES));
@@ -144,9 +145,9 @@ describe('SeriesFormPage: alta', () => {
     expect(field.description()).toHaveAccessibleDescription(/La descripción es obligatoria/);
     expect(field.releaseYear()).toHaveAccessibleDescription('El año de estreno es obligatorio');
     // El año de fin vacío es válido: conserva su ayuda.
-    expect(field.endYear()).not.toHaveAttribute('aria-invalid');
+    expect(field.endYear()).toHaveAttribute('aria-invalid', 'false');
     // El tráiler también es opcional.
-    expect(field.trailer()).not.toHaveAttribute('aria-invalid');
+    expect(field.trailer()).toHaveAttribute('aria-invalid', 'false');
     expect(field.image()).toHaveAccessibleDescription('La URL de la imagen es obligatoria');
     expect(genresGroup()).toHaveAccessibleDescription('Indica al menos un género');
     expect(field.title()).toHaveFocus();
@@ -246,7 +247,7 @@ describe('SeriesFormPage: alta', () => {
 
     await user.click(submitNew());
 
-    expect(screen.getByRole('button', { name: 'Guardando...' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Guardando...' }), { busy: true });
     expect(sentBody('POST', '/api/series')).toEqual({
       title: 'Severance',
       description: 'Empleados con la memoria dividida.',
@@ -375,7 +376,7 @@ describe('SeriesFormPage: edición', () => {
     expect(field.image()).toHaveValue('/covers/dark.webp');
     // Sin tráiler (`null`): campo vacío y sin error.
     expect(field.trailer()).toHaveValue('');
-    expect(field.trailer()).not.toHaveAttribute('aria-invalid');
+    expect(field.trailer()).toHaveAttribute('aria-invalid', 'false');
     expect(await within(genresGroup()).findByRole('checkbox', { name: 'Ciencia ficción' })).toBeChecked();
     expect(within(genresGroup()).getByRole('checkbox', { name: 'Acción' })).not.toBeChecked();
 
@@ -430,7 +431,7 @@ describe('SeriesFormPage: edición', () => {
     expect(sentBody('PUT', '/api/series/4')).toMatchObject({ title: 'Dark (versión extendida)', endYear: null, genreIds: [1, 2] });
     expect(screen.getByRole('heading', { level: 2, name: 'Editar «Dark (versión extendida)»' })).toBeInTheDocument();
     expect(screen.getByText('ruta:/admin/series/4/editar')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: 'Guardar cambios' }));
     // La vuelta al listado sigue apuntando a donde se estaba.
     expect(screen.getAllByRole('link', { name: 'Volver al listado' })[0]).toHaveAttribute('href', '/admin/series?page=2');
   });

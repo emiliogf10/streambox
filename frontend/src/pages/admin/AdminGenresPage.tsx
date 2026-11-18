@@ -285,7 +285,7 @@ export function AdminGenresPage() {
                   />
                 </div>
                 <div className="flex gap-2">
-                  <Button type="submit" disabled={saving}>
+                  <Button type="submit" pending={saving}>
                     {saving ? 'Guardando...' : 'Guardar'}
                   </Button>
                   <Button variant="outline" onClick={cancelRename} disabled={saving}>
@@ -366,7 +366,7 @@ export function AdminGenresPage() {
           />
         </div>
         {/* sm:mt-6.5: alinea el botón con el campo (altura de la etiqueta + su margen). */}
-        <Button type="submit" disabled={creating} className="sm:mt-6.5">
+        <Button type="submit" pending={creating} className="sm:mt-6.5">
           {creating ? 'Añadiendo...' : 'Añadir'}
         </Button>
       </form>

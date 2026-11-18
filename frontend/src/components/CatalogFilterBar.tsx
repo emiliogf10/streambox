@@ -6,6 +6,7 @@ import type { GenresStatus } from '../hooks/useGenres';
 import { SORT_OPTIONS } from '../lib/catalogFilters';
 import type { CatalogKind, CatalogSortKey } from '../lib/catalogFilters';
 import type { Genre } from '../lib/types';
+import { useDelayedAnnouncement } from '../hooks/useDelayedAnnouncement';
 import { useRetryFocus } from '../hooks/useRetryFocus';
 import { Button } from './Button';
 import { FormField } from './FormField';
@@ -53,7 +54,7 @@ function SelectField({
         <div className={`relative min-w-0 flex-1 ${controlClassName}`.trim()}>
           <select
             id={id}
-            className="focus-ring min-h-11 w-full cursor-pointer appearance-none truncate rounded-lg border border-field-border bg-surface py-2.5 pr-10 pl-4 text-sm text-white transition-colors hover:border-muted"
+            className="focus-ring min-h-11 w-full cursor-pointer appearance-none truncate rounded-lg border border-field-border bg-surface py-2.5 pr-10 pl-4 text-base text-white transition-colors hover:border-muted sm:text-sm"
             {...selectProps}
           >
             {children}
@@ -120,7 +121,10 @@ export interface CatalogFilterBarProps {
  * `type="number"`: ese tipo cambia el valor con la rueda del ratón al
  * desplazar la página y acepta `e` o decimales. Se valida en el cliente con el
  * mismo rango que el backend; el error (texto, no solo color) aparece al salir
- * del campo o con 4 caracteres, no mientras se escribe «20…».
+ * del campo o con 4 caracteres, no mientras se escribe «20…». Como aparece sin
+ * enviar nada (el foco no se mueve), lo anuncia una región cortés propia con
+ * medio segundo de retraso ({@link useDelayedAnnouncement}); el mensaje bajo el
+ * campo no es una región viva (ver `FormField`).
  *
  * **Responsive.** En móvil, rejilla de dos columnas: género y año en la primera
  * fila (el año, estrecho), orden y «Quitar filtros» a todo el ancho debajo.
@@ -159,6 +163,7 @@ export function CatalogFilterBar({
   const sortId = useId();
   // Al reintentar, el aviso de los géneros desaparece: el foco va al desplegable de género, que sigue ahí.
   const { retryRef, handleRetry } = useRetryFocus(onRetryGenres, () => document.getElementById(genreId));
+  const yearAnnouncement = useDelayedAnnouncement(yearError);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -227,6 +232,11 @@ export function CatalogFilterBar({
           ))}
         </SelectField>
       </form>
+
+      {/* Siempre en la página (vacía si no hay error): los lectores solo anuncian bien los cambios de una región que ya existía. */}
+      <p role="status" className="sr-only">
+        {yearAnnouncement && `Año: ${yearAnnouncement}`}
+      </p>
 
       {/* Sin géneros se puede seguir filtrando por año y orden: el fallo se explica aquí, sin tapar la página. */}
       {genresStatus === 'error' && (

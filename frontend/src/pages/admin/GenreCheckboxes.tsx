@@ -94,6 +94,8 @@ export function GenreCheckboxes({
               className="focus-ring size-4 shrink-0 accent-accent"
               checked={selected.includes(genre.id)}
               onChange={() => onToggle(genre.id)}
+              // El error del grupo, en cada casilla: tras un envío fallido el foco llega a la primera y lo lee.
+              aria-describedby={error ? errorId : undefined}
             />
             <span className="min-w-0 wrap-anywhere">{genre.name}</span>
           </label>
@@ -114,7 +116,8 @@ export function GenreCheckboxes({
       <legend className="mb-1.5 text-sm font-medium text-gray-300">Géneros</legend>
       {body}
       {error ? (
-        <p id={errorId} role="alert" className="mt-1.5 text-xs font-medium text-danger">
+        // Sin región viva: tras un envío fallido el foco va a la primera casilla, que lee este error.
+        <p id={errorId} className="mt-1.5 text-xs font-medium text-danger">
           {error}
         </p>
       ) : (

@@ -27,6 +27,7 @@ import {
   renderWithProviders,
   routeFetch,
 } from '../test/helpers';
+import { expectButtonUnavailable } from '../test/buttonState';
 import { createTestQueryClient } from '../test/queryClient';
 import { WELCOME_SAVED_MESSAGE, WELCOME_SKIPPED_MESSAGE, WelcomePage } from './WelcomePage';
 
@@ -208,6 +209,34 @@ describe('Elegir géneros', () => {
     expect(terror).toBeChecked();
   });
 
+  it('mientras se guarda, «Guardar» conserva el foco (ocupado, sin `disabled`), «Ahora no» espera y no hay un segundo envío', async () => {
+    let answer!: (response: Response) => void;
+    const { user } = renderWelcome({
+      routes: { [SAVE_FAVORITE_GENRES]: () => new Promise<Response>((resolve) => (answer = resolve)) },
+    });
+    const group = await picker();
+    for (const name of ['Acción', 'Animación', 'Ciencia ficción']) {
+      await user.click(within(group).getByRole('checkbox', { name }));
+    }
+    const save = screen.getByRole('button', { name: 'Guardar' });
+    save.focus();
+
+    await user.keyboard('{Enter}');
+
+    const saving = screen.getByRole('button', { name: 'Guardando...' });
+    expectButtonUnavailable(saving, { busy: true });
+    expect(saving).toHaveFocus();
+    const skip = screen.getByRole('button', { name: 'Ahora no' });
+    expectButtonUnavailable(skip);
+    expect(skip).not.toHaveAttribute('aria-busy');
+    await user.keyboard('{Enter}');
+    await user.click(skip);
+    expect(savedBodies()).toHaveLength(1);
+
+    answer(jsonResponse([GENRES[0], GENRES[1], GENRES[2]]));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Portada' })).toBeInTheDocument();
+  });
+
   it('«Ahora no» envía la lista vacía y lleva al inicio con un aviso que dice dónde elegirlos después', async () => {
     const { user } = renderWelcome();
     await picker();
@@ -370,7 +399,9 @@ describe('Sin géneros y errores', () => {
 
     await user.click(screen.getByRole('button', { name: 'Guardar' }));
 
-    expect(await within(group).findByRole('alert')).toHaveTextContent('Alguno de los géneros ya no tiene títulos.');
+    // El error describe el grupo, que recibe el foco: así se oye una vez (sin una región viva que se pise con el foco).
+    expect(await within(group).findByText('Alguno de los géneros ya no tiene títulos.')).not.toHaveAttribute('role');
+    expect(group).toHaveAccessibleDescription(/^Alguno de los géneros ya no tiene títulos\./);
     expect(group).toHaveFocus();
     await waitFor(() => expect(optionCalls()).toBe(2));
     expect(screen.queryByRole('button', { name: 'Continuar sin guardar' })).not.toBeInTheDocument();

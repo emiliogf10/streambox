@@ -368,7 +368,8 @@ for (const viewport of VIEWPORTS) {
       const year = form.getByRole('textbox', { name: 'Año' });
       await year.fill('99');
       await year.press('Tab');
-      const yearError = page.getByRole('alert').filter({ hasText: 'Escribe un año entre 1888 y 2100.' });
+      // El mensaje visible (exacto: la región que lo anuncia dice «Año: …» y no se ve).
+      const yearError = form.getByText('Escribe un año entre 1888 y 2100.', { exact: true });
       await expectFullyInsideViewportWidth(yearError, page, 'error del año');
       await expectFilterBarFits(page);
       await expectClearFiltersNextToSort(page);

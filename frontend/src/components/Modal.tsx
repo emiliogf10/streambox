@@ -3,12 +3,27 @@ import type { ReactNode, RefObject } from 'react';
 import { useToast } from '../context/ToastContext';
 import { useModalDialog } from '../hooks/useModalDialog';
 
+/**
+ * Por qué pide cerrarse el diálogo:
+ * - `escape`: Escape (o el gesto «atrás» del móvil), que llega como evento `cancel`;
+ * - `backdrop`: clic en el fondo;
+ * - `forced`: el navegador YA lo ha cerrado por su cuenta (p. ej. un segundo Escape
+ *   seguido sin interacción del usuario, que no deja cancelar: es una protección
+ *   del navegador contra páginas que no dejan salir). Aquí el padre debe cerrar:
+ *   el `<dialog>` ya no está abierto.
+ */
+export type ModalCloseReason = 'escape' | 'backdrop' | 'forced';
+
 /** Propiedades de {@link Modal}. */
 interface ModalProps {
   /** Si está abierto. Por defecto `true`: basta con montarlo/desmontarlo. */
   open?: boolean;
-  /** Se invoca al pedir el cierre (Escape, clic en el fondo...). El padre decide si cerrar. */
-  onClose: () => void;
+  /**
+   * Se invoca al pedir el cierre (Escape, clic en el fondo...) con el motivo. El
+   * padre decide si cerrar: p. ej. un formulario con cambios sin guardar puede
+   * pedir confirmación en lugar de cerrar (salvo con `forced`).
+   */
+  onClose: (reason: ModalCloseReason) => void;
   /** Si es `false` (p. ej. mientras hay una operación en curso) Escape y el fondo no cierran. */
   dismissible?: boolean;
   /** `alertdialog` para preguntas que exigen respuesta (confirmaciones); `dialog` para el resto. */
@@ -75,7 +90,7 @@ export function Modal({
       onCancel={(event) => {
         // Escape: el navegador cerraría el <dialog> por su cuenta, dejando a React con un estado desfasado.
         event.preventDefault();
-        if (dismissible) onClose();
+        if (dismissible) onClose('escape');
       }}
       // Respaldo: el navegador puede cerrar el diálogo sin pasar por `cancel`
       // (p. ej. al pulsar Escape dos veces seguidas sin otra interacción).
@@ -83,14 +98,14 @@ export function Modal({
       // diálogo ya se ha vuelto a abrir (React StrictMode monta, desmonta y
       // vuelve a montar en desarrollo) es un cierre antiguo y se ignora.
       onClose={() => {
-        if (!dialogRef.current?.open) onClose();
+        if (!dialogRef.current?.open) onClose('forced');
       }}
       onMouseDown={(event) => {
         pressStartedOnBackdrop.current = event.target === dialogRef.current;
       }}
       onClick={(event) => {
         // Un clic cuyo destino es el propio <dialog> (no su contenido) es un clic en el fondo.
-        if (event.target === dialogRef.current && pressStartedOnBackdrop.current && dismissible) onClose();
+        if (event.target === dialogRef.current && pressStartedOnBackdrop.current && dismissible) onClose('backdrop');
       }}
       className={
         'm-auto max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] overflow-y-auto overscroll-contain rounded-2xl ' +

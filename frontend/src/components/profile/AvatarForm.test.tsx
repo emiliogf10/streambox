@@ -20,6 +20,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiCalls, errorResponse, jsonResponse, makeUser, renderWithProviders, routeFetch } from '../../test/helpers';
 import { AvatarForm } from './AvatarForm';
+import { expectButtonUnavailable } from '../../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 const PATCH_ME = 'PATCH /api/users/me';
@@ -109,7 +110,7 @@ describe('AvatarForm: envío', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar icono' }));
 
     const saving = await screen.findByRole('button', { name: 'Guardando...' });
-    expect(saving).toBeDisabled();
+    expectButtonUnavailable(saving);
     expect(screen.getByRole('button', { name: 'Cancelar' })).toBeDisabled();
     await user.click(saving);
     expect(patchCalls()).toHaveLength(1);

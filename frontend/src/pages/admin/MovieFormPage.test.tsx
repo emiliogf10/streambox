@@ -16,6 +16,7 @@ import type { Genre } from '../../lib/types';
 import { installManualTimers, passTime } from '../../test/fakeTimers';
 import { errorResponse, jsonResponse, makeMovie, renderWithProviders, routeFetch } from '../../test/helpers';
 import { MovieFormPage } from './MovieFormPage';
+import { expectButtonAvailable, expectButtonUnavailable } from '../../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -149,10 +150,12 @@ describe('MovieFormPage: alta', () => {
     expect(field.year()).toHaveAccessibleDescription('Indica el año de estreno');
     expect(field.image()).toHaveAccessibleDescription('La URL de la portada es obligatoria');
     // Vídeo y tráiler son opcionales: vacíos no son un error.
-    expect(field.video()).not.toHaveAttribute('aria-invalid');
-    expect(field.trailer()).not.toHaveAttribute('aria-invalid');
+    expect(field.video()).toHaveAttribute('aria-invalid', 'false');
+    expect(field.trailer()).toHaveAttribute('aria-invalid', 'false');
     expect(genresGroup()).toHaveAccessibleDescription('Elige al menos un género');
-    expect(screen.getByText('Elige al menos un género')).toHaveAttribute('role', 'alert');
+    // Sin región viva: cada casilla lo tiene de descripción, así que se oye cuando el foco llega al grupo.
+    expect(screen.getByText('Elige al menos un género')).not.toHaveAttribute('role');
+    expect(within(genresGroup()).getAllByRole('checkbox')[0]).toHaveAccessibleDescription('Elige al menos un género');
     expect(field.title()).toHaveFocus();
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
@@ -231,7 +234,7 @@ describe('MovieFormPage: alta', () => {
 
     await user.click(submitNew());
 
-    expect(screen.getByRole('button', { name: 'Guardando...' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Guardando...' }), { busy: true });
     expect(sentBody('POST', '/api/movies')).toEqual({
       title: 'Interstellar',
       description: 'Un viaje a través de un agujero de gusano.',
@@ -299,7 +302,7 @@ describe('MovieFormPage: alta', () => {
     expect(field.trailer()).toHaveAttribute('aria-invalid', 'true');
     expect(field.trailer()).toHaveAccessibleDescription('El tráiler debe ser un enlace de un vídeo de YouTube');
     expect(field.trailer()).toHaveFocus();
-    expect(field.video()).not.toHaveAttribute('aria-invalid');
+    expect(field.video()).toHaveAttribute('aria-invalid', 'false');
   });
 
   it('un 403 (ya no es administrador) se explica en el formulario sin perder lo escrito', async () => {
@@ -316,7 +319,7 @@ describe('MovieFormPage: alta', () => {
 
     expect(await screen.findByText('No tienes permisos para realizar esta acción.')).toHaveAttribute('role', 'alert');
     expect(field.title()).toHaveValue('  Interstellar ');
-    expect(submitNew()).toBeEnabled();
+    expectButtonAvailable(submitNew());
   });
 
   it('un título con un carácter de control (NUL pegado) se marca con el mensaje del servidor y no se envía', async () => {
@@ -471,7 +474,7 @@ describe('MovieFormPage: edición', () => {
     expect(await within(genresGroup()).findByRole('checkbox', { name: 'Ciencia ficción' })).toBeChecked();
     expect(within(genresGroup()).getByRole('checkbox', { name: 'Drama' })).toBeChecked();
     expect(within(genresGroup()).getByRole('checkbox', { name: 'Acción' })).not.toBeChecked();
-    expect(field.image()).not.toHaveAttribute('aria-invalid');
+    expect(field.image()).toHaveAttribute('aria-invalid', 'false');
   });
 
   it('guarda con PUT y vuelve al listado en la misma búsqueda y página de la que se vino', async () => {
@@ -541,8 +544,8 @@ describe('MovieFormPage: edición', () => {
 
     expect(field.video()).toHaveValue('');
     expect(field.trailer()).toHaveValue('');
-    expect(field.video()).not.toHaveAttribute('aria-invalid');
-    expect(field.trailer()).not.toHaveAttribute('aria-invalid');
+    expect(field.video()).toHaveAttribute('aria-invalid', 'false');
+    expect(field.trailer()).toHaveAttribute('aria-invalid', 'false');
 
     await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
 

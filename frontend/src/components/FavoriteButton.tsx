@@ -18,7 +18,10 @@ type Props = { className?: string } & ({ movie: Movie; series?: never } | { seri
  * mismo. Películas y series son listas distintas en el servidor (una película y
  * una serie pueden tener el mismo id), por eso el botón le dice al contexto de
  * qué tipo es. Mientras hay una petición en curso para ese título se bloquea
- * para evitar dobles clics. El estado se comunica con texto e icono (no solo con color).
+ * para evitar dobles clics, con `pending` y no con `disabled` (como
+ * `LikeButton`): un botón desactivado mientras tiene el foco lo suelta al
+ * `<body>`, y quien guarda un título con el teclado perdería su sitio en la
+ * página cada vez. El estado se comunica con texto e icono (no solo con color).
  */
 export function FavoriteButton(props: Props) {
   const { isFavorite, isPending, toggle, toggleSeries } = useFavorites();
@@ -30,7 +33,7 @@ export function FavoriteButton(props: Props) {
     <Button
       variant="outline"
       onClick={() => void (props.series ? toggleSeries(props.series) : toggle(props.movie))}
-      disabled={isPending(item.id, kind)}
+      pending={isPending(item.id, kind)}
       className={`${active ? 'bg-white/15' : ''} ${props.className ?? ''}`}
     >
       {active ? (

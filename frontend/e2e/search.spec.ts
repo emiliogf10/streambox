@@ -90,14 +90,18 @@ test.describe('Buscador', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Dune: Parte Dos' })).toBeVisible();
   });
 
-  test('Escape cierra la lista y vacía el campo', async ({ page }) => {
+  test('Escape va por pasos: el primero cierra la lista y conserva el texto; el segundo vacía el campo', async ({ page }) => {
     const search = page.getByRole('combobox', { name: 'Buscar películas y series por título' });
     await search.fill('mad');
     await expect(page.getByRole('listbox')).toBeVisible();
 
     await search.press('Escape');
     await expect(page.getByRole('listbox')).toHaveCount(0);
-    await expect(search).toHaveValue('');
     await expect(search).toHaveAttribute('aria-expanded', 'false');
+    await expect(search).toHaveValue('mad');
+
+    await search.press('Escape');
+    await expect(search).toHaveValue('');
+    await expect(search).toBeFocused();
   });
 });

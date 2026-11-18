@@ -49,7 +49,8 @@ export function RequestLinkForm({ id, send, doneMessage }: RequestLinkFormProps)
         id={id}
         label="Correo electrónico"
         type="email"
-        autoComplete="email"
+        // `username`, como en el login: así el gestor de contraseñas ofrece la cuenta guardada.
+        autoComplete="username"
         placeholder="tu@correo.com"
         required
         error={fieldError}
@@ -60,7 +61,7 @@ export function RequestLinkForm({ id, send, doneMessage }: RequestLinkFormProps)
         }}
       />
       <div>
-        <Button type="submit" variant="outline" disabled={sending || waiting} className="w-full">
+        <Button type="submit" variant="outline" pending={sending} inactive={waiting} className="w-full">
           {sending ? 'Enviando...' : waiting ? `Pedir otro en ${formatWaitTime(remaining)}` : 'Enviar un enlace nuevo'}
         </Button>
         <ResendNotice notice={notice} />

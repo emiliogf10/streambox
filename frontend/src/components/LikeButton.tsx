@@ -25,10 +25,11 @@ type Props = { className?: string } & ({ movie: Movie; series?: never } | { seri
  * - Nombre accesible = texto visible + título («Me gusta — Interstellar»,
  *   «Te gusta — Interstellar»): empieza por lo que se ve (WCAG 2.5.3) y, fuera
  *   de contexto, dice de qué título es (como «Mi lista — …»).
- * - Mientras su petición está en curso se bloquea con `aria-disabled` y no con
- *   `disabled`: un botón con `disabled` pierde el foco en Chromium, y quien usa
- *   teclado tendría que volver a buscarlo. Los clics de ese rato se ignoran
- *   (`useLikes` no deja dos cambios a la vez para el mismo título).
+ * - Mientras su petición está en curso se bloquea con `pending` de `Button`
+ *   (`aria-disabled` + `aria-busy`) y no con `disabled`: un botón con
+ *   `disabled` pierde el foco en Chromium, y quien usa teclado tendría que
+ *   volver a buscarlo. `Button` ignora los clics de ese rato (y `useLikes`
+ *   tampoco deja dos cambios a la vez para el mismo título).
  * - `min-h-11` (44 px) y `focus-ring` vienen de `Button`.
  *
  * El corazón relleno usa el token `like` (sus contrastes, en `index.css`). Es
@@ -45,10 +46,8 @@ export function LikeButton(props: Props) {
     <Button
       variant="outline"
       aria-pressed={liked}
-      aria-disabled={pending || undefined}
-      onClick={() => {
-        if (!pending) void toggle(kind, item);
-      }}
+      pending={pending}
+      onClick={() => void toggle(kind, item)}
       className={`${liked ? 'bg-white/15' : ''} ${props.className ?? ''}`}
     >
       <Heart aria-hidden="true" className={`size-4 ${liked ? 'fill-current text-like' : ''}`} />

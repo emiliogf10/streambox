@@ -25,6 +25,7 @@ import {
   routeFetch,
 } from '../../test/helpers';
 import { AdminSeriesPage } from './AdminSeriesPage';
+import { expectButtonUnavailable } from '../../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -379,7 +380,7 @@ describe('AdminSeriesPage: borrar', () => {
     await user.click(screen.getByRole('button', { name: 'Sí, borrar serie' }));
 
     // No es optimista: mientras el servidor no responde, la serie sigue y el diálogo no se puede cerrar.
-    expect(screen.getByRole('button', { name: 'Procesando...' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Procesando...' }), { busy: true });
     expect(row('Dark')).toBeInTheDocument();
 
     resolveDelete(noContentResponse());
@@ -499,8 +500,11 @@ describe('AdminSeriesPage: texto que el servidor no admite (máx. 150, sin carac
     renderList('/admin/series?q=dark');
 
     const reason = 'La búsqueda no puede contener caracteres de control.';
-    expect(await screen.findByText(reason)).toHaveAttribute('role', 'alert');
+    // El motivo, bajo el campo (su descripción) y anunciado UNA vez por la región de estado de la página.
+    expect(await screen.findByText(reason, { selector: '#admin-series-search-error' })).not.toHaveAttribute('role');
+    expect(screen.getByText(reason, { selector: '[role="status"]' })).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: 'Buscar por título' })).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('searchbox', { name: 'Buscar por título' })).toHaveAccessibleDescription(reason);
     expect(screen.getByRole('heading', { name: 'No se puede buscar ese texto' })).toBeInTheDocument();
     expect(
       screen.getByText('Corrige la búsqueda (el motivo está bajo el campo) o bórrala para ver todas las series.'),

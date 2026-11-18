@@ -29,6 +29,7 @@ import {
   routeFetch,
 } from '../test/helpers';
 import { UserStatusProbe } from '../test/UserStatusProbe';
+import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -150,7 +151,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
     expect(newPasswordField()).toHaveFocus();
 
     await submitPasswords(user, PASSWORD, `${PASSWORD}x`);
-    expect(newPasswordField()).not.toHaveAttribute('aria-invalid');
+    expect(newPasswordField()).toHaveAttribute('aria-invalid', 'false');
     expect(confirmField()).toHaveAccessibleDescription('Las contraseñas no coinciden.');
     expect(confirmField()).toHaveFocus();
     expect(confirmBodies()).toEqual([]);
@@ -240,7 +241,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
 
     await submitPasswords(user);
 
-    expect(await screen.findByRole('button', { name: 'Cambiando la contraseña...' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Cambiando la contraseña...' }), { busy: true });
   });
 
   it('400 INVALID_RESET_TOKEN: «El enlace no es válido o ha caducado», con el foco en el título y la forma de pedir otro', async () => {
@@ -267,7 +268,7 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
     expect(done.closest('[role="status"]')).not.toBeNull();
     const requests = apiCalls(fetchMock).filter(([url]) => url === '/api/auth/password-reset');
     expect(requests.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([{ email: 'ana@example.com' }]);
-    expect(screen.getByRole('button', { name: /^Pedir otro en/ })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: /^Pedir otro en/ }));
   });
 
   it('400 VALIDATION_ERROR de la contraseña: el motivo junto al campo y el token sigue valiendo para reintentar', async () => {
@@ -287,8 +288,10 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
 
     await submitPasswords(user, 'contraseña123');
 
-    expect(await screen.findByText('La contraseña es demasiado común.')).toHaveAttribute('role', 'alert');
+    // Sin región viva propia (varias se pisarían): se oye al llegar el foco al campo, que lo tiene de descripción.
+    expect(await screen.findByText('La contraseña es demasiado común.')).not.toHaveAttribute('role');
     expect(newPasswordField()).toHaveAttribute('aria-invalid', 'true');
+    expect(newPasswordField()).toHaveAccessibleDescription(/La contraseña es demasiado común\./);
     expect(newPasswordField()).toHaveFocus();
     expect(screen.getByRole('heading', { level: 1, name: 'Elige una contraseña nueva' })).toBeInTheDocument();
 
@@ -347,12 +350,12 @@ describe('ResetPasswordPage: con un token en el enlace', () => {
 
     await submitPasswords(user);
 
-    expect(await screen.findByRole('button', { name: 'Reintentar en 30 s' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 30 s' }));
     expect(screen.getByText('Demasiados intentos. Inténtalo de nuevo en 30 s.')).toHaveAttribute('role', 'alert');
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
-    expect(submitButton()).toBeEnabled();
+    expectButtonAvailable(submitButton());
     expect(screen.queryByText(/Demasiados intentos/)).not.toBeInTheDocument();
   });
 });
@@ -370,7 +373,7 @@ describe('ResetPasswordPage: sin token válido en el enlace', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'El enlace no es válido o ha caducado' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Contraseña nueva')).not.toBeInTheDocument();
     expect(screen.getByText(/comprueba también que esté completo/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Enviar un enlace nuevo' })).toBeEnabled();
+    expectButtonAvailable(screen.getByRole('button', { name: 'Enviar un enlace nuevo' }));
     await vi.waitFor(() => expect(fetchMock.mock.calls.map(([url]) => url)).toContain('/api/auth/refresh'));
     expect(apiCalls(fetchMock)).toEqual([]);
   });
@@ -427,12 +430,12 @@ describe('ResetPasswordPage: otro enlace con la página ya abierta', () => {
     const user = userEvent.setup();
     renderReset(`#token=${TOKEN}`);
     await submitPasswords(user);
-    expect(await screen.findByRole('button', { name: 'Reintentar en 30 s' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 30 s' }));
 
     await user.click(openNewLink());
 
     expect(await screen.findByRole('heading', { name: 'Elige una contraseña nueva' })).toHaveFocus();
-    expect(submitButton()).toBeEnabled();
+    expectButtonAvailable(submitButton());
     expect(screen.queryByText(/Demasiados intentos/)).not.toBeInTheDocument();
   });
 });

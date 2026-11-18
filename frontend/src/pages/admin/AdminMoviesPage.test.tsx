@@ -24,6 +24,7 @@ import {
   routeFetch,
 } from '../../test/helpers';
 import { AdminMoviesPage } from './AdminMoviesPage';
+import { expectButtonUnavailable } from '../../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -372,7 +373,7 @@ describe('AdminMoviesPage: borrar', () => {
     await user.click(screen.getByRole('button', { name: 'Sí, borrar película' }));
 
     // Mientras el servidor no responde, la película sigue ahí y el diálogo no se puede cerrar.
-    expect(screen.getByRole('button', { name: 'Procesando...' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Procesando...' }), { busy: true });
     expect(row('Interstellar')).toBeInTheDocument();
 
     resolveDelete(noContentResponse());
@@ -564,7 +565,10 @@ describe('AdminMoviesPage: texto que el servidor no admite (máx. 150, sin carac
 
     const reason = 'La búsqueda no puede superar los 150 caracteres.';
     const field = screen.getByRole('searchbox', { name: 'Buscar por título' });
-    expect(await screen.findByText(reason)).toHaveAttribute('role', 'alert');
+    // El motivo, bajo el campo (su descripción) y anunciado UNA vez por la región de estado de la página:
+    // aparece sin mover el foco, así que el mensaje del campo no basta, pero tampoco es otra región viva.
+    expect(await screen.findByText(reason, { selector: '#admin-movies-search-error' })).not.toHaveAttribute('role');
+    expect(screen.getByText(reason, { selector: '[role="status"]' })).toBeInTheDocument();
     expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(field).toHaveAccessibleDescription(reason);
     expect(screen.getByRole('heading', { name: 'No se puede buscar ese texto' })).toBeInTheDocument();
@@ -579,7 +583,7 @@ describe('AdminMoviesPage: texto que el servidor no admite (máx. 150, sin carac
     await user.click(screen.getByRole('button', { name: 'Borrar búsqueda' }));
 
     expect(await screen.findByRole('row', { name: /^Dredd/ })).toBeInTheDocument();
-    expect(field).not.toHaveAttribute('aria-invalid');
+    expect(field).toHaveAttribute('aria-invalid', 'false');
     expect(screen.queryByText(reason)).not.toBeInTheDocument();
   });
 
@@ -593,6 +597,6 @@ describe('AdminMoviesPage: texto que el servidor no admite (máx. 150, sin carac
     renderList('/admin/peliculas?q=dredd');
 
     expect(await screen.findByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
-    expect(screen.getByRole('searchbox', { name: 'Buscar por título' })).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByRole('searchbox', { name: 'Buscar por título' })).toHaveAttribute('aria-invalid', 'false');
   });
 });

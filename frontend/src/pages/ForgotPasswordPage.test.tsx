@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppRoutes } from '../App';
 import { RESET_REQUEST_DONE_MESSAGE } from '../lib/passwordReset';
 import { apiCalls, errorResponse, jsonResponse, renderWithProviders, routeFetch } from '../test/helpers';
+import { expectButtonAvailable, expectButtonUnavailable } from '../test/buttonState';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -63,6 +64,8 @@ describe('ForgotPasswordPage: el formulario', () => {
       screen.getByText('Escribe el correo de tu cuenta y te llegará un enlace para elegir una nueva.'),
     ).toBeInTheDocument();
     expect(emailField()).toHaveAttribute('type', 'email');
+    // Como en el login: el gestor de contraseñas ofrece la cuenta guardada (el correo es su «usuario»).
+    expect(emailField()).toHaveAttribute('autocomplete', 'username');
     expect(emailField()).toHaveValue('');
     expect(screen.getByRole('link', { name: 'Inicia sesión' })).toHaveAttribute('href', '/login');
     expect(document.title).toBe('Recuperar la contraseña — StreamBox');
@@ -111,8 +114,10 @@ describe('ForgotPasswordPage: el formulario', () => {
 
     await submitEmail(user, 'ana@example');
 
-    expect(await screen.findByText('El email no tiene un formato válido.')).toHaveAttribute('role', 'alert');
+    // Sin región viva propia (varias se pisarían): se oye al llegar el foco al campo, que lo tiene de descripción.
+    expect(await screen.findByText('El email no tiene un formato válido.')).not.toHaveAttribute('role');
     expect(emailField()).toHaveAttribute('aria-invalid', 'true');
+    expect(emailField()).toHaveAccessibleDescription('El email no tiene un formato válido.');
     expect(emailField()).toHaveFocus();
     expect(screen.getByRole('heading', { level: 1, name: '¿Has olvidado tu contraseña?' })).toBeInTheDocument();
   });
@@ -127,14 +132,14 @@ describe('ForgotPasswordPage: el formulario', () => {
 
     await submitEmail(user, 'ana@example.com');
 
-    expect(await screen.findByRole('button', { name: 'Reintentar en 30 s' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Reintentar en 30 s' }));
     expect(
       screen.getByText('Has pedido demasiados correos seguidos. Podrás pedir otro en 30 s.'),
     ).toHaveAttribute('role', 'alert');
     act(() => {
       vi.advanceTimersByTime(30_000);
     });
-    expect(submitButton()).toBeEnabled();
+    expectButtonAvailable(submitButton());
     expect(screen.queryByText(/demasiados correos/)).not.toBeInTheDocument();
   });
 
@@ -192,8 +197,8 @@ describe('ForgotPasswordPage: «Revisa tu correo» (202)', () => {
     // El texto del 202 del servidor no se enseña: la pantalla pone el suyo.
     expect(screen.queryByText('Texto fijo del servidor')).not.toBeInTheDocument();
 
-    expect(screen.getByRole('button', { name: /^Reenviar en / })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Corregir el correo' })).toBeEnabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: /^Reenviar en / }));
+    expectButtonAvailable(screen.getByRole('button', { name: 'Corregir el correo' }));
     expect(screen.getByRole('link', { name: 'crear una cuenta' })).toHaveAttribute('href', '/registro');
     expect(screen.getByRole('link', { name: 'Inicia sesión' })).toHaveAttribute('href', '/login');
   });
@@ -204,7 +209,7 @@ describe('ForgotPasswordPage: «Revisa tu correo» (202)', () => {
     const user = userEvent.setup({ delay: null });
     renderForgot();
     await submitEmail(user, 'ana@example.com');
-    expect(await screen.findByRole('button', { name: 'Reenviar en 1 min' })).toBeDisabled();
+    expectButtonUnavailable(await screen.findByRole('button', { name: 'Reenviar en 1 min' }));
 
     act(() => {
       vi.advanceTimersByTime(60_000);
@@ -214,7 +219,7 @@ describe('ForgotPasswordPage: «Revisa tu correo» (202)', () => {
     const done = await screen.findByText(RESET_REQUEST_DONE_MESSAGE('ana@example.com'));
     expect(done.closest('[role="status"]')).not.toBeNull();
     expect(requestBodies()).toEqual([{ email: 'ana@example.com' }, { email: 'ana@example.com' }]);
-    expect(screen.getByRole('button', { name: 'Reenviar en 1 min' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Reenviar en 1 min' }));
   });
 
   it('«Reenviar el enlace» con 429: avisa de la espera y bloquea el botón', async () => {
@@ -239,7 +244,7 @@ describe('ForgotPasswordPage: «Revisa tu correo» (202)', () => {
     expect(
       await screen.findByText('Has pedido demasiados correos seguidos. Podrás pedir otro en 2 min.'),
     ).toHaveAttribute('role', 'alert');
-    expect(screen.getByRole('button', { name: 'Reenviar en 2 min' })).toBeDisabled();
+    expectButtonUnavailable(screen.getByRole('button', { name: 'Reenviar en 2 min' }));
   });
 
   it('«Corregir el correo» vuelve al formulario con lo escrito y el foco en el campo', async () => {

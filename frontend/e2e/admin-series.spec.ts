@@ -317,6 +317,10 @@ test('episodios: repetir temporada y número da el 409 del servidor junto a los 
   await expect(number).toBeFocused();
   await expect(number).toHaveAccessibleDescription('Ya existe el episodio 1 de la temporada 2');
   await expect(dialog.getByLabel('Temporada', { exact: true })).toHaveAttribute('aria-invalid', 'true');
+  // Con cambios sin guardar, Escape no tira lo escrito: pregunta (foco en «Seguir editando»)…
+  await page.keyboard.press('Escape');
+  await expect(dialog.getByRole('button', { name: 'Seguir editando' })).toBeFocused();
+  // …y un segundo Escape descarta, como dice el aviso (el navegador tampoco deja anular dos seguidos).
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await expect(episodes.getByRole('listitem')).toHaveCount(2);

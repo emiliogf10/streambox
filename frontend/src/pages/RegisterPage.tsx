@@ -271,7 +271,14 @@ export function RegisterPage() {
           id={FIELD_IDS.username}
           label="Nombre de usuario"
           type="text"
-          autoComplete="username"
+          // `nickname` y no `username`: con lo que se inicia sesión es el CORREO. Si este campo fuera
+          // `username`, el gestor de contraseñas guardaría «nombre + contraseña» y luego pondría el
+          // nombre en el campo de correo del login, que fallaría (y contaría como intento fallido).
+          autoComplete="nickname"
+          // Es un identificador, no texto: sin mayúscula inicial ni autocorrección del teclado del móvil.
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           required
           hint={`Entre ${USERNAME_MIN} y ${USERNAME_MAX} caracteres.`}
           error={fieldErrors.username}
@@ -282,7 +289,9 @@ export function RegisterPage() {
           id={FIELD_IDS.email}
           label="Correo electrónico"
           type="email"
-          autoComplete="email"
+          // `username` (con `type="email"`): el correo es el identificador de la cuenta, y es el valor que
+          // los gestores de contraseñas reconocen como «usuario» para guardarlo junto a la contraseña.
+          autoComplete="username"
           placeholder="tu@correo.com"
           required
           error={fieldErrors.email}
@@ -300,7 +309,7 @@ export function RegisterPage() {
           value={values.password}
           onChange={(e) => setField('password', e.target.value)}
         />
-        <Button type="submit" disabled={submitting || blocked} className="mt-2 w-full">
+        <Button type="submit" pending={submitting} inactive={blocked} className="mt-2 w-full">
           {submitting ? 'Creando cuenta...' : blocked ? `Reintentar en ${remaining} s` : 'Crear cuenta'}
         </Button>
       </form>

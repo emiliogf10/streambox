@@ -245,7 +245,7 @@ export function SeriesEpisodesSection({ series, onSeriesChange }: SeriesEpisodes
           className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/40 bg-red-900/40 px-4 py-3 text-sm text-red-300"
         >
           <span className="min-w-0">{`No se pudo actualizar la lista de episodios: puede estar desactualizada. ${refreshError}`}</span>
-          <Button variant="outline" onClick={() => void refresh()} disabled={refreshing}>
+          <Button variant="outline" onClick={() => void refresh()} pending={refreshing}>
             {refreshing ? 'Actualizando...' : 'Reintentar'}
           </Button>
         </div>

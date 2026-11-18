@@ -218,10 +218,17 @@ export function AdminSeriesPage() {
           onChange={(event) => list.setInput(event.target.value)}
         />
       </div>
-      {/* Anuncia la búsqueda en curso y, si lo que llega son títulos parecidos, que no son coincidencias;
+      {/* Anuncia la búsqueda en curso, el texto que rechaza el servidor (su mensaje bajo el campo no es una
+          región viva: el foco sigue en el campo y no se oiría) y, si lo que llega son títulos parecidos, que no son coincidencias;
           el recuento lo anuncia «Página X de Y · N series». */}
       <p role="status" className="sr-only">
-        {list.searching ? 'Buscando...' : approximateQuery !== null ? approximateResultsText('series', approximateQuery) : ''}
+        {list.searching
+          ? 'Buscando...'
+          : list.searchError !== null
+            ? list.searchError
+            : approximateQuery !== null
+              ? approximateResultsText('series', approximateQuery)
+              : ''}
       </p>
 
       {content}

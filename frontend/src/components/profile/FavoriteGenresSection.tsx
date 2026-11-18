@@ -168,7 +168,8 @@ function TastesEditor({ current, onClose }: TastesEditorProps) {
         {ready && (
           <Button
             onClick={() => void submit()}
-            aria-disabled={!canSave || saving || undefined}
+            pending={saving}
+            inactive={!canSave}
             aria-describedby={counterId}
           >
             {saving ? 'Guardando...' : 'Guardar'}

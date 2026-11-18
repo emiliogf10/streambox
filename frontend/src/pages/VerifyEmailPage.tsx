@@ -200,7 +200,12 @@ function VerificationFlow({ token, announce }: VerificationFlowProps) {
       titleRef={titleRef}
     >
       <FormAlert message={error} />
-      <Button className="w-full" disabled={status === 'confirming' || waiting} onClick={() => void handleConfirm()}>
+      <Button
+        className="w-full"
+        pending={status === 'confirming'}
+        inactive={waiting}
+        onClick={() => void handleConfirm()}
+      >
         {status === 'confirming'
           ? 'Confirmando...'
           : waiting

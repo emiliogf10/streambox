@@ -37,7 +37,7 @@ export function LoadMoreFooter({ shown, total, singular, plural, hasMore, loadin
         Mostrando {shown} de {pluralize(total, singular, plural)}
       </p>
       {hasMore && (
-        <Button variant="outline" onClick={onLoadMore} disabled={loadingMore}>
+        <Button variant="outline" onClick={onLoadMore} pending={loadingMore}>
           {loadingMore ? 'Cargando...' : loadMoreFailed ? 'Reintentar carga' : `Cargar más ${plural}`}
         </Button>
       )}

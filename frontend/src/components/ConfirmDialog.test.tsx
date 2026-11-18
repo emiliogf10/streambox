@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ToastProvider, useToast } from '../context/ToastContext';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
+import { expectButtonUnavailable } from '../test/buttonState';
 
 /** Renderiza el diálogo (abierto por defecto) con los avisos disponibles, como en la app. */
 function renderDialog(props: Partial<Parameters<typeof ConfirmDialog>[0]> = {}) {
@@ -144,7 +145,7 @@ describe('ConfirmDialog', () => {
       renderDialog({ busy: true });
 
       expect(screen.getByRole('button', { name: 'Cancelar' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Procesando...' })).toBeDisabled();
+      expectButtonUnavailable(screen.getByRole('button', { name: 'Procesando...' }), { busy: true });
     });
 
     it('Escape y el clic en el fondo no cancelan', async () => {

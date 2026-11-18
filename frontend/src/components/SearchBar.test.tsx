@@ -130,6 +130,15 @@ describe('SearchBar: petición', () => {
     expect(box).not.toHaveClass('border-line');
   });
 
+  it('el propio campo mide al menos 44 px de alto (zona táctil, WCAG 2.5.5), no solo la cápsula que lo rodea', () => {
+    const { input } = setup();
+
+    // jsdom no maqueta: se comprueba la clase. La medida real la vigila la revisión en el navegador.
+    expect(input).toHaveClass('min-h-11');
+    // Y en el móvil, 16 px: con menos, Safari en iOS amplía la página al enfocarlo.
+    expect(input).toHaveClass('text-base');
+  });
+
   it('espera 300 ms tras la última tecla y entonces hace UNA petición por tipo (películas y series) con el texto completo', async () => {
     const { user } = setup();
 
@@ -429,13 +438,26 @@ describe('SearchBar: teclado', () => {
     expect(within(list).getByRole('option', { name: /^Matrix 1999$/ })).toHaveAttribute('href', '/peliculas/1');
   });
 
-  it('Escape cierra la lista y vacía el campo', async () => {
+  it('Escape va por pasos (patrón combobox): el 1.º cierra la lista y conserva el texto; el 2.º lo vacía', async () => {
     const { user, input } = setup();
     await searchMatrix(user);
+    await user.keyboard('{ArrowDown}');
 
     await user.keyboard('{Escape}');
 
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-expanded', 'false');
+    expect(input).not.toHaveAttribute('aria-activedescendant');
+    expect(input).toHaveValue('matrix');
+    expect(input).toHaveFocus();
+
+    // ↓ vuelve a abrir la misma lista, sin buscar otra vez.
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    await user.keyboard('{Escape}');
+
     expect(input).toHaveValue('');
     expect(input).toHaveAttribute('aria-expanded', 'false');
     expect(input).toHaveFocus();

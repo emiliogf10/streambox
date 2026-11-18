@@ -125,7 +125,8 @@ export function AvatarForm({ id, username, currentAvatar, onClose }: AvatarFormP
           Se muestra en la barra superior y en tu perfil. «Tu inicial» usa la primera letra de tu nombre.
         </p>
         {fieldError && (
-          <p id={errorId} role="alert" className="mb-3 text-xs font-medium text-danger">
+          // Sin región viva: el foco va a la opción marcada, que lee este error por `aria-describedby`.
+          <p id={errorId} className="mb-3 text-xs font-medium text-danger">
             {fieldError}
           </p>
         )}
@@ -180,7 +181,7 @@ export function AvatarForm({ id, username, currentAvatar, onClose }: AvatarFormP
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" pending={submitting}>
             {submitting ? 'Guardando...' : 'Guardar icono'}
           </Button>
           <Button variant="outline" onClick={onClose} disabled={submitting}>

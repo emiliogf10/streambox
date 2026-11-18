@@ -38,8 +38,8 @@
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
 | Backend (JUnit) | **4061** con Docker (2026-11-13) | Sin omitidos. Tras la cookie de dispositivo (2026-11-16): **3987** sin Docker (3648 con H2 y 339 de PostgreSQL omitidos); **los de PostgreSQL de ese cambio aún no se han ejecutado con Docker**. Antes del lote posterior a la auditoría run-3 eran 3975 en el CI |
-| Frontend (Vitest) | **1734** | |
-| E2E (Playwright) | **234** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
+| Frontend (Vitest) | **1760** | |
+| E2E (Playwright) | **247** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -482,6 +482,15 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-18 · Revisión del frontend con skills y lote de errores
+
+- **Revisión (2026-11-17), de solo lectura:** `frontend` revisó el código con `modern-web-guidance` (1 alta, 3 medias, 11 bajas, 14 informativas) y `qa` la app en el navegador con `impeccable`, `emil-design-eng`, `design-taste-frontend`, `review-animations` y `agent-browser` (errores: 1 alta, 3 medias, 9 bajas; diseño: 19 propuestas para el autor). Informes y 94 capturas fuera del repositorio: `Pruebas/streambox-capturas/revision-frontend-2026-11/` (`codigo-web-moderna.md`, `visual-ux.md`).
+- **Lote de errores** (`frontend`, aprobado por el autor; dos cortes de la API a mitad, terminado por un tercer agente): autocompletado del registro y del login (el nombre es `nickname` y el email `username`: el gestor de contraseñas rellenaba el nombre en el campo de correo y el login fallaba y contaba para el bloqueo); botones que trabajan sin soltar el foco (`Button` con `pending`/`inactive` = `aria-disabled`, en «Mi lista» y ~25 botones; con `disabled` el foco iba a `<body>`); Escape en el tráiler (`useFocusStealGuard`: el reproductor de YouTube se quedaba con el foco); controles a 16 px en móvil (iOS ampliaba la página); un solo anuncio de errores al lector (sin `role="alert"` por campo, `aria-invalid` siempre con valor); diálogo de episodio que pregunta antes de descartar cambios; zonas táctiles de 44×44 (buscador, «Administrar», chips de género) y Escape por pasos en el buscador.
+- **Tests:** Vitest de 1734 a **1760**; `qa` añadió `e2e/keyboard-focus.spec.ts` (13 pruebas de teclado y móvil que **fallan las 13 con el código anterior**, comprobado en un worktree de `HEAD`); E2E de 234 a **247** + 24 omitidos. Verificado por el orquestador: build 0, lint 0, Vitest 1760/1760.
+- **Decisión a validar por el autor:** tras un error del servidor (p. ej. 401 en el login), el foco se queda en el botón pulsado (puede reintentar) y el aviso se anuncia una vez; la revisión proponía llevarlo al aviso o al primer campo.
+- **Para la revisión humana:** el tráiler en Chrome con ventana y un vídeo real (se probó con el Chromium sin ventana), un lector de pantalla real (NVDA/VoiceOver: que cada error se anuncie una vez), «Descartar cambios» en dos líneas a 375 px en el diálogo de episodio, y el zoom en iPad real.
+- **Pendiente (fuera del lote):** M3, *code-splitting* de `/admin` (el bundle es de 539 kB); las 19 propuestas de diseño (D-1 barra fija de 165 px en móvil, D-2 el formulario fuera de pantalla tras fallar el login, D-3 «Revisa tu correo» demasiado largo, D-4 borrar un género en uso…); el resto de bajas e informativas (página 404 propia, `h1` del inicio, subtítulo del registro, orden de botones de `ConfirmDialog` en móvil, comillas «» en el error de género en uso —`backend`—). Ver los dos informes.
 
 ### 2026-11-16 · Cookie de dispositivo firmada contra el bloqueo de cuenta como arma
 

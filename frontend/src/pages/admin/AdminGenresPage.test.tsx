@@ -128,8 +128,10 @@ describe('AdminGenresPage: alta', () => {
     await user.type(newNameInput(), 'drama');
     await user.click(screen.getByRole('button', { name: 'Añadir' }));
 
-    expect(await screen.findByText('Ya existe un género con el nombre "Drama"')).toHaveAttribute('role', 'alert');
+    // Sin región viva propia (varias se pisarían): se oye al llegar el foco al campo, que lo tiene de descripción.
+    expect(await screen.findByText('Ya existe un género con el nombre "Drama"')).not.toHaveAttribute('role');
     expect(newNameInput()).toHaveAttribute('aria-invalid', 'true');
+    expect(newNameInput()).toHaveAccessibleDescription('Ya existe un género con el nombre "Drama"');
     expect(newNameInput()).toHaveFocus();
     expect(newNameInput()).toHaveValue('drama');
     expect(names()).toHaveLength(3);
@@ -205,7 +207,8 @@ describe('AdminGenresPage: renombrar en línea', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar' }));
 
     const input = screen.getByRole('textbox', { name: 'Nuevo nombre para Drama' });
-    expect(await screen.findByText('Ya existe un género con el nombre "Acción"')).toHaveAttribute('role', 'alert');
+    // Sin región viva propia (varias se pisarían): se oye al llegar el foco al campo, que lo tiene de descripción.
+    expect(await screen.findByText('Ya existe un género con el nombre "Acción"')).not.toHaveAttribute('role');
     expect(input).toHaveAccessibleDescription('Ya existe un género con el nombre "Acción"');
     expect(input).toHaveFocus();
     expect(names()).toHaveLength(3);

@@ -82,9 +82,11 @@ type Phase = 'idle' | 'saving' | 'skipping' | 'done';
  * vuelve a la pregunta.
  *
  * **Accesibilidad.** Al llegar, el foco va al `<h1>` (se anuncia la pantalla y el
- * siguiente Tab empieza en ella). «Guardar» usa `aria-disabled` y no `disabled`
- * mientras no hay entre 3 y 5 marcados: sigue en el orden de tabulación con el
- * contador como descripción, que dice qué falta.
+ * siguiente Tab empieza en ella). «Guardar» se bloquea con `inactive` de `Button`
+ * (`aria-disabled`, no `disabled`) mientras no hay entre 3 y 5 marcados: sigue en
+ * el orden de tabulación con el contador como descripción, que dice qué falta.
+ * Mientras se envía, el botón pulsado queda `pending` (además `aria-busy`) y el
+ * otro `inactive`: ninguno suelta el foco ni admite un segundo envío.
  *
  * **Responsive.** Columna ancha (`max-w-5xl`) con el selector en rejilla de 2 a 5
  * columnas: en escritorio aprovecha el ancho; a 375 px, dos columnas y los
@@ -270,17 +272,16 @@ export function WelcomePage() {
         <div className="mt-8 flex flex-col gap-4 border-t border-line pt-6 sm:flex-row sm:flex-wrap sm:items-center">
           <div className="flex flex-wrap gap-3">
             {notEnoughOptions ? (
-              <Button onClick={() => void submit([], null)} aria-disabled={busy || undefined}>
+              <Button onClick={() => void submit([], null)} pending={busy}>
                 {phase === 'skipping' ? 'Un momento...' : 'Continuar'}
               </Button>
             ) : (
               <>
                 {showPicker && (
                   <Button
-                    onClick={() => {
-                      if (canSave) void submit(visibleSelected, WELCOME_SAVED_MESSAGE);
-                    }}
-                    aria-disabled={!canSave || busy || undefined}
+                    onClick={() => void submit(visibleSelected, WELCOME_SAVED_MESSAGE)}
+                    pending={phase === 'saving'}
+                    inactive={!canSave || busy}
                     aria-describedby={counterId}
                   >
                     {phase === 'saving' ? 'Guardando...' : 'Guardar'}
@@ -289,7 +290,8 @@ export function WelcomePage() {
                 <Button
                   variant="outline"
                   onClick={() => void submit([], WELCOME_SKIPPED_MESSAGE)}
-                  aria-disabled={busy || undefined}
+                  pending={phase === 'skipping'}
+                  inactive={busy}
                   aria-describedby={skipHintId}
                 >
                   {phase === 'skipping' ? 'Un momento...' : 'Ahora no'}
