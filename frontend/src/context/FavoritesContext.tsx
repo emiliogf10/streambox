@@ -49,8 +49,12 @@ interface FavoritesContextValue {
   /**
    * Vacía la lista entera (películas y series) en el servidor. Devuelve `true`
    * solo si se vaciaron las dos. No es optimista: es destructivo.
+   *
+   * @param showToast decide CUÁNDO se lanza el aviso del resultado (por defecto, en
+   *   el acto). «Mi lista» pasa el de `useToastAfterDialog`: se vacía desde
+   *   una confirmación y el aviso debe nacer cuando ya se ha cerrado.
    */
-  clear: () => Promise<boolean>;
+  clear: (showToast?: (show: () => void) => void) => Promise<boolean>;
   /** Vuelve a cargar la lista desde el servidor (botón "Reintentar"). */
   reload: () => void;
 }
@@ -325,7 +329,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
    * - una sí y otra no → dice exactamente qué se quitó y qué no, con el motivo,
    *   para que el usuario sepa que puede volver a intentarlo.
    */
-  const clear = useCallback(async () => {
+  const clear = useCallback(async (showToast: (show: () => void) => void = (show) => show()) => {
     const [movieResult, seriesResult] = await Promise.allSettled([
       apiFetch(ENDPOINTS.movie, { method: 'DELETE' }),
       apiFetch(ENDPOINTS.series, { method: 'DELETE' }),
@@ -340,18 +344,18 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     void queryClient.invalidateQueries({ queryKey: FAVORITES_KEY, refetchType: 'none' });
 
     if (moviesCleared && seriesCleared) {
-      toast.success('Tu lista se ha vaciado.');
+      showToast(() => toast.success('Tu lista se ha vaciado.'));
       return true;
     }
     if (movieResult.status === 'rejected' && seriesResult.status === 'rejected') {
-      toast.errorFrom(movieResult.reason, 'No se pudo vaciar tu lista.');
+      showToast(() => toast.errorFrom(movieResult.reason, 'No se pudo vaciar tu lista.'));
       return false;
     }
     const failure = movieResult.status === 'rejected' ? movieResult.reason : (seriesResult as PromiseRejectedResult).reason;
     // Una sesión caducada ya tiene su propio aviso (y lleva al login): no se añade otro.
     if (!(failure instanceof ApiError && failure.sessionExpired)) {
       const [done, pending] = moviesCleared ? ['las películas', 'las series'] : ['las series', 'las películas'];
-      toast.error(`Se han quitado ${done} de tu lista, pero no ${pending}. ${getErrorMessage(failure)}`);
+      showToast(() => toast.error(`Se han quitado ${done} de tu lista, pero no ${pending}. ${getErrorMessage(failure)}`));
     }
     return false;
   }, [queryClient, toast]);

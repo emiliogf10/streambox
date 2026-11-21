@@ -192,7 +192,7 @@ test.describe('Géneros', () => {
     await expect(list.getByRole('listitem').filter({ hasText: renamed })).toHaveCount(0);
   });
 
-  test('un nombre repetido (409) se avisa junto al campo y un género en uso (409) no se borra', async ({
+  test('un nombre repetido (409) se avisa junto al campo y un género en uso no ofrece «Borrar»', async ({
     page,
     request,
     signIn,
@@ -215,7 +215,54 @@ test.describe('Géneros', () => {
     await expect(nameInput).toHaveAttribute('aria-invalid', 'true');
     await expect(nameInput).toHaveAccessibleDescription(duplicateBody.message);
 
-    // «Drama» lo usan varias películas del catálogo sembrado: el servidor no deja borrarlo.
+    // D-4: «Drama» lo usan películas y series del catálogo sembrado. La fila lo dice y «Borrar» no está disponible
+    // (sin soltar el foco), con el porqué como descripción; pulsarlo no abre la confirmación ni llama al servidor.
+    const dramaRow = page.getByRole('listitem').filter({ has: page.getByRole('button', { name: 'Borrar Drama' }) });
+    await expect(dramaRow).toContainText(/\d+ películas y \d+ series?/);
+    const deleteDrama = page.getByRole('button', { name: 'Borrar Drama' });
+    await expect(deleteDrama).toHaveAttribute('aria-disabled', 'true');
+    await expect(deleteDrama).toHaveAccessibleDescription(/^No se puede borrar: lo usan \d+ películas y \d+ series?\. /);
+    let deleteSent = false;
+    page.on('request', (sent) => {
+      if (sent.method() === 'DELETE' && /\/api\/genres\/\d+$/.test(sent.url())) deleteSent = true;
+    });
+    // Con el teclado (Playwright no «pulsa» con el ratón un botón con aria-disabled: lo trata como desactivado).
+    await deleteDrama.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(deleteDrama).toBeFocused();
+    expect(deleteSent).toBe(false);
+  });
+
+  test('si el uso cambia entre medias, el 409 del servidor (GENRE_IN_USE) se queda en la fila y «Borrar» se desactiva', async ({
+    page,
+    request,
+    signIn,
+  }) => {
+    await signIn({ token: await loginAdmin(request) });
+    // Datos desfasados: la PRIMERA lista del panel dice que nadie usa «Drama» (como si sus títulos se le hubieran
+    // asignado después de cargarla). El borrado sí llega al servidor real, que responde 409.
+    // Desfasada hasta que sale el DELETE (cualquier relectura anterior, p. ej. al recuperar el foco la ventana,
+    // también lo está); después, la lista real.
+    let stale = true;
+    page.on('request', (sent) => {
+      if (sent.method() === 'DELETE' && /\/api\/genres\/\d+$/.test(sent.url())) stale = false;
+    });
+    await page.route(/\/api\/admin\/genres$/, async (route) => {
+      if (!stale) return route.continue();
+      const response = await route.fetch();
+      const genres = (await response.json()) as { name: string; movieCount: number; seriesCount: number }[];
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          genres.map((genre) => (genre.name === 'Drama' ? { ...genre, movieCount: 0, seriesCount: 0 } : genre)),
+        ),
+      });
+    });
+    await page.goto('/admin/generos');
+    await expect(page.getByRole('list', { name: 'Géneros' })).toBeVisible();
+
     const deleteResponse = page.waitForResponse(
       (response) => /\/api\/genres\/\d+$/.test(response.url()) && response.request().method() === 'DELETE',
     );
@@ -226,9 +273,11 @@ test.describe('Géneros', () => {
     const inUseBody = (await inUse.json()) as { code: string; message: string };
     expect(inUseBody.code).toBe('GENRE_IN_USE');
 
-    // El mensaje del servidor (cuántas películas lo usan y qué hacer) se queda en la fila de «Drama», que sigue ahí.
+    // El mensaje del servidor (cuántos títulos lo usan y qué hacer) se queda en la fila de «Drama», que sigue ahí;
+    // los recuentos se vuelven a pedir (ya sin el desfase) y «Borrar» pasa a no disponible sin perder el foco.
     const dramaRow = page.getByRole('listitem').filter({ has: page.getByRole('button', { name: 'Borrar Drama' }) });
     await expect(dramaRow.getByRole('alert')).toHaveText(inUseBody.message);
+    await expect(page.getByRole('button', { name: 'Borrar Drama' })).toHaveAttribute('aria-disabled', 'true');
     await expect(page.getByRole('button', { name: 'Borrar Drama' })).toBeFocused();
   });
 });

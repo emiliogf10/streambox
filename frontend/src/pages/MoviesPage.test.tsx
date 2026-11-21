@@ -61,11 +61,15 @@ function searchKey({
 
 const drama = { id: 4, name: 'Drama' };
 const terror = { id: 7, name: 'Terror' };
+/** Existe, pero no tiene ninguna película: no sale en el desplegable salvo que venga en la URL (D-9). */
+const comedia = { id: 8, name: 'Comedia' };
 
 /** Lo que pide cualquier pantalla con la lista de favoritos y la barra de filtros. */
 const BASE = {
   'GET /api/users/me/favorites': () => jsonResponse([]),
-  'GET /api/genres': () => jsonResponse([terror, drama]),
+  'GET /api/genres?withTitles=movies': () => jsonResponse([terror, drama]),
+  // Lista completa: solo se pide si la URL trae un género que no tiene películas (ver useCatalogFilterBar).
+  'GET /api/genres': () => jsonResponse([terror, drama, comedia]),
 };
 
 // Orden del servidor: más reciente primero. La 1 será el banner.
@@ -320,10 +324,47 @@ describe('MoviesPage: filtros leídos de la URL', () => {
     expect(screen.queryByRole('region', { name: 'Resultados' })).not.toBeInTheDocument();
   });
 
+  it('el desplegable solo ofrece géneros con películas (D-9): ni «Comedia», que existe sin ninguna', async () => {
+    routeFetch(fetchMock, { ...BASE, [CATALOG_0]: () => jsonResponse(makePage([hero, ...others])) });
+
+    renderPage();
+
+    await genresLoaded();
+    expect(within(genreSelect()).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Todos los géneros',
+      'Drama',
+      'Terror',
+    ]);
+    // La lista completa ni se pide: no hace falta.
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/genres')).toBe(false);
+  });
+
+  it('un género de la URL que existe pero no tiene películas no se descarta en silencio: se ofrece «(sin películas)» y el vacío da salida', async () => {
+    routeFetch(fetchMock, {
+      ...BASE,
+      [searchKey({ genreId: 8 })]: () => jsonResponse(makePage([])),
+      [CATALOG_0]: () => jsonResponse(makePage([hero, ...others])),
+    });
+
+    renderPage('/peliculas?genero=8');
+
+    // El filtro se mantiene (nada de enseñar todo el catálogo con ?genero=8 en la URL) y el desplegable lo refleja.
+    const empty = await screen.findByRole('heading', { level: 3, name: 'No hay películas con estos filtros' });
+    expect(genreSelect()).toHaveValue('8');
+    expect(within(genreSelect()).getByRole('option', { name: 'Comedia (sin películas)' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Estreno estrella' })).not.toBeInTheDocument();
+    expect(within(results()).getByRole('button', { name: 'Quitar filtros' })).toBeInTheDocument();
+    // El vacío dice el motivo exacto, no un genérico «prueba con otro año».
+    expect(
+      within(results()).getByText('«Comedia» no tiene ninguna película todavía. Prueba con otro género o quita los filtros.'),
+    ).toBeInTheDocument();
+    expect(empty).toBeInTheDocument();
+  });
+
   it('si fallan los géneros se explica junto a la barra y se puede reintentar; el resto sigue funcionando', async () => {
     routeFetch(fetchMock, {
       ...BASE,
-      'GET /api/genres': () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+      'GET /api/genres?withTitles=movies': () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
       [CATALOG_0]: () => jsonResponse(makePage([hero, ...others])),
     });
     const user = renderPage();
@@ -579,7 +620,7 @@ describe('MoviesPage: cuadrícula de resultados', () => {
     });
     const user = renderPage(route);
 
-    const empty = await screen.findByRole('heading', { level: 2, name: 'No hay películas con estos filtros' });
+    const empty = await screen.findByRole('heading', { level: 3, name: 'No hay películas con estos filtros' });
     await expectCount('0 películas');
     const emptyState = empty.closest('div')!.parentElement!;
     // Quitar los filtros enseña todas las películas (no "todo el catálogo": las series están en /series).

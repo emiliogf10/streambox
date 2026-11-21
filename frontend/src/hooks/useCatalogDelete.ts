@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { useToast } from '../context/ToastContext';
 import { ApiError, apiFetch } from '../lib/api';
+import { useToastAfterDialog } from './useToastAfterDialog';
 
 /** Lo mínimo que necesita {@link useCatalogDelete} de un título del catálogo. */
 interface Deletable {
@@ -40,6 +41,8 @@ export interface CatalogDelete<T extends Deletable> {
  *   del catálogo, que recarga el listado y avisa a los listados públicos.
  * - Tras borrar, el foco va al título de la sección **al cerrarse el
  *   diálogo**: mientras está abierto el resto de la página es inerte.
+ * - El aviso (borrado, ya no estaba o error) también espera a que se cierre el
+ *   diálogo ({@link useToastAfterDialog}): así nace una sola vez, en la página.
  *
  * @param deletePath ruta de la API que borra `item` (p. ej. `` (s) => `/series/${s.id}` ``)
  * @param onSettled se llama al terminar, haya ido bien o mal (normalmente, invalidar el catálogo)
@@ -53,6 +56,7 @@ export function useCatalogDelete<T extends Deletable>(
   const [deleting, setDeleting] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const focusHeadingAfterClose = useRef(false);
+  const toastAfterDialog = useToastAfterDialog(pending !== null);
 
   const confirm = async () => {
     if (!pending) return;
@@ -60,14 +64,14 @@ export function useCatalogDelete<T extends Deletable>(
     setDeleting(true);
     try {
       await apiFetch(deletePath(pending), { method: 'DELETE' });
-      toast.success(`«${title}» se ha borrado del catálogo.`);
+      toastAfterDialog(() => toast.success(`«${title}» se ha borrado del catálogo.`));
       focusHeadingAfterClose.current = true;
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
-        toast.info(`«${title}» ya no estaba en el catálogo. Se ha actualizado el listado.`);
+        toastAfterDialog(() => toast.info(`«${title}» ya no estaba en el catálogo. Se ha actualizado el listado.`));
         focusHeadingAfterClose.current = true;
       } else {
-        toast.errorFrom(error, `No se pudo borrar «${title}».`);
+        toastAfterDialog(() => toast.errorFrom(error, `No se pudo borrar «${title}».`));
       }
     } finally {
       setDeleting(false);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Pencil, Tags, Trash } from 'lucide-react';
@@ -10,12 +10,14 @@ import { FormField } from '../../components/FormField';
 import { LoadingState } from '../../components/LoadingState';
 import { useToast } from '../../context/ToastContext';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
-import { useGenres } from '../../hooks/useGenres';
+import { useAdminGenres } from '../../hooks/useGenres';
 import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
+import { useToastAfterDialog } from '../../hooks/useToastAfterDialog';
 import { ApiError, apiFetch } from '../../lib/api';
 import { GENRE_NAME_MAX, GENRE_NAME_MIN, validateGenreName } from '../../lib/movieValidation';
 import { queryKeys } from '../../lib/queryKeys';
-import type { Genre, GenreRequest } from '../../lib/types';
+import type { AdminGenre, Genre, GenreRequest } from '../../lib/types';
+import { genreInUseExplanation, genreUsageText, usageTotal } from './genreUsage';
 
 /** Aviso que se queda en la fila de un género (p. ej. "no se puede borrar: lo usan 3 películas"). */
 interface RowNotice {
@@ -42,6 +44,67 @@ function nameErrorFrom(error: unknown): string | null {
   return null;
 }
 
+/** Propiedades de {@link GenreRow}. */
+interface GenreRowProps {
+  genre: AdminGenre;
+  renameRef: (element: HTMLButtonElement | null) => void;
+  onRename: () => void;
+  onDelete: () => void;
+}
+
+/**
+ * Fila de un género (fuera del modo renombrar): nombre, uso y acciones.
+ *
+ * En móvil, el uso va en una segunda línea bajo el nombre; desde `sm`, en su
+ * propia columna, para que la lista aproveche el ancho del panel.
+ *
+ * **«Borrar» de un género en uso** (D-4): se ve y se anuncia como no disponible
+ * (`inactive` de `Button`: `aria-disabled`, sin soltar el foco ni salir del
+ * orden de tabulación) y su descripción accesible dice por qué y qué hacer. No
+ * abre la confirmación: antes se preguntaba «¿Borrar el género «Drama»?» y solo
+ * después el servidor contestaba que lo usaban 12 películas.
+ */
+function GenreRow({ genre, renameRef, onRename, onDelete }: GenreRowProps) {
+  const explanationId = useId();
+  const inUse = usageTotal(genre) > 0;
+  return (
+    <>
+      <div className="min-w-0 flex-1 sm:grid sm:grid-cols-2 sm:items-baseline sm:gap-6">
+        <span className="block font-medium wrap-anywhere text-white">{genre.name}</span>
+        <span className="block text-sm text-muted tabular-nums">{genreUsageText(genre)}</span>
+      </div>
+      <div className="flex gap-1 sm:gap-2">
+        <Button
+          ref={renameRef}
+          variant="ghost"
+          aria-label={`Renombrar ${genre.name}`}
+          onClick={onRename}
+          className="font-medium max-sm:w-11 max-sm:px-0 sm:px-3"
+        >
+          <Pencil aria-hidden="true" className="size-4 shrink-0" />
+          <span className="max-sm:sr-only">Renombrar</span>
+        </Button>
+        <Button
+          variant="ghost"
+          aria-label={`Borrar ${genre.name}`}
+          inactive={inUse}
+          aria-describedby={inUse ? explanationId : undefined}
+          onClick={onDelete}
+          className="font-medium text-danger hover:bg-red-500/10 hover:text-danger max-sm:w-11 max-sm:px-0 sm:px-3"
+        >
+          <Trash aria-hidden="true" className="size-4 shrink-0" />
+          <span className="max-sm:sr-only">Borrar</span>
+        </Button>
+        {inUse && (
+          <span id={explanationId} className="sr-only">
+            {genreInUseExplanation(genre)}
+          </span>
+        )}
+      </div>
+    </>
+  );
+}
+
 /**
  * Pestaña «Géneros» del panel (`/admin/generos`): alta, renombrado en línea y borrado.
  *
@@ -52,39 +115,65 @@ function nameErrorFrom(error: unknown): string | null {
  *   «Guardar» y «Cancelar». El foco entra en el campo (con el texto
  *   seleccionado); Escape o «Cancelar» lo devuelven al botón «Renombrar X» y,
  *   tras guardar, al botón del género ya renombrado. Solo una fila a la vez.
- * - **Borrar**: con confirmación y esperando al servidor. Si el género está en
- *   uso (409 `GENRE_IN_USE`), el mensaje del servidor —que dice cuántas
- *   películas y series lo usan y qué hacer— se queda **en la fila** de ese género en vez
- *   de en un aviso emergente: hay que poder leerlo con calma mientras se
- *   decide, y un toast desaparece a los pocos segundos.
+ * - **Uso de cada género** (`GET /api/admin/genres`, D-4): cuántas películas y
+ *   series lo usan. Un género en uso no ofrece «Borrar» (ver {@link GenreRow}) y
+ *   el texto de cabecera explica la regla a la vista de todos.
+ * - **Borrar**: con confirmación y esperando al servidor. Si aun así el género
+ *   está en uso (409 `GENRE_IN_USE`: alguien le asignó un título entre medias),
+ *   el mensaje del servidor —que dice cuántas películas y series lo usan y qué
+ *   hacer— se queda **en la fila** de ese género en vez de en un aviso
+ *   emergente, para leerlo con calma, y se vuelven a pedir los recuentos.
  * - **404** al renombrar o borrar: el género ya no existía (otra persona, otra
- *   pestaña). Se informa y se recarga la lista.
- * - **Caché.** La lista es la entrada compartida de `useGenres`: cada cambio
+ *   pestaña). Se informa y se recargan la lista del panel y la de los
+ *   formularios (ver `refreshAfterMissingGenre`).
+ * - **Avisos del borrado**: se lanzan cuando ya se ha cerrado la confirmación
+ *   ({@link useToastAfterDialog}), para que nazcan una sola vez y en la página.
+ * - **Caché.** La lista de la pestaña es `queryKeys.genres.admin`: cada cambio
  *   confirmado por el servidor se escribe en ella (`setQueryData`, con lo que
- *   devuelve el servidor), así que los formularios y los filtros de `/peliculas`
- *   lo ven sin pedir nada. Además se invalidan las películas, las series y «Mi
- *   lista», que llevan el nombre de sus géneros dentro (ver `keysAffectedBy`).
+ *   devuelve el servidor) sin volver a pedirla. La lista completa de los
+ *   formularios (`genres.all`) se marca como anticuada (no está en pantalla: se
+ *   pedirá al abrir un formulario) y se invalidan las películas, las series, los
+ *   filtros y «Mi lista», que llevan el nombre de sus géneros dentro (ver
+ *   `keysAffectedBy`).
  */
 export function AdminGenresPage() {
   useDocumentTitle('Géneros · Administración');
   const toast = useToast();
-  const { genres, status, loaded, errorMessage, reload } = useGenres();
+  const { genres, status, loaded, errorMessage, reload } = useAdminGenres();
   const queryClient = useQueryClient();
   const invalidateCatalog = useInvalidateCatalog();
 
   /**
    * Aplica a la lista en caché un cambio que el servidor ya ha confirmado y avisa
-   * a los listados que muestran géneros. El orden lo pone `useGenres` al leer.
+   * a lo demás que muestra géneros. El orden lo pone `useAdminGenres` al leer.
    *
    * Antes corta la lectura de géneros en vuelo: salió antes de esta escritura y,
    * al responder después, desharía el cambio en la lista. Si aún no había lista (el
    * formulario de alta se puede usar mientras carga la primera vez), no hay dónde
    * aplicar el cambio: se pide de nuevo, porque la lectura cortada ya no llegará.
+   * `exact`: cada lista de géneros es su propia entrada (ver `queryKeys.genres`).
    */
-  const applyGenreChange = async (change: (list: Genre[]) => Genre[]) => {
-    await queryClient.cancelQueries({ queryKey: queryKeys.genres.all });
-    const updated = queryClient.setQueryData<Genre[]>(queryKeys.genres.all, (list) => (list ? change(list) : list));
-    if (updated === undefined) void queryClient.invalidateQueries({ queryKey: queryKeys.genres.all });
+  const applyGenreChange = async (change: (list: AdminGenre[]) => AdminGenre[]) => {
+    const admin = { queryKey: queryKeys.genres.admin, exact: true };
+    const full = { queryKey: queryKeys.genres.all, exact: true };
+    await Promise.all([queryClient.cancelQueries(admin), queryClient.cancelQueries(full)]);
+    const updated = queryClient.setQueryData<AdminGenre[]>(queryKeys.genres.admin, (list) => (list ? change(list) : list));
+    if (updated === undefined) void queryClient.invalidateQueries(admin);
+    void queryClient.invalidateQueries(full);
+    void invalidateCatalog('genres');
+  };
+
+  /**
+   * 404 al renombrar o borrar: el género ya no existe en el servidor. Se vuelven a
+   * pedir la lista del panel (`reload`) y TAMBIÉN la completa de los formularios
+   * de película y serie (`genres.all`, exacta: por prefijo alcanzaría también a la
+   * del panel, que ya se está pidiendo). Sin esto último, esos formularios podían
+   * seguir ofreciendo el género borrado hasta que su caché caducara (60 s). Lo
+   * demás que muestra géneros se invalida con `invalidateCatalog('genres')`.
+   */
+  const refreshAfterMissingGenre = () => {
+    reload();
+    void queryClient.invalidateQueries({ queryKey: queryKeys.genres.all, exact: true });
     void invalidateCatalog('genres');
   };
 
@@ -97,8 +186,9 @@ export function AdminGenresPage() {
   const [editError, setEditError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
-  const [genreToDelete, setGenreToDelete] = useState<Genre | null>(null);
+  const [genreToDelete, setGenreToDelete] = useState<AdminGenre | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const toastAfterDialog = useToastAfterDialog(genreToDelete !== null);
   const [rowNotice, setRowNotice] = useState<RowNotice | null>(null);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -141,7 +231,8 @@ export function AdminGenresPage() {
     try {
       const body: GenreRequest = { name: newName.trim() };
       const created = await apiFetch<Genre>('/genres', { method: 'POST', body });
-      await applyGenreChange((list) => [...list, created]);
+      // Recién creado, no lo usa nadie.
+      await applyGenreChange((list) => [...list, { ...created, movieCount: 0, seriesCount: 0 }]);
       setNewName('');
       toast.success(`Género «${created.name}» creado.`);
     } catch (error) {
@@ -157,7 +248,7 @@ export function AdminGenresPage() {
     }
   };
 
-  const startRename = (genre: Genre) => {
+  const startRename = (genre: AdminGenre) => {
     setRowNotice(null);
     setEditingId(genre.id);
     setEditName(genre.name);
@@ -171,7 +262,7 @@ export function AdminGenresPage() {
     setEditError(undefined);
   };
 
-  const handleRename = async (event: FormEvent, genre: Genre) => {
+  const handleRename = async (event: FormEvent, genre: AdminGenre) => {
     event.preventDefault();
     const invalid = validateGenreName(editName);
     if (invalid) {
@@ -187,7 +278,7 @@ export function AdminGenresPage() {
     try {
       const body: GenreRequest = { name: editName.trim() };
       const updated = await apiFetch<Genre>(`/genres/${genre.id}`, { method: 'PUT', body });
-      await applyGenreChange((list) => list.map((item) => (item.id === genre.id ? updated : item)));
+      await applyGenreChange((list) => list.map((item) => (item.id === genre.id ? { ...item, name: updated.name } : item)));
       setEditingId(null);
       pendingFocus.current = { kind: 'rename-button', genreId: genre.id };
       toast.success(`Género «${genre.name}» renombrado a «${updated.name}».`);
@@ -200,8 +291,7 @@ export function AdminGenresPage() {
         setEditingId(null);
         pendingFocus.current = { kind: 'heading' };
         toast.info(`El género «${genre.name}» ya no existía. Se ha actualizado la lista.`);
-        reload();
-        void invalidateCatalog('genres');
+        refreshAfterMissingGenre();
       } else {
         toast.errorFrom(error, `No se pudo renombrar «${genre.name}».`);
       }
@@ -218,18 +308,19 @@ export function AdminGenresPage() {
       await apiFetch(`/genres/${genre.id}`, { method: 'DELETE' });
       await applyGenreChange((list) => list.filter((item) => item.id !== genre.id));
       pendingFocus.current = { kind: 'heading' }; // la fila (y su botón) desaparece
-      toast.success(`Género «${genre.name}» borrado.`);
+      toastAfterDialog(() => toast.success(`Género «${genre.name}» borrado.`));
     } catch (error) {
       if (error instanceof ApiError && error.status === 409 && error.code === 'GENRE_IN_USE') {
         // El foco vuelve solo al botón «Borrar» (sigue existiendo) y el aviso de la fila se anuncia (role="alert").
+        // Los recuentos que se veían estaban desfasados: al llegar los nuevos, «Borrar» queda desactivado.
         setRowNotice({ genreId: genre.id, message: error.message });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.genres.admin, exact: true });
       } else if (error instanceof ApiError && error.status === 404) {
         pendingFocus.current = { kind: 'heading' };
-        toast.info(`El género «${genre.name}» ya no existía. Se ha actualizado la lista.`);
-        reload();
-        void invalidateCatalog('genres');
+        toastAfterDialog(() => toast.info(`El género «${genre.name}» ya no existía. Se ha actualizado la lista.`));
+        refreshAfterMissingGenre();
       } else {
-        toast.errorFrom(error, `No se pudo borrar «${genre.name}».`);
+        toastAfterDialog(() => toast.errorFrom(error, `No se pudo borrar «${genre.name}».`));
       }
     } finally {
       setDeleting(false);
@@ -294,36 +385,18 @@ export function AdminGenresPage() {
                 </div>
               </form>
             ) : (
-              <>
-                <span className="min-w-0 flex-1 font-medium wrap-anywhere text-white">{genre.name}</span>
-                <div className="flex gap-1 sm:gap-2">
-                  <Button
-                    ref={(element) => {
-                      if (element) renameButtons.current.set(genre.id, element);
-                      else renameButtons.current.delete(genre.id);
-                    }}
-                    variant="ghost"
-                    aria-label={`Renombrar ${genre.name}`}
-                    onClick={() => startRename(genre)}
-                    className="font-medium max-sm:w-11 max-sm:px-0 sm:px-3"
-                  >
-                    <Pencil aria-hidden="true" className="size-4 shrink-0" />
-                    <span className="max-sm:sr-only">Renombrar</span>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    aria-label={`Borrar ${genre.name}`}
-                    onClick={() => {
-                      setRowNotice(null);
-                      setGenreToDelete(genre);
-                    }}
-                    className="font-medium text-danger hover:bg-red-500/10 hover:text-danger max-sm:w-11 max-sm:px-0 sm:px-3"
-                  >
-                    <Trash aria-hidden="true" className="size-4 shrink-0" />
-                    <span className="max-sm:sr-only">Borrar</span>
-                  </Button>
-                </div>
-              </>
+              <GenreRow
+                genre={genre}
+                renameRef={(element) => {
+                  if (element) renameButtons.current.set(genre.id, element);
+                  else renameButtons.current.delete(genre.id);
+                }}
+                onRename={() => startRename(genre)}
+                onDelete={() => {
+                  setRowNotice(null);
+                  setGenreToDelete(genre);
+                }}
+              />
             )}
             {rowNotice?.genreId === genre.id && (
               <p role="alert" className="basis-full rounded-md border border-red-500/30 bg-red-950/30 px-3 py-2 text-sm text-red-300">
@@ -349,6 +422,10 @@ export function AdminGenresPage() {
           </p>
         )}
       </div>
+      {/* La regla, a la vista: un «Borrar» atenuado no debe ser un misterio (D-4). */}
+      <p className="-mt-3 mb-5 max-w-prose text-sm leading-relaxed text-muted">
+        Solo se pueden borrar los géneros que no usa ninguna película ni serie.
+      </p>
 
       <form onSubmit={(event) => void handleCreate(event)} noValidate className="mb-6 flex max-w-xl flex-col gap-3 sm:flex-row sm:items-start">
         <div className="min-w-0 flex-1">
@@ -376,7 +453,7 @@ export function AdminGenresPage() {
       <ConfirmDialog
         open={genreToDelete !== null}
         title={genreToDelete ? `¿Borrar el género «${genreToDelete.name}»?` : ''}
-        description="Solo se puede borrar un género que no tenga ninguna película ni serie. Esta acción no se puede deshacer."
+        description="No lo usa ninguna película ni serie. Esta acción no se puede deshacer."
         confirmLabel="Sí, borrar género"
         busy={deleting}
         onConfirm={() => void handleConfirmDelete()}

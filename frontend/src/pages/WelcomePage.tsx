@@ -234,7 +234,9 @@ export function WelcomePage() {
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[36rem] bg-radial-[ellipse_at_top] from-accent/12 via-accent/4 via-40% to-transparent to-70%"
       />
-      <div className="mx-auto w-full max-w-5xl px-5 py-10 sm:px-8 sm:py-14">
+      {/* Una sola columna centrada de 48rem: es una pregunta con un formulario, no un catálogo. Con `max-w-5xl` los
+          géneros ocupaban la mitad izquierda y la línea de las acciones cruzaba todo el ancho (D-13). */}
+      <div className="mx-auto w-full max-w-3xl px-5 py-10 sm:px-8 sm:py-14 lg:py-20">
         <div className="mb-10 flex items-center gap-2.5">
           <span aria-hidden="true" className="size-3 rounded-full bg-accent" />
           <span className="text-xl font-bold tracking-tight">streambox</span>

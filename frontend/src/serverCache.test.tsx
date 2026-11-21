@@ -64,6 +64,9 @@ function commonRoutes(movies: () => Movie[]) {
     'GET /api/series?page=0&size=12&sort=createdAt&direction=desc': () => jsonResponse(makePage([])),
     'GET /api/series?page=0&size=1&sort=createdAt&direction=desc': () => jsonResponse(makePage([])),
     'GET /api/genres': () => jsonResponse([{ id: 1, name: 'Drama' }]),
+    'GET /api/genres?withTitles=movies': () => jsonResponse([{ id: 1, name: 'Drama' }]),
+    'GET /api/genres?withTitles=series': () => jsonResponse([{ id: 1, name: 'Drama' }]),
+    'GET /api/admin/genres': () => jsonResponse([{ id: 1, name: 'Drama', movieCount: 1, seriesCount: 0 }]),
     'GET /api/users/me/favorites': () => jsonResponse([]),
   };
 }
@@ -91,7 +94,7 @@ describe('Caché entre navegaciones', () => {
     expect(screen.getByRole('option', { name: 'Drama' })).toBeInTheDocument();
 
     expect(getCalls(CATALOG)).toBe(1);
-    expect(getCalls('/api/genres')).toBe(1);
+    expect(getCalls('/api/genres?withTitles=movies')).toBe(1);
   });
 });
 

@@ -13,8 +13,9 @@ import {
   sameCatalogFilters,
 } from '../lib/catalogFilters';
 import type { CatalogFilters, CatalogKind, CatalogSortKey } from '../lib/catalogFilters';
+import type { Genre } from '../lib/types';
 import { useDebouncedValue } from './useDebouncedValue';
-import { useGenres } from './useGenres';
+import { sortGenres, useGenres } from './useGenres';
 
 /** Espera tras el último cambio de un filtro antes de aplicarlo (la misma que los buscadores). */
 export const CATALOG_FILTER_DEBOUNCE_MS = 300;
@@ -190,13 +191,80 @@ export interface CatalogFilterBarState {
   barProps: CatalogFilterBarProps;
   /** Quita los filtros y lleva el foco al primer control (también para el «Quitar filtros» del estado vacío). */
   clearFilters: () => void;
+  /**
+   * Nombre del género de la URL que existe pero no tiene títulos de este catálogo
+   * (ver {@link useFilterGenres}), o `null`. La página lo usa para que el estado
+   * vacío diga el motivo exacto en vez de un genérico «prueba con otro género».
+   */
+  emptyGenreName: string | null;
+}
+
+/** Lo que devuelve {@link useFilterGenres}. */
+interface FilterGenres {
+  /** Opciones del desplegable: los géneros con títulos y, si hace falta, el de la URL sin títulos. */
+  genres: Genre[];
+  /** Id de un género de la URL que existe pero no tiene títulos de este catálogo (se ofrece marcado como tal). */
+  emptyGenreId: number | null;
+  /** Ids de los géneros que valen como filtro, o `null` mientras no se sabe (se confía en la URL). */
+  knownGenreIds: number[] | null;
+  status: ReturnType<typeof useGenres>['status'];
+  reload: () => void;
+}
+
+/**
+ * Géneros del desplegable de una página de catálogo (D-9): solo los que tienen
+ * algún título de ESE catálogo (`GET /api/genres?withTitles=movies|series`; en
+ * series, con episodios). Antes se ofrecían todos, y elegir «Terror» sin ninguna
+ * película solo llevaba a «No hay películas con estos filtros».
+ *
+ * **Un género de la URL sin títulos** (un enlace guardado, o el catálogo cambió:
+ * se borró su última película) no se descarta en silencio. Si se ignorara, la
+ * página enseñaría TODO el catálogo con `?genero=…` en la URL y el desplegable en
+ * «Todos los géneros», como si el filtro hubiera funcionado. Tampoco se puede
+ * dejar el filtro con un desplegable que no tiene esa opción (un `<select>` con
+ * un valor que no está en su lista se ve en blanco: un estado imposible). Así que:
+ * - se pide la lista completa (`GET /api/genres`, solo en este caso);
+ * - si el género existe, el filtro se mantiene, el desplegable lo ofrece como
+ *   «Terror (sin películas)» y los resultados dicen «No hay películas con estos
+ *   filtros» con «Quitar filtros» (la salida de siempre, no un callejón);
+ * - si no existe (borrado, o un id inventado), se ignora como cualquier otro
+ *   valor inválido de la URL, igual que antes.
+ * Mientras no se sabe, se confía en la URL (como antes, mientras cargaban los géneros).
+ *
+ * Si la lista completa falla, se ignora el género (lo prudente sin saber si existe).
+ */
+function useFilterGenres(kind: CatalogKind, urlGenreId: number | null): FilterGenres {
+  const withTitles = useGenres({ withTitles: kind });
+  const missing =
+    withTitles.loaded && urlGenreId !== null && !withTitles.genres.some((genre) => genre.id === urlGenreId);
+  const all = useGenres({ enabled: missing });
+
+  return useMemo(() => {
+    const base = { status: withTitles.status, reload: withTitles.reload };
+    if (!withTitles.loaded) return { ...base, genres: withTitles.genres, emptyGenreId: null, knownGenreIds: null };
+    const ids = withTitles.genres.map((genre) => genre.id);
+    if (!missing) return { ...base, genres: withTitles.genres, emptyGenreId: null, knownGenreIds: ids };
+    if (!all.loaded) {
+      // Sin saber aún si existe, se confía en la URL; si la lista completa ha fallado, se ignora.
+      return { ...base, genres: withTitles.genres, emptyGenreId: null, knownGenreIds: all.status === 'error' ? ids : null };
+    }
+    const empty = all.genres.find((genre) => genre.id === urlGenreId);
+    if (!empty) return { ...base, genres: withTitles.genres, emptyGenreId: null, knownGenreIds: ids };
+    return {
+      ...base,
+      genres: sortGenres([...withTitles.genres, empty]),
+      emptyGenreId: empty.id,
+      knownGenreIds: [...ids, empty.id],
+    };
+  }, [withTitles.genres, withTitles.loaded, withTitles.status, withTitles.reload, missing, all.genres, all.loaded, all.status, urlGenreId]);
 }
 
 /**
  * Todo lo que necesita una página de catálogo para su barra de filtros: los
- * géneros (`GET /api/genres`), el estado de {@link useCatalogFilters} y la
- * acción «Quitar filtros». Lo comparten `/peliculas` y `/series`, que así solo
- * deciden qué pintan con los filtros, no cómo se conectan con la URL.
+ * géneros con títulos de ese catálogo ({@link useFilterGenres}), el estado de
+ * {@link useCatalogFilters} y la acción «Quitar filtros». Lo comparten
+ * `/peliculas` y `/series`, que así solo deciden qué pintan con los filtros, no
+ * cómo se conectan con la URL.
  *
  * **Foco al quitar los filtros.** El botón pulsado desaparece (sin filtros no
  * hay nada que quitar) y, sin moverlo, el foco caería al `<body>` y el teclado
@@ -206,9 +274,12 @@ export interface CatalogFilterBarState {
  * @param kind catálogo de la página
  */
 export function useCatalogFilterBar(kind: CatalogKind): CatalogFilterBarState {
-  const { genres, status: genresStatus, loaded: genresLoaded, reload: reloadGenres } = useGenres();
-  // Hasta conocer los géneros no se puede saber si el de la URL existe: mientras tanto se confía en él.
-  const knownGenreIds = useMemo(() => (genresLoaded ? genres.map((genre) => genre.id) : null), [genres, genresLoaded]);
+  const [searchParams] = useSearchParams();
+  const urlGenreId = useMemo(() => parseCatalogFilters(searchParams, kind).genreId, [searchParams, kind]);
+  const { genres, emptyGenreId, knownGenreIds, status: genresStatus, reload: reloadGenres } = useFilterGenres(
+    kind,
+    urlGenreId,
+  );
   const state = useCatalogFilters(kind, knownGenreIds);
   const { filters, draft, clear } = state;
   const genreSelectRef = useRef<HTMLSelectElement>(null);
@@ -221,13 +292,17 @@ export function useCatalogFilterBar(kind: CatalogKind): CatalogFilterBarState {
   // «Quitar filtros» se ofrece también mientras un cambio espera para aplicarse.
   const draftActive = draft.genre !== '' || draft.year.trim() !== '' || draft.sort !== DEFAULT_SORT;
 
+  const emptyGenreName = genres.find((genre) => genre.id === emptyGenreId)?.name ?? null;
+
   return {
     filters,
     clearFilters,
+    emptyGenreName,
     barProps: {
       kind,
       draft,
       genres,
+      emptyGenreId,
       genresStatus,
       onRetryGenres: reloadGenres,
       onGenreChange: state.setGenre,

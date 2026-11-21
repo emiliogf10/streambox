@@ -26,15 +26,47 @@ describe('movimiento reducido', () => {
     expect(reducedMotionBlock()).not.toMatch(/transition-duration/);
   });
 
-  it('el diálogo conserva el fundido pero no crece (escala inicial 1)', () => {
+  it('el diálogo conserva el fundido pero no crece (empieza ya sin escala: `none`, ver «diálogo sin escala»)', () => {
     const block = reducedMotionBlock();
     expect(block).toMatch(/dialog\[open\][\s\S]*transition:\s*opacity/);
-    expect(block).toMatch(/@starting-style\s*{[^}]*opacity:\s*0;[^}]*scale:\s*1;/);
+    expect(block).toMatch(/@starting-style\s*{[^}]*opacity:\s*0;[^}]*scale:\s*none;/);
   });
 
   it('sigue parando las animaciones continuas y el desplazamiento suave', () => {
     const block = reducedMotionBlock();
     expect(block).toMatch(/animation-duration:\s*0\.01ms/);
     expect(block).toMatch(/scroll-behavior:\s*auto/);
+  });
+});
+
+describe('alto de la ventana', () => {
+  // B9: con `100vh`, en móvil la página medía la altura con la barra de direcciones OCULTA y «Mi lista» vacía
+  // tenía siempre unos píxeles de scroll sin contenido. `100dvh` sigue a la ventana visible.
+  it('el cuerpo usa la altura dinámica de la ventana (`100dvh`), no `100vh`', () => {
+    expect(css).toMatch(/body\s*{[^}]*min-height:\s*100dvh;/);
+    expect(css).not.toMatch(/min-height:\s*100vh/);
+  });
+});
+
+describe('diálogo sin escala (B11)', () => {
+  // Cualquier `scale` distinto de `none` (también `1`) hace del `<dialog>` el bloque contenedor de sus hijos
+  // `position: fixed`: la zona de avisos del diálogo se desplazaba con su contenido y se salía por arriba.
+  it('el estado final del diálogo abierto es `scale: none`, y la entrada sigue partiendo de 0.96', () => {
+    const rule = css.slice(css.indexOf('dialog[open] {'), css.indexOf('dialog[open]::backdrop'));
+    expect(rule).toMatch(/^dialog\[open\] {\s*opacity:\s*1;\s*scale:\s*none;/);
+    expect(rule).toMatch(/@starting-style\s*{[^}]*scale:\s*0\.96;/);
+    expect(css).not.toMatch(/scale:\s*1;/);
+  });
+});
+
+describe('avisos de móvil bajo la barra (D-1 / E-10)', () => {
+  it('define la variante `navbar-away` con la misma condición que aparta la barra (sin el foco dentro)', () => {
+    expect(css).toMatch(/@custom-variant navbar-away\s*{\s*:root:has\(\[data-navbar-away\]:not\(:focus-within\)\) &/);
+  });
+
+  it('en móvil, el margen de desplazamiento del contenido reserva también la altura de los avisos', () => {
+    expect(css).toMatch(
+      /@variant max-sm\s*{\s*scroll-margin-top:\s*calc\(var\(--navbar-height, 0px\) \+ var\(--toasts-height, 0px\) \+ 2rem\);/,
+    );
   });
 });

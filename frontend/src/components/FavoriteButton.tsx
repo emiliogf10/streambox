@@ -2,6 +2,10 @@ import { Check, Plus } from 'lucide-react';
 import { useFavorites } from '../context/FavoritesContext';
 import type { Movie, Series } from '../lib/types';
 import { Button } from './Button';
+import { StableLabel } from './StableLabel';
+
+/** Las dos etiquetas del botón: el ancho lo fija la más larga (ver {@link StableLabel}). */
+const LABELS = ['Mi lista', 'En mi lista'] as const;
 
 /**
  * Propiedades de {@link FavoriteButton}: una película O una serie (excluyentes,
@@ -22,6 +26,7 @@ type Props = { className?: string } & ({ movie: Movie; series?: never } | { seri
  * `LikeButton`): un botón desactivado mientras tiene el foco lo suelta al
  * `<body>`, y quien guarda un título con el teclado perdería su sitio en la
  * página cada vez. El estado se comunica con texto e icono (no solo con color).
+ * El botón mide lo mismo con las dos etiquetas ({@link StableLabel}, D-11).
  */
 export function FavoriteButton(props: Props) {
   const { isFavorite, isPending, toggle, toggleSeries } = useFavorites();
@@ -41,7 +46,7 @@ export function FavoriteButton(props: Props) {
       ) : (
         <Plus aria-hidden="true" className="size-4" />
       )}
-      {active ? 'En mi lista' : 'Mi lista'}
+      <StableLabel current={active ? 'En mi lista' : 'Mi lista'} options={LABELS} />
       <span className="sr-only"> — {item.title}</span>
     </Button>
   );

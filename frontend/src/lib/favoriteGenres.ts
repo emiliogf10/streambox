@@ -27,6 +27,27 @@ export const TASTES_SECTION_ID = 'tus-gustos';
 export const PROFILE_TASTES_PATH = `/perfil#${TASTES_SECTION_ID}`;
 
 /**
+ * Estado de navegación que pide abrir YA el editor de «Tus gustos» al llegar a
+ * {@link PROFILE_TASTES_PATH} (lo manda «Elegir mis géneros» de la portada, D-8).
+ *
+ * Va en el estado del historial y no en la URL a propósito: el enlace sigue
+ * siendo `/perfil#tus-gustos` (se puede copiar o abrir en otra pestaña y lleva a
+ * la sección, sin más), y el perfil lo consume al llegar, así que recargar o
+ * volver con «Atrás» no reabre el editor por sorpresa.
+ */
+export interface OpenTastesEditorState {
+  openTastesEditor: true;
+}
+
+/** Valor de {@link OpenTastesEditorState} para `<Link state>`. */
+export const OPEN_TASTES_EDITOR_STATE: OpenTastesEditorState = { openTastesEditor: true };
+
+/** `true` si el estado de navegación pide abrir el editor de «Tus gustos». */
+export function wantsTastesEditor(state: unknown): boolean {
+  return (state as Partial<OpenTastesEditorState> | null)?.openTastesEditor === true;
+}
+
+/**
  * `true` si con `count` géneros marcados se puede pulsar «Guardar» (de 3 a 5).
  * La lista vacía también es válida para el servidor, pero no se envía con
  * «Guardar»: es «Ahora no» o «Quitar mis gustos», cada uno con su botón.

@@ -47,7 +47,7 @@ export function countGenres(items: readonly Pick<CatalogItem, 'genres'>[]): Genr
 export type ListPreviewItem = { kind: 'movie'; item: Movie } | { kind: 'series'; item: Series };
 
 /** Cuántos títulos de la lista enseña el perfil (una fila de pósters en escritorio). */
-export const LIST_PREVIEW_SIZE = 5;
+export const LIST_PREVIEW_SIZE = 6;
 
 /**
  * Elige los títulos de la lista que enseña el perfil: primero las películas

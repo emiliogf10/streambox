@@ -101,7 +101,7 @@ class PostgresGenreIntegrationTest extends PostgresIntegrationTestSupport {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("GENRE_IN_USE"))
                 .andExpect(jsonPath("$.message").value(
-                        "No se puede eliminar el género \"Drama\": lo usan 2 películas. "
+                        "No se puede eliminar el género «Drama»: lo usan 2 películas. "
                                 + "Quítalo de esas películas antes de borrarlo."));
 
         assertTrue(genreRepository.existsById(drama.getId()));
@@ -176,7 +176,7 @@ class PostgresGenreIntegrationTest extends PostgresIntegrationTestSupport {
             ExecutionException thrown = assertThrows(ExecutionException.class,
                     () -> deleter.get(30, TimeUnit.SECONDS));
             GenreInUseException inUse = assertInstanceOf(GenreInUseException.class, thrown.getCause());
-            assertEquals("No se puede eliminar el género \"Drama\": alguna película o serie lo tiene asignado. "
+            assertEquals("No se puede eliminar el género «Drama»: alguna película o serie lo tiene asignado. "
                     + "Quítalo de esas películas o series antes de borrarlo.", inUse.getMessage());
         } finally {
             pool.shutdownNow();
@@ -218,7 +218,7 @@ class PostgresGenreIntegrationTest extends PostgresIntegrationTestSupport {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"CIENCIA FICCIÓN\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("GENRE_ALREADY_EXISTS"))
-                .andExpect(jsonPath("$.message").value("Ya existe un género con el nombre \"Ciencia ficción\""));
+                .andExpect(jsonPath("$.message").value("Ya existe un género con el nombre «Ciencia ficción»"));
 
         assertEquals(1, genreRepository.count());
     }

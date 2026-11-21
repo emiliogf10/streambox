@@ -110,7 +110,8 @@ describe('RecommendedRows', () => {
     renderRows();
     await waitForLoaded();
 
-    expect(screen.queryByRole('region')).not.toBeInTheDocument();
+    // La única región es la zona de avisos («Avisos», siempre presente); ninguna fila.
+    expect(screen.getAllByRole('region').map((region) => region.getAttribute('aria-label'))).toEqual(['Avisos']);
     expect(screen.queryByRole('heading')).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/users/me/recommendations?limit=12')).toBe(true);
     expect(favoriteGenresRequested()).toBe(false);

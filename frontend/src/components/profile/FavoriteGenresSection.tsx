@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../Button';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { ErrorState } from '../ErrorState';
@@ -8,6 +8,7 @@ import { FormAlert } from '../FormAlert';
 import { GenrePicker } from '../GenrePicker';
 import { useToast } from '../../context/ToastContext';
 import { useFavoriteGenres, useGenreOptions, useSaveFavoriteGenres } from '../../hooks/useFavoriteGenres';
+import { useToastAfterDialog } from '../../hooks/useToastAfterDialog';
 import { ApiError, getErrorMessage } from '../../lib/api';
 import {
   GENRE_SHORTAGE_LIKES_HINT,
@@ -17,6 +18,7 @@ import {
   genreShortageMessage,
   genreShortageTitle,
   hasEnoughGenreOptions,
+  wantsTastesEditor,
 } from '../../lib/favoriteGenres';
 import type { Genre } from '../../lib/types';
 
@@ -29,7 +31,7 @@ export const TASTES_REMOVED_MESSAGE = 'Has quitado tus gustos. Puedes volver a e
 /** A dónde va el foco tras cerrar el editor o quitar los gustos (ver `focusRequest`). */
 type FocusTarget = 'heading' | 'edit';
 
-/** Etiqueta de un género, la misma que las de «Géneros de tu lista» (sin recuento). */
+/** Etiqueta de un género, la misma que las de «Géneros que más guardas» (sin recuento). */
 function GenreChips({ genres }: { genres: Genre[] }) {
   return (
     <ul role="list" className="flex flex-wrap gap-2">
@@ -198,11 +200,15 @@ function TastesEditor({ current, onClose }: TastesEditorProps) {
  *   (`ConfirmDialog`): pierde de golpe la base de las recomendaciones. Un fallo
  *   se enseña dentro del diálogo, que sigue abierto para reintentar.
  *
- * **Foco.** Al llegar con `#tus-gustos` (la tarjeta de la portada), el foco va
- * al título de la sección (lo que lleva la página hasta ella, sin quedar debajo
- * de la barra gracias al `scroll-margin-top` de `index.css`). Al cerrar el
- * editor vuelve al botón que lo abrió; tras quitar los gustos, al título (el
- * botón ya no existe).
+ * **Foco.** Al llegar con `#tus-gustos`, el foco va al título de la sección (lo
+ * que lleva la página hasta ella, sin quedar debajo de la barra gracias al
+ * `scroll-margin-top` de `index.css`). Si además se pide abrir el editor (la
+ * tarjeta «Elegir mis géneros» de la portada, `OPEN_TASTES_EDITOR_STATE`), el
+ * editor se abre solo y, en cuanto llegan las opciones, el foco baja al grupo
+ * de géneros (D-8): el lector anuncia «Elige entre 3 y 5 géneros» y el
+ * contador. Esa petición se borra del historial al usarla (recargar no reabre
+ * el editor). Al cerrar el editor el foco vuelve al botón que lo abre; tras
+ * quitar los gustos, al título (el botón ya no existe).
  *
  * Tras guardar o quitar, `useSaveFavoriteGenres` actualiza la lista con la
  * respuesta y descarta las recomendaciones en caché: la portada las vuelve a
@@ -211,21 +217,41 @@ function TastesEditor({ current, onClose }: TastesEditorProps) {
 export function FavoriteGenresSection() {
   const toast = useToast();
   const location = useLocation();
+  const navigate = useNavigate();
   const favorites = useFavoriteGenres();
   const { save, saving } = useSaveFavoriteGenres();
   const headingId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const editButtonRef = useRef<HTMLButtonElement>(null);
-  const [editing, setEditing] = useState(false);
+  // Se abre ya editando si se llega con la petición de la portada (ver `wantsTastesEditor`). El editor no se
+  // monta hasta que llegan los favoritos (el estado de carga va antes), así que empieza con los suyos marcados.
+  const [editing, setEditing] = useState(
+    () => location.hash === `#${TASTES_SECTION_ID}` && wantsTastesEditor(location.state),
+  );
   const [confirming, setConfirming] = useState(false);
+  // «Tus gustos se han quitado» espera a que se cierre la confirmación: así nace una vez y en la página.
+  const toastAfterDialog = useToastAfterDialog(confirming);
   const [removeError, setRemoveError] = useState('');
   // Petición de foco tras un cambio de modo: se atiende en un efecto, cuando el destino ya está en la página.
   const [focusRequest, setFocusRequest] = useState<{ target: FocusTarget } | null>(null);
 
   // Llegada desde la tarjeta de la portada (`/perfil#tus-gustos`).
+  // Si el foco ya está dentro (el editor abierto a la llegada lo ha llevado a sus géneros: los efectos de los hijos
+  // corren antes), no se le quita.
   useEffect(() => {
-    if (location.hash === `#${TASTES_SECTION_ID}`) headingRef.current?.focus();
+    if (location.hash !== `#${TASTES_SECTION_ID}`) return;
+    if (sectionRef.current?.contains(document.activeElement)) return;
+    headingRef.current?.focus();
   }, [location.hash]);
+
+  // La petición de abrir el editor ya se ha usado: se quita del historial (misma URL) para que recargar o
+  // volver con «Atrás» no lo reabra.
+  const editorRequested = wantsTastesEditor(location.state);
+  useEffect(() => {
+    if (!editorRequested) return;
+    void navigate({ pathname: location.pathname, search: location.search, hash: location.hash }, { replace: true, state: null });
+  }, [editorRequested, navigate, location.pathname, location.search, location.hash]);
 
   useEffect(() => {
     if (!focusRequest) return;
@@ -242,7 +268,7 @@ export function FavoriteGenresSection() {
     try {
       await save([]);
       setConfirming(false);
-      toast.success(TASTES_REMOVED_MESSAGE);
+      toastAfterDialog(() => toast.success(TASTES_REMOVED_MESSAGE));
       setFocusRequest({ target: 'heading' });
     } catch (error) {
       if (error instanceof ApiError && error.sessionExpired) return;
@@ -308,11 +334,14 @@ export function FavoriteGenresSection() {
     );
   }
 
+  // `p-5`, como las tarjetas de `ProfileCard` («Cuenta», «Sesiones»): antes llevaba `sm:p-6` y sus bordes
+  // interiores no se alineaban con los de encima (D-5).
   return (
     <section
+      ref={sectionRef}
       id={TASTES_SECTION_ID}
       aria-labelledby={headingId}
-      className="mt-4 rounded-xl border border-line bg-surface p-5 sm:p-6"
+      className="mt-4 rounded-xl border border-line bg-surface p-5"
     >
       {/* Enfocable por código (llegada con #tus-gustos, tras quitar los gustos); sin anillo: no es un control. */}
       <h2

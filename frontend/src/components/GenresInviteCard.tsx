@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import { Link } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
-import { PROFILE_TASTES_PATH } from '../lib/favoriteGenres';
+import { OPEN_TASTES_EDITOR_STATE, PROFILE_TASTES_PATH } from '../lib/favoriteGenres';
 import { buttonClasses } from './buttonStyles';
 
 /** Título de la tarjeta (su `<h2>` y el nombre de su región). */
@@ -11,8 +11,10 @@ export const GENRES_INVITE_TITLE = 'Dinos qué géneros te gustan y te recomenda
  * Tarjeta de la portada para quien no tiene recomendaciones porque no hay nada
  * en qué basarlas (`basis: 'NONE'`: ni géneros favoritos ni «Me gusta»).
  *
- * Lleva a «Tus gustos» del perfil (`/perfil#tus-gustos`, donde la página pone
- * el foco en la sección). Es la vía de las cuentas que ya existían antes de esta
+ * Lleva a «Tus gustos» del perfil (`/perfil#tus-gustos`) con el editor YA
+ * abierto (`OPEN_TASTES_EDITOR_STATE`) y el foco en el grupo de géneros: un
+ * paso, no dos. Antes llegaba a la sección y había que pulsar otro «Elegir
+ * géneros» para lo mismo que el botón ya prometía (revisión visual D-8). Es la vía de las cuentas que ya existían antes de esta
  * función (decisión del autor: a ellas nunca se les hace la pregunta de
  * bienvenida) y de quien contestó «Ahora no».
  *
@@ -47,7 +49,7 @@ export function GenresInviteCard() {
             Elige entre 3 y 5 en tu perfil. También aprendemos de los títulos que marcas con «Me gusta».
           </p>
         </div>
-        <Link to={PROFILE_TASTES_PATH} className={`${buttonClasses('primary')} shrink-0`}>
+        <Link to={PROFILE_TASTES_PATH} state={OPEN_TASTES_EDITOR_STATE} className={`${buttonClasses('primary')} shrink-0`}>
           Elegir mis géneros
         </Link>
       </div>

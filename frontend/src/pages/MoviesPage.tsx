@@ -44,7 +44,7 @@ interface ViewProps {
  */
 export function MoviesPage() {
   useDocumentTitle('Películas');
-  const { filters, barProps, clearFilters } = useCatalogFilterBar('movies');
+  const { filters, barProps, clearFilters, emptyGenreName } = useCatalogFilterBar('movies');
   const results = useMovieResults(filters);
 
   return (
@@ -62,7 +62,12 @@ export function MoviesPage() {
           plural="películas"
           errorTitle="No se pudieron cargar las películas"
           emptyTitle="No hay películas con estos filtros"
-          emptyDescription="Prueba con otro género u otro año, o quita los filtros."
+          emptyDescription={
+            // Un género de la URL sin ninguna película (un enlace guardado): se dice el motivo exacto (D-9).
+            emptyGenreName
+              ? `«${emptyGenreName}» no tiene ninguna película todavía. Prueba con otro género o quita los filtros.`
+              : 'Prueba con otro género u otro año, o quita los filtros.'
+          }
           onClearFilters={clearFilters}
         />
       ) : (

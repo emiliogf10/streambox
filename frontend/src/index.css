@@ -57,6 +57,21 @@
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
+/*
+ * Variante `navbar-away:`: se cumple mientras la barra superior está apartada
+ * (al bajar por la página en móvil, ver `Navbar`). La barra lo marca con
+ * `data-navbar-away`, pero NO se aparta si tiene el foco dentro
+ * (`:not(:focus-within)`, la misma condición que su propia clase): por eso la
+ * variante repite esa condición en vez de fiarse solo del atributo. La usa la
+ * zona de avisos de móvil (`ToastViewport`), que va justo debajo de la barra y
+ * sube con ella para no dejar un hueco vacío arriba.
+ */
+@custom-variant navbar-away {
+  :root:has([data-navbar-away]:not(:focus-within)) & {
+    @slot;
+  }
+}
+
 @layer base {
   html {
     /* Controles nativos (scrollbars, botón de borrar del input de búsqueda) en oscuro. */
@@ -91,10 +106,20 @@
    * estado "antes de aparecer" sin JavaScript; los navegadores que no lo
    * entienden simplemente lo muestran sin animación. Con `prefers-reduced-motion`
    * la regla de abajo conserva el fundido y quita el crecimiento.
+   *
+   * **El estado final es `scale: none`, no `scale: 1`** (pista B11). Se ven
+   * igual, pero cualquier `scale` distinto de `none` (también `1`) convierte al
+   * `<dialog>` en el bloque contenedor de sus hijos `position: fixed`, como
+   * haría un `transform`. La zona de avisos del diálogo (ver `Modal`) es
+   * `fixed`, y como el que hace scroll es el propio diálogo, con `scale: 1` los
+   * avisos se desplazaban con el contenido y se salían por arriba (medido: de
+   * 29 px a −202 px). Con `none` vuelven a ir pegados a la ventana. La entrada
+   * sigue animándose: `none` se interpola como la escala identidad (1), así que
+   * solo es bloque contenedor durante esos 200 ms.
    */
   dialog[open] {
     opacity: 1;
-    scale: 1;
+    scale: none;
     transition:
       opacity 200ms var(--ease-out-strong),
       scale 200ms var(--ease-out-strong);
@@ -138,6 +163,17 @@
   main,
   main :not(dialog, dialog *) {
     scroll-margin-top: calc(var(--navbar-height, 0px) + 2rem);
+
+    /*
+     * Por debajo de `sm` la zona de avisos va ARRIBA, justo bajo la barra (ver
+     * `ToastViewport`), y un error no se cierra solo: la franja que debe quedar
+     * libre incluye también su altura (`--toasts-height`, que mide la propia
+     * zona). Sin avisos mide casi 0 y no cambia nada. Desde `sm` los avisos van
+     * abajo a la derecha y no se suman.
+     */
+    @variant max-sm {
+      scroll-margin-top: calc(var(--navbar-height, 0px) + var(--toasts-height, 0px) + 2rem);
+    }
   }
 
   /* Lo añade `useModalDialog` mientras hay un diálogo abierto: el fondo no debe desplazarse. */
@@ -151,7 +187,7 @@
     font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    min-height: 100vh;
+    min-height: 100dvh;
   }
 }
 
@@ -181,13 +217,16 @@
     scroll-behavior: auto !important;
   }
 
-  /* El diálogo sigue apareciendo con un fundido, pero sin crecer del 96 % al 100 %. */
+  /*
+   * El diálogo sigue apareciendo con un fundido, pero sin crecer del 96 % al 100 %.
+   * Empieza ya en `none` (no en `1`): ver arriba por qué el diálogo no debe tener escala.
+   */
   dialog[open] {
     transition: opacity 200ms var(--ease-out-strong);
 
     @starting-style {
       opacity: 0;
-      scale: 1;
+      scale: none;
     }
   }
 }

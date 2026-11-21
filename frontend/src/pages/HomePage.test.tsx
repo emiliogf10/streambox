@@ -134,18 +134,57 @@ describe('HomePage: estados', () => {
     expect(screen.queryByRole('link', { name: 'Gestionar series' })).not.toBeInTheDocument();
   });
 
-  it('error: muestra el mensaje y "Reintentar" recupera el catálogo', async () => {
-    routeFetch(fetchMock, { ...FAVORITES, [PAGE_0]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom') });
+  it('si fallan las películas Y las series: un único error de página, y «Reintentar» recupera las dos', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+      [SERIES_ROW]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+    });
     const user = renderHome();
 
     expect(await screen.findByRole('heading', { name: 'No se pudo cargar el catálogo' })).toBeInTheDocument();
     expect(screen.getByText(/El servidor ha tenido un problema/)).toBeInTheDocument();
+    // Un solo aviso, no uno por bloque diciendo lo mismo (sin contar la región de los avisos emergentes, vacía).
+    const pageAlerts = screen.getAllByRole('alert').filter((alert) => !alert.closest('[aria-label="Avisos"]'));
+    expect(pageAlerts).toHaveLength(1);
 
-    routeFetch(fetchMock, { ...FAVORITES, [PAGE_0]: () => jsonResponse(makePage([hero, ...others])) });
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+      [SERIES_ROW]: () => jsonResponse(makePage([makeSeries({ id: 10, title: 'Serie nueva' })])),
+    });
     await user.click(screen.getByRole('button', { name: 'Reintentar' }));
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Estreno estrella' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Series' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'No se pudo cargar el catálogo' })).not.toBeInTheDocument();
+  });
+
+  it('si solo fallan las películas (D-10): el error va en su bloque y la fila «Series», que sí cargó, sigue ahí', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+      [SERIES_ROW]: () => jsonResponse(makePage([makeSeries({ id: 10, title: 'Serie nueva' })])),
+    });
+    const user = renderHome();
+
+    const movies = await screen.findByRole('region', { name: 'Películas' });
+    expect(within(movies).getByRole('alert')).toHaveTextContent(/No se pudieron cargar las películas\./);
+    expect(await screen.findByRole('region', { name: 'Series' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^Serie nueva/ })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'No se pudo cargar el catálogo' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+
+    // «Reintentar» solo repite las películas y, al volver, el banner ocupa su sitio.
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+      [SERIES_ROW]: () => jsonResponse(makePage([makeSeries({ id: 10, title: 'Serie nueva' })])),
+    });
+    await user.click(within(movies).getByRole('button', { name: /^Reintentar\s*la carga de películas$/ }));
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Estreno estrella' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Películas' })).not.toBeInTheDocument();
   });
 });
 
@@ -338,7 +377,7 @@ describe('HomePage: fila «Series»', () => {
       [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
       [SERIES_ROW]: () => jsonResponse(makePage(latest)),
     });
-    await user.click(within(row).getByRole('button', { name: 'Reintentar' }));
+    await user.click(within(row).getByRole('button', { name: /^Reintentar\s*la carga de series$/ }));
 
     expect(await screen.findByRole('link', { name: /^Serie nueva/ })).toBeInTheDocument();
   });

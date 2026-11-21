@@ -1493,18 +1493,39 @@ paths:
     get:
       tags:
       - genre-controller
-      summary: Obtiene todos los géneros
-      description: Devuelve la lista completa de géneros cinematográficos disponibles en Streambox.
+      summary: Obtiene los géneros
+      description: 'Sin parámetros, devuelve la lista completa de géneros, sin orden garantizado. Con withTitles=movies, solo
+        los que tienen alguna película; con withTitles=series, solo los que tienen alguna serie con episodios (las series
+        sin episodios no cuentan). Con withTitles, la lista va ordenada por nombre. Pensado para los filtros de los catálogos:
+        así no se ofrece un género que solo llevaría a una página vacía.'
       operationId: getGenres
+      parameters:
+      - name: withTitles
+        in: query
+        description: 'Solo los géneros con algún título visible de este tipo: movies (alguna película) o series (alguna serie
+          con episodios). En minúsculas; sin él, todos.'
+        required: false
+        schema:
+          type: string
+          enum:
+          - movies
+          - series
       responses:
         '200':
-          description: Géneros obtenidos correctamente
+          description: Géneros obtenidos correctamente (con withTitles puede estar vacía)
           content:
             '*/*':
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/GenreResponse'
+        '400':
+          description: 'withTitles no es movies ni series (código VALIDATION_ERROR, motivo en validationErrors.withTitles:
+            "Filtro de títulos no permitido. Valores válidos: movies, series")'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: El usuario no está autenticado
           content:
@@ -1798,15 +1819,14 @@ paths:
         en dos cookies HttpOnly; SameSite=Strict (Secure según la configuración). streambox_token: JWT de acceso, Path=/api,
         Max-Age = su vida (15 minutos por defecto). streambox_refresh: refresh token opaco, Path=/api/auth (solo viaja a las
         rutas de /api/auth: login, refresh, logout, logout-all, verificación del correo y restablecimiento de la contraseña),
-        Max-Age = su vida (7 días). Cuando el JWT caduca, POST /api/auth/refresh entrega uno nuevo sin
-        volver a pedir la contraseña. Las peticiones POST/PUT/PATCH/DELETE autenticadas por cookie deben llevar la cabecera
-        X-Requested-With: StreamBox (403 CSRF_REJECTED si falta). También se acepta Authorization: Bearer con el JWT de acceso
-        (clientes de API), sin esa cabecera extra. Además, un login correcto entrega (o renueva) la cookie de dispositivo
-        streambox_device (HttpOnly, SameSite=Strict, Path=/api/auth, Max-Age = 30 días por defecto): firmada por el servidor,
-        no abre sesión, pero en los siguientes logins de esa cuenta desde ese navegador da un contador de intentos propio
-        (los mismos 5 fallos cada 15 minutos), de modo que el bloqueo que provoquen otros no le deja fuera. Deja de valer
-        al cerrar sesión en todos los dispositivos, cambiar o restablecer la contraseña y confirmar el correo; una cookie
-        que no vale se ignora.'
+        Max-Age = su vida (7 días). Cuando el JWT caduca, POST /api/auth/refresh entrega uno nuevo sin volver a pedir la contraseña.
+        Las peticiones POST/PUT/PATCH/DELETE autenticadas por cookie deben llevar la cabecera X-Requested-With: StreamBox
+        (403 CSRF_REJECTED si falta). También se acepta Authorization: Bearer con el JWT de acceso (clientes de API), sin
+        esa cabecera extra. Además, un login correcto entrega (o renueva) la cookie de dispositivo streambox_device (HttpOnly,
+        SameSite=Strict, Path=/api/auth, Max-Age = 30 días por defecto): firmada por el servidor, no abre sesión, pero en
+        los siguientes logins de esa cuenta desde ese navegador da un contador de intentos propio (los mismos 5 fallos cada
+        15 minutos), de modo que el bloqueo que provoquen otros no le deja fuera. Deja de valer al cerrar sesión en todos
+        los dispositivos, cambiar o restablecer la contraseña y confirmar el correo; una cookie que no vale se ignora.'
       operationId: login
       parameters:
       - name: streambox_device
@@ -2634,6 +2654,40 @@ paths:
       security:
       - cookieAuth: []
       - bearerAuth: []
+  /api/admin/genres:
+    get:
+      tags:
+      - admin-genre-controller
+      summary: Lista los géneros para el panel
+      description: 'Devuelve todos los géneros, ordenados por nombre, con cuántas películas (movieCount) y cuántas series
+        (seriesCount) los tienen asignados. seriesCount incluye las series sin episodios (ocultas para los usuarios). Son
+        los mismos recuentos que daría el 409 GENRE_IN_USE al borrarlo: solo se puede borrar un género con los dos a 0. Requiere
+        rol ADMIN.'
+      operationId: getAdminGenres
+      responses:
+        '200':
+          description: Géneros obtenidos correctamente (puede estar vacía)
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminGenreResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: El usuario no tiene permisos de administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
 components:
   schemas:
     ChangePasswordRequest:
@@ -3305,6 +3359,20 @@ components:
             incluidos los listados sin búsqueda y las búsquedas sin resultados.'
       required:
       - approximate
+    AdminGenreResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        movieCount:
+          type: integer
+          format: int64
+        seriesCount:
+          type: integer
+          format: int64
     ErrorResponse:
       type: object
       description: 'Formato común de todas las respuestas de error de la API (4xx y 5xx). El cliente debe decidir por status

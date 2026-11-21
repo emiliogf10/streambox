@@ -53,6 +53,33 @@ describe('FormField', () => {
   });
 });
 
+describe('FormField: hueco reservado del mensaje (D-11)', () => {
+  it('con `messageSlotClassName`, sin error pinta un hueco vacío (oculto a los lectores) con esas clases', () => {
+    const { container } = render(<FormField id="anio" label="Año" messageSlotClassName="sm:min-h-4" />);
+
+    const slot = container.querySelector('p');
+    expect(slot).toBeEmptyDOMElement();
+    expect(slot).toHaveAttribute('aria-hidden', 'true');
+    expect(slot).toHaveClass('mt-1', 'text-xs', 'sm:min-h-4');
+    expect(screen.getByRole('textbox', { name: 'Año' })).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('con error, el error ocupa ese mismo hueco (mismas clases) y describe el campo', () => {
+    const { container } = render(
+      <FormField id="anio" label="Año" error="Escribe un año entre 1888 y 2100." messageSlotClassName="sm:min-h-4" />,
+    );
+
+    expect(container.querySelectorAll('p')).toHaveLength(1);
+    expect(screen.getByText('Escribe un año entre 1888 y 2100.')).toHaveClass('mt-1', 'text-xs', 'sm:min-h-4');
+    expect(screen.getByRole('textbox', { name: 'Año' })).toHaveAccessibleDescription('Escribe un año entre 1888 y 2100.');
+  });
+
+  it('sin la prop, sin error no hay hueco (como siempre)', () => {
+    const { container } = render(<FormField id="nombre" label="Nombre" />);
+    expect(container.querySelector('p')).toBeNull();
+  });
+});
+
 describe('TextAreaField', () => {
   it('sigue las mismas reglas: aria-invalid siempre, error sin región viva y 16 px en móvil', () => {
     const { rerender } = render(<TextAreaField id="sinopsis" label="Sinopsis" value="" maxChars={10} onChange={() => {}} />);

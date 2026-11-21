@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -18,6 +19,8 @@ import com.emilio.streambox.dto.GenreResponse;
 import com.emilio.streambox.service.GenreService;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -49,20 +52,35 @@ public class GenreController {
     }
 
     /**
-     * Obtiene todos los géneros.
+     * Obtiene los géneros: todos o, con {@code withTitles}, solo los que tienen
+     * algún título visible de ese tipo.
      *
+     * @param withTitles {@code movies}, {@code series} o ausente (todos)
      * @return lista de géneros
      */
     @GetMapping
-    @Operation(summary = "Obtiene todos los géneros", description = "Devuelve la lista completa de géneros "
-            + "cinematográficos disponibles en Streambox.")
+    @Operation(summary = "Obtiene los géneros", description = "Sin parámetros, devuelve la lista completa de "
+            + "géneros, sin orden garantizado. Con withTitles=movies, solo los que tienen alguna película; con "
+            + "withTitles=series, solo los que tienen alguna serie con episodios (las series sin episodios no "
+            + "cuentan). Con withTitles, la lista va ordenada por nombre. Pensado para los filtros de los "
+            + "catálogos: así no se ofrece un género que solo llevaría a una página vacía.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Géneros obtenidos correctamente"),
+            @ApiResponse(responseCode = "200", description = "Géneros obtenidos correctamente (con withTitles "
+                    + "puede estar vacía)"),
+            @ApiResponse(responseCode = "400", description = "withTitles no es movies ni series (código "
+                    + "VALIDATION_ERROR, motivo en validationErrors.withTitles: \""
+                    + GenreService.WITH_TITLES_MESSAGE + "\")"),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado")
     })
-    public List<GenreResponse> getGenres() {
+    public List<GenreResponse> getGenres(
+            @RequestParam(name = GenreService.WITH_TITLES_PARAMETER, required = false)
+            @Parameter(description = "Solo los géneros con algún título visible de este tipo: movies (alguna "
+                    + "película) o series (alguna serie con episodios). En minúsculas; sin él, todos.",
+                    schema = @Schema(type = "string",
+                            allowableValues = { GenreService.WITH_MOVIES, GenreService.WITH_SERIES }))
+            String withTitles) {
 
-        return genreService.getAllGenres();
+        return genreService.getGenres(withTitles);
     }
 
     /**

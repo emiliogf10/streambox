@@ -18,7 +18,7 @@ import { Navbar } from './Navbar';
 export function AppShell() {
   return (
     <FavoritesProvider>
-      <div className="min-h-screen bg-canvas text-white">
+      <div className="min-h-dvh bg-canvas text-white">
         <Navbar />
         {/* tabIndex -1: destino enfocable por código del enlace "Saltar al contenido"; no es una parada de tabulador. */}
         <main id={MAIN_CONTENT_ID} tabIndex={-1} className="outline-hidden">

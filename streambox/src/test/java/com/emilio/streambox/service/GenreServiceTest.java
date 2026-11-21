@@ -85,7 +85,7 @@ class GenreServiceTest {
         GenreInUseException thrown = assertThrows(GenreInUseException.class,
                 () -> service.deleteGenre(GENRE));
 
-        assertEquals("No se puede eliminar el género \"Drama\": alguna película o serie lo tiene asignado. "
+        assertEquals("No se puede eliminar el género «Drama»: alguna película o serie lo tiene asignado. "
                 + "Quítalo de esas películas o series antes de borrarlo.", thrown.getMessage());
     }
 
@@ -107,7 +107,7 @@ class GenreServiceTest {
         GenreInUseException thrown = assertThrows(GenreInUseException.class,
                 () -> service.deleteGenre(GENRE));
 
-        assertEquals("No se puede eliminar el género \"Drama\": lo usan 2 películas. "
+        assertEquals("No se puede eliminar el género «Drama»: lo usan 2 películas. "
                 + "Quítalo de esas películas antes de borrarlo.", thrown.getMessage());
         verify(genreRepository, never()).delete(any());
     }
@@ -126,7 +126,7 @@ class GenreServiceTest {
         GenreInUseException thrown = assertThrows(GenreInUseException.class,
                 () -> service.deleteGenre(GENRE));
 
-        assertEquals("No se puede eliminar el género \"Drama\": lo usan 2 series. "
+        assertEquals("No se puede eliminar el género «Drama»: lo usan 2 series. "
                 + "Quítalo de esas series antes de borrarlo.", thrown.getMessage());
         verify(genreRepository, never()).delete(any());
     }
@@ -145,7 +145,7 @@ class GenreServiceTest {
         GenreInUseException thrown = assertThrows(GenreInUseException.class,
                 () -> service.deleteGenre(GENRE));
 
-        assertEquals("No se puede eliminar el género \"Drama\": " + usage + " antes de borrarlo.",
+        assertEquals("No se puede eliminar el género «Drama»: " + usage + " antes de borrarlo.",
                 thrown.getMessage());
     }
 
@@ -293,6 +293,43 @@ class GenreServiceTest {
         GenreResponse created = service.createGenre(new GenreRequest("   " + name + "  "));
 
         assertEquals(length, created.name().length());
+    }
+
+    // ------------------------------------------------------------------
+    // Filtro withTitles de GET /api/genres
+    // ------------------------------------------------------------------
+
+    /** Sin filtro se usa la consulta de siempre ({@code findAll}), no las filtradas. */
+    @Test
+    void sinFiltroDevuelveTodosLosGenerosComoAntes() {
+        when(genreRepository.findAll()).thenReturn(List.of(drama));
+
+        assertEquals(List.of(new GenreResponse(GENRE, "Drama")), service.getGenres(null));
+        verify(genreRepository, never()).findWithMovies();
+        verify(genreRepository, never()).findWithVisibleSeries();
+    }
+
+    /** Cada valor de la lista blanca va a su consulta (series: solo las que tienen episodios). */
+    @Test
+    void cadaValorDelFiltroUsaSuConsulta() {
+        when(genreRepository.findWithMovies()).thenReturn(List.of(drama));
+        when(genreRepository.findWithVisibleSeries()).thenReturn(List.of());
+
+        assertEquals(List.of(new GenreResponse(GENRE, "Drama")), service.getGenres("movies"));
+        assertEquals(List.of(), service.getGenres("series"));
+        verify(genreRepository, never()).findAll();
+    }
+
+    /** Un valor fuera de la lista blanca se rechaza sin consultar la base de datos. */
+    @ParameterizedTest
+    @ValueSource(strings = { "", "MOVIES", "peliculas", "movies,series" })
+    void unFiltroNoPermitidoSeRechazaSinConsultarNada(String value) {
+        InvalidParameterException error = assertThrows(InvalidParameterException.class,
+                () -> service.getGenres(value));
+
+        assertEquals("withTitles", error.getParameter());
+        assertEquals("Filtro de títulos no permitido. Valores válidos: movies, series", error.getMessage());
+        verifyNoInteractions(genreRepository, movieRepository, seriesRepository);
     }
 
     /**

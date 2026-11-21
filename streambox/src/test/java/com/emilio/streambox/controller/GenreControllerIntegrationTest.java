@@ -169,7 +169,7 @@ class GenreControllerIntegrationTest {
                         .content(json("  dRAMA ")))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("GENRE_ALREADY_EXISTS"))
-                .andExpect(jsonPath("$.message").value("Ya existe un género con el nombre \"Drama\""));
+                .andExpect(jsonPath("$.message").value("Ya existe un género con el nombre «Drama»"));
     }
 
     /**
@@ -228,7 +228,7 @@ class GenreControllerIntegrationTest {
                         .content(json("DRAMA")))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("GENRE_ALREADY_EXISTS"))
-                .andExpect(jsonPath("$.message").value("Ya existe un género con el nombre \"Drama\""));
+                .andExpect(jsonPath("$.message").value("Ya existe un género con el nombre «Drama»"));
 
         assertEquals("Comedia", genreRepository.findById(comedy.getId()).orElseThrow().getName());
     }
@@ -311,7 +311,7 @@ class GenreControllerIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("GENRE_IN_USE"))
                 .andExpect(jsonPath("$.message").value(
-                        "No se puede eliminar el género \"Drama\": lo usan 3 películas. "
+                        "No se puede eliminar el género «Drama»: lo usan 3 películas. "
                                 + "Quítalo de esas películas antes de borrarlo."));
 
         assertTrue(genreRepository.existsById(drama.getId()));

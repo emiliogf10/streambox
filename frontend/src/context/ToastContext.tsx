@@ -93,7 +93,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const id = nextId.current++;
     // Se mira la visibilidad en el momento de crearlo: la de un render anterior podría estar desfasada.
     const revealed = isPageVisible();
-    setToasts((current) => [...current, { id, type, message, revealed }].slice(-MAX_TOASTS));
+    // Un aviso igual a otro que ya está (mismo tipo y texto) lo sustituye en vez de apilarse: los errores ya no se
+    // cierran solos, y tres «No se pudo añadir a tu lista» seguidos solo ocuparían la pantalla. El nuevo se anuncia.
+    setToasts((current) =>
+      [...current.filter((t) => t.type !== type || t.message !== message), { id, type, message, revealed }].slice(
+        -MAX_TOASTS,
+      ),
+    );
   }, []);
 
   // Al volver a la pestaña se pintan los avisos que esperaban. Se marca cada uno como
@@ -136,7 +142,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={api}>
       {children}
       <ToastViewport toasts={onPage} onDismiss={dismiss} />
-      {host && createPortal(<ToastViewport toasts={inHost} onDismiss={dismiss} />, host.element)}
+      {host && createPortal(<ToastViewport toasts={inHost} onDismiss={dismiss} inDialog />, host.element)}
     </ToastContext.Provider>
   );
 }

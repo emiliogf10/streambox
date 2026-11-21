@@ -23,6 +23,7 @@ import {
   renderWithProviders,
   routeFetch,
 } from '../test/helpers';
+import { watchToastInsertions } from '../test/toastInsertions';
 import type { Movie, Series } from '../lib/types';
 import { MyListPage } from './MyListPage';
 
@@ -245,10 +246,14 @@ describe('MyListPage: vaciar lista', () => {
     const confirm = screen.getByRole('alertdialog', { name: '¿Vaciar tu lista?' });
     expect(confirm).toHaveTextContent('Se quitarán las 2 películas y la serie de Mi lista. Esta acción no se puede deshacer.');
 
+    const toasts = watchToastInsertions('Tu lista se ha vaciado.');
     await user.click(within(confirm).getByRole('button', { name: 'Sí, vaciar lista' }));
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Tu lista está vacía' })).toBeInTheDocument();
     expect(screen.getByText('Tu lista se ha vaciado.')).toBeInTheDocument();
+    // El aviso espera a que se cierre la confirmación (`useToastAfterDialog`): nace una vez, en la página.
+    expect(toasts.places()).toEqual(['page']);
+    toasts.stop();
     expect(screen.getByRole('heading', { level: 1, name: 'Mi lista' })).toHaveFocus();
     const deletes = fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE').map(([url]) => String(url));
     expect(deletes.sort()).toEqual(['/api/users/me/favorites', '/api/users/me/favorites/series']);
@@ -279,12 +284,14 @@ describe('MyListPage: vaciar lista', () => {
     });
 
     await user.click(await screen.findByRole('button', { name: 'Vaciar lista' }));
+    const toasts = watchToastInsertions('Se han quitado las películas de tu lista, pero no las series.');
     await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Sí, vaciar lista' }));
 
-    // El aviso nace dentro del diálogo abierto (ver ToastContext) y vuelve a la página al cerrarse:
-    // se busca cuando el diálogo ya se ha cerrado, en su sitio definitivo.
+    // El aviso espera a que se cierre el diálogo (`useToastAfterDialog`): nace una sola vez, ya en la página.
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
     expect(screen.getByText(/^Se han quitado las películas de tu lista, pero no las series\./)).toBeInTheDocument();
+    expect(toasts.places()).toEqual(['page']);
+    toasts.stop();
     expect(within(section('Películas')).getByText('Todavía no has guardado ninguna película.')).toBeInTheDocument();
     expect(within(section('Series')).getByRole('link', { name: /^Dark/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Vaciar lista' })).toBeInTheDocument();

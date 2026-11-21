@@ -22,7 +22,6 @@ import { ToastProvider, useToast } from './ToastContext';
 
 /** Duraciones de `components/Toast` (se repiten a propósito: si cambian, el test lo dice). */
 const INFO_MS = 5000;
-const ERROR_MS = 9000;
 
 let toast: ReturnType<typeof useToast>;
 
@@ -47,7 +46,7 @@ afterEach(() => {
 });
 
 describe('Avisos sin cambios de visibilidad (como siempre)', () => {
-  it('información y éxito se cierran a los 5 s; los errores, a los 9 s', () => {
+  it('información y éxito se cierran a los 5 s; los errores NO se cierran solos (B5), solo con «Cerrar aviso»', () => {
     show('info', 'Guardado');
     show('error', 'Ha fallado');
 
@@ -57,10 +56,26 @@ describe('Avisos sin cambios de visibilidad (como siempre)', () => {
     expect(screen.queryByText('Guardado')).not.toBeInTheDocument();
     expect(screen.getByText('Ha fallado')).toBeInTheDocument();
 
-    passTime(ERROR_MS - INFO_MS - 1);
+    // Antes se iba a los 9 s: si el usuario miraba a otro sitio, ya no podía releer el motivo.
+    passTime(10 * 60_000);
     expect(screen.getByText('Ha fallado')).toBeInTheDocument();
-    passTime(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
     expect(screen.queryByText('Ha fallado')).not.toBeInTheDocument();
+  });
+
+  it('la zona de avisos es una región con nombre («Avisos») que contiene las dos regiones vivas', () => {
+    const region = screen.getByRole('region', { name: 'Avisos' });
+    expect(region).toContainElement(screen.getByRole('status'));
+    expect(region).toContainElement(screen.getByRole('alert'));
+  });
+
+  it('un aviso igual a uno que ya está lo sustituye en lugar de apilarse', () => {
+    show('error', 'No se pudo añadir a tu lista.');
+    show('error', 'No se pudo añadir a tu lista.');
+    show('error', 'Otro fallo');
+
+    expect(screen.getAllByText('No se pudo añadir a tu lista.')).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Cerrar aviso' })).toHaveLength(2);
   });
 
   it('el puntero encima lo pausa y, al salir, vuelve a contar la duración completa', () => {
@@ -103,18 +118,18 @@ describe('Avisos con la pestaña oculta', () => {
   });
 
   it('uno visible que se oculta a mitad se pausa y, al volver, se cierra tras el tiempo que le quedaba', () => {
-    show('error', 'Ha fallado');
+    show('success', 'Añadido');
     passTime(3000);
 
     setPageVisibility('hidden');
-    passTime(ERROR_MS * 10);
-    expect(screen.getByText('Ha fallado')).toBeInTheDocument();
+    passTime(INFO_MS * 10);
+    expect(screen.getByText('Añadido')).toBeInTheDocument();
 
     setPageVisibility('visible');
-    passTime(ERROR_MS - 3000 - 1);
-    expect(screen.getByText('Ha fallado')).toBeInTheDocument();
+    passTime(INFO_MS - 3000 - 1);
+    expect(screen.getByText('Añadido')).toBeInTheDocument();
     passTime(1);
-    expect(screen.queryByText('Ha fallado')).not.toBeInTheDocument();
+    expect(screen.queryByText('Añadido')).not.toBeInTheDocument();
   });
 
   it('varias idas y vueltas descuentan solo el tiempo que la pestaña estuvo a la vista', () => {
@@ -159,5 +174,82 @@ describe('Avisos con la pestaña oculta', () => {
     setPageVisibility('hidden');
     setPageVisibility('visible');
     expect(screen.getByText(/otra pestaña/)).toBe(revealed);
+  });
+});
+
+/**
+ * B4: cerrar con el teclado un aviso que tiene el foco no debe dejarlo en `<body>` (el botón pulsado desaparece).
+ * Guía «persistent-toast-notifications»: al siguiente aviso de la pila o, si no queda ninguno, a donde estaba antes.
+ */
+describe('Foco al cerrar un aviso a mano', () => {
+  /** Botón de la página desde el que se «entra» en la zona de avisos (como con Tab o F6). */
+  function pageButton(): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.textContent = 'Guardar';
+    document.body.prepend(button);
+    return button;
+  }
+
+  /** Lleva el foco de `from` a `to` como lo haría el navegador: con `relatedTarget` en el `focusin`. */
+  function moveFocus(from: HTMLElement, to: HTMLElement) {
+    to.focus();
+    fireEvent.focusIn(to, { relatedTarget: from });
+  }
+
+  it('con más avisos en la pila, el foco pasa al «Cerrar aviso» del siguiente', () => {
+    const origin = pageButton();
+    origin.focus();
+    show('error', 'Primer fallo');
+    show('error', 'Segundo fallo');
+    const [first, second] = screen.getAllByRole('button', { name: 'Cerrar aviso' });
+    moveFocus(origin, first);
+
+    fireEvent.click(first);
+
+    expect(screen.queryByText('Primer fallo')).not.toBeInTheDocument();
+    expect(second).toHaveFocus();
+    origin.remove();
+  });
+
+  it('si era el último, el foco vuelve a donde estaba antes de entrar en los avisos', () => {
+    const origin = pageButton();
+    origin.focus();
+    show('error', 'Ha fallado');
+    const close = screen.getByRole('button', { name: 'Cerrar aviso' });
+    moveFocus(origin, close);
+
+    fireEvent.click(close);
+
+    expect(screen.queryByText('Ha fallado')).not.toBeInTheDocument();
+    expect(origin).toHaveFocus();
+    origin.remove();
+  });
+
+  it('si ese elemento ya no está, va al contenido principal (`<main id="contenido">`)', () => {
+    const main = document.createElement('main');
+    main.id = 'contenido';
+    main.tabIndex = -1;
+    document.body.prepend(main);
+    const origin = pageButton();
+    show('error', 'Ha fallado');
+    const close = screen.getByRole('button', { name: 'Cerrar aviso' });
+    moveFocus(origin, close);
+    origin.remove();
+
+    fireEvent.click(close);
+
+    expect(main).toHaveFocus();
+    main.remove();
+  });
+
+  it('cerrar con el ratón un aviso SIN foco no mueve el foco de donde esté', () => {
+    const origin = pageButton();
+    origin.focus();
+    show('info', 'Guardado');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
+
+    expect(origin).toHaveFocus();
+    origin.remove();
   });
 });

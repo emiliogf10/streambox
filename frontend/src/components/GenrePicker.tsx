@@ -100,7 +100,9 @@ export function GenrePicker({
           {error}
         </p>
       )}
-      <ul role="list" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      {/* Tantas columnas de ≥9.5rem como quepan (2 a 375 px) y, con pocos géneros, las que hay se reparten la fila
+          (`auto-fit`, no `auto-fill`): con 3 géneros y 5 columnas fijas, la mitad derecha quedaba vacía (D-13). */}
+      <ul role="list" className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-2">
         {options.map((genre) => {
           const checked = selected.includes(genre.id);
           const blocked = !checked && atLimit;

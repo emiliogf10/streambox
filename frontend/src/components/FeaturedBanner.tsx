@@ -115,7 +115,12 @@ interface Props {
  *   `:last-child:nth-child(odd)`, que no sabía de textos largos). A 375 px,
  *   con las cuatro de la portada: «Ver ahora | Ver tráiler», «Mi lista» y
  *   «Más información», cada una en su fila; desde ~400 px, de dos en dos.
- * Desde `sm`, todas en línea con su ancho natural. Quien pasa las acciones no
+ * La regla depende del ancho de la COLUMNA de acciones (consulta de contenedor,
+ * por debajo de 36rem), no del de la ventana: a 768 px el póster va al lado y la
+ * columna mide lo mismo que un móvil; con la regla atada a `sm`, las cuatro
+ * acciones de una película dejaban «Me gusta» sola en una segunda fila (D-12).
+ * Ahora quedan en 2 × 2 a partes iguales. Con la columna más ancha (de ~600 px
+ * en adelante), todas en línea con su ancho natural. Quien pasa las acciones no
  * debe meter entre ellas elementos que no se ven (un `<dialog>`, un texto
  * oculto): ocuparían sitio en la fila (el diálogo del tráiler va en un
  * *portal*, ver `TrailerButton`).
@@ -178,7 +183,7 @@ export function FeaturedBanner({
         />
 
         {/* Móvil: `contents` (cada hijo es una celda de la rejilla). Desde md: columna junto al póster. */}
-        <div className={`contents md:flex md:min-w-0 md:flex-col ${isPage ? 'md:flex-1' : 'md:max-w-2xl'}`}>
+        <div className={`contents md:flex md:min-w-0 md:flex-col ${isPage ? 'md:flex-1' : 'md:w-full md:max-w-2xl'}`}>
           <Heading
             id={titleId}
             className="text-[1.75rem] leading-[1.1] font-extrabold tracking-tight text-balance break-words text-white sm:text-4xl md:mb-4 lg:text-5xl"
@@ -197,8 +202,10 @@ export function FeaturedBanner({
             </p>
           )}
 
-          {/* Ver «Acciones»: nunca se parte un texto (`*:min-w-max`); en móvil, de dos en dos o a todo el ancho (`grow` + `basis` de media fila). */}
-          <div className="col-span-2 flex flex-wrap gap-3 *:min-w-max max-sm:*:grow max-sm:*:basis-[calc(50%-0.375rem)] md:mt-6">
+          {/* Ver «Acciones»: nunca se parte un texto (`*:min-w-max`); en una columna estrecha (móvil, y la tableta con el
+              póster al lado), de dos en dos o a todo el ancho (`grow` + `basis` de media fila), según el ancho de la
+              propia columna (`@container`). */}
+          <div className="@container col-span-2 flex flex-wrap gap-3 *:min-w-max @max-[36rem]:*:grow @max-[36rem]:*:basis-[calc(50%-0.375rem)] md:mt-6">
             {actions}
           </div>
 

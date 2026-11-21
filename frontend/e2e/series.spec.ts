@@ -342,7 +342,7 @@ test.describe('Series: filtros', () => {
     expect(EMPTY_SERIES.releaseYear).toBe(2025);
     await page.goto('/series?anio=2025');
 
-    await expect(page.getByRole('heading', { level: 2, name: 'No hay series con estos filtros' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 3, name: 'No hay series con estos filtros' })).toBeVisible();
     await expect(page.getByText('Prueba con otro género u otro año, o quita los filtros.')).toBeVisible();
     // El del estado vacío (el último: el de la barra va antes en la página).
     await page.getByRole('main').getByRole('button', { name: 'Quitar filtros' }).last().click();

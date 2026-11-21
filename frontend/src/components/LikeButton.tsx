@@ -2,6 +2,10 @@ import { Heart } from 'lucide-react';
 import { useLikes } from '../hooks/useLikes';
 import type { Movie, Series } from '../lib/types';
 import { Button } from './Button';
+import { StableLabel } from './StableLabel';
+
+/** Las dos etiquetas del botón: mismo ancho con las dos ({@link StableLabel}). */
+const LABELS = ['Me gusta', 'Te gusta'] as const;
 
 /**
  * Propiedades de {@link LikeButton}: una película O una serie (excluyentes, el
@@ -51,7 +55,7 @@ export function LikeButton(props: Props) {
       className={`${liked ? 'bg-white/15' : ''} ${props.className ?? ''}`}
     >
       <Heart aria-hidden="true" className={`size-4 ${liked ? 'fill-current text-like' : ''}`} />
-      {liked ? 'Te gusta' : 'Me gusta'}
+      <StableLabel current={liked ? 'Te gusta' : 'Me gusta'} options={LABELS} />
       <span className="sr-only"> — {item.title}</span>
     </Button>
   );

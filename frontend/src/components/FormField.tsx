@@ -16,6 +16,15 @@ interface FormFieldProps extends ComponentProps<'input'> {
    * como renombrar en línea un elemento de una lista.
    */
   hideLabel?: boolean;
+  /**
+   * Si se da, el hueco del mensaje (el error) existe SIEMPRE, vacío cuando no
+   * hay error, con estas clases añadidas: así la aparición del error no empuja
+   * lo que hay debajo (salto de maquetación). Se combina con variantes de
+   * Tailwind para decidir dónde se reserva: p. ej. `max-sm:empty:hidden
+   * sm:min-h-4` lo reserva solo desde `sm` (ver el campo «Año» de
+   * `CatalogFilterBar`, D-11). Sin la prop, el error aparece y empuja, como siempre.
+   */
+  messageSlotClassName?: string;
 }
 
 /**
@@ -50,7 +59,16 @@ interface FormFieldProps extends ComponentProps<'input'> {
  *   WCAG 1.4.11 pide 3:1 para el contorno que permite identificar un control,
  *   y el anterior `white/15` se quedaba en 1.5:1. Al pasar el ratón se aclara.
  */
-export function FormField({ id, label, error, hint, hideLabel = false, className = '', ...inputProps }: FormFieldProps) {
+export function FormField({
+  id,
+  label,
+  error,
+  hint,
+  hideLabel = false,
+  messageSlotClassName,
+  className = '',
+  ...inputProps
+}: FormFieldProps) {
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const showHint = Boolean(hint) && !error;
@@ -82,9 +100,13 @@ export function FormField({ id, label, error, hint, hideLabel = false, className
         </p>
       )}
       {error && (
-        <p id={errorId} className="mt-1 text-xs font-medium text-danger">
+        <p id={errorId} className={`mt-1 text-xs font-medium text-danger ${messageSlotClassName ?? ''}`.trim()}>
           {error}
         </p>
+      )}
+      {/* Hueco reservado del mensaje (vacío): mide lo mismo que el error, que así no desplaza nada al aparecer. */}
+      {!error && !showHint && messageSlotClassName !== undefined && (
+        <p aria-hidden="true" className={`mt-1 text-xs ${messageSlotClassName}`} />
       )}
     </div>
   );

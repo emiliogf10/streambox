@@ -44,6 +44,8 @@ interface Props<T extends { id: number }> {
  * oye «12 películas» sin que el foco se mueva de la barra. Mientras carga, el
  * recuento queda vacío y lo que se anuncia es el esqueleto («Buscando series...»).
  *
+ * Los títulos del vacío y del error son `<h3>`: dependen de «Resultados» (E-9).
+ *
  * Sin resultados, el estado vacío ofrece «Quitar filtros» (la salida que
  * siempre funciona) y, si la página la da, una acción secundaria a su lado;
  * su texto también lo da la página, que sabe para quién es.
@@ -69,13 +71,20 @@ export function FilteredCatalogResults<T extends { id: number }>({
     content = <GridSkeleton label={`Buscando ${plural}...`} />;
   } else if (status === 'error') {
     content = (
-      <ErrorState title={errorTitle} message={errorMessage} onRetry={reload} retryFocusRef={headingRef} />
+      <ErrorState
+        title={errorTitle}
+        message={errorMessage}
+        onRetry={reload}
+        retryFocusRef={headingRef}
+        headingLevel={3}
+      />
     );
   } else if (items.length === 0) {
     content = (
       <EmptyState
         icon={<SearchX className="size-8" />}
         title={emptyTitle}
+        titleAs="h3"
         description={emptyDescription}
         action={
           // En móvil, una debajo de otra; desde `sm`, en fila. La principal va primero (orden de lectura y de tabulación).

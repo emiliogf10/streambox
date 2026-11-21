@@ -44,6 +44,9 @@ function routesFor(role: 'ADMIN' | 'USER') {
     'GET /api/movies?page=0&size=1&sort=createdAt&direction=desc': () =>
       jsonResponse(makePage([makeMovie({ id: 1, title: 'Interstellar' })])),
     'GET /api/genres': () => jsonResponse([{ id: 1, name: 'Drama' }]),
+    'GET /api/genres?withTitles=movies': () => jsonResponse([{ id: 1, name: 'Drama' }]),
+    'GET /api/genres?withTitles=series': () => jsonResponse([{ id: 1, name: 'Drama' }]),
+    'GET /api/admin/genres': () => jsonResponse([{ id: 1, name: 'Drama', movieCount: 1, seriesCount: 0 }]),
     'GET /api/movies/1': () => jsonResponse(makeMovie({ id: 1, title: 'Interstellar' })),
     'GET /api/series?page=0&size=12&sort=createdAt&direction=desc': () => jsonResponse(makePage([])),
     'GET /api/series?page=0&size=20&sort=createdAt&direction=desc': () =>
@@ -297,7 +300,7 @@ describe('Rutas del panel de administración', () => {
     expect(screen.queryByRole('heading', { name: 'Administración' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Administrar' })).not.toBeInTheDocument();
     // No llegó a pedir datos del panel.
-    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/genres')).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/admin/genres')).toBe(false);
   });
 
   it('sin sesión, /admin lleva al login', async () => {

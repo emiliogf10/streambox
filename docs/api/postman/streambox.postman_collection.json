@@ -1823,6 +1823,182 @@
           ]
         },
         {
+          "name": "Géneros con películas (filtro de /peliculas)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/genres?withTitles=movies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "genres"
+              ],
+              "query": [
+                {
+                  "key": "withTitles",
+                  "value": "movies"
+                }
+              ]
+            },
+            "description": "Solo los géneros con alguna película (withTitles=movies), ordenados por nombre. Con withTitles=series, los que tienen alguna serie con episodios. Sin el parámetro, todos."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Lista de géneros con id y nombre, sin recuentos\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an(\"array\");",
+                  "  body.forEach(g => { pm.expect(g).to.have.all.keys(\"id\", \"name\"); });",
+                  "});",
+                  "pm.test(\"El género recién creado no sale: aún no tiene películas\", function () {",
+                  "  const id = Number(pm.collectionVariables.get(\"genreId\"));",
+                  "  pm.expect(pm.response.json().map(g => g.id)).to.not.include(id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filtro de géneros no permitido (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/genres?withTitles=peliculas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "genres"
+              ],
+              "query": [
+                {
+                  "key": "withTitles",
+                  "value": "peliculas"
+                }
+              ]
+            },
+            "description": "withTitles solo admite movies o series (en minúsculas)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR solo en withTitles, con el mensaje exacto\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(Object.keys(body.validationErrors)).to.eql([\"withTitles\"]);",
+                  "  pm.expect(body.validationErrors.withTitles).to.eql(\"Filtro de títulos no permitido. Valores válidos: movies, series\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Géneros con recuentos (ADMIN)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "genres"
+              ]
+            },
+            "description": "Vista de gestión del panel: todos los géneros, por nombre, con cuántas películas y series los tienen asignados (también las series sin episodios). Son las cifras del 409 GENRE_IN_USE: solo se puede borrar un género con las dos a 0. Solo ADMIN.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Cada género trae movieCount y seriesCount\", function () {",
+                  "  pm.response.json().forEach(g => {",
+                  "    pm.expect(g).to.have.all.keys(\"id\", \"name\", \"movieCount\", \"seriesCount\");",
+                  "    pm.expect(g.movieCount).to.be.a(\"number\");",
+                  "    pm.expect(g.seriesCount).to.be.a(\"number\");",
+                  "  });",
+                  "});",
+                  "pm.test(\"El género recién creado no lo usa nadie (se podría borrar)\", function () {",
+                  "  const id = Number(pm.collectionVariables.get(\"genreId\"));",
+                  "  const genre = pm.response.json().find(g => g.id === id);",
+                  "  pm.expect(genre.movieCount).to.eql(0);",
+                  "  pm.expect(genre.seriesCount).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Géneros con recuentos sin ser ADMIN (403)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "genres"
+              ]
+            },
+            "description": "Los recuentos incluyen las series sin episodios, que para un usuario no existen: solo los ve un ADMIN."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 403\", function () { pm.response.to.have.status(403); });",
+                  "pm.test(\"Cuerpo de error con code ACCESS_DENIED\", function () { pm.expect(pm.response.json().code).to.eql(\"ACCESS_DENIED\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Renombrar género (ADMIN)",
           "request": {
             "method": "PUT",
@@ -2266,6 +2442,46 @@
           "protocolProfileBehavior": {
             "disableCookies": true
           }
+        },
+        {
+          "name": "Géneros con películas: ya sale el de la colección",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/genres?withTitles=movies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "genres"
+              ],
+              "query": [
+                {
+                  "key": "withTitles",
+                  "value": "movies"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Incluye el género de las películas creadas\", function () {",
+                  "  const id = Number(pm.collectionVariables.get(\"genreId\"));",
+                  "  pm.expect(pm.response.json().map(g => g.id)).to.include(id);",
+                  "});"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Listar películas (paginado y ordenado)",
@@ -2961,6 +3177,96 @@
           }
         },
         {
+          "name": "Géneros con series: la serie sin episodios no cuenta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/genres?withTitles=series",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "genres"
+              ],
+              "query": [
+                {
+                  "key": "withTitles",
+                  "value": "series"
+                }
+              ]
+            },
+            "description": "El filtro de /series solo ofrece géneros con alguna serie con episodios: una serie vacía no existe para los usuarios y su género no debe delatarla."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"No incluye el género: su única serie no tiene episodios\", function () {",
+                  "  const id = Number(pm.collectionVariables.get(\"genreId\"));",
+                  "  pm.expect(pm.response.json().map(g => g.id)).to.not.include(id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Géneros con recuentos: la serie sin episodios sí cuenta (ADMIN)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/genres",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "genres"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"El género lo usan las tres películas y la serie vacía\", function () {",
+                  "  const id = Number(pm.collectionVariables.get(\"genreId\"));",
+                  "  const genre = pm.response.json().find(g => g.id === id);",
+                  "  pm.expect(genre.movieCount).to.eql(3);",
+                  "  pm.expect(genre.seriesCount).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
           "name": "Añadir episodio (ADMIN)",
           "request": {
             "method": "POST",
@@ -3024,6 +3330,46 @@
           "protocolProfileBehavior": {
             "disableCookies": true
           }
+        },
+        {
+          "name": "Géneros con series: ya con un episodio",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/genres?withTitles=series",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "genres"
+              ],
+              "query": [
+                {
+                  "key": "withTitles",
+                  "value": "series"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Incluye el género: su serie ya tiene un episodio\", function () {",
+                  "  const id = Number(pm.collectionVariables.get(\"genreId\"));",
+                  "  pm.expect(pm.response.json().map(g => g.id)).to.include(id);",
+                  "});"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Episodio duplicado (409)",

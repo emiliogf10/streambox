@@ -60,6 +60,108 @@ public interface GenreRepository extends JpaRepository<Genre, Long> {
      */
     boolean existsByNameIgnoreCaseAndIdNot(String name, Long id);
 
+    /**
+     * Devuelve todos los géneros con cuántas películas y cuántas series los
+     * tienen asignados, por nombre (y por {@code id} para desempatar), en
+     * <strong>una sola consulta</strong>.
+     *
+     * <p>
+     * Es la vista de gestión del panel ({@code GET /api/admin/genres}): con
+     * ella el panel sabe de antemano qué géneros no se pueden borrar.
+     * </p>
+     *
+     * <p>
+     * <b>Misma definición que el 409 {@code GENRE_IN_USE}.</b> Cada recuento es
+     * una subconsulta con la misma forma que las consultas derivadas que usa el
+     * borrado ({@code MovieRepository.countByGenres_Id} y
+     * {@code SeriesRepository.countByGenres_Id}: «títulos unidos a sus géneros
+     * con ese id»), así que el número que ve el panel es el mismo que diría el
+     * mensaje del 409. Por eso cuenta <strong>también las series sin
+     * episodios</strong>: también impiden el borrado (la clave foránea de
+     * {@code series_genres} no tiene cascada). Es justo lo que no debe ver un
+     * usuario (para él esas series no existen), y por eso esta consulta solo
+     * la usa un endpoint de {@code /api/admin/**}.
+     * </p>
+     *
+     * <p>
+     * <b>Por qué subconsultas y no {@code LEFT JOIN} + {@code GROUP BY}:</b>
+     * con dos {@code LEFT JOIN} (películas y series) las filas se
+     * multiplicarían (un género con 3 películas y 2 series daría 6 filas) y
+     * habría que contar con {@code DISTINCT}. Cada subconsulta escalar va por
+     * {@code idx_movie_genres_genre_id} o {@code idx_series_genres_genre_id};
+     * con los pocos géneros de un catálogo, el coste es despreciable. Es JPQL
+     * (no SQL nativo), así que Hibernate la traduce igual para PostgreSQL y
+     * H2, y los alias llegan a {@link GenreUsage} tal cual (en SQL nativo,
+     * PostgreSQL los pasaría a minúsculas).
+     * </p>
+     *
+     * @return todos los géneros con sus recuentos (0 si nadie los usa)
+     */
+    @Query("select g.id as id, g.name as name,"
+            + " (select count(m) from Movie m join m.genres mg where mg.id = g.id) as movieCount,"
+            + " (select count(s) from Series s join s.genres sg where sg.id = g.id) as seriesCount"
+            + " from Genre g order by g.name, g.id")
+    List<GenreUsage> findAllWithUsage();
+
+    // ------------------------------------------------------------------
+    // Géneros con títulos visibles
+    //
+    // Condiciones en SQL nativo que comparten la lista de opciones de «Tus
+    // gustos» y los filtros de los catálogos (GET /api/genres?withTitles=...).
+    // Viven en constantes para que «visible» signifique lo mismo en todas
+    // partes: si la regla de visibilidad cambia, cambia a la vez en todas.
+    // ------------------------------------------------------------------
+
+    /**
+     * Condición «el género {@code g} tiene alguna película». Todas las
+     * películas son visibles para los usuarios. Para en la primera fila
+     * ({@code idx_movie_genres_genre_id}).
+     */
+    String HAS_MOVIES = "EXISTS (SELECT 1 FROM movie_genres mg WHERE mg.genre_id = g.id)";
+
+    /**
+     * Condición «el género {@code g} tiene alguna serie <strong>visible</strong>»:
+     * con al menos un episodio, la misma regla que el resto de rutas públicas
+     * (una serie sin episodios es indistinguible de una inexistente). Un
+     * episodio implica su serie por la clave foránea. Usa
+     * {@code idx_series_genres_genre_id} y el índice único de {@code episodes}
+     * (empieza por {@code series_id}).
+     */
+    String HAS_VISIBLE_SERIES = "EXISTS (SELECT 1 FROM series_genres sg WHERE sg.genre_id = g.id"
+            + " AND EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = sg.series_id))";
+
+    /**
+     * Devuelve los géneros con alguna película, por nombre y {@code id}.
+     *
+     * <p>
+     * Es la lista del filtro de género de {@code /peliculas}
+     * ({@code GET /api/genres?withTitles=movies}): un género sin películas solo
+     * llevaría a «No hay películas con estos filtros».
+     * </p>
+     *
+     * @return géneros con al menos una película
+     */
+    @Query(value = "SELECT g.* FROM genres g WHERE " + HAS_MOVIES
+            + " ORDER BY g.name, g.id", nativeQuery = true)
+    List<Genre> findWithMovies();
+
+    /**
+     * Devuelve los géneros con alguna serie visible (con episodios), por
+     * nombre y {@code id}.
+     *
+     * <p>
+     * Es la lista del filtro de género de {@code /series}
+     * ({@code GET /api/genres?withTitles=series}). Un género cuyas series están
+     * todas vacías no sale: si saliera, delataría que existen series ocultas
+     * con ese género.
+     * </p>
+     *
+     * @return géneros con al menos una serie con episodios
+     */
+    @Query(value = "SELECT g.* FROM genres g WHERE " + HAS_VISIBLE_SERIES
+            + " ORDER BY g.name, g.id", nativeQuery = true)
+    List<Genre> findWithVisibleSeries();
+
     // ------------------------------------------------------------------
     // Géneros favoritos («Tus gustos», tabla user_favorite_genres, V11)
     //
@@ -78,14 +180,12 @@ public interface GenreRepository extends JpaRepository<Genre, Long> {
      *
      * <p>
      * Es una constante para que el listado de opciones y la validación de los
-     * ids no puedan divergir. Cada {@code EXISTS} para en la primera fila:
-     * {@code idx_movie_genres_genre_id}, {@code idx_series_genres_genre_id} y el
-     * índice único de {@code episodes} (empieza por {@code series_id}).
+     * ids no puedan divergir, y se compone de {@link #HAS_MOVIES} y
+     * {@link #HAS_VISIBLE_SERIES} para que tampoco diverja de los filtros de
+     * los catálogos. Cada {@code EXISTS} para en la primera fila.
      * </p>
      */
-    String HAS_VISIBLE_TITLES = "(EXISTS (SELECT 1 FROM movie_genres mg WHERE mg.genre_id = g.id)"
-            + " OR EXISTS (SELECT 1 FROM series_genres sg WHERE sg.genre_id = g.id"
-            + "   AND EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = sg.series_id)))";
+    String HAS_VISIBLE_TITLES = "(" + HAS_MOVIES + " OR " + HAS_VISIBLE_SERIES + ")";
 
     /**
      * Devuelve los géneros favoritos de un usuario, por nombre (y por

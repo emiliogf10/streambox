@@ -38,8 +38,8 @@
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
 | Backend (JUnit) | **4061** con Docker (2026-11-13) | Sin omitidos. Tras la cookie de dispositivo (2026-11-16): **3987** sin Docker (3648 con H2 y 339 de PostgreSQL omitidos); **los de PostgreSQL de ese cambio aún no se han ejecutado con Docker**. Antes del lote posterior a la auditoría run-3 eran 3975 en el CI |
-| Frontend (Vitest) | **1794** | |
-| E2E (Playwright) | **252** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
+| Frontend (Vitest) | **1834** | |
+| E2E (Playwright) | **259** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -482,6 +482,15 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-20 · Cierre de la revisión del frontend (UX)
+
+- **Backend** (`backend`, revisado por `database`): `GET /api/admin/genres` (solo ADMIN; cuántas películas y series usan cada género, con las mismas cifras que el 409 `GENRE_IN_USE`), `GET /api/genres?withTitles=movies|series` (solo géneros con títulos visibles; una serie sin episodios no cuenta) y comillas «» en los 409 de géneros. Suite 4241 (con Docker).
+- **Frontend** (`frontend`, con las skills de diseño y `modern-web-guidance`): D-4 «Borrar» no disponible si el género está en uso, con recuentos en el panel; D-9 filtros solo con géneros con títulos (y un género de la URL sin títulos se explica, no se descarta); D-8 «Elegir mis géneros» abre el editor; D-10 error por bloque en el inicio; D-11 botones de ancho estable (`StableLabel`) y sin saltos por el error del año; D-5/6/7 perfil (cifras en franja, rejilla común, «Géneros que más guardas»); D-12 acciones del banner en 2×2 en tablet; D-13 bienvenida centrada; D-14 «2h»; D-15 zoom de 200 ms; E-8 orden de `ConfirmDialog`; E-9 `h3`; E-10/B4/B5 avisos (errores persistentes, región con nombre, foco al cerrar, sin repetidos); B9 sin scroll sobrante en «Mi lista».
+- **Revisión de `qa`:** sin críticos ni altos; arreglados por `frontend` un **MEDIO** (en móvil un error persistente tapaba toda la barra: los avisos van ahora debajo de ella y suben con ella) y tres bajos (avisos que se movían con el contenido de un diálogo largo —`scale: none`—, `genres.all` desfasada tras un 404, y avisos que nacían dentro del diálogo —`useToastAfterDialog`, aplicado también a borrar títulos, «Quitar mis gustos» y vaciar «Mi lista»—). `qa` añadió tests de que `withTitles=series` no delata las series vacías y de los 403/401 del endpoint de admin.
+- **Tests:** backend 4241 (el 2026-11-20 sin Docker: 4028 ejecutados y 343 omitidos; **falta ejecutar con Docker `PostgresGenreViewsIntegrationTest`**, ampliado por `qa`); Vitest de 1794 a **1834**; E2E de 252 a **259** + 24 omitidos. Verificado por el orquestador: build 0, lint 0, tipos de los E2E 0, Vitest 1834/1834.
+- **Decisiones para el autor:** «2h» sin espacio (encaja con «1h 48m»); en móvil el aviso tapa unos segundos la parte de arriba del contenido; seis títulos en «De tu lista». Capturas en `Pruebas/streambox-capturas/cierre-revision-2026-11/`. La skill `review-animations` solo la puede lanzar el autor (`/review-animations`).
+- **Nota:** desde Git Bash, Vitest falló a veces con «Vitest failed to find the current suite»; desde PowerShell pasa siempre.
 
 ### 2026-11-19 · Lote de frontend: barra móvil, foco al aviso, carga bajo demanda y textos
 

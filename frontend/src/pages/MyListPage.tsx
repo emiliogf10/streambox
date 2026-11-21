@@ -14,6 +14,7 @@ import { POSTER_GRID_CLASS } from '../components/posterGridStyles';
 import { SeriesCard } from '../components/SeriesCard';
 import { useFavorites } from '../context/FavoritesContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { useToastAfterDialog } from '../hooks/useToastAfterDialog';
 
 /**
  * Ilustración del estado vacío: tres huecos de póster (2:3, borde discontinuo)
@@ -113,6 +114,8 @@ export function MyListPage() {
   const { movies, series, status, errorMessage, clear, reload } = useFavorites();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
+  // El aviso del vaciado («Tu lista se ha vaciado.» o el fallo) espera a que se cierre la confirmación.
+  const toastAfterDialog = useToastAfterDialog(confirmOpen);
   const headingRef = useRef<HTMLHeadingElement>(null);
   // Se activa al vaciar la lista y se consume cuando el diálogo ya está cerrado (ver el efecto).
   const focusHeadingAfterClose = useRef(false);
@@ -120,7 +123,7 @@ export function MyListPage() {
 
   const handleConfirmClear = async () => {
     setClearing(true);
-    const done = await clear();
+    const done = await clear(toastAfterDialog);
     setClearing(false);
     focusHeadingAfterClose.current = done;
     setConfirmOpen(false);
@@ -194,7 +197,7 @@ export function MyListPage() {
   }
 
   return (
-    <div className="min-h-screen px-4 py-6 sm:px-6">
+    <div className="px-4 py-6 sm:px-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         {/* tabIndex -1: recibe el foco por código tras vaciar la lista; no es una parada de tabulador. */}
         <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold tracking-tight outline-hidden sm:text-3xl">

@@ -12,6 +12,8 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useLocation } from 'react-router-dom';
+import { OPEN_TASTES_EDITOR_STATE, PROFILE_TASTES_PATH } from '../../lib/favoriteGenres';
 import { queryKeys } from '../../lib/queryKeys';
 import {
   CURRENT_USER,
@@ -26,6 +28,7 @@ import {
   routeFetch,
 } from '../../test/helpers';
 import { createTestQueryClient } from '../../test/queryClient';
+import { watchToastInsertions } from '../../test/toastInsertions';
 import { FavoriteGenresSection, TASTES_REMOVED_MESSAGE, TASTES_SAVED_MESSAGE } from './FavoriteGenresSection';
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -107,6 +110,44 @@ describe('FavoriteGenresSection: ver', () => {
     const heading = await screen.findByRole('heading', { level: 2, name: 'Tus gustos' });
     await waitFor(() => expect(heading).toHaveFocus());
     expect(screen.getByRole('region', { name: 'Tus gustos' })).toHaveAttribute('id', 'tus-gustos');
+  });
+});
+
+describe('FavoriteGenresSection: llegada desde «Elegir mis géneros» de la portada (D-8)', () => {
+  /** Enseña el estado de navegación actual, para ver que la petición de abrir el editor se consume. */
+  function StateProbe() {
+    const location = useLocation();
+    return <p>{`estado:${JSON.stringify(location.state ?? null)}`}</p>;
+  }
+
+  it('con la petición en el historial, el editor ya está abierto (un paso) con el foco en el grupo de géneros', async () => {
+    routeFetch(fetchMock, {
+      [CURRENT_USER]: () => jsonResponse(makeUser()),
+      [FAVORITE_GENRES]: () => jsonResponse([]),
+      [GENRE_OPTIONS]: () => jsonResponse(GENRES),
+    });
+    renderWithProviders(
+      <>
+        <FavoriteGenresSection />
+        <StateProbe />
+      </>,
+      { route: PROFILE_TASTES_PATH, routeState: OPEN_TASTES_EDITOR_STATE, session: true },
+    );
+
+    const section = screen.getByRole('region', { name: 'Tus gustos' });
+    const group = await within(section).findByRole('group', { name: 'Elige entre 3 y 5 géneros' });
+    await waitFor(() => expect(group).toHaveFocus());
+    expect(within(section).queryByRole('button', { name: 'Elegir géneros' })).not.toBeInTheDocument();
+    // La petición se borra del historial (misma URL): recargar o volver con «Atrás» no reabre el editor.
+    await waitFor(() => expect(screen.getByText('estado:null')).toBeInTheDocument());
+    expect(screen.getByText('ruta:/perfil')).toBeInTheDocument();
+  });
+
+  it('sin la petición (un enlace copiado a #tus-gustos), solo lleva a la sección, sin abrir el editor', async () => {
+    const { section } = renderSection({ route: PROFILE_TASTES_PATH });
+
+    expect(await within(section()).findByRole('button', { name: 'Elegir géneros' })).toBeInTheDocument();
+    expect(within(section()).queryByRole('group', { name: 'Elige entre 3 y 5 géneros' })).not.toBeInTheDocument();
   });
 });
 
@@ -255,12 +296,16 @@ describe('FavoriteGenresSection: quitar', () => {
       'Dejaremos de usar estos géneros para recomendarte títulos. Podrás volver a elegirlos cuando quieras.',
     );
     expect(savedBodies()).toEqual([]);
+    const toasts = watchToastInsertions(TASTES_REMOVED_MESSAGE);
     await user.click(within(dialog).getByRole('button', { name: 'Quitar mis gustos' }));
 
     expect(await screen.findByText(TASTES_REMOVED_MESSAGE)).toBeInTheDocument();
     expect(savedBodies()).toEqual([{ genreIds: [] }]);
     expect(await within(section()).findByText('Aún no has elegido tus géneros favoritos')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Tus gustos' })).toHaveFocus());
+    // El aviso espera a que se cierre la confirmación: nace una sola vez, en la página (no dentro del diálogo).
+    expect(toasts.places()).toEqual(['page']);
+    toasts.stop();
   });
 
   it('si falla, el error sale dentro del diálogo, que sigue abierto; «Cancelar» no envía nada', async () => {

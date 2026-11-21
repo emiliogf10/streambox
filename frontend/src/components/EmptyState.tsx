@@ -16,9 +16,12 @@ interface EmptyStateProps {
   action?: ReactNode;
   /**
    * Nivel del título: `h2` (por defecto) cuando la página ya tiene su `<h1>`;
-   * `h1` cuando el estado ES la página entera (p. ej. «Serie no encontrada»).
+   * `h1` cuando el estado ES la página entera (p. ej. «Serie no encontrada»);
+   * `h3` cuando vive DENTRO de una sección que ya tiene su `<h2>` (p. ej. bajo
+   * «Resultados» de un catálogo filtrado: dos `h2` seguidos harían del vacío una
+   * sección hermana, cuando depende de la anterior; E-9).
    */
-  titleAs?: 'h1' | 'h2';
+  titleAs?: 'h1' | 'h2' | 'h3';
 }
 
 /**

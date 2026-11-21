@@ -2,9 +2,11 @@ package com.emilio.streambox.mapper;
 
 import java.util.List;
 
+import com.emilio.streambox.dto.AdminGenreResponse;
 import com.emilio.streambox.dto.GenreRequest;
 import com.emilio.streambox.dto.GenreResponse;
 import com.emilio.streambox.entity.Genre;
+import com.emilio.streambox.repository.GenreUsage;
 
 /**
  * Convierte entre la entidad {@link Genre} y los DTO de la API.
@@ -37,6 +39,19 @@ public final class GenreMapper {
     public static GenreResponse toResponse(Genre genre) {
 
         return new GenreResponse(genre.getId(), genre.getName());
+    }
+
+    /**
+     * Convierte un género con sus recuentos en el DTO del panel de
+     * administración.
+     *
+     * @param usage género con cuántas películas y series lo usan
+     * @return DTO de la vista de gestión
+     */
+    public static AdminGenreResponse toAdminResponse(GenreUsage usage) {
+
+        return new AdminGenreResponse(usage.getId(), usage.getName(), usage.getMovieCount(),
+                usage.getSeriesCount());
     }
 
     /**

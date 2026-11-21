@@ -25,9 +25,10 @@ interface ErrorStateProps {
   /**
    * Nivel del encabezado del título: 2 (por defecto) cuando el error vive dentro
    * de una página que ya tiene su `<h1>`; 1 cuando el error ES la página (p. ej.
-   * «No se pudo comprobar tu sesión», que se pinta sin barra ni contenido).
+   * «No se pudo comprobar tu sesión», que se pinta sin barra ni contenido); 3
+   * cuando vive dentro de una sección que ya tiene su `<h2>` (p. ej. «Resultados»).
    */
-  headingLevel?: 1 | 2;
+  headingLevel?: 1 | 2 | 3;
   /**
    * Elemento estable de la zona (p. ej. su encabezado, con `tabIndex={-1}`) que
    * recibe el foco cuando «Reintentar» desaparece al pulsarlo. Sin él, va al
@@ -62,7 +63,7 @@ export function ErrorState({
   retryFocusRef,
 }: ErrorStateProps) {
   const { retryRef, handleRetry } = useRetryFocus(onRetry ?? NO_RETRY, retryFocusRef && (() => retryFocusRef.current));
-  const Heading = headingLevel === 1 ? 'h1' : 'h2';
+  const Heading = (['h1', 'h2', 'h3'] as const)[headingLevel - 1];
   return (
     <div className={`flex items-center justify-center ${compact ? '' : 'min-h-[50vh] px-4'}`}>
       <div

@@ -64,7 +64,11 @@ interface ViewProps {
 export function SeriesPage() {
   useDocumentTitle('Series');
   const { isAdmin } = useAuth();
-  const { filters, barProps, clearFilters } = useCatalogFilterBar('series');
+  const { filters, barProps, clearFilters, emptyGenreName } = useCatalogFilterBar('series');
+  // Un género de la URL sin ninguna serie visible (un enlace guardado): el vacío dice el motivo exacto (D-9).
+  const tryAgain = emptyGenreName
+    ? `«${emptyGenreName}» no tiene ninguna serie ${isAdmin ? 'visible ' : ''}todavía. Prueba con otro género o quita los filtros.`
+    : 'Prueba con otro género u otro año, o quita los filtros.';
   const results = useSeriesResults(filters);
 
   return (
@@ -83,9 +87,7 @@ export function SeriesPage() {
           errorTitle="No se pudieron cargar las series"
           emptyTitle={isAdmin ? 'No hay series visibles con estos filtros' : 'No hay series con estos filtros'}
           emptyDescription={
-            isAdmin
-              ? 'Prueba con otro género u otro año, o quita los filtros. Las series sin episodios no aparecen aunque coincidan.'
-              : 'Prueba con otro género u otro año, o quita los filtros.'
+            isAdmin ? `${tryAgain} Las series sin episodios no aparecen aunque coincidan.` : tryAgain
           }
           onClearFilters={clearFilters}
           emptySecondaryAction={

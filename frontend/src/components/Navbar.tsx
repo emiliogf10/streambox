@@ -76,7 +76,9 @@ const adminIconOnlyMark = ({ isActive }: { isActive: boolean }) =>
  *   aparece y desaparece sin deslizarse. NUNCA se aparta si tiene el foco
  *   (`:focus-within`: quien navega con el teclado o escribe en el buscador la
  *   sigue viendo) ni con el menú de usuario abierto. En escritorio no se mueve:
- *   una fila de 57 px no estorba.
+ *   una fila de 57 px no estorba. Mientras está apartada lleva `data-navbar-away`:
+ *   la zona de avisos de móvil, anclada justo debajo de la barra, sube con ella
+ *   (variante `navbar-away` de `index.css`; ver `ToastViewport`).
  *
  * Por qué así (revisión de 2026-11, D-1): a 375 px la barra medía 165 px, el
  * 20-25 % de la pantalla, siempre. La guía de `modern-web-guidance` pide barras
@@ -205,6 +207,9 @@ export function Navbar() {
   return (
     <header
       ref={headerRef}
+      // Marca «apartada» para otras piezas que dependen de dónde está la barra: la zona de avisos de móvil
+      // (`ToastViewport`) sube con ella a través de la variante `navbar-away` de `index.css`.
+      data-navbar-away={barAway || undefined}
       // Por debajo de `md`, se aparta al bajar (salvo con el foco dentro) y se desliza solo si no se ha pedido
       // reducir el movimiento. Al entrar el foco aparece SIN transición (`focus-within:transition-none`): una acción
       // de teclado no se anima y, a mitad de deslizamiento, el navegador vería el control enfocado fuera de la

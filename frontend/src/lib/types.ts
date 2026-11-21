@@ -306,6 +306,18 @@ export interface EpisodeRequest {
   videoUrl: string | null;
 }
 
+/**
+ * Género con su uso, tal como lo da `GET /api/admin/genres` (`AdminGenreResponse`,
+ * solo administradores). `movieCount` y `seriesCount` cuentan TODAS las películas
+ * y series que lo usan (también las series sin episodios, que el público no ve):
+ * son las mismas cifras con las que el servidor responde 409 `GENRE_IN_USE`, así
+ * que un género solo se puede borrar si las dos son 0.
+ */
+export interface AdminGenre extends Genre {
+  movieCount: number;
+  seriesCount: number;
+}
+
 /** Cuerpo de `POST /api/genres` y `PUT /api/genres/{id}` (`GenreRequest`, solo administradores). */
 export interface GenreRequest {
   name: string;

@@ -9,7 +9,7 @@
  * serie con el mismo id no se confunden; que cada cambio descarta las
  * recomendaciones; y que pulsar mientras la lista carga es seguro.
  */
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { likedMessage, likeGoneMessage, unlikedMessage } from '../hooks/useLikes';
@@ -95,10 +95,14 @@ describe('LikeButton: estado y nombres', () => {
 
     const movie = screen.getByRole('button', { name: MOVIE_LIKED });
     expect(movie).toHaveAttribute('aria-pressed', 'true');
-    expect(movie).toHaveTextContent(/^Te gusta/);
+    // Las dos etiquetas están siempre (fijan el ancho, D-11); solo la actual es visible y se lee.
+    expect(within(movie).getByText('Te gusta')).not.toHaveAttribute('aria-hidden');
+    expect(within(movie).getByText('Me gusta')).toHaveAttribute('aria-hidden', 'true');
+    expect(within(movie).getByText('Me gusta')).toHaveClass('invisible');
     const series = screen.getByRole('button', { name: SERIES_NOT_LIKED });
     expect(series).toHaveAttribute('aria-pressed', 'false');
-    expect(series).toHaveTextContent(/^Me gusta/);
+    expect(within(series).getByText('Me gusta')).not.toHaveAttribute('aria-hidden');
+    expect(within(series).getByText('Te gusta')).toHaveClass('invisible');
     // Nada que ver con «Mi lista»: ni su texto ni su nombre.
     expect(screen.queryByRole('button', { name: /mi lista/i })).not.toBeInTheDocument();
   });

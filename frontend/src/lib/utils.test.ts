@@ -67,7 +67,9 @@ describe('formatDuration', () => {
   it.each([
     [108, '1h 48m'],
     [45, '45m'],
-    [60, '1h 0m'],
+    // Horas exactas: sin «0m» de relleno (D-14).
+    [60, '1h'],
+    [120, '2h'],
     [0, '0m'],
     [59, '59m'],
     [125, '2h 5m'],

@@ -628,7 +628,7 @@ class SeriesAdminIntegrationTest {
         mockMvc.perform(delete("/api/genres/" + drama.getId()).header("Authorization", adminToken))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("GENRE_IN_USE"))
-                .andExpect(jsonPath("$.message").value("No se puede eliminar el género \"Drama\": lo usan 2 series. "
+                .andExpect(jsonPath("$.message").value("No se puede eliminar el género «Drama»: lo usan 2 series. "
                         + "Quítalo de esas series antes de borrarlo."));
 
         assertTrue(genreRepository.existsById(drama.getId()));
@@ -646,11 +646,11 @@ class SeriesAdminIntegrationTest {
 
         mockMvc.perform(delete("/api/genres/" + drama.getId()).header("Authorization", adminToken))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.message").value("No se puede eliminar el género \"Drama\": lo usan "
+                .andExpect(jsonPath("$.message").value("No se puede eliminar el género «Drama»: lo usan "
                         + "3 películas y 2 series. Quítalo de esas películas y de esas series antes de borrarlo."));
         mockMvc.perform(delete("/api/genres/" + comedy.getId()).header("Authorization", adminToken))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.message").value("No se puede eliminar el género \"Comedia\": lo usan "
+                .andExpect(jsonPath("$.message").value("No se puede eliminar el género «Comedia»: lo usan "
                         + "1 película y 1 serie. Quítalo de esa película y de esa serie antes de borrarlo."));
     }
 
@@ -660,7 +660,7 @@ class SeriesAdminIntegrationTest {
 
         mockMvc.perform(delete("/api/genres/" + comedy.getId()).header("Authorization", adminToken))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.message").value("No se puede eliminar el género \"Comedia\": lo usa "
+                .andExpect(jsonPath("$.message").value("No se puede eliminar el género «Comedia»: lo usa "
                         + "1 serie. Quítalo de esa serie antes de borrarlo."));
 
         mockMvc.perform(delete(SERIES + "/" + series.getId()).header("Authorization", adminToken))

@@ -7,22 +7,18 @@ import type { CatalogItem } from '../../lib/types';
 import { Button } from '../Button';
 import { ErrorState } from '../ErrorState';
 import { MovieCard } from '../MovieCard';
+import { COMPACT_POSTER_GRID_CLASS } from '../posterGridStyles';
 import { SeriesCard } from '../SeriesCard';
 
 /**
  * Cuántos títulos de cada tipo se enseñan antes de «Mostrar todas». Doce son
- * filas completas en todos los anchos de la rejilla (cuatro filas de 3 a 375 px,
- * tres de 4 desde `sm`, dos de 6 desde `md`) y no convierten el perfil en un catálogo. El resto se
+ * filas completas en todos los anchos de la rejilla (cuatro filas de 3 hasta
+ * `md`, dos de 6 desde `md`) y no convierten el perfil en un catálogo. El resto se
  * despliega aquí mismo: no hay (ni se quiere, decisión del autor) una página
  * aparte de «Me gusta».
  */
 export const LIKED_PREVIEW_LIMIT = 12;
 
-/**
- * Rejilla de tarjetas pequeñas: más densa que la de «Mi lista» porque aquí son
- * un resumen dentro del perfil, no la pantalla principal.
- */
-const SMALL_GRID_CLASS = 'grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6';
 
 /** Propiedades de {@link LikedGroup}. */
 interface LikedGroupProps<T extends CatalogItem> {
@@ -49,7 +45,7 @@ function LikedGroup<T extends CatalogItem>({ title, noun, items, renderCard }: L
       <h3 className="mb-3 text-base font-semibold text-white">
         {title} <span className="font-normal text-muted tabular-nums">({items.length})</span>
       </h3>
-      <ul id={listId} role="list" className={SMALL_GRID_CLASS}>
+      <ul id={listId} role="list" className={COMPACT_POSTER_GRID_CLASS}>
         {shown.map((item) => (
           <li key={item.id} className="min-w-0">
             {renderCard(item)}
@@ -76,7 +72,7 @@ function LikedGroup<T extends CatalogItem>({ title, noun, items, renderCard }: L
  * administrador también tiene sus «Me gusta») y dice cómo llenarla y para qué
  * sirve. Sin botón: el camino es la página de un título (las tarjetas de «De tu
  * lista», justo encima si las hay, o las secciones de la barra), y repetir aquí el
- * «Explorar películas» de «Géneros de tu lista» serían dos botones iguales en la misma
+ * «Explorar películas» de «Géneros que más guardas» serían dos botones iguales en la misma
  * pantalla cuando las dos están vacías.
  */
 function LikesEmpty() {

@@ -66,7 +66,7 @@ describe('pickListPreview', () => {
 
     expect(result).toHaveLength(LIST_PREVIEW_SIZE);
     expect(result.every((entry) => entry.kind === 'movie')).toBe(true);
-    expect(result.map((entry) => entry.item.id)).toEqual([1, 2, 3, 4, 5]);
+    expect(result.map((entry) => entry.item.id)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('si sobran huecos, completa con series (después de las películas)', () => {

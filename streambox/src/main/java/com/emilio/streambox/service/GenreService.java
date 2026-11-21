@@ -10,6 +10,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.emilio.streambox.dto.AdminGenreResponse;
 import com.emilio.streambox.dto.GenreRequest;
 import com.emilio.streambox.dto.GenreResponse;
 import com.emilio.streambox.entity.Genre;
@@ -46,6 +47,19 @@ import com.emilio.streambox.validation.InvisibleEdges;
 @Service
 public class GenreService {
 
+    /** Nombre del parámetro que filtra los géneros por títulos visibles. */
+    public static final String WITH_TITLES_PARAMETER = "withTitles";
+
+    /** Valor de {@code withTitles}: géneros con alguna película. */
+    public static final String WITH_MOVIES = "movies";
+
+    /** Valor de {@code withTitles}: géneros con alguna serie con episodios. */
+    public static final String WITH_SERIES = "series";
+
+    /** Mensaje del 400 si {@code withTitles} no está en la lista blanca. */
+    public static final String WITH_TITLES_MESSAGE = "Filtro de títulos no permitido. Valores válidos: "
+            + WITH_MOVIES + ", " + WITH_SERIES;
+
     /** Secuencias de separadores o controles dentro del nombre (se colapsan en un espacio). */
     private static final Pattern INNER_SPACES = Pattern.compile("[\\p{Z}\\p{Cc}]+");
 
@@ -78,6 +92,71 @@ public class GenreService {
     public List<GenreResponse> getAllGenres() {
 
         return GenreMapper.toResponseList(genreRepository.findAll());
+    }
+
+    /**
+     * Obtiene los géneros, todos o solo los que tienen algún título visible de
+     * un tipo ({@code GET /api/genres?withTitles=...}).
+     *
+     * <p>
+     * <b>Para qué.</b> Los filtros de {@code /peliculas} y {@code /series}
+     * ofrecían todos los géneros, también los que no tienen ningún título de
+     * ese tipo, que solo llevaban a una página vacía. Con el filtro:
+     * </p>
+     * <ul>
+     * <li>{@value #WITH_MOVIES}: géneros con alguna película.</li>
+     * <li>{@value #WITH_SERIES}: géneros con alguna serie <strong>con
+     * episodios</strong>. Una serie vacía no cuenta: para los usuarios no
+     * existe, y si su género apareciera delataría que la hay.</li>
+     * </ul>
+     *
+     * <p>
+     * Sin filtro ({@code null}) responde exactamente como antes
+     * ({@link #getAllGenres()}, sin orden garantizado), para no cambiar nada a
+     * los clientes que ya lo usan; con filtro, por nombre y {@code id}. Los
+     * valores van por lista blanca exacta (en minúsculas): cualquier otro,
+     * también el vacío, es un 400 sobre {@code withTitles}, como un
+     * {@code sort} no permitido.
+     * </p>
+     *
+     * @param withTitles {@code null} (todos), {@value #WITH_MOVIES} o {@value #WITH_SERIES}
+     * @return los géneros pedidos
+     * @throws InvalidParameterException si {@code withTitles} no es ninguno de los valores permitidos
+     */
+    @Transactional(readOnly = true)
+    public List<GenreResponse> getGenres(String withTitles) {
+
+        if (withTitles == null) {
+            return getAllGenres();
+        }
+        List<Genre> genres = switch (withTitles) {
+            case WITH_MOVIES -> genreRepository.findWithMovies();
+            case WITH_SERIES -> genreRepository.findWithVisibleSeries();
+            default -> throw new InvalidParameterException(WITH_TITLES_PARAMETER, WITH_TITLES_MESSAGE);
+        };
+        return GenreMapper.toResponseList(genres);
+    }
+
+    /**
+     * Obtiene todos los géneros con cuántas películas y series los usan, por
+     * nombre (vista de gestión del panel, {@code GET /api/admin/genres}).
+     *
+     * <p>
+     * Los recuentos tienen la misma definición que los del 409
+     * {@code GENRE_IN_USE} de {@link #deleteGenre(Long)} (incluidas las series
+     * sin episodios: también impiden borrarlo), así que el panel puede
+     * desactivar «Borrar» de antemano sin contradecir después al servidor.
+     * Una sola consulta (ver {@link GenreRepository#findAllWithUsage()}).
+     * </p>
+     *
+     * @return géneros con sus recuentos
+     */
+    @Transactional(readOnly = true)
+    public List<AdminGenreResponse> getAdminGenres() {
+
+        return genreRepository.findAllWithUsage().stream()
+                .map(GenreMapper::toAdminResponse)
+                .toList();
     }
 
     /**
@@ -195,8 +274,8 @@ public class GenreService {
             // Tras un fallo de flush la transacción queda inservible (en
             // PostgreSQL, abortada), así que no se puede repetir el recuento:
             // el mensaje no da la cifra ni sabe si fue una película o una serie.
-            throw new GenreInUseException("No se puede eliminar el género \"" + genre.getName()
-                    + "\": alguna película o serie lo tiene asignado. "
+            throw new GenreInUseException("No se puede eliminar el género «" + genre.getName()
+                    + "»: alguna película o serie lo tiene asignado. "
                     + "Quítalo de esas películas o series antes de borrarlo.");
         }
     }
@@ -344,7 +423,7 @@ public class GenreService {
 
     private static GenreAlreadyExistsException alreadyExists(String name) {
 
-        return new GenreAlreadyExistsException("Ya existe un género con el nombre \"" + name + "\"");
+        return new GenreAlreadyExistsException("Ya existe un género con el nombre «" + name + "»");
     }
 
     /**
@@ -356,8 +435,9 @@ public class GenreService {
      * películas y 2 series. Quítalo de esas películas y de esas series», «lo
      * usan 2 series. Quítalo de esas series». La parte que vale 0 se omite, y
      * el verbo va en singular solo si en total es una única película o serie.
-     * Con solo películas el texto es exactamente el que había antes de existir
-     * las series (el frontend y los tests ya lo conocen).
+     * Con solo películas el texto es el que había antes de existir las series.
+     * El nombre va entre comillas angulares («»), como en el resto de la
+     * interfaz (antes eran rectas); el frontend muestra el mensaje tal cual.
      * </p>
      *
      * @param name   nombre del género
@@ -379,7 +459,7 @@ public class GenreService {
         }
 
         String verb = movies + series == 1 ? "lo usa " : "lo usan ";
-        return "No se puede eliminar el género \"" + name + "\": " + verb + String.join(" y ", counts)
+        return "No se puede eliminar el género «" + name + "»: " + verb + String.join(" y ", counts)
                 + ". Quítalo de " + String.join(" y de ", targets) + " antes de borrarlo.";
     }
 }

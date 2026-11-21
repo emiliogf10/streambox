@@ -39,11 +39,15 @@ const PAGE_0 = 'GET /api/series?page=0&size=20&sort=createdAt&direction=desc';
 const PAGE_1 = 'GET /api/series?page=1&size=20&sort=createdAt&direction=desc';
 const drama = { id: 4, name: 'Drama' };
 const terror = { id: 7, name: 'Terror' };
+/** Existe, pero sin ninguna serie visible: no sale en el desplegable salvo que venga en la URL (D-9). */
+const comedia = { id: 8, name: 'Comedia' };
 
 /** Lo que pide la página además del catálogo: «Mi lista» y los géneros de la barra de filtros. */
 const FAVORITES = {
   'GET /api/users/me/favorites': () => jsonResponse([]),
-  'GET /api/genres': () => jsonResponse([terror, drama]),
+  'GET /api/genres?withTitles=series': () => jsonResponse([terror, drama]),
+  // Lista completa: solo se pide si la URL trae un género sin series visibles (ver useCatalogFilterBar).
+  'GET /api/genres': () => jsonResponse([terror, drama, comedia]),
 };
 
 /**
@@ -369,6 +373,37 @@ describe('SeriesPage: barra de filtros', () => {
     expect(genreSelect()).toHaveValue('');
     expect(screen.queryByRole('region', { name: 'Resultados' })).not.toBeInTheDocument();
   });
+
+  it('el desplegable pide y ofrece solo los géneros con series visibles (D-9)', async () => {
+    routeFetch(fetchMock, { ...FAVORITES, [PAGE_0]: () => jsonResponse(makePage([hero, ...others])) });
+
+    renderPage();
+
+    await genresLoaded();
+    expect(within(genreSelect()).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Todos los géneros',
+      'Drama',
+      'Terror',
+    ]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/genres?withTitles=series')).toBe(true);
+  });
+
+  it('un género de la URL sin series visibles se mantiene como filtro y se ofrece «(sin series)»', async () => {
+    routeFetch(fetchMock, {
+      ...FAVORITES,
+      [searchKey({ genreId: 8 })]: () => jsonResponse(makePage([])),
+      [PAGE_0]: () => jsonResponse(makePage([hero, ...others])),
+    });
+
+    renderPage('/series?genero=8');
+
+    expect(await screen.findByRole('heading', { level: 3, name: 'No hay series con estos filtros' })).toBeInTheDocument();
+    expect(genreSelect()).toHaveValue('8');
+    expect(within(genreSelect()).getByRole('option', { name: 'Comedia (sin series)' })).toBeInTheDocument();
+    expect(
+      within(results()).getByText('«Comedia» no tiene ninguna serie todavía. Prueba con otro género o quita los filtros.'),
+    ).toBeInTheDocument();
+  });
 });
 
 describe('SeriesPage: cambiar filtros', () => {
@@ -473,7 +508,7 @@ describe('SeriesPage: cuadrícula de resultados', () => {
     const user = renderPage(route);
 
     expect(await screen.findByText('estado:ready')).toBeInTheDocument();
-    const empty = await screen.findByRole('heading', { level: 2, name: 'No hay series con estos filtros' });
+    const empty = await screen.findByRole('heading', { level: 3, name: 'No hay series con estos filtros' });
     await expectCount('0 series');
     const emptyState = empty.closest('div')!.parentElement!;
     expect(emptyState).toHaveTextContent('Prueba con otro género u otro año, o quita los filtros.');
@@ -499,7 +534,7 @@ describe('SeriesPage: cuadrícula de resultados', () => {
     renderPage(route);
 
     expect(
-      await screen.findByRole('heading', { level: 2, name: 'No hay series visibles con estos filtros' }),
+      await screen.findByRole('heading', { level: 3, name: 'No hay series visibles con estos filtros' }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -520,7 +555,7 @@ describe('SeriesPage: cuadrícula de resultados', () => {
 
     renderPage(route);
 
-    const empty = await screen.findByRole('heading', { level: 2, name: 'No hay series visibles con estos filtros' });
+    const empty = await screen.findByRole('heading', { level: 3, name: 'No hay series visibles con estos filtros' });
     const emptyState = empty.closest('div')!.parentElement!;
     const clear = within(emptyState).getByRole('button', { name: 'Quitar filtros' });
     const manage = within(emptyState).getByRole('link', { name: 'Gestionar series' });
@@ -539,7 +574,7 @@ describe('SeriesPage: cuadrícula de resultados', () => {
 
     renderPage(route);
 
-    expect(await screen.findByRole('heading', { level: 2, name: 'No hay series con estos filtros' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 3, name: 'No hay series con estos filtros' })).toBeInTheDocument();
     expect(screen.getByText('estado:loading')).toBeInTheDocument();
     // Ni el enlace al panel: mientras no se confirma el rol, nada de administrador.
     expect(screen.queryByRole('link', { name: 'Gestionar series' })).not.toBeInTheDocument();

@@ -1,13 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
+import type { Ref } from 'react';
 import { CircleAlert, CircleCheck, Info, X } from 'lucide-react';
 import type { ToastItem, ToastType } from '../context/ToastContext';
 import { usePageVisible } from '../hooks/usePageVisible';
 
-/** Milisegundos que permanece visible cada tipo de aviso (los errores, más: hay que leerlos). */
-const DURATION_MS: Record<ToastType, number> = {
+/**
+ * Milisegundos que permanece visible cada tipo de aviso, o `null` si no se
+ * cierra solo.
+ *
+ * **Los errores no se cierran solos** (B5 de la revisión, guía
+ * «persistent-toast-notifications»: «Prefer persistent toast notifications that
+ * remain present until they are dismissed, except for frequent, low importance
+ * events»). Antes duraban 9 s: un «No se pudo borrar…» desaparecía si el usuario
+ * miraba a otro sitio, el botón volvía a su estado anterior y el motivo ya no se
+ * podía releer. Se quedan hasta que se pulsa «Cerrar aviso» (y como mucho hay
+ * `MAX_TOASTS` a la vez: el más antiguo deja sitio al nuevo). Los de éxito e
+ * información sí se van solos: son frecuentes, de poca importancia, y lo que
+ * cuentan ya se ve en la pantalla (el botón cambia a «En mi lista», la fila
+ * desaparece...).
+ */
+const DURATION_MS: Record<ToastType, number | null> = {
   success: 5000,
   info: 5000,
-  error: 9000,
+  error: null,
 };
 
 /** Icono y colores de cada tipo. El icono evita depender solo del color. */
@@ -22,13 +37,15 @@ interface ToastProps {
   toast: ToastItem;
   /** Se invoca al cerrarse, de forma manual o automática. */
   onDismiss: (id: number) => void;
+  /** `ref` del botón «Cerrar aviso»: la zona de avisos la usa para mover el foco al cerrar otro (ver `ToastViewport`). */
+  closeRef?: Ref<HTMLButtonElement>;
 }
 
 /**
  * Un aviso individual.
  *
- * Se cierra solo tras unos segundos, o a mano con el botón. La cuenta atrás se
- * pausa en dos casos:
+ * Los de éxito e información se cierran solos tras unos segundos; los de error,
+ * solo a mano (ver `DURATION_MS`). La cuenta atrás se pausa en dos casos:
  * - **Puntero o foco encima**, para que quien lee despacio o usa teclado no
  *   pierda el mensaje. Al salir vuelve a empezar con la duración COMPLETA (se
  *   entiende que ha dejado de leerlo en ese momento).
@@ -49,10 +66,15 @@ interface ToastProps {
  * algo que llega, no como un parpadeo. Se hace con `@starting-style`
  * (variante `starting:` de Tailwind) y una TRANSICIÓN, no con `@keyframes`:
  * si llegan varios avisos seguidos, una transición se puede interrumpir sin
- * saltos. Con `prefers-reduced-motion` se conserva el fundido (no marea) y se quita
- * el desplazamiento (`motion-reduce:starting:translate-y-0`).
+ * saltos. En móvil la zona de avisos está ARRIBA (ver `ToastViewport`), así que
+ * allí baja desde arriba: entra siempre desde el borde al que está anclada.
+ * Con `prefers-reduced-motion` se conserva el fundido (no marea) y se quita
+ * el desplazamiento (solo se aplica con `motion-safe:`).
+ *
+ * El botón «Cerrar aviso» mide 44 px de lado en móvil (zona táctil mínima) sin
+ * agrandar el aviso: el margen negativo compensa el relleno.
  */
-export function Toast({ toast, onDismiss }: ToastProps) {
+export function Toast({ toast, onDismiss, closeRef }: ToastProps) {
   const [paused, setPaused] = useState(false);
   const pageVisible = usePageVisible();
   const remainingMs = useRef(DURATION_MS[toast.type]);
@@ -60,14 +82,16 @@ export function Toast({ toast, onDismiss }: ToastProps) {
   const counting = !paused && pageVisible;
 
   useEffect(() => {
-    if (!counting) return;
+    if (!counting || remainingMs.current === null) return;
     const startedAt = Date.now();
     const timer = setTimeout(() => onDismiss(toast.id), remainingMs.current);
     // Al pausar (o desmontar) se descuenta lo que llevaba corriendo: es lo que permite
     // que, al volver a la pestaña, siga con el tiempo restante y no desde cero.
     return () => {
       clearTimeout(timer);
-      remainingMs.current = Math.max(0, remainingMs.current - (Date.now() - startedAt));
+      if (remainingMs.current !== null) {
+        remainingMs.current = Math.max(0, remainingMs.current - (Date.now() - startedAt));
+      }
     };
   }, [counting, toast.id, onDismiss]);
 
@@ -79,7 +103,7 @@ export function Toast({ toast, onDismiss }: ToastProps) {
 
   return (
     <div
-      className="pointer-events-auto flex items-start gap-3 rounded-xl border border-line bg-surface-raised p-4 shadow-2xl transition-[opacity,translate] duration-250 ease-out-strong starting:translate-y-2 starting:opacity-0 motion-reduce:starting:translate-y-0"
+      className="pointer-events-auto flex items-start gap-3 rounded-xl border border-line bg-surface-raised p-4 shadow-2xl transition-[opacity,translate] duration-250 ease-out-strong starting:opacity-0 motion-safe:max-sm:starting:-translate-y-2 motion-safe:sm:starting:translate-y-2"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={resume}
       onFocus={() => setPaused(true)}
@@ -91,10 +115,11 @@ export function Toast({ toast, onDismiss }: ToastProps) {
         {toast.message}
       </p>
       <button
+        ref={closeRef}
         type="button"
         onClick={() => onDismiss(toast.id)}
         aria-label="Cerrar aviso"
-        className="focus-ring -m-1 rounded-md p-1 text-muted hover:text-white"
+        className="focus-ring -m-3 rounded-md p-3.5 text-muted hover:text-white sm:-m-1 sm:p-1"
       >
         <X aria-hidden="true" className="size-4" />
       </button>

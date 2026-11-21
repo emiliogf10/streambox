@@ -121,11 +121,25 @@ test.describe('Pregunta de bienvenida', () => {
     await expect(invite).toBeVisible();
     await expect(page.getByRole('region', { name: /recomendadas para ti$/ })).toHaveCount(0);
 
-    // La tarjeta lleva a «Tus gustos» del perfil, con el foco en la sección.
+    // La tarjeta lleva a «Tus gustos» del perfil con el editor YA abierto y el foco en los géneros (D-8: un paso).
     await invite.getByRole('link', { name: 'Elegir mis géneros' }).click();
     await expect(page).toHaveURL(/\/perfil#tus-gustos$/);
-    await expect(page.getByRole('heading', { level: 2, name: 'Tus gustos' })).toBeFocused();
-    await expect(page.getByRole('region', { name: 'Tus gustos' }).getByRole('button', { name: 'Elegir géneros' })).toBeVisible();
+    const tastes = page.getByRole('region', { name: 'Tus gustos' });
+    await expect(tastes.getByRole('group', { name: 'Elige entre 3 y 5 géneros' })).toBeFocused();
+    await expect(tastes.getByRole('button', { name: 'Elegir géneros' })).toHaveCount(0);
+
+    // Al recargar no se reabre: la petición se consumió (el enlace copiado solo lleva a la sección).
+    await page.reload();
+    await expect(tastes.getByRole('button', { name: 'Elegir géneros' })).toBeVisible();
+    await expect(tastes.getByRole('group', { name: 'Elige entre 3 y 5 géneros' })).toHaveCount(0);
+
+    // Ni «Atrás» + «Adelante»: la entrada del historial ya no lleva la petición (se sustituyó al usarla), así que
+    // volver a ella deja la sección cerrada. Se espera a algo propio de cada página (no basta la URL).
+    await page.goBack();
+    await expect(page.getByRole('region', { name: INVITE_TITLE })).toBeVisible();
+    await page.goForward();
+    await expect(tastes.getByRole('button', { name: 'Elegir géneros' })).toBeVisible();
+    await expect(tastes.getByRole('group', { name: 'Elige entre 3 y 5 géneros' })).toHaveCount(0);
   });
 
   test('las páginas públicas nunca desvían a la bienvenida, aunque la sesión la tenga pendiente', async ({

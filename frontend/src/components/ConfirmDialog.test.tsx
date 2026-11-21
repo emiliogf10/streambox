@@ -55,6 +55,20 @@ describe('ConfirmDialog', () => {
     expect(screen.getByRole('button', { name: 'Cancelar' })).toHaveFocus();
   });
 
+  it('el orden visual de los botones es el del foco a todos los anchos (E-8): «Cancelar» y luego la acción', async () => {
+    renderDialog();
+    const user = userEvent.setup();
+    const cancel = screen.getByRole('button', { name: 'Cancelar' });
+    const confirm = screen.getByRole('button', { name: 'Vaciar lista' });
+
+    // Orden del DOM = orden del tabulador.
+    expect(cancel.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.tab();
+    expect(confirm).toHaveFocus();
+    // Y nada lo invierte a la vista: en móvil, `flex-col-reverse` ponía el botón rojo arriba pero después al tabular.
+    expect(cancel.parentElement?.className).not.toMatch(/reverse/);
+  });
+
   it('cerrado (open=false) no es accesible ni se muestra', () => {
     renderDialog({ open: false });
 

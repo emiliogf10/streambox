@@ -11,10 +11,12 @@ import { LatestSeriesRow } from '../components/LatestSeriesRow';
 import { LoadMoreFooter } from '../components/LoadMoreFooter';
 import { MovieRow } from '../components/MovieRow';
 import { RecommendedRows } from '../components/RecommendedRows';
+import { RowError } from '../components/RowError';
 import { useAuth } from '../context/AuthContext';
 import { useCatalog } from '../hooks/useCatalog';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { usePrefetchRecommendations } from '../hooks/useRecommendations';
+import { useLatestSeries } from '../hooks/useSeriesCatalog';
 import { buildCatalogRows } from '../lib/catalog';
 import { ADMIN_MOVIES_PATH } from './admin/adminPaths';
 
@@ -86,6 +88,17 @@ function RecommendationsSlot({ inviteToChooseGenres = false }: { inviteToChooseG
  * Gestiona los tres estados: cargando, vacío y error (con "Reintentar"). El
  * fallo de "cargar más" se trata aparte para no perder lo ya mostrado.
  *
+ * **Error por bloques** (D-10). Películas, series y recomendaciones se piden
+ * por separado, y el fallo de una no debe tapar las demás:
+ * - si fallan las PELÍCULAS pero las series no, en el sitio del banner va un
+ *   bloque «Películas» con el error y su «Reintentar» ({@link RowError}), y
+ *   debajo siguen las recomendaciones y la fila «Series» con lo que sí cargó.
+ *   Antes toda la portada decía «No se pudo cargar el catálogo» aunque las
+ *   series estuvieran ahí;
+ * - si fallan las dos, sí hay un único error de página (tres avisos rojos
+ *   seguidos dirían lo mismo tres veces) y su «Reintentar» repite las dos;
+ * - las series y las recomendaciones ya tenían su error dentro de su fila.
+ *
  * **Sin películas** la portada no da el catálogo por vacío sin más: puede haber
  * series. Se pinta la fila «Series» y solo si tampoco tiene ninguna aparece
  * {@link EmptyCatalog}. Antes decía «El catálogo está vacío» aunque hubiera series.
@@ -104,6 +117,10 @@ export function HomePage() {
   const { isAdmin } = useAuth();
   const { movies, total, status, errorMessage, loadingMore, loadMoreFailed, hasMore, loadMore, reload } =
     useCatalog();
+  // La misma entrada de la caché que usa la fila «Series» (`LatestSeriesRow`): no repite la petición. Hace falta
+  // aquí para saber si, con las películas en error, el resto de la portada tiene algo que enseñar.
+  const latestSeries = useLatestSeries();
+  const reloadSeries = latestSeries.reload;
   // Las recomendaciones se piden ya, en paralelo con el catálogo, y no cuando se montan sus filas
   // (después de él): así llegan a la vez y no empujan la portada al aparecer.
   usePrefetchRecommendations();
@@ -116,8 +133,37 @@ export function HomePage() {
   if (status === 'loading') {
     // Silueta del banner y de una fila (no un spinner): el cambio al contenido real es mínimo.
     content = <CatalogSkeleton label="Cargando catálogo..." />;
+  } else if (status === 'error' && latestSeries.status === 'error') {
+    // Nada ha cargado: un único error de página, que lo reintenta todo.
+    content = (
+      <ErrorState
+        title="No se pudo cargar el catálogo"
+        message={errorMessage}
+        onRetry={() => {
+          reload();
+          reloadSeries();
+        }}
+      />
+    );
   } else if (status === 'error') {
-    content = <ErrorState title="No se pudo cargar el catálogo" message={errorMessage} onRetry={reload} />;
+    // Solo han fallado las películas: el error, en su bloque; lo demás, como siempre. Sin películas no se sabe si
+    // hay géneros que elegir, así que no se invita a elegirlos (ver `RecommendedRows`). `tabIndex -1`: recibe el
+    // foco si «Reintentar» desaparece al pulsarlo (`useRetryFocus`).
+    content = (
+      <div className="pt-6">
+        <div tabIndex={-1} className="focus-ring rounded-xl">
+          <RowError
+            title="Películas"
+            summary="No se pudieron cargar las películas."
+            message={errorMessage}
+            onRetry={reload}
+            retryContext="la carga de películas"
+          />
+        </div>
+        <RecommendationsSlot />
+        <LatestSeriesRow />
+      </div>
+    );
   } else if (!hero) {
     // Sin películas puede seguir habiendo series: la fila las enseña, y solo si
     // tampoco hay ninguna se dice que el catálogo está vacío. `pt-6`: sin banner

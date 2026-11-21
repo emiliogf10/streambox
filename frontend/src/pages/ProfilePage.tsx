@@ -8,6 +8,7 @@ import { ErrorState } from '../components/ErrorState';
 import { ExploreLink } from '../components/ExploreLink';
 import { LoadingState } from '../components/LoadingState';
 import { MovieCard } from '../components/MovieCard';
+import { COMPACT_POSTER_GRID_CLASS } from '../components/posterGridStyles';
 import { SeriesCard } from '../components/SeriesCard';
 import { UserAvatar } from '../components/UserAvatar';
 import { AccountCard } from '../components/profile/AccountCard';
@@ -23,7 +24,7 @@ import type { GenreCount } from '../lib/profile';
 import { pluralize } from '../lib/series';
 import type { Movie, Series, User } from '../lib/types';
 
-/** Cuántos géneros enseña la tarjeta «Géneros de tu lista» (los más frecuentes; más serían una nube de etiquetas). */
+/** Cuántos géneros enseña la tarjeta «Géneros que más guardas» (los más frecuentes; más serían una nube de etiquetas). */
 const TOP_GENRES = 6;
 
 /** Propiedades de {@link ProfileHeader}. */
@@ -96,15 +97,21 @@ interface StatProps {
 }
 
 /**
- * Una estadística: número grande y etiqueta. Es un grupo `dt`/`dd` de una lista
- * de descripción (la etiqueta nombra el dato); `flex-col-reverse` la pone DEBAJO
+ * Una estadística: número y etiqueta. Es un grupo `dt`/`dd` de una lista de
+ * descripción (la etiqueta nombra el dato); `flex-col-reverse` la pone DEBAJO
  * del número a la vista sin cambiar el orden de lectura (etiqueta y luego valor).
+ *
+ * Las tres van en UNA franja de tres columnas a cualquier ancho, separadas por
+ * una línea (D-6). Antes eran tres tarjetas que en móvil se apilaban a todo el
+ * ancho: unos 330 px de pantalla para tres números, empujando lo útil fuera de
+ * la vista. En móvil el número baja a `text-2xl` y la etiqueta a `text-xs` (se
+ * parte en dos líneas si hace falta); desde `sm`, tamaño de escritorio.
  */
 function Stat({ value, label }: StatProps) {
   return (
-    <div className="flex flex-col-reverse gap-1 rounded-xl border border-line bg-surface px-5 py-4">
-      <dt className="text-sm text-muted">{label}</dt>
-      <dd className="text-4xl font-bold tracking-tight text-white tabular-nums">{value}</dd>
+    <div className="flex min-w-0 flex-col-reverse justify-end gap-1 px-3 py-3 sm:px-5 sm:py-4">
+      <dt className="text-xs leading-snug text-muted sm:text-sm">{label}</dt>
+      <dd className="text-2xl font-bold tracking-tight text-white tabular-nums sm:text-4xl">{value}</dd>
     </div>
   );
 }
@@ -122,11 +129,13 @@ interface GenresCardProps {
 }
 
 /**
- * Tarjeta «Géneros de tu lista»: los géneros que más se repiten en «Mi lista»,
+ * Tarjeta «Géneros que más guardas»: los géneros que más se repiten en «Mi lista»,
  * con cuántos títulos tiene cada uno. Aquí no se pregunta nada al usuario, se
  * resume lo que ya guardó; los géneros que ELIGE como favoritos están en «Tus
- * gustos» ({@link FavoriteGenresSection}). Antes se llamaba «Tus géneros»; se
- * renombró al llegar «Tus gustos» para que no parecieran lo mismo.
+ * gustos» ({@link FavoriteGenresSection}). Antes se llamó «Tus géneros» y luego
+ * «Géneros de tu lista»: junto a «Tus gustos» seguían pareciendo lo mismo (D-7).
+ * «Que más guardas» dice de dónde sale (lo que guardas) y qué enseña (los más
+ * repetidos), frente a «Tus gustos», que es lo que eliges.
  *
  * Cuatro situaciones, y en las cuatro el texto es verdad para cualquier rol:
  * - Cargando / error: la lista de favoritos aún no está (el error es de la
@@ -201,7 +210,7 @@ function GenresCard({ status, errorMessage, onRetry, genres, totalTitles }: Genr
     );
   }
 
-  return <ProfileCard title="Géneros de tu lista">{body}</ProfileCard>;
+  return <ProfileCard title="Géneros que más guardas">{body}</ProfileCard>;
 }
 
 /** Propiedades de {@link ListPreview}. */
@@ -211,12 +220,14 @@ interface ListPreviewProps {
 }
 
 /**
- * Sección «De tu lista»: hasta cinco títulos guardados (primero películas, luego
+ * Sección «De tu lista»: hasta seis títulos guardados (primero películas, luego
  * series) y el enlace «Ver toda mi lista». Reutiliza las tarjetas de siempre:
- * cada una lleva a la página de su título.
+ * cada una lleva a la página de su título. Misma rejilla compacta que «Te gusta»
+ * (`COMPACT_POSTER_GRID_CLASS`, D-5): antes, dos secciones seguidas con pósters
+ * de 224 y de 107 px a 768 parecían de pantallas distintas.
  *
  * Solo se pinta con la lista llena. Con la lista vacía la explicación y la salida
- * («Explorar películas») ya están en «Géneros de tu lista»: repetirlas aquí serían dos
+ * («Explorar películas») ya están en «Géneros que más guardas»: repetirlas aquí serían dos
  * estados vacíos casi iguales uno encima de otro.
  */
 function ListPreview({ movies, series }: ListPreviewProps) {
@@ -236,7 +247,7 @@ function ListPreview({ movies, series }: ListPreviewProps) {
           <ArrowRight aria-hidden="true" className="size-4" />
         </Link>
       </div>
-      <ul role="list" className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      <ul role="list" className={COMPACT_POSTER_GRID_CLASS}>
         {items.map((entry) => (
           <li key={`${entry.kind}:${entry.item.id}`}>
             {entry.kind === 'movie' ? (
@@ -255,7 +266,7 @@ function ListPreview({ movies, series }: ListPreviewProps) {
  * Página «Mi perfil» (`/perfil`): quién eres y qué has guardado.
  *
  * **De dónde sale cada dato (no hay nada inventado).** El usuario viene de
- * `GET /api/users/me` (`AuthContext`), las estadísticas, «Géneros de tu lista» y «De tu
+ * `GET /api/users/me` (`AuthContext`), las estadísticas, «Géneros que más guardas» y «De tu
  * lista» de la lista compartida de favoritos (`FavoritesContext`, que `AppShell`
  * ya cargó), «Tus gustos» de los géneros favoritos (`useFavoriteGenres`) y «Te
  * gusta» de los «Me gusta» (`useLikes`). Las escrituras son las de «Editar
@@ -277,10 +288,10 @@ function ListPreview({ movies, series }: ListPreviewProps) {
  * - El usuario (cabecera y «Cuenta»): cargando o error con «Reintentar»
  *   (`refreshUser`). El `<h1>` «Mi perfil» está siempre; con el usuario cargado
  *   pasa a ser su nombre.
- * - La lista (estadísticas, «Géneros de tu lista», «De tu lista»): mientras carga o si
+ * - La lista (estadísticas, «Géneros que más guardas», «De tu lista»): mientras carga o si
  *   falla, solo la tarjeta de géneros lo cuenta (con «Reintentar») y el resto de
  *   la página sigue siendo útil. Con la lista vacía, un único estado vacío en
- *   «Géneros de tu lista» (ver {@link GenresCard}).
+ *   «Géneros que más guardas» (ver {@link GenresCard}).
  *
  * **Estructura.** Un `<h1>`, secciones con `<h2>` y estadísticas como lista de
  * descripción (`dl`), que es lo que son: pares «etiqueta → valor».
@@ -326,7 +337,7 @@ export function ProfilePage() {
             <h2 id={summaryId} className="sr-only">
               Resumen de tu lista
             </h2>
-            <dl className="grid gap-4 sm:grid-cols-3">
+            <dl className="grid grid-cols-3 divide-x divide-line rounded-xl border border-line bg-surface">
               <Stat value={movies.length} label={movies.length === 1 ? 'Película en mi lista' : 'Películas en mi lista'} />
               <Stat value={series.length} label={series.length === 1 ? 'Serie en mi lista' : 'Series en mi lista'} />
               <Stat value={genres.length} label={genres.length === 1 ? 'Género distinto' : 'Géneros distintos'} />

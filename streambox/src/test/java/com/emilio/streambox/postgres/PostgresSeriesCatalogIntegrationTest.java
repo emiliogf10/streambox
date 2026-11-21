@@ -253,7 +253,7 @@ class PostgresSeriesCatalogIntegrationTest extends PostgresIntegrationTestSuppor
         mockMvc.perform(delete("/api/genres/" + comedy.getId()).header("Authorization", adminToken))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("GENRE_IN_USE"))
-                .andExpect(jsonPath("$.message").value("No se puede eliminar el género \"Comedia\": lo usan "
+                .andExpect(jsonPath("$.message").value("No se puede eliminar el género «Comedia»: lo usan "
                         + "1 película y 2 series. Quítalo de esa película y de esas series antes de borrarlo."));
     }
 

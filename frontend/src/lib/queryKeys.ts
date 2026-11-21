@@ -62,9 +62,24 @@ export const queryKeys = {
     /** Listado del panel (`/admin/series`, que incluye las series sin episodios). */
     admin: (query: string, page: number) => ['series', 'admin', { query, page }] as const,
   },
-  /** Lista de géneros (`GET /api/genres`). */
+  /**
+   * Géneros del catálogo. `all` es a la vez la raíz y la lista completa
+   * (`GET /api/genres`, la de los formularios del panel); de ella cuelgan:
+   * - `withTitles(kind)`: solo los géneros con alguna película (`movies`) o con
+   *   alguna serie CON episodios (`series`), `GET /api/genres?withTitles=…`. Son
+   *   las opciones de los filtros de `/peliculas` y `/series` (D-9): un género sin
+   *   títulos solo llevaría a «No hay … con estos filtros». Una entrada por valor:
+   *   las dos listas son distintas y no deben pisarse.
+   * - `admin`: la de la pestaña Géneros del panel, con cuántas películas y series
+   *   usan cada uno (`GET /api/admin/genres`, solo ADMIN; D-4).
+   *
+   * Ojo al invalidar `all`: por prefijo alcanza también a las otras dos.
+   */
   genres: {
     all: ['genres'] as const,
+    withTitlesAll: ['genres', 'withTitles'] as const,
+    withTitles: (kind: 'movies' | 'series') => ['genres', 'withTitles', kind] as const,
+    admin: ['genres', 'admin'] as const,
   },
   /**
    * «Mi lista» del usuario de la sesión (películas y series). Es un dato
@@ -147,19 +162,28 @@ const PERSONAL_COPIES: QueryKey[] = [
  * Raíces de la caché que deja anticuadas cada tipo de cambio. Los datos
  * personales con copias de títulos ({@link PERSONAL_COPIES}) van en todas. Un
  * género renombrado aparece dentro de cada película y serie, por eso arrastra
- * también sus listados. La propia lista de géneros NO se invalida tras un
- * cambio de géneros: la pestaña Géneros ya la actualiza con la respuesta del
- * servidor (ver `AdminGenresPage`).
+ * también sus listados.
+ *
+ * Los géneros que dependen de los TÍTULOS también:
+ * - los de los filtros (`genres.withTitles`): una película nueva puede estrenar
+ *   un género, una serie gana su primer episodio (se hace visible) o pierde el
+ *   último, y un borrado deja un género sin títulos;
+ * - los recuentos del panel (`genres.admin`): cuántas películas y series usan
+ *   cada género, que deciden si se puede borrar.
+ *
+ * Tras un cambio de GÉNEROS no se invalidan ni la lista completa ni la del
+ * panel: la pestaña Géneros las actualiza con la respuesta del servidor (ver
+ * `AdminGenresPage`); sí las de los filtros, que llevan los nombres.
  *
  * @param change qué tipo de dato se ha escrito
  */
 export function keysAffectedBy(change: CatalogChange): QueryKey[] {
   switch (change) {
     case 'movies':
-      return [queryKeys.movies.all, ...PERSONAL_COPIES];
+      return [queryKeys.movies.all, queryKeys.genres.withTitles('movies'), queryKeys.genres.admin, ...PERSONAL_COPIES];
     case 'series':
-      return [queryKeys.series.all, ...PERSONAL_COPIES];
+      return [queryKeys.series.all, queryKeys.genres.withTitles('series'), queryKeys.genres.admin, ...PERSONAL_COPIES];
     case 'genres':
-      return [queryKeys.movies.all, queryKeys.series.all, ...PERSONAL_COPIES];
+      return [queryKeys.movies.all, queryKeys.series.all, queryKeys.genres.withTitlesAll, ...PERSONAL_COPIES];
   }
 }

@@ -379,7 +379,7 @@ class GenreEdgeCasesIntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("GENRE_IN_USE"))
                 .andExpect(jsonPath("$.message").value(
-                        "No se puede eliminar el género \"Drama\": lo usan 2 películas. "
+                        "No se puede eliminar el género «Drama»: lo usan 2 películas. "
                                 + "Quítalo de esas películas antes de borrarlo."));
 
         mockMvc.perform(get("/api/movies/{id}", uno.getId()).header("Authorization", userToken))

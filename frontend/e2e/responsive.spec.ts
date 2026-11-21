@@ -659,6 +659,59 @@ async function expectCenteredDetail(page: Page, header: Locator): Promise<void> 
   expect(facts.x + facts.width - poster.x, 'el contenido ocupa demasiado poco ancho').toBeGreaterThanOrEqual(1000);
 }
 
+test.describe('Acciones de la página de un título: tableta 768x1024 y ancho estable', () => {
+  test.use({ viewport: { width: 768, height: 1024 } });
+
+  /**
+   * D-12: con el póster al lado, la columna de acciones de una película mide como un móvil. Las cuatro acciones
+   * («Ver ahora», «Ver tráiler», «Mi lista», «Me gusta») van en 2 × 2 a partes iguales; antes «Me gusta» se
+   * quedaba sola en una segunda fila con su ancho natural.
+   */
+  test('las cuatro acciones de una película van en 2 × 2, sin una sola descolgada', async ({ page, user, signIn }) => {
+    await signIn(user);
+    await page.goto('/');
+    await page.getByRole('region', { name: HERO_TITLE }).getByRole('link', { name: /^Más información/ }).click();
+    const header = page.getByRole('region', { name: HERO_TITLE });
+    await expect(header.getByRole('heading', { level: 1, name: HERO_TITLE })).toBeVisible();
+
+    const boxes = [];
+    for (const locator of [
+      header.getByRole('link', { name: /^Ver ahora/ }),
+      header.getByRole('button', { name: /^Ver tráiler/ }),
+      header.getByRole('button', { name: /^(En mi lista|Mi lista)/ }),
+      header.getByRole('button', { name: /^(Me gusta|Te gusta)/ }),
+    ]) {
+      boxes.push((await locator.boundingBox())!);
+    }
+    const [watch, trailer, list, like] = boxes;
+    expect(Math.abs(watch.y - trailer.y), 'fila 1').toBeLessThanOrEqual(1);
+    expect(Math.abs(list.y - like.y), '«Me gusta» debe compartir fila con «Mi lista»').toBeLessThanOrEqual(1);
+    expect(list.y, 'dos filas').toBeGreaterThan(watch.y + watch.height - 1);
+    for (const box of boxes) expect(Math.abs(box.width - watch.width), 'mismo ancho').toBeLessThanOrEqual(1);
+    await expectNoHorizontalScroll(page);
+  });
+
+  /** D-11: «Mi lista» ↔ «En mi lista» no cambia el ancho del botón ni mueve el de al lado. */
+  test('«Mi lista» no cambia de ancho al pulsarlo ni mueve «Me gusta»', async ({ page, user, signIn }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await signIn(user);
+    await page.goto('/');
+    await page.getByRole('region', { name: HERO_TITLE }).getByRole('link', { name: /^Más información/ }).click();
+    const header = page.getByRole('region', { name: HERO_TITLE });
+    const list = header.getByRole('button', { name: /^Mi lista/ });
+    const like = header.getByRole('button', { name: /^Me gusta/ });
+    await expect(list).toBeVisible();
+    const before = { list: (await list.boundingBox())!, like: (await like.boundingBox())! };
+
+    await list.click();
+    const added = header.getByRole('button', { name: /^En mi lista/ });
+    await expect(added).toBeVisible();
+    const after = { list: (await added.boundingBox())!, like: (await like.boundingBox())! };
+    expect(after.list.width).toBeCloseTo(before.list.width, 0);
+    expect(after.like.x).toBeCloseTo(before.like.x, 0);
+  });
+});
+
 for (const viewport of [
   { name: '1440x900', width: 1440, height: 900 },
   { name: '1920x1080', width: 1920, height: 1080 },
@@ -666,7 +719,7 @@ for (const viewport of [
   test.describe(`Pantalla ancha ${viewport.name}`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height } });
 
-    test('/bienvenida aprovecha el ancho: los géneros van en varias columnas, no en una lista estrecha', async ({
+    test('/bienvenida va centrada y sus géneros llenan la fila, sin media pantalla vacía (D-13)', async ({
       page,
       request,
       signIn,
@@ -676,12 +729,25 @@ for (const viewport of [
       const group = page.getByRole('group', { name: 'Tus géneros favoritos' });
       await expect(group.getByRole('checkbox').first()).toBeAttached();
       const labels = group.locator('label');
-      const first = await labels.nth(0).boundingBox();
-      const third = await labels.nth(2).boundingBox();
-      // Las tres primeras opciones comparten fila (rejilla de 4–5 columnas en escritorio).
-      expect(Math.abs(first!.y - third!.y), 'las tres primeras opciones en la misma fila').toBeLessThanOrEqual(1);
-      const groupBox = await group.boundingBox();
-      expect(groupBox!.width, 'el selector ocupa demasiado poco ancho').toBeGreaterThanOrEqual(800);
+      const count = await labels.count();
+      const first = (await labels.nth(0).boundingBox())!;
+      const third = (await labels.nth(2).boundingBox())!;
+      // Las tres primeras opciones comparten fila (varias columnas, no una lista estrecha).
+      expect(Math.abs(first.y - third.y), 'las tres primeras opciones en la misma fila').toBeLessThanOrEqual(1);
+      // Una sola columna CENTRADA de contenido (antes iba pegada a la izquierda de un contenedor de 64rem).
+      const groupBox = (await group.boundingBox())!;
+      const leftMargin = groupBox.x;
+      const rightMargin = viewport.width - (groupBox.x + groupBox.width);
+      expect(Math.abs(leftMargin - rightMargin), 'el selector no está centrado').toBeLessThanOrEqual(24);
+      expect(groupBox.width, 'el selector ocupa demasiado poco ancho').toBeGreaterThanOrEqual(600);
+      // Con pocos géneros, los que hay se reparten la fila: la última opción de la primera fila llega al borde derecho.
+      const lastInFirstRow = (await labels.nth(Math.min(count, 3) - 1).boundingBox())!;
+      if (count <= 3) {
+        expect(
+          Math.abs(lastInFirstRow.x + lastInFirstRow.width - (groupBox.x + groupBox.width)),
+          'la fila de géneros deja un hueco vacío a la derecha',
+        ).toBeLessThanOrEqual(2);
+      }
       await expectNoHorizontalScroll(page);
     });
 

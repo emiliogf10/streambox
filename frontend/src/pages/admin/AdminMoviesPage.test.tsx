@@ -25,6 +25,7 @@ import {
 } from '../../test/helpers';
 import { AdminMoviesPage } from './AdminMoviesPage';
 import { expectButtonUnavailable } from '../../test/buttonState';
+import { watchToastInsertions } from '../../test/toastInsertions';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -376,9 +377,13 @@ describe('AdminMoviesPage: borrar', () => {
     expectButtonUnavailable(screen.getByRole('button', { name: 'Procesando...' }), { busy: true });
     expect(row('Interstellar')).toBeInTheDocument();
 
+    const toasts = watchToastInsertions('«Interstellar» se ha borrado del catálogo.');
     resolveDelete(noContentResponse());
 
     await expectToastOnPage('«Interstellar» se ha borrado del catálogo.');
+    // Espera a que se cierre la confirmación (`useToastAfterDialog`): nace una vez, en la página.
+    expect(toasts.places()).toEqual(['page']);
+    toasts.stop();
     await waitFor(() => expect(screen.queryByRole('row', { name: /^Interstellar/ })).not.toBeInTheDocument());
     expect(callsTo(listKey().slice(4))).toHaveLength(2);
     // La fila (y el botón que tenía el foco) ya no existe: el foco pasa al título de la sección.
@@ -406,9 +411,12 @@ describe('AdminMoviesPage: borrar', () => {
     renderList();
 
     await user.click(await screen.findByRole('button', { name: 'Borrar Interstellar' }));
+    const toasts = watchToastInsertions('El servidor ha tenido un problema');
     await user.click(screen.getByRole('button', { name: 'Sí, borrar película' }));
 
     await expectToastOnPage(/El servidor ha tenido un problema/);
+    expect(toasts.places()).toEqual(['page']);
+    toasts.stop();
     expect(await screen.findByRole('row', { name: /^Interstellar/ })).toBeInTheDocument();
   });
 

@@ -68,7 +68,10 @@ export function ConfirmDialog({
           {description}
         </p>
         <FormAlert message={error} />
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        {/* Mismo orden a la vista que en el DOM (y al tabular) a todos los anchos: «Cancelar» primero (arriba en
+            móvil, a la izquierda desde `sm`). Antes, `flex-col-reverse` ponía en móvil el botón rojo encima pero
+            después en el orden del foco, y Mayús+Tab subía «hacia abajo» (E-8, WCAG 2.4.3). */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
           <Button ref={cancelRef} variant="outline" onClick={onCancel} disabled={busy}>
             Cancelar
           </Button>

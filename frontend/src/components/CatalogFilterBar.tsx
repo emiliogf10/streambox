@@ -73,14 +73,23 @@ function SelectField({
 /** Nombre accesible del formulario de cada catálogo. */
 const FORM_LABEL: Record<CatalogKind, string> = { movies: 'Filtrar películas', series: 'Filtrar series' };
 
+/** Marca de un género sin títulos en el desplegable de cada catálogo. */
+const EMPTY_GENRE_SUFFIX: Record<CatalogKind, string> = { movies: ' (sin películas)', series: ' (sin series)' };
+
 /** Propiedades de {@link CatalogFilterBar} (las prepara `useCatalogFilterBar`). */
 export interface CatalogFilterBarProps {
   /** Catálogo que se filtra: decide el nombre del formulario y qué órdenes se ofrecen. */
   kind: CatalogKind;
   /** Valor actual de cada control (ver `useCatalogFilters`). */
   draft: CatalogFilterDraft;
-  /** Géneros de `GET /api/genres`, ya ordenados por nombre. */
+  /** Géneros con títulos de este catálogo (`GET /api/genres?withTitles=…`), ya ordenados por nombre. */
   genres: Genre[];
+  /**
+   * Id del género de la URL que existe pero no tiene títulos de este catálogo, o
+   * `null`. Se ofrece con «(sin películas)» / «(sin series)» para que el
+   * desplegable diga la verdad sobre el filtro aplicado (ver `useCatalogFilterBar`).
+   */
+  emptyGenreId?: number | null;
   genresStatus: GenresStatus;
   onRetryGenres: () => void;
   onGenreChange: (value: string) => void;
@@ -130,6 +139,13 @@ export interface CatalogFilterBarProps {
  * fila (el año, estrecho), orden y «Quitar filtros» a todo el ancho debajo.
  * Desde `sm`, todo en una fila que puede partirse, alineada por arriba: así un
  * error bajo el año crece hacia abajo sin descolocar los demás controles.
+ *
+ * **El error del año no mueve la página** (D-11). Desde `sm` su línea está
+ * reservada siempre (`messageSlotClassName` de `FormField`) y no se parte
+ * (`whitespace-nowrap`: cabe bajo el hueco de la derecha): antes, al aparecer en
+ * dos líneas, empujaba el banner 40 px hacia abajo, justo bajo el puntero. En
+ * móvil no se reserva (serían 20 px vacíos siempre en una pantalla corta): ahí el
+ * error aparece donde se está escribiendo, sin puntero que pierda su objetivo.
  * Todos los controles miden 44 px de alto.
  *
  * **«Quitar filtros» va pegado al desplegable de orden** (`trailing` de
@@ -146,6 +162,7 @@ export function CatalogFilterBar({
   kind,
   draft,
   genres,
+  emptyGenreId = null,
   genresStatus,
   onRetryGenres,
   onGenreChange,
@@ -189,7 +206,7 @@ export function CatalogFilterBar({
           <option value="">Todos los géneros</option>
           {genres.map((genre) => (
             <option key={genre.id} value={String(genre.id)}>
-              {genre.name}
+              {genre.id === emptyGenreId ? `${genre.name}${EMPTY_GENRE_SUFFIX[kind]}` : genre.name}
             </option>
           ))}
         </SelectField>
@@ -206,6 +223,7 @@ export function CatalogFilterBar({
             maxLength={4}
             autoComplete="off"
             placeholder="Ej.: 2014"
+            messageSlotClassName="max-sm:empty:hidden sm:min-h-4 sm:whitespace-nowrap"
           />
         </div>
 

@@ -809,14 +809,18 @@ describe('useFavorites: carreras con refrescos, avisos y cambios de sesión', ()
       up = true;
       await returnToTab();
       await waitFor(() => expect(result.current.status).toBe('ready'));
+      // Los avisos de error ya no se cierran solos: el de la primera racha sigue ahí.
+      const firstNotice = screen.getByText(SERVER_DOWN);
 
-      // Racha nueva (p. ej. se descarta la lista y vuelve a fallar): sí se avisa otra vez.
+      // Racha nueva (p. ej. se descarta la lista y vuelve a fallar): sí se avisa otra vez. Como el texto es el
+      // mismo, el aviso nuevo SUSTITUYE al viejo (no se apilan dos iguales), pero es otro nodo: se anuncia de nuevo.
       up = false;
       await act(async () => {
         await queryClient.resetQueries({ queryKey: queryKeys.favorites.all });
       });
       await waitFor(() => expect(result.current.status).toBe('error'));
-      expect(screen.getAllByText(SERVER_DOWN)).toHaveLength(2);
+      await waitFor(() => expect(screen.getByText(SERVER_DOWN)).not.toBe(firstNotice));
+      expect(screen.getAllByText(SERVER_DOWN)).toHaveLength(1);
     });
   });
 });

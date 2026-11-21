@@ -149,7 +149,7 @@ La base de todos los endpoints es `/api`.
 ### 4. Géneros Cinematográficos
 | Método | Endpoint | Acceso | Descripción |
 | :--- | :--- | :---: | :--- |
-| `GET` | `/api/genres` | `USER`, `ADMIN` | Lista completa de géneros disponibles |
+| `GET` | `/api/genres` | `USER`, `ADMIN` | Lista completa de géneros disponibles. Con `?withTitles=movies` o `?withTitles=series`, solo los que tienen al menos una película o una serie visible (con episodios), ordenados por nombre (los filtros de `/peliculas` y `/series`) |
 | `POST` | `/api/genres` | `ADMIN` | Alta de nuevo género cinematográfico (409 `GENRE_ALREADY_EXISTS` si el nombre ya existe) |
 | `PUT` | `/api/genres/{id}` | `ADMIN` | Renombrar un género (mismas reglas de nombre que el alta) |
 | `DELETE` | `/api/genres/{id}` | `ADMIN` | Eliminar un género (409 `GENRE_IN_USE` si alguna película o serie lo usa) |
@@ -165,6 +165,7 @@ La base de todos los endpoints es `/api`.
 | `POST` | `/api/series/{id}/episodes` | `ADMIN` | Alta de un episodio (`videoUrl` opcional; 409 `EPISODE_ALREADY_EXISTS` si la temporada y el número ya existen) |
 | `PUT` / `DELETE` | `/api/series/{id}/episodes/{episodeId}` | `ADMIN` | Edición / borrado de un episodio |
 | `GET` | `/api/admin/series`, `/api/admin/series/{id}` | `ADMIN` | Vistas de gestión: incluyen las series aún sin episodios |
+| `GET` | `/api/admin/genres` | `ADMIN` | Géneros con cuántas películas y series los usan (también las series sin episodios): el panel desactiva «Borrar» si alguno los usa |
 | `GET` / `DELETE` | `/api/users/me/favorites/series` | `USER`, `ADMIN` | Series de «Mi lista» / vaciarlas |
 | `POST` / `DELETE` | `/api/users/me/favorites/series/{seriesId}` | `USER`, `ADMIN` | Añadir / quitar una serie de «Mi lista» |
 

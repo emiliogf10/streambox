@@ -577,6 +577,18 @@ describe('Navbar en móvil: se aparta al bajar y vuelve al subir (D-1)', () => {
     expect(header).not.toHaveClass(AWAY);
   });
 
+  it('mientras está apartada lo marca con data-navbar-away (la zona de avisos de móvil sube con ella)', async () => {
+    await renderNavbar(() => jsonResponse(makeUser()));
+    const header = screen.getByRole('banner');
+    expect(header).not.toHaveAttribute('data-navbar-away');
+
+    scrollTo(500);
+    expect(header).toHaveAttribute('data-navbar-away');
+
+    scrollTo(450);
+    expect(header).not.toHaveAttribute('data-navbar-away');
+  });
+
   it('con el menú de usuario abierto no se aparta (en un móvil, tocar el botón no siempre le da el foco)', async () => {
     const user = await renderNavbar(() => jsonResponse(makeUser()));
     await openMenu(user);
@@ -584,5 +596,6 @@ describe('Navbar en móvil: se aparta al bajar y vuelve al subir (D-1)', () => {
     scrollTo(500);
 
     expect(screen.getByRole('banner')).not.toHaveClass(AWAY);
+    expect(screen.getByRole('banner')).not.toHaveAttribute('data-navbar-away');
   });
 });

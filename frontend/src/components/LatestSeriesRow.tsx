@@ -5,8 +5,8 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLatestSeries } from '../hooks/useSeriesCatalog';
 import { ADMIN_SERIES_PATH } from '../pages/admin/adminPaths';
-import { Button } from './Button';
 import { RowSkeleton } from './CatalogSkeleton';
+import { RowError } from './RowError';
 import { SeriesRow } from './SeriesRow';
 
 /** Título de la fila (y nombre de su región). */
@@ -56,22 +56,13 @@ export function LatestSeriesRow({ whenEmpty }: LatestSeriesRowProps = {}) {
 
   if (status === 'error') {
     return (
-      <section aria-labelledby={headingId} className="mb-9 px-4 sm:mb-10 sm:px-6">
-        <h2 id={headingId} className="mb-3 text-lg font-bold tracking-tight text-white">
-          {ROW_TITLE}
-        </h2>
-        <div
-          role="alert"
-          className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3"
-        >
-          <p className="text-sm text-muted">
-            <span className="font-semibold text-danger">No se pudieron cargar las series.</span> {errorMessage}
-          </p>
-          <Button variant="outline" onClick={reload}>
-            Reintentar
-          </Button>
-        </div>
-      </section>
+      <RowError
+        title={ROW_TITLE}
+        summary="No se pudieron cargar las series."
+        message={errorMessage}
+        onRetry={reload}
+        retryContext="la carga de series"
+      />
     );
   }
 

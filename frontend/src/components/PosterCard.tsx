@@ -48,7 +48,9 @@ const cardClass =
  *   oscuros y, sin él, su borde se perdía contra el fondo de la página. Al
  *   pasar el ratón se aclara, en lugar del antiguo velo negro que apagaba
  *   justo la imagen que el usuario quería mirar.
- * - **Zoom suave** de la imagen al pasar el ratón. En Tailwind v4 `hover:` solo
+ * - **Zoom suave** de la imagen al pasar el ratón, en 200 ms (antes 500: un
+ *   efecto que se ve decenas de veces al día debe quedar por debajo de 300 ms o
+ *   la interfaz se siente lenta; revisión visual D-15). En Tailwind v4 `hover:` solo
  *   se aplica en dispositivos con puntero real, así que en móvil un toque no
  *   deja la tarjeta "pegada" en estado hover.
  * - **Al pulsar** la tarjeta se hunde un 2 % (`active:scale-98`): confirma el
@@ -62,7 +64,7 @@ export function PosterCard({ title, imageUrl, meta, to, className = 'w-36 shrink
           title={title}
           src={imageUrl}
           className="aspect-2/3 w-full"
-          imgClassName="transition-[scale] duration-500 ease-out-strong group-hover:scale-105 motion-reduce:group-hover:scale-100"
+          imgClassName="transition-[scale] duration-200 ease-out-strong group-hover:scale-105 motion-reduce:group-hover:scale-100"
         />
         <div
           aria-hidden="true"

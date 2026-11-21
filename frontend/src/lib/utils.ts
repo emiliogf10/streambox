@@ -1,8 +1,19 @@
-/** Formatea duración en minutos → "1h 48m" */
+/**
+ * Formatea una duración en minutos para leerla de un vistazo: "1h 48m", "45m"
+ * y, si las horas son exactas, solo "2h".
+ *
+ * Antes salía "2h 0m" (revisión visual D-14): el "0m" es ruido y hace dudar de
+ * si falta un dato. Se mantiene el estilo compacto sin espacio ("1h 48m") que
+ * ya usan todas las tarjetas, fichas y tablas: mezclar "2 h" con "1h 48m" en la
+ * misma fila sería más raro que el propio "0m".
+ *
+ * @param mins minutos (enteros, ≥0, como los valida el backend)
+ */
 export function formatDuration(mins: number): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
 /**
