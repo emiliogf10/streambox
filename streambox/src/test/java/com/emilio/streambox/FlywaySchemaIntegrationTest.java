@@ -39,7 +39,9 @@ import com.emilio.streambox.migration.UserAvatarSchemaCases;
  * de acceso en {@code V12}, cuyas consultas se prueban en
  * {@code repository.UserTokenVersionRepositoryIntegrationTest}; las reservas
  * de nombre de usuario en {@code V13}, cuyas consultas se prueban en
- * {@code repository.UsernameReservationRepositoryIntegrationTest}).
+ * {@code repository.UsernameReservationRepositoryIntegrationTest}; el
+ * progreso de visionado («Seguir viendo») en {@code V14}, cuyas consultas se
+ * prueban en {@code repository.WatchProgressRepositoryIntegrationTest}).
  * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
  * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
  * de PostgreSQL.
@@ -1170,6 +1172,123 @@ class FlywaySchemaIntegrationTest {
         insertReservationOwner("reservadup", HASH_B);
         assertEquals(1, count("username_reservations"));
         assertEquals(2, count("username_reservation_owners"));
+    }
+
+    // --- V14: progreso de visionado (user_movie_progress y user_episode_progress) ---
+
+    @Test
+    void v14EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '14' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * Columnas de las dos tablas de la V14 (todas obligatorias; segundos
+     * enteros y fecha con zona), sus claves primarias {@code (user_id,
+     * <título>_id)} y sus índices: por título (cascada al borrarlo) y
+     * {@code (user_id, updated_at DESC)} («Seguir viendo», lo más reciente
+     * primero).
+     */
+    @Test
+    void lasTablasDeProgresoTienenSusColumnasClavesPrimariasEIndices() {
+        assertEquals(Map.of(
+                "user_id", "BIGINT NOT NULL",
+                "movie_id", "BIGINT NOT NULL",
+                "position_seconds", "INTEGER NOT NULL",
+                "duration_seconds", "INTEGER NOT NULL",
+                "updated_at", "TIMESTAMP WITH TIME ZONE NOT NULL"), columnsOf("user_movie_progress"));
+        assertEquals(Map.of(
+                "user_id", "BIGINT NOT NULL",
+                "episode_id", "BIGINT NOT NULL",
+                "position_seconds", "INTEGER NOT NULL",
+                "duration_seconds", "INTEGER NOT NULL",
+                "updated_at", "TIMESTAMP WITH TIME ZONE NOT NULL"), columnsOf("user_episode_progress"));
+        assertEquals(List.of("user_id", "movie_id"), keyColumns("pk_user_movie_progress"));
+        assertEquals(List.of("user_id", "episode_id"), keyColumns("pk_user_episode_progress"));
+        assertEquals(List.of("movie_id ASC"), indexColumns("idx_movie_progress_movie_id"));
+        assertEquals(List.of("episode_id ASC"), indexColumns("idx_episode_progress_episode_id"));
+        assertEquals(List.of("user_id ASC", "updated_at DESC"), indexColumns("idx_movie_progress_user_updated_at"));
+        assertEquals(List.of("user_id ASC", "updated_at DESC"), indexColumns("idx_episode_progress_user_updated_at"));
+    }
+
+    /** Las cuatro claves foráneas de la V14 borran en cascada. */
+    @Test
+    void lasClavesForaneasDelProgresoBorranEnCascada() {
+        java.util.Map<String, String> rules = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT LOWER(CONSTRAINT_NAME) AS NAME, DELETE_RULE AS RULE"
+                        + " FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS")
+                .forEach(r -> rules.put((String) r.get("NAME"), (String) r.get("RULE")));
+
+        assertEquals("CASCADE", rules.get("fk_movie_progress_user"));
+        assertEquals("CASCADE", rules.get("fk_movie_progress_movie"));
+        assertEquals("CASCADE", rules.get("fk_episode_progress_user"));
+        assertEquals("CASCADE", rules.get("fk_episode_progress_episode"));
+    }
+
+    /**
+     * Restricciones de la V14 con un {@code INSERT} directo (sin pasar por el
+     * repositorio): posición negativa, duración nula o de más de 24 h, posición
+     * mayor que la duración, fila repetida (clave primaria), título
+     * inexistente (clave foránea) y fecha nula. Los límites (0, igual a la
+     * duración, 24 h exactas) sí se admiten.
+     */
+    @Test
+    void laBaseDeDatosRechazaProgresosImposiblesDuplicadosOHuerfanos() {
+        long userId = insertUser("progreso");
+        long movieId = insertMovie("Progreso", 2000);
+        long seriesId = insertSeries("Serie progreso", 2010, null);
+        insertEpisode(seriesId, 1, 1, 45);
+        long episodeId = jdbc.queryForObject("SELECT id FROM episodes WHERE series_id = ?", Long.class, seriesId);
+        insertProgress("user_movie_progress", "movie_id", userId, movieId, 86_400, 86_400, T0);
+        insertProgress("user_episode_progress", "episode_id", userId, episodeId, 0, 1, T0);
+
+        Map<String, int[]> rejected = Map.of(
+                "position", new int[] { -1, 100 },
+                "duration", new int[] { 0, 0 },
+                "position_within_duration", new int[] { 101, 100 });
+        for (String[] table : new String[][] { { "user_movie_progress", "movie_id", "movie" },
+                { "user_episode_progress", "episode_id", "episode" } }) {
+            long titleId = "movie".equals(table[2]) ? insertMovie("Otra " + table[2], 2000) : insertEpisodeFor(seriesId);
+            rejected.forEach((check, values) -> {
+                DataIntegrityViolationException error = assertThrows(DataIntegrityViolationException.class,
+                        () -> insertProgress(table[0], table[1], userId, titleId, values[0], values[1], T0));
+                assertTrue(error.getMessage().toLowerCase(java.util.Locale.ROOT)
+                        .contains("ck_" + table[2] + "_progress_" + check), error.getMessage());
+            });
+            DataIntegrityViolationException tooLong = assertThrows(DataIntegrityViolationException.class,
+                    () -> insertProgress(table[0], table[1], userId, titleId, 0, 86_401, T0));
+            assertTrue(tooLong.getMessage().toLowerCase(java.util.Locale.ROOT)
+                    .contains("ck_" + table[2] + "_progress_duration"), tooLong.getMessage());
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> insertProgress(table[0], table[1], userId, Long.MAX_VALUE, 0, 10, T0));
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> insertProgress(table[0], table[1], userId, titleId, 0, 10, null));
+        }
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertProgress("user_movie_progress", "movie_id", userId, movieId, 1, 10, T0));
+        assertThrows(DataIntegrityViolationException.class,
+                () -> insertProgress("user_episode_progress", "episode_id", userId, episodeId, 1, 10, T0));
+        assertEquals(1, count("user_movie_progress"));
+        assertEquals(1, count("user_episode_progress"));
+    }
+
+    private void insertProgress(String table, String titleColumn, long userId, long titleId, int position,
+            int duration, OffsetDateTime updatedAt) {
+        jdbc.update("INSERT INTO " + table + " (user_id, " + titleColumn
+                + ", position_seconds, duration_seconds, updated_at) VALUES (?, ?, ?, ?, ?)",
+                userId, titleId, position, duration, updatedAt);
+    }
+
+    /** Añade a la serie un episodio en la siguiente posición libre de la temporada 1 y devuelve su id. */
+    private long insertEpisodeFor(long seriesId) {
+        int next = jdbc.queryForObject("SELECT COALESCE(MAX(episode_number), 0) + 1 FROM episodes WHERE series_id = ?",
+                Integer.class, seriesId);
+        insertEpisode(seriesId, 1, next, 45);
+        return jdbc.queryForObject("SELECT id FROM episodes WHERE series_id = ? AND episode_number = ?",
+                Long.class, seriesId, next);
     }
 
     // --- Utilidades ---

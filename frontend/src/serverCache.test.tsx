@@ -292,3 +292,60 @@ describe('Sesión caducada con datos en la caché', () => {
     expect(screen.queryByText('La favorita de Ana')).not.toBeInTheDocument();
   });
 });
+
+describe('Cambio de usuario: «Seguir viendo»', () => {
+  it('quien entra después no ve ni un instante lo que el anterior tenía a medias', async () => {
+    const ana = makeUser({ id: 1, username: 'ana', email: 'ana@example.com' });
+    const bea = makeUser({ id: 2, username: 'bea', email: 'bea@example.com' });
+    const anaItem = {
+      type: 'MOVIE' as const,
+      id: 9,
+      title: 'La que Ana dejó a medias',
+      imageUrl: 'https://img.example/9.jpg',
+      seasonNumber: null,
+      episodeNumber: null,
+      seriesId: null,
+      seriesTitle: null,
+      positionSeconds: 600,
+      durationSeconds: 6000,
+      updatedAt: '2026-11-21T10:00:00Z',
+    };
+    let current: User | null = ana;
+
+    routeFetch(fetchMock, {
+      ...commonRoutes(() => [makeMovie({ id: 1, title: 'Interstellar' })]),
+      'GET /api/users/me': () => (current ? jsonResponse(current) : errorResponse(401, 'UNAUTHORIZED', 'No autenticado.')),
+      'GET /api/users/me/continue-watching?limit=12': () => jsonResponse(current?.id === 1 ? [anaItem] : []),
+      'POST /api/auth/logout': () => {
+        current = null;
+        return noContentResponse();
+      },
+      'POST /api/auth/login': () => {
+        current = bea;
+        return noContentResponse();
+      },
+    });
+    const queryClient = createTestQueryClient();
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: '/', session: true, queryClient });
+    const anaRow = await screen.findByRole('region', { name: 'Seguir viendo' });
+    expect(within(anaRow).getByText('La que Ana dejó a medias')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Menú de usuario' }));
+    await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+    expect(await screen.findByText('ruta:/login')).toBeInTheDocument();
+    expect(queryClient.getQueryData(queryKeys.progress.continueWatching(12))).toBeUndefined();
+
+    await user.type(screen.getByLabelText('Correo electrónico'), bea.email);
+    await user.type(screen.getByLabelText('Contraseña'), 'una-contraseña-cualquiera');
+    await user.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
+    await screen.findByText('ruta:/');
+
+    expect(screen.queryByText('La que Ana dejó a medias')).not.toBeInTheDocument();
+    await screen.findByRole('heading', { level: 2, name: 'Interstellar' });
+    await waitFor(() =>
+      expect(queryClient.getQueryState(queryKeys.progress.continueWatching(12))?.status).toBe('success'),
+    );
+    expect(screen.queryByRole('region', { name: 'Seguir viendo' })).not.toBeInTheDocument();
+  });
+});

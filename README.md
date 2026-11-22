@@ -25,6 +25,7 @@
 - **🎥 Catálogo y Búsqueda Dinámica**:
   - Paginación y ordenación nativa con `Pageable` y DTOs envolventes (`MoviePageResponse`).
   - Filtrado multicriterio combinable (título insensible a mayúsculas, género y año de lanzamiento) implementado mediante **Spring Data JPA `Specification`**.
+- **▶️ Reproductor integrado y «Seguir viendo»** (`/api/users/me/progress`, `/api/users/me/continue-watching`): los vídeos en archivo directo (`.mp4`, `.webm`, `.ogg`) se ven dentro de la aplicación; se guarda por dónde va cada usuario (al pausar, al salir y cada 15 s), «Reanudar» lo retoma y la primera fila del inicio muestra lo que dejó a medias, con una barra de progreso también en cada episodio.
 - **⭐ Lista de Favoritos ("Mi Lista")**:
   - Gestión integral vinculada al usuario autenticado (`/api/users/me/favorites`).
   - **«Me gusta» y recomendaciones** (`/api/users/me/likes`, `/api/users/me/recommendations`): un corazón distinto de «Mi lista» y filas «Recomendadas para ti» en el inicio, calculadas por géneros detrás de una interfaz `Recommender` pensada para poder sustituirla por una IA.
@@ -129,6 +130,10 @@ La base de todos los endpoints es `/api`.
 | `DELETE` | `/api/users/me/favorites/by-title?title=...` | `USER`, `ADMIN` | Elimina una película de la lista por coincidencia de título |
 | `DELETE` | `/api/users/me/favorites` | `USER`, `ADMIN` | Vacía por completo la lista del usuario actual |
 | `GET` | `/api/users/me/likes/movies` · `/api/users/me/likes/series` | `USER`, `ADMIN` | Títulos que le gustan al usuario («la vi y me gustó»), lo más reciente primero (solo series con episodios) |
+| `PUT` / `GET` | `/api/users/me/progress/movies/{movieId}` · `/api/users/me/progress/episodes/{episodeId}` | `USER`, `ADMIN` | Guardar (`{positionSeconds, durationSeconds}`, 204) o leer (200, o 204 si aún no lo ha empezado) por dónde va en una película o un episodio. 409 `NO_VIDEO_AVAILABLE` si el título no tiene vídeo |
+| `GET` | `/api/users/me/progress/series/{seriesId}` | `USER`, `ADMIN` | Progreso de los episodios empezados de una serie (barras de la página de la serie) |
+| `GET` | `/api/users/me/continue-watching?limit=` | `USER`, `ADMIN` | «Seguir viendo»: lo que tiene a medias (sin lo terminado ni lo que no tiene vídeo; una tarjeta por serie; `limit` 1–24) |
+| `DELETE` | `/api/users/me/continue-watching/movies/{movieId}` · `/api/users/me/continue-watching/series/{seriesId}` | `USER`, `ADMIN` | Quitar de «Seguir viendo» (en una serie, el progreso de todos sus episodios); 204 idempotente |
 | `PUT` / `DELETE` | `/api/users/me/likes/movies/{movieId}` · `/api/users/me/likes/series/{seriesId}` | `USER`, `ADMIN` | Da o quita un «me gusta» (204, idempotentes; el `PUT` da 404 si el título no existe o la serie no tiene episodios) |
 | `GET` | `/api/users/me/recommendations?limit=12` | `USER`, `ADMIN` | Recomendaciones por géneros de lo que te gusta y de tus géneros favoritos (cada favorito pesa como 2 «me gusta»; `limit` 1–24): `{ basis, movies, series }` con `basis` = `NONE` \| `GENRES` \| `LIKES` \| `GENRES_AND_LIKES`; sin favoritos ni «me gusta», `NONE` y listas vacías |
 | `GET` | `/api/users/me/genres` | `USER`, `ADMIN` | «Tus gustos»: tus géneros favoritos que tienen títulos, por nombre |

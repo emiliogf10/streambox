@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "36f1cc7d-d712-5ceb-bd83-b75fec0d4c79",
     "name": "StreamBox API",
-    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend. Son necesarios: además de las peticiones de administrador, la carpeta 1 lee como ADMIN el correo de verificación de la bandeja del perfil `e2e` (arranca el backend con ese perfil; si no, pon el token del enlace a mano en `verificationToken`).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9, en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones, en la 11 la restablece con «He olvidado mi contraseña» (y la restaura) y en la 12 cierra la sesión del ADMIN. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos, sus «me gusta» y ve sus recomendaciones; ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Verificación del correo.** El registro responde 202 siempre igual y deja la cuenta pendiente: el login con la contraseña correcta responde el mismo 401 INVALID_CREDENTIALS que una contraseña incorrecta (no revela que el email está registrado) hasta confirmar el correo con `POST /api/auth/email-verification` (token del enlace; 204, o 400 INVALID_VERIFICATION_TOKEN). `POST /api/auth/email-verification/resend` pide otro enlace (202 siempre igual). Las dos son públicas.\n\n**He olvidado mi contraseña.** `POST /api/auth/password-reset` (`{\"email\"}`) responde 202 siempre igual y, si hay cuenta, envía un enlace `<STREAMBOX_PUBLIC_URL>/restablecer-contrasena#token=...` (1 h, un solo uso). `POST /api/auth/password-reset/confirm` (`{\"token\", \"newPassword\"}`) fija la contraseña nueva: 204 (sin iniciar sesión; cierra todas las sesiones y confirma el correo), 400 INVALID_RESET_TOKEN o 400 VALIDATION_ERROR en `newPassword` (el token no se gasta). Las dos son públicas; la carpeta 11 lee el correo de la bandeja del perfil `e2e`.\n\n**Límites**: login, registro, refresh, verificación del correo y restablecimiento de la contraseña tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 2 de los 5 reenvíos por hora, 2 de las 5 peticiones de restablecimiento por hora, **los 10 logins por minuto** y 6 de las 30 renovaciones por minuto: entre dos ejecuciones hay que esperar un minuto (también por el límite silencioso de un correo de restablecimiento por minuto y cuenta) y a la tercera ejecución en una hora el registro, el reenvío y el restablecimiento responden 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` (y `..._LOGIN_`, `..._EMAIL_VERIFICATION_RESEND_` y `..._PASSWORD_RESET_MAX_REQUESTS`) más altos y `STREAMBOX_EMAIL_RESEND_MIN_INTERVAL=0s`. No la ejecutes en bucle contra un entorno real.",
+    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend. Son necesarios: además de las peticiones de administrador, la carpeta 1 lee como ADMIN el correo de verificación de la bandeja del perfil `e2e` (arranca el backend con ese perfil; si no, pon el token del enlace a mano en `verificationToken`).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9, en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones, en la 11 la restablece con «He olvidado mi contraseña» (y la restaura) y en la 12 cierra la sesión del ADMIN. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos, sus «me gusta», ve sus recomendaciones y guarda su progreso de visionado («Seguir viendo»); ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Verificación del correo.** El registro responde 202 siempre igual y deja la cuenta pendiente: el login con la contraseña correcta responde el mismo 401 INVALID_CREDENTIALS que una contraseña incorrecta (no revela que el email está registrado) hasta confirmar el correo con `POST /api/auth/email-verification` (token del enlace; 204, o 400 INVALID_VERIFICATION_TOKEN). `POST /api/auth/email-verification/resend` pide otro enlace (202 siempre igual). Las dos son públicas.\n\n**He olvidado mi contraseña.** `POST /api/auth/password-reset` (`{\"email\"}`) responde 202 siempre igual y, si hay cuenta, envía un enlace `<STREAMBOX_PUBLIC_URL>/restablecer-contrasena#token=...` (1 h, un solo uso). `POST /api/auth/password-reset/confirm` (`{\"token\", \"newPassword\"}`) fija la contraseña nueva: 204 (sin iniciar sesión; cierra todas las sesiones y confirma el correo), 400 INVALID_RESET_TOKEN o 400 VALIDATION_ERROR en `newPassword` (el token no se gasta). Las dos son públicas; la carpeta 11 lee el correo de la bandeja del perfil `e2e`.\n\n**Límites**: login, registro, refresh, verificación del correo y restablecimiento de la contraseña tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 2 de los 5 reenvíos por hora, 2 de las 5 peticiones de restablecimiento por hora, **los 10 logins por minuto** y 6 de las 30 renovaciones por minuto: entre dos ejecuciones hay que esperar un minuto (también por el límite silencioso de un correo de restablecimiento por minuto y cuenta) y a la tercera ejecución en una hora el registro, el reenvío y el restablecimiento responden 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` (y `..._LOGIN_`, `..._EMAIL_VERIFICATION_RESEND_` y `..._PASSWORD_RESET_MAX_REQUESTS`) más altos y `STREAMBOX_EMAIL_RESEND_MIN_INTERVAL=0s`. No la ejecutes en bucle contra un entorno real.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -3793,7 +3793,7 @@
       ]
     },
     {
-      "name": "7. Favoritos, «me gusta», géneros favoritos y recomendaciones (usuario autenticado)",
+      "name": "7. Favoritos, «me gusta», géneros favoritos, recomendaciones y «Seguir viendo» (usuario autenticado)",
       "description": "",
       "item": [
         {
@@ -5006,6 +5006,601 @@
                 "exec": [
                   "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
                   "pm.test(\"basis NONE y listas vacías\", function () { const body = pm.response.json(); pm.expect(body.basis).to.eql(\"NONE\"); pm.expect(body.movies).to.eql([]); pm.expect(body.series).to.eql([]); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Guardar mi progreso en una película",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/movies/{{movieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "movies",
+                "{{movieId}}"
+              ]
+            },
+            "description": "Lo que envía el reproductor integrado cada pocos segundos y al pausar: el segundo por el que va y la duración del vídeo, en segundos enteros. PUT idempotente: cada envío sustituye al anterior (gana el último). El usuario sale del token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"positionSeconds\": 1325, \"durationSeconds\": 8160 }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Sin cuerpo\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Leer mi progreso en la película",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/movies/{{movieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "movies",
+                "{{movieId}}"
+              ]
+            },
+            "description": "Para «Reanudar desde X». finished lo calcula el servidor (95 % o más de la duración)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Devuelve lo guardado\", function () { const b = pm.response.json(); pm.expect(b.positionSeconds).to.eql(1325); pm.expect(b.durationSeconds).to.eql(8160); pm.expect(b.finished).to.eql(false); pm.expect(b.updatedAt).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Guardar un progreso con la posición mayor que la duración (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/movies/{{movieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "movies",
+                "{{movieId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"positionSeconds\": 101, \"durationSeconds\": 100 }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error de validación solo en positionSeconds\", function () { const b = pm.response.json(); pm.expect(b.code).to.eql(\"VALIDATION_ERROR\"); pm.expect(Object.keys(b.validationErrors)).to.eql([\"positionSeconds\"]); pm.expect(b.validationErrors.positionSeconds).to.eql(\"La posición no puede ser mayor que la duración\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Guardar el progreso de una película sin vídeo (409)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/movies/{{secondMovieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "movies",
+                "{{secondMovieId}}"
+              ]
+            },
+            "description": "La segunda película de la colección se creó sin videoUrl: no se puede reproducir en la aplicación, así que no tiene sentido guardar por dónde vas.",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"positionSeconds\": 10, \"durationSeconds\": 100 }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Código NO_VIDEO_AVAILABLE\", function () { const b = pm.response.json(); pm.expect(b.code).to.eql(\"NO_VIDEO_AVAILABLE\"); pm.expect(b.message).to.eql(\"Esta película no tiene vídeo: no se puede guardar por dónde vas\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Leer el progreso de una película sin empezar (204)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/movies/{{thirdMovieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "movies",
+                "{{thirdMovieId}}"
+              ]
+            },
+            "description": "No haberla empezado no es un error: 204 sin cuerpo (el 404 queda para la película que no existe)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Sin cuerpo\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Progreso de una película inexistente (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/movies/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "movies",
+                "999999999"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 404\", function () { pm.response.to.have.status(404); });",
+                  "pm.test(\"Código RESOURCE_NOT_FOUND\", function () { const b = pm.response.json(); pm.expect(b.code).to.eql(\"RESOURCE_NOT_FOUND\"); pm.expect(b.message).to.eql(\"Película no encontrada\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Guardar el progreso de un episodio sin vídeo (409)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/episodes/{{episodeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "episodes",
+                "{{episodeId}}"
+              ]
+            },
+            "description": "El episodio de la colección se editó sin videoUrl en la carpeta 6.",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"positionSeconds\": 10, \"durationSeconds\": 100 }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Código NO_VIDEO_AVAILABLE\", function () { const b = pm.response.json(); pm.expect(b.code).to.eql(\"NO_VIDEO_AVAILABLE\"); pm.expect(b.message).to.eql(\"Este episodio no tiene vídeo: no se puede guardar por dónde vas\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mi progreso en los episodios de la serie (lista vacía)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/series/{{seriesId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "series",
+                "{{seriesId}}"
+              ]
+            },
+            "description": "Una lista con el progreso de cada episodio empezado, para pintar sus barras. Una serie sin episodios daría el mismo 404 que una inexistente."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Lista vacía: no ha empezado ningún episodio\", function () { pm.expect(pm.response.json()).to.eql([]); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Seguir viendo: está la película",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/continue-watching",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "continue-watching"
+              ]
+            },
+            "description": "Películas y episodios a medio ver, del guardado más reciente al más antiguo (por defecto, como mucho 10). Cada elemento lleva type (MOVIE o EPISODE); en las películas los campos de la serie van a null."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"La película sale una vez, con su progreso\", function () { const items = pm.response.json().filter(i => i.type === \"MOVIE\" && String(i.id) === String(pm.collectionVariables.get(\"movieId\"))); pm.expect(items.length).to.eql(1); pm.expect(items[0].positionSeconds).to.eql(1325); pm.expect(items[0].durationSeconds).to.eql(8160); pm.expect(items[0].title).to.be.a(\"string\"); pm.expect(items[0].imageUrl).to.be.a(\"string\"); pm.expect(items[0].seriesId).to.eql(null); pm.expect(items[0].seasonNumber).to.eql(null); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Seguir viendo con limit=25 (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/continue-watching?limit=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "continue-watching"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "25"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error de validación en limit\", function () { const b = pm.response.json(); pm.expect(b.code).to.eql(\"VALIDATION_ERROR\"); pm.expect(b.validationErrors.limit).to.eql(\"El límite máximo es 24\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Terminar la película (95 % o más)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/movies/{{movieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "movies",
+                "{{movieId}}"
+              ]
+            },
+            "description": "8000 de 8160 segundos es más del 95 %: la película cuenta como vista.",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"positionSeconds\": 8000, \"durationSeconds\": 8160 }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Sin cuerpo\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Seguir viendo: la película terminada ya no sale",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/continue-watching",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "continue-watching"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"La película terminada no está\", function () { const items = pm.response.json().filter(i => i.type === \"MOVIE\" && String(i.id) === String(pm.collectionVariables.get(\"movieId\"))); pm.expect(items.length).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quitar la película de Seguir viendo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/continue-watching/movies/{{movieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "continue-watching",
+                "movies",
+                "{{movieId}}"
+              ]
+            },
+            "description": "Borra el progreso: al volver a abrirla, empieza desde el principio. Idempotente: repetirlo, o con una película inexistente, también es 204."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Sin cuerpo\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Leer el progreso de la película quitada (204)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/movies/{{movieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "movies",
+                "{{movieId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Sin cuerpo\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quitar la serie de Seguir viendo (204, idempotente)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/continue-watching/series/{{seriesId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "continue-watching",
+                "series",
+                "{{seriesId}}"
+              ]
+            },
+            "description": "Borra el progreso de todos los episodios de la serie (si solo se borrara el de la tarjeta, otro episodio a medias ocuparía su lugar). Aunque no haya progreso, 204."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Sin cuerpo\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
                 ]
               }
             }

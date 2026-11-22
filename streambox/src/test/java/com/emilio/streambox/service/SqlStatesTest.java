@@ -61,6 +61,38 @@ class SqlStatesTest {
         assertFalse(SqlStates.isForeignKeyViolation(violation("23503", null), "fk_movie_genres_genre"));
     }
 
+    /**
+     * Sentencias de {@code JdbcClient} (progreso de visionado): Spring envuelve
+     * el error del driver sin pasar por Hibernate, así que no hay nombre de
+     * restricción extraído y se reconoce por el mensaje del driver, con el
+     * formato real de cada motor. Sin este respaldo, el usuario borrado durante
+     * la petición se traducía a un falso «Película no encontrada».
+     */
+    @Test
+    void sinHibernateReconoceLaClaveForaneaPorElMensajeDelDriver() {
+        DataIntegrityViolationException postgres = jdbcViolation("23503", "ERROR: insert or update on table "
+                + "\"user_movie_progress\" violates foreign key constraint \"fk_movie_progress_user\"\n"
+                + "  Detail: Key (user_id)=(99) is not present in table \"users\".");
+        DataIntegrityViolationException h2 = jdbcViolation("23506", "Referential integrity constraint "
+                + "violation: \"FK_MOVIE_PROGRESS_USER: PUBLIC.USER_MOVIE_PROGRESS FOREIGN KEY(USER_ID) "
+                + "REFERENCES PUBLIC.USERS(ID) (CAST(99 AS BIGINT))\"; SQL statement: INSERT INTO ...");
+
+        assertNull(SqlStates.constraintName(postgres));
+        assertTrue(SqlStates.isForeignKeyViolation(postgres, "fk_movie_progress_user"));
+        assertTrue(SqlStates.isForeignKeyViolation(h2, "fk_movie_progress_user"));
+        assertFalse(SqlStates.isForeignKeyViolation(postgres, "fk_movie_progress_movie"));
+        assertFalse(SqlStates.isForeignKeyViolation(h2, "fk_movie_progress_movie"));
+        // Con otro SQLSTATE no cuenta aunque el mensaje nombre la restricción
+        assertFalse(SqlStates.isForeignKeyViolation(jdbcViolation("23514", "fk_movie_progress_user"),
+                "fk_movie_progress_user"));
+    }
+
+    /** La forma de un error de {@code JdbcTemplate}/{@code JdbcClient}: Spring sobre el driver. */
+    private static DataIntegrityViolationException jdbcViolation(String sqlState, String driverMessage) {
+        return new DataIntegrityViolationException("PreparedStatementCallback; SQL [INSERT ...]",
+                new SQLException(driverMessage, sqlState));
+    }
+
     private static DataIntegrityViolationException violation(String sqlState, String constraintName) {
         SQLException driver = new SQLException("violación", sqlState);
         return new DataIntegrityViolationException("could not execute statement",

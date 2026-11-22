@@ -508,3 +508,48 @@ describe('MovieDetailPage: casos límite', () => {
     expect(screen.queryByRole('button', { name: 'Reintentar' })).not.toBeInTheDocument();
   });
 });
+
+describe('MovieDetailPage: reproductor integrado y progreso', () => {
+  const direct = { ...movie, videoUrl: 'https://cdn.example/interstellar.mp4' };
+  const PROGRESS = 'GET /api/users/me/progress/movies/7';
+
+  it('sin progreso, «Ver ahora» lleva al reproductor de StreamBox (no a otra pestaña)', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse(direct), { [PROGRESS]: noContentResponse });
+
+    const watch = await screen.findByRole('link', { name: 'Ver ahora Interstellar' });
+    expect(watch).toHaveAttribute('href', '/ver/peliculas/7');
+    expect(watch).not.toHaveAttribute('target');
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
+  it('a medias: «Reanudar», con la barra de lo visto y lo que queda en palabras', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse(direct), {
+      [PROGRESS]: () =>
+        jsonResponse({ positionSeconds: 3000, durationSeconds: 5040, finished: false, updatedAt: '2026-11-21T10:00:00Z' }),
+    });
+
+    const watch = await screen.findByRole('link', { name: 'Reanudar Interstellar' });
+    expect(watch).toHaveAttribute('href', '/ver/peliculas/7');
+    const bar = screen.getByRole('progressbar', { name: 'Quedan 34 min' });
+    expect(bar).toHaveAttribute('value', '3000');
+    expect(bar).toHaveAttribute('max', '5040');
+  });
+
+  it('terminada: «Volver a ver» (empieza desde el principio), sin barra', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse(direct), {
+      [PROGRESS]: () =>
+        jsonResponse({ positionSeconds: 5000, durationSeconds: 5040, finished: true, updatedAt: '2026-11-21T10:00:00Z' }),
+    });
+
+    expect(await screen.findByRole('link', { name: 'Volver a ver Interstellar' })).toHaveAttribute('href', '/ver/peliculas/7');
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
+  it('un vídeo que no es un archivo directo sigue abriéndose en otra pestaña, y no se pide progreso', async () => {
+    renderDetail();
+
+    const watch = await screen.findByRole('link', { name: 'Ver ahora Interstellar (se abre en una pestaña nueva)' });
+    expect(watch).toHaveAttribute('href', 'https://video.example/interstellar');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/progress/'))).toBe(false);
+  });
+});

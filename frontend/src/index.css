@@ -176,6 +176,15 @@
     }
   }
 
+  /*
+   * Pantalla del reproductor (`components/player/PlayerShell`, `data-player-screen`): todo negro, también el
+   * hueco que `scrollbar-gutter: stable` reserva a la derecha (lo pinta el fondo de `html`, no el de la página),
+   * que si no se ve como una franja gris junto al vídeo.
+   */
+  html:has([data-player-screen]) {
+    background-color: #000;
+  }
+
   /* Lo añade `useModalDialog` mientras hay un diálogo abierto: el fondo no debe desplazarse. */
   html.scroll-locked {
     overflow: hidden;
@@ -248,5 +257,37 @@
   &:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
+  }
+}
+
+/*
+ * Barra de progreso de visionado (`components/WatchProgressBar`): un `<progress>`
+ * nativo (rol `progressbar` implícito, valor que leen los lectores de pantalla)
+ * con su aspecto propio. `appearance: none` y el fondo en el propio elemento
+ * desactivan el estilo del sistema; el relleno se pinta con el pseudoelemento de
+ * cada motor (`::-webkit-progress-value` en Chromium y Safari,
+ * `::-moz-progress-bar` en Firefox), cada uno una sola vez.
+ * Contraste (WCAG 1.4.11, 3:1): relleno `accent` sobre la pista (blanco al 20 %
+ * sobre canvas, ≈ #3e4146): 4.8. Sin transición del ancho: la barra no se anima
+ * al aparecer (se ve en cada tarjeta, decenas de veces al día).
+ */
+@utility watch-progress {
+  appearance: none;
+  display: block;
+  border: none;
+  border-radius: 9999px;
+  overflow: hidden;
+  background-color: rgb(255 255 255 / 0.2);
+  color: var(--color-accent);
+  &::-webkit-progress-bar {
+    background-color: transparent;
+  }
+  &::-webkit-progress-value {
+    background-color: var(--color-accent);
+    border-radius: 9999px;
+  }
+  &::-moz-progress-bar {
+    background-color: var(--color-accent);
+    border-radius: 9999px;
   }
 }

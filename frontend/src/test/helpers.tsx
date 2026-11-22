@@ -14,6 +14,7 @@ import type { ReactElement } from 'react';
 import { MemoryRouter, parsePath } from 'react-router-dom';
 import type { Mock } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
+import { InAppHistoryProvider } from '../context/InAppHistoryContext';
 import { ToastProvider } from '../context/ToastContext';
 import { LocationProbe } from './LocationProbe';
 import { createTestQueryClient } from './queryClient';
@@ -69,6 +70,9 @@ export const DEFAULT_GENRE_OPTIONS: Genre[] = [
 
 /** Clave de {@link routeFetch} para guardar los géneros favoritos. */
 export const SAVE_FAVORITE_GENRES = 'PUT /api/users/me/genres';
+
+/** «Seguir viendo» de la portada (`GET /api/users/me/continue-watching?limit=12`); por defecto, vacío. */
+export const CONTINUE_WATCHING = 'GET /api/users/me/continue-watching?limit=12';
 
 /** Clave de {@link routeFetch} de la renovación de la sesión, que `apiFetch` pide ante un 401. */
 export const REFRESH_SESSION = 'POST /api/auth/refresh';
@@ -253,6 +257,9 @@ export function currentUserAs(user: User): () => Response {
  * bienvenida, el editor y los tests de «menos de 3» declaran las suyas. (El
  * `PUT` no tiene valor por defecto: sus tests lo declaran.)
  *
+ * «Seguir viendo» ({@link CONTINUE_WATCHING}) responde vacío: la portada lo pide
+ * siempre y sin nada a medias no pinta nada, como antes de existir.
+ *
  * Y {@link REFRESH_SESSION} (`POST /api/auth/refresh`) responde por defecto 401
  * `SESSION_EXPIRED` («no hay sesión que renovar»): `apiFetch` lo pide ante
  * cualquier 401 de una ruta autenticada, también en el arranque sin sesión, así
@@ -272,6 +279,7 @@ export function routeFetch(fetchMock: Mock<typeof fetch>, routes: Record<string,
     [RECOMMENDATIONS]: () => jsonResponse(makeRecommendations()),
     [FAVORITE_GENRES]: () => jsonResponse([]),
     [GENRE_OPTIONS]: () => jsonResponse(DEFAULT_GENRE_OPTIONS),
+    [CONTINUE_WATCHING]: () => jsonResponse([]),
     [REFRESH_SESSION]: sessionExpiredResponse,
     ...routes,
   };
@@ -325,14 +333,16 @@ export function renderWithProviders(ui: ReactElement, options: RenderOptions = {
   const queryClient = options.queryClient ?? createTestQueryClient();
   return render(
     <MemoryRouter initialEntries={[entry]}>
-      <QueryClientProvider client={queryClient}>
-        <ToastProvider>
-          <AuthProvider>
-            {ui}
-            <LocationProbe />
-          </AuthProvider>
-        </ToastProvider>
-      </QueryClientProvider>
+      <InAppHistoryProvider>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <AuthProvider>
+              {ui}
+              <LocationProbe />
+            </AuthProvider>
+          </ToastProvider>
+        </QueryClientProvider>
+      </InAppHistoryProvider>
     </MemoryRouter>,
   );
 }

@@ -193,6 +193,18 @@ class OpenApiErrorResponseDocumentationIntegrationTest {
         assertTrue(paths.at("/~1api~1genres~1{id}/delete/responses/204/content").isMissingNode());
         assertTrue(paths.at("/~1api~1movies~1{id}/delete/responses/204/content").isMissingNode());
         assertTrue(paths.at("/~1api~1users~1me~1favorites/delete/responses/204/content").isMissingNode());
+
+        // El GET del progreso responde 200 con cuerpo o 204 sin él (no lo ha empezado).
+        // Sin content = @Content, springdoc pegaba al 204 el esquema del 200.
+        for (String path : List.of("/api/users/me/progress/movies/{movieId}",
+                "/api/users/me/progress/episodes/{episodeId}")) {
+            assertEquals("#/components/schemas/WatchProgressResponse", schemaRef(paths, path, "get", "200"), path);
+            JsonNode noProgress = paths.path(path).path("get").path("responses").path("204");
+            assertTrue(noProgress.isObject(), path);
+            assertTrue(noProgress.path("content").isMissingNode(), path);
+        }
+        assertTrue(paths.at("/~1api~1users~1me~1progress~1movies~1{movieId}/put/responses/204/content")
+                .isMissingNode());
     }
 
     /** Los 429 declaran la cabecera {@code Retry-After} (segundos, entero de al menos 1). */

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { Film } from 'lucide-react';
 import { buttonClasses } from '../components/buttonStyles';
 import { CatalogSkeleton } from '../components/CatalogSkeleton';
+import { ContinueWatchingRow } from '../components/ContinueWatchingRow';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { HeroBanner } from '../components/HeroBanner';
@@ -17,6 +18,7 @@ import { useCatalog } from '../hooks/useCatalog';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { usePrefetchRecommendations } from '../hooks/useRecommendations';
 import { useLatestSeries } from '../hooks/useSeriesCatalog';
+import { usePrefetchContinueWatching } from '../hooks/useWatchProgress';
 import { buildCatalogRows } from '../lib/catalog';
 import { ADMIN_MOVIES_PATH } from './admin/adminPaths';
 
@@ -72,10 +74,26 @@ function RecommendationsSlot({ inviteToChooseGenres = false }: { inviteToChooseG
 }
 
 /**
+ * Hueco de la fila «Seguir viendo» ({@link ContinueWatchingRow}): lo primero
+ * tras el banner, porque retomar lo que se dejó a medias es lo que más se hace
+ * al entrar. Enfocable por código (`tabIndex={-1}`) por lo mismo que
+ * {@link RecommendationsSlot}: si «Reintentar» de su error desaparece, el foco
+ * se queda en esta zona. `empty:hidden`: sin nada a medias no deja hueco.
+ */
+function ContinueWatchingSlot() {
+  return (
+    <div tabIndex={-1} className="focus-ring rounded-xl empty:hidden">
+      <ContinueWatchingRow />
+    </div>
+  );
+}
+
+/**
  * Portada de la aplicación.
  *
  * - El banner es la película más reciente del catálogo.
- * - Debajo, filas horizontales: "Novedades", las recomendadas para el usuario
+ * - Debajo, lo primero, **«Seguir viendo»** (lo que el usuario tiene a medias;
+ *   solo si hay algo, ver `ContinueWatchingRow`). Después, filas horizontales: "Novedades", las recomendadas para el usuario
  *   («Películas/Series recomendadas para ti», solo si tiene géneros favoritos
  *   o le gusta algo y hay qué recomendar; si no tiene ni lo uno ni lo otro, la
  *   tarjeta «Dinos qué géneros te gustan…»; ver `RecommendedRows`), la fila «Series» (las series más
@@ -124,6 +142,8 @@ export function HomePage() {
   // Las recomendaciones se piden ya, en paralelo con el catálogo, y no cuando se montan sus filas
   // (después de él): así llegan a la vez y no empujan la portada al aparecer.
   usePrefetchRecommendations();
+  // «Seguir viendo» va encima de todo: si llegara después del catálogo, empujaría las filas al aparecer.
+  usePrefetchContinueWatching();
 
   const hero = movies[0];
   // Las filas se calculan sin la película del banner para no repetirla justo debajo.
@@ -151,6 +171,7 @@ export function HomePage() {
     // foco si «Reintentar» desaparece al pulsarlo (`useRetryFocus`).
     content = (
       <div className="pt-6">
+        <ContinueWatchingSlot />
         <div tabIndex={-1} className="focus-ring rounded-xl">
           <RowError
             title="Películas"
@@ -170,6 +191,7 @@ export function HomePage() {
     // encima, la fila quedaría pegada a la barra superior.
     content = (
       <div className="pt-6">
+        <ContinueWatchingSlot />
         <RecommendationsSlot />
         <LatestSeriesRow whenEmpty={<EmptyCatalog isAdmin={isAdmin} />} />
       </div>
@@ -178,6 +200,7 @@ export function HomePage() {
     content = (
       <>
         <HeroBanner movie={hero} />
+        <ContinueWatchingSlot />
 
         {rows.map((row, index) => (
           <Fragment key={row.id}>

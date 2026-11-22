@@ -200,5 +200,14 @@ public enum ErrorCode {
      * película del panel de administración, ronda los 16 KB en el peor caso).
      * Ver {@code RequestBodySizeLimitFilter}.
      */
-    PAYLOAD_TOO_LARGE
+    PAYLOAD_TOO_LARGE,
+
+    /**
+     * {@code PUT /api/users/me/progress/movies/{id}} o
+     * {@code /episodes/{id}}: la película o el episodio existe pero no tiene
+     * vídeo ({@code videoUrl} nulo), así que no se puede reproducir en la
+     * aplicación ni guardar por dónde va el usuario (409). Si el título no
+     * existe, el código es {@link #RESOURCE_NOT_FOUND}.
+     */
+    NO_VIDEO_AVAILABLE
 }

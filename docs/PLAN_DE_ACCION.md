@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **4061** con Docker (2026-11-13) | Sin omitidos. Tras la cookie de dispositivo (2026-11-16): **3987** sin Docker (3648 con H2 y 339 de PostgreSQL omitidos); **los de PostgreSQL de ese cambio aún no se han ejecutado con Docker**. Antes del lote posterior a la auditoría run-3 eran 3975 en el CI |
-| Frontend (Vitest) | **1834** | |
-| E2E (Playwright) | **259** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
+| Backend (JUnit) | **4355** con Docker (2026-11-22) | Sin omitidos ni fallos (reproductor y «Seguir viendo», ejecutado por `qa`) |
+| Frontend (Vitest) | **1984** | |
+| E2E (Playwright) | **263** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -312,12 +312,15 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - **Recomendación:** se cambia solo `GenreBasedRecommender` (la interfaz `Recommender` está para esto). Los géneros elegidos son el punto de partida y los «me gusta» van pesando más según se acumulan (p. ej. cada género elegido equivale a 2 «me gusta»). El campo `basedOnLikes` dejaría de ser verdad: cambiarlo por algo como `basis: NONE | GENRES | LIKES` para que el texto de la portada pueda decir la verdad.
   - **Textos:** que expliquen el porqué («Porque te gustan Acción y Drama»). Para los usuarios que ya existen no se fuerza nada: si no tienen ni gustos ni «me gusta», el inicio puede invitarles con una tarjeta («Dinos qué géneros te gustan…») que lleve a «Tus gustos».
   - **Decisiones del autor (2026-10-18):** (1) el **ADMIN no ve la pregunta**, pero **sí tiene la sección «Tus gustos»** en su perfil; (2) **mínimo 3 y máximo 5** géneros; (3) los usuarios que ya existen **solo ven la tarjeta del inicio**, nunca la pregunta. (4) **cada género elegido pesa como 2 «me gusta»** (decidido el 2026-10-25). **En curso desde el 2026-10-25** (seguimiento en `docs/TRABAJO_EN_CURSO.md`).
-- **Reproductor integrado** — *Media · MEDIA*
-  - «Ver ahora» abre el vídeo en otra pestaña. Un reproductor en la app solo sirve para vídeos directos (`.mp4`, `.webm`, HLS): revisar antes qué `videoUrl` hay en la base de datos.
-  - Para HLS (`.m3u8`, que propone el informe de Gemini) bastaría `hls.js` con URLs HLS ya publicadas. Transcodificar con FFmpeg, guardar en S3/MinIO y servir por CDN es otro proyecto (subidas, colas de trabajo, almacenamiento) y hoy no hay vídeos propios. Una subida de archivos exigiría reactivar multipart solo para su ruta (capítulo 13 del manual).
+- ✅ ~~**Reproductor integrado y «Seguir viendo»**~~ — **hecho el 2026-11-22** (opción A; ver el [historial](#4-historial-de-trabajos) y el cap. 15 ter del manual). Solo archivos de vídeo directos por `https:` (`.mp4`, `.webm`, `.ogg`); el resto se sigue abriendo en otra pestaña. Pendiente:
+  - **Decisión del autor (QA-4):** la tarjeta de una serie en «Seguir viendo» muestra el episodio **sin terminar** más reciente, y la página de la serie lleva al **último que se tocó** (o al siguiente, si lo terminó). Ejemplo: 1x01 a medias y luego 1x02 terminado → la tarjeta dice «T1:E1» y la serie propone «T1:E3». Elegir uno de los dos criterios para ambos (lo habitual en las plataformas es el segundo, y entonces la tarjeta propondría el siguiente episodio sin progreso todavía: cambia la consulta, `backend`/`database`).
+  - **Subtítulos** (WCAG 1.2.2): un campo opcional `subtitlesUrl` (WebVTT, https) en películas y episodios para añadir `<track kind="captions">` (`database` + `backend` + `frontend`).
+  - **HLS** (`.m3u8`): exigiría `hls.js` (dependencia nueva). Transcodificar con FFmpeg y servir por CDN es otro proyecto: hoy no hay vídeos propios.
+  - **A mano:** probar con vídeos reales en `.mp4` (su servidor debe admitir `Range`; si no, el vídeo empieza en 0 y no aparece «Sigues por»), los controles nativos en Safari de iPhone y el aviso largo del pie («…esta vez no se guardará por dónde vas») a 375 px.
+  - Opcional (`security`): un `limit_req` genérico en nginx para las rutas autenticadas (el guardado del progreso no tiene límite propio, como los «me gusta»; punto 11 de seguridad).
 - **Series: siguientes pasos** (fuera de la primera versión, 2026-10-05) — *Media · MEDIA–ALTA*
   - **Imagen propia por episodio** (hoy usa la de la serie): columna nueva en `episodes` con su migración y `@HttpsUrl`.
-  - **Progreso de visionado / «Seguir viendo»**: tabla de progreso por usuario y episodio o película; depende del reproductor.
+  - ✅ ~~**Progreso de visionado / «Seguir viendo»**~~ — **hecho el 2026-11-22** (ver «Reproductor integrado» arriba).
   - **Episodios favoritos** sueltos.
   - **Tráileres**, y una imagen horizontal `backdropUrl` para el banner.
   - **Valoraciones**: me gusta o estrellas, y nota media.
@@ -482,6 +485,17 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-22 · Reproductor integrado y «Seguir viendo» (opción A)
+
+- **Qué:** los vídeos en archivo directo por `https:` (`.mp4`, `.webm`, `.ogg`) se ven dentro de StreamBox (`/ver/peliculas/:id`, `/ver/series/:seriesId/episodios/:episodeId`); se guarda por dónde va cada usuario, «Reanudar» lo retoma, la primera fila del inicio es «Seguir viendo» (con «Quitar») y cada episodio lleva su barra. Los demás enlaces se siguen abriendo en otra pestaña, sin progreso. Manual: cap. 15 ter y §5.4 «V14».
+- **`database`:** `V14__watch_progress.sql` (`user_movie_progress`, `user_episode_progress`: `CHECK` de posición y duración, cascadas, índices por usuario y fecha) y `WatchProgressRepository` (`JdbcClient`; *upsert* = `UPDATE` y si no `INSERT … ON CONFLICT DO NOTHING` con reintento, porque H2 no admite `DO UPDATE`; «Seguir viendo» en una sola consulta, una tarjeta por serie, sin terminados ni títulos sin vídeo).
+- **`backend`:** `PUT`/`GET /api/users/me/progress/movies|episodes/{id}` (GET 204 sin progreso), `GET /progress/series/{id}`, `GET /continue-watching?limit=` (1–24), `DELETE /continue-watching/movies|series/{id}` (204 siempre); 409 `NO_VIDEO_AVAILABLE`. Arreglado `SqlStates.isForeignKeyViolation` con `JdbcClient` (una cuenta borrada a mitad de un guardado daba un falso «Película no encontrada»). OpenAPI y Postman al día (Newman 162/162).
+- **`security`:** sin críticos, altos ni medios. CSP de nginx con `media-src 'self' https:` (comprobada en la prueba de humo de `ci.yml`). Sin límite de frecuencia propio para el guardado (aceptado, como los «me gusta»).
+- **`frontend`:** reproductor `<video>` nativo, guardado cada 15 s / al pausar / tras saltar / al terminar / al salir (`keepalive` vía `apiFetch`, nunca `sendBeacon`, que no manda la cabecera CSRF), nada antes de 10 s vistos, «Sigues por» solo si el salto llegó (servidores sin `Range`), sin reproducción automática sin gesto, «Ver el siguiente» con `replace`. E2E nuevo `player.spec.ts`.
+- **Revisión de `qa`:** API y propiedad sin fallos (26 tests de casos límite en `WatchProgressQaEdgeCasesIntegrationTest`, más 20 de Vitest). Arreglados por `frontend`: **QA-1 MEDIA** («Volver»/Escape sacaban de StreamBox tras «Ver el siguiente» en un episodio abierto desde un enlace → `context/InAppHistoryContext.tsx`), **QA-2** (un vídeo `http://` iba al reproductor pero la CSP lo bloquea → ahora se abre fuera) y **QA-3** (si fallaba la lectura del progreso, el guardado machacaba el real → esa visita no guarda y lo dice). **QA-4** queda para el autor (ver 2.9).
+- **Tests:** backend de 4241 a **4355** (con Docker, sin omitidos); Vitest de 1834 a **1984**; E2E de 259 a **263** + 24 omitidos. Verificado por el orquestador: build 0, lint 0, tipos de los E2E 0, Vitest 1984/1984 y E2E completo 263/0.
+- **Nota:** `agent-browser` se quedó colgado al lanzar Chrome en las dos pasadas; los agentes usaron el Chromium de Playwright contra la pila aislada (capturas en `Pruebas/streambox-capturas/reproductor-2026-11/` y `reproductor-2026-11-qa/`).
 
 ### 2026-11-20 · Cierre de la revisión del frontend (UX)
 

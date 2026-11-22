@@ -11,6 +11,214 @@ servers:
 - url: http://localhost:8080
   description: Backend local (perfil dev)
 paths:
+  /api/users/me/progress/movies/{movieId}:
+    get:
+      tags:
+      - watch-progress-controller
+      summary: Obtiene mi progreso en una película
+      description: Devuelve el segundo por el que va el usuario autenticado en la película, la duración del vídeo, si ya la
+        terminó (95 % o más) y cuándo se guardó. Si nunca la empezó (o la quitó de «Seguir viendo»), 204 sin cuerpo.
+      operationId: getMovieProgress
+      parameters:
+      - name: movieId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Progreso obtenido
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/WatchProgressResponse'
+        '204':
+          description: La película existe, pero no hay progreso guardado
+        '400':
+          description: El id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Película no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+    put:
+      tags:
+      - watch-progress-controller
+      summary: Guarda mi progreso en una película
+      description: Guarda el segundo por el que va el usuario autenticado en la película y la duración del vídeo, sustituyendo
+        lo anterior. El reproductor lo envía periódicamente y al pausar o salir; repetirlo es idempotente. Si la posición
+        alcanza el 95 % de la duración, la película cuenta como vista y deja de salir en «Seguir viendo».
+      operationId: saveMovieProgress
+      parameters:
+      - name: movieId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WatchProgressRequest'
+        required: true
+      responses:
+        '204':
+          description: Progreso guardado
+        '400':
+          description: Id no válido, o posición o duración fuera de rango (VALIDATION_ERROR, con el detalle en validationErrors),
+            o un valor que no es un número entero (MALFORMED_REQUEST)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Película no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: La película no tiene vídeo (NO_VIDEO_AVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+  /api/users/me/progress/episodes/{episodeId}:
+    get:
+      tags:
+      - watch-progress-controller
+      summary: Obtiene mi progreso en un episodio
+      description: Devuelve el segundo por el que va el usuario autenticado en el episodio, la duración del vídeo, si ya lo
+        terminó (95 % o más) y cuándo se guardó. Si nunca lo empezó, 204 sin cuerpo.
+      operationId: getEpisodeProgress
+      parameters:
+      - name: episodeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Progreso obtenido
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/WatchProgressResponse'
+        '204':
+          description: El episodio existe, pero no hay progreso guardado
+        '400':
+          description: El id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Episodio no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+    put:
+      tags:
+      - watch-progress-controller
+      summary: Guarda mi progreso en un episodio
+      description: Guarda el segundo por el que va el usuario autenticado en el episodio y la duración del vídeo, sustituyendo
+        lo anterior. Idempotente. Si la posición alcanza el 95 % de la duración, el episodio cuenta como visto y deja de salir
+        en «Seguir viendo».
+      operationId: saveEpisodeProgress
+      parameters:
+      - name: episodeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WatchProgressRequest'
+        required: true
+      responses:
+        '204':
+          description: Progreso guardado
+        '400':
+          description: Id no válido, o posición o duración fuera de rango (VALIDATION_ERROR, con el detalle en validationErrors),
+            o un valor que no es un número entero (MALFORMED_REQUEST)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Episodio no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: El episodio no tiene vídeo (NO_VIDEO_AVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
   /api/users/me/password:
     put:
       tags:
@@ -2102,6 +2310,52 @@ paths:
       security:
       - cookieAuth: []
       - bearerAuth: []
+  /api/users/me/progress/series/{seriesId}:
+    get:
+      tags:
+      - watch-progress-controller
+      summary: Obtiene mi progreso en los episodios de una serie
+      description: Devuelve, en una sola lista, el progreso del usuario autenticado en cada episodio de la serie que ha empezado
+        (terminados incluidos), en orden de temporada y número. Los episodios sin empezar no aparecen; si no ha empezado ninguno,
+        la lista va vacía.
+      operationId: getSeriesProgress
+      parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Lista obtenida correctamente (puede estar vacía)
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EpisodeProgressResponse'
+        '400':
+          description: El id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 'Serie no encontrada: no existe o no tiene episodios, sin distinguir entre ambos casos'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
   /api/users/me/likes/series:
     get:
       tags:
@@ -2276,6 +2530,52 @@ paths:
         '403':
           description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
             X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+  /api/users/me/continue-watching:
+    get:
+      tags:
+      - continue-watching-controller
+      summary: Obtiene mi fila «Seguir viendo»
+      description: 'Devuelve las películas y los episodios que el usuario autenticado tiene a medio ver, mezclados y del guardado
+        más reciente al más antiguo (a igual fecha, primero las películas y después el id mayor). No incluye lo terminado
+        (95 % o más de la duración) ni los títulos que ya no tienen vídeo, y muestra una sola tarjeta por serie: la del episodio
+        sin terminar guardado más recientemente. Cada elemento lleva type (MOVIE o EPISODE); los campos de la serie van a
+        null en las películas.'
+      operationId: getContinueWatching
+      parameters:
+      - name: limit
+        in: query
+        description: 'Número máximo de elementos: de 1 a 24 (por defecto, 10)'
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 10
+          maximum: 24
+          minimum: 1
+      responses:
+        '200':
+          description: Lista obtenida correctamente (puede estar vacía)
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ContinueWatchingItemResponse'
+        '400':
+          description: El límite no es un número entero entre 1 y 24
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
           content:
             application/json:
               schema:
@@ -2688,8 +2988,110 @@ paths:
       security:
       - cookieAuth: []
       - bearerAuth: []
+  /api/users/me/continue-watching/series/{seriesId}:
+    delete:
+      tags:
+      - continue-watching-controller
+      summary: Quita una serie de «Seguir viendo»
+      description: 'Borra el progreso del usuario autenticado en todos los episodios de la serie, para que no la sustituya
+        otro episodio a medias. Es idempotente: si no había progreso, o la serie no existe o no tiene episodios, también responde
+        204.'
+      operationId: removeSeriesFromContinueWatching
+      parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: La serie ya no está en «Seguir viendo»
+        '400':
+          description: El id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+  /api/users/me/continue-watching/movies/{movieId}:
+    delete:
+      tags:
+      - continue-watching-controller
+      summary: Quita una película de «Seguir viendo»
+      description: 'Borra el progreso del usuario autenticado en la película: deja de salir en «Seguir viendo» y, al volver
+        a abrirla, empieza desde el principio. Es idempotente: si no había progreso, o la película no existe, también responde
+        204.'
+      operationId: removeMovieFromContinueWatching
+      parameters:
+      - name: movieId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: La película ya no está en «Seguir viendo»
+        '400':
+          description: El id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 'Código CSRF_REJECTED: la petición se autentica por la cookie streambox_token y le falta la cabecera
+            X-Requested-With: StreamBox (defensa CSRF). Con Authorization: Bearer no se exige'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
 components:
   schemas:
+    WatchProgressRequest:
+      type: object
+      properties:
+        positionSeconds:
+          type: integer
+          format: int32
+          description: Segundo del vídeo por el que va el usuario, entero (redondeado hacia abajo). Entre 0 y durationSeconds.
+          example: 1325
+          minimum: 0
+        durationSeconds:
+          type: integer
+          format: int32
+          description: Duración del vídeo reproducido en segundos, entera (la que conoce el reproductor, no la de la ficha,
+            que va en minutos). Entre 1 y 86400 (24 horas).
+          example: 8160
+          maximum: 86400
+          minimum: 1
+      required:
+      - durationSeconds
+      - positionSeconds
     ChangePasswordRequest:
       type: object
       properties:
@@ -3297,6 +3699,120 @@ components:
         episodeCount:
           type: integer
           format: int64
+    EpisodeProgressResponse:
+      type: object
+      properties:
+        episodeId:
+          type: integer
+          format: int64
+          description: Identificador del episodio
+          example: 42
+        positionSeconds:
+          type: integer
+          format: int32
+          description: Segundo del vídeo por el que va el usuario
+          example: 610
+        durationSeconds:
+          type: integer
+          format: int32
+          description: Duración del vídeo reproducido, en segundos
+          example: 2700
+        finished:
+          type: boolean
+          description: true si la posición alcanza el 95 % de la duración (visto entero)
+          example: false
+        updatedAt:
+          type: string
+          format: date-time
+          description: Instante del último guardado (UTC, ISO-8601)
+          example: '2026-11-21T18:30:00Z'
+    WatchProgressResponse:
+      type: object
+      properties:
+        positionSeconds:
+          type: integer
+          format: int32
+          description: Segundo del vídeo por el que va el usuario
+          example: 1325
+        durationSeconds:
+          type: integer
+          format: int32
+          description: Duración del vídeo reproducido, en segundos
+          example: 8160
+        finished:
+          type: boolean
+          description: 'true si la posición alcanza el 95 % de la duración (visto entero: ya no sale en «Seguir viendo»)'
+          example: false
+        updatedAt:
+          type: string
+          format: date-time
+          description: Instante del último guardado (UTC, ISO-8601)
+          example: '2026-11-21T18:30:00Z'
+    ContinueWatchingItemResponse:
+      type: object
+      properties:
+        type:
+          type: string
+          description: MOVIE (película) o EPISODE (episodio de una serie)
+          enum:
+          - MOVIE
+          - EPISODE
+          example: MOVIE
+        id:
+          type: integer
+          format: int64
+          description: Id de la película (MOVIE) o del episodio (EPISODE)
+          example: 7
+        title:
+          type: string
+          description: Título de la película o del episodio
+          example: Dune
+        imageUrl:
+          type: string
+          description: Portada de la película o, en un episodio, la de su serie
+          example: https://example.com/dune.jpg
+        seasonNumber:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Temporada del episodio; null en una película
+          example: 1
+        episodeNumber:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Número del episodio en su temporada; null en una película
+          example: 3
+        seriesId:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Id de la serie del episodio; null en una película
+          example: 4
+        seriesTitle:
+          type:
+          - string
+          - 'null'
+          description: Título de la serie del episodio; null en una película
+          example: Dark
+        positionSeconds:
+          type: integer
+          format: int32
+          description: Segundo del vídeo por el que va el usuario
+          example: 1325
+        durationSeconds:
+          type: integer
+          format: int32
+          description: Duración del vídeo reproducido, en segundos
+          example: 8160
+        updatedAt:
+          type: string
+          format: date-time
+          description: Instante del último guardado (UTC, ISO-8601)
+          example: '2026-11-21T18:30:00Z'
     SeriesPageResponse:
       type: object
       properties:
@@ -3422,6 +3938,9 @@ components:
 
             - AMBIGUOUS_TITLE (409): varias películas tienen ese título; hay que usar el id.
 
+            - NO_VIDEO_AVAILABLE (409): al guardar el progreso de visionado, la película o el episodio existe pero no tiene
+            vídeo (videoUrl nulo): no se puede reproducir en la aplicación.
+
             - VALIDATION_ERROR (400): datos o parámetros no válidos; el detalle por campo va en validationErrors.
 
             - CURRENT_PASSWORD_INCORRECT (400): al cambiar la contraseña, la actual no es correcta; el detalle va en validationErrors.currentPassword.
@@ -3491,6 +4010,7 @@ components:
           - INVALID_VERIFICATION_TOKEN
           - INVALID_RESET_TOKEN
           - PAYLOAD_TOO_LARGE
+          - NO_VIDEO_AVAILABLE
           example: RESOURCE_NOT_FOUND
         message:
           type: string

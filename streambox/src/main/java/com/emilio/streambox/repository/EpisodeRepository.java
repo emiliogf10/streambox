@@ -64,6 +64,19 @@ public interface EpisodeRepository extends JpaRepository<Episode, Long> {
     boolean existsBySeriesId(Long seriesId);
 
     /**
+     * Indica si el episodio existe <b>y tiene vídeo</b> ({@code video_url} no
+     * nulo). Misma razón que
+     * {@code MovieRepository#existsByIdAndVideoUrlIsNotNull}: es la
+     * comprobación barata que precede a cada guardado del progreso de
+     * visionado. Un episodio siempre es visible (su existencia hace visible a
+     * su serie), así que no hace falta mirar la serie.
+     *
+     * @param id identificador del episodio
+     * @return {@code true} si existe y tiene {@code videoUrl}
+     */
+    boolean existsByIdAndVideoUrlIsNotNull(Long id);
+
+    /**
      * Indica si ya existe en la serie un episodio con esa temporada y número.
      *
      * <p>

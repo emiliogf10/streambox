@@ -135,6 +135,58 @@ export interface FavoriteGenresRequest {
   genreIds: number[];
 }
 
+/**
+ * Progreso de visionado de una película o de un episodio
+ * (`GET /api/users/me/progress/movies/{id}` y `/episodes/{id}`; 204 = sin progreso).
+ */
+export interface WatchProgress {
+  /** Segundo por el que va el usuario (entero). */
+  positionSeconds: number;
+  /** Duración del vídeo que se reprodujo, en segundos (entero, 1 a 86 400). */
+  durationSeconds: number;
+  /** `true` si lo ha visto casi entero (≥ 95 %, regla del servidor): no se reanuda ni sale en «Seguir viendo». */
+  finished: boolean;
+  /** Instante del último guardado (ISO-8601, UTC). */
+  updatedAt: string;
+}
+
+/** Progreso de un episodio dentro del de su serie (`GET /api/users/me/progress/series/{id}`). */
+export interface EpisodeProgress extends WatchProgress {
+  episodeId: number;
+}
+
+/**
+ * Cuerpo de `PUT /api/users/me/progress/movies/{id}` y `/episodes/{id}` (204).
+ * Enteros; `positionSeconds` entre 0 y `durationSeconds`. Si el título ya no
+ * tiene vídeo, 409 `NO_VIDEO_AVAILABLE`.
+ */
+export interface WatchProgressRequest {
+  positionSeconds: number;
+  durationSeconds: number;
+}
+
+/**
+ * Un elemento de «Seguir viendo» (`GET /api/users/me/continue-watching`): lo que
+ * el usuario tiene a medias, lo más reciente primero, sin lo terminado ni lo que
+ * ya no tiene vídeo, y una sola tarjeta por serie (su último episodio).
+ */
+export interface ContinueWatchingItem {
+  type: 'MOVIE' | 'EPISODE';
+  /** Id de la película o del EPISODIO (no de la serie: esa va en `seriesId`). */
+  id: number;
+  /** Título de la película o del episodio. */
+  title: string;
+  /** Portada de la película o, en un episodio, la de su serie. */
+  imageUrl: string;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  seriesId: number | null;
+  seriesTitle: string | null;
+  positionSeconds: number;
+  durationSeconds: number;
+  updatedAt: string;
+}
+
 /** Página de resultados con los metadatos de paginación (`MoviePageResponse`, `SeriesPageResponse`). */
 export interface PageResponse<T> {
   content: T[];

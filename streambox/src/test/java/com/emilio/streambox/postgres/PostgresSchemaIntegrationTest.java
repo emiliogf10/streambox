@@ -34,7 +34,7 @@ import jakarta.persistence.EntityManagerFactory;
  *
  * <p>
  * Que el contexto de Spring arranque ya demuestra dos cosas: que todas las
- * migraciones ({@code V1}..{@code V13}) se aplican en PostgreSQL desde cero y que Hibernate
+ * migraciones ({@code V1}..{@code V14}) se aplican en PostgreSQL desde cero y que Hibernate
  * ({@code ddl-auto=validate}) acepta las entidades contra ese esquema. Aquí se
  * comprueba además lo que H2 no puede garantizar: los tipos reales del catálogo
  * del sistema ({@code information_schema}, {@code pg_catalog}), las políticas de
@@ -80,7 +80,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10, V11, V12 y V13 (sin
+     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10, V11, V12, V13 y V14 (sin
      * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
      * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
@@ -90,7 +90,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -775,6 +775,73 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
 
         jdbc.update("DELETE FROM username_reservations WHERE username = 'reservado'");
         assertEquals(0, count("username_reservation_owners"));
+    }
+
+    // ------------------------------------------------------------------
+    // V14: progreso de visionado (user_movie_progress y user_episode_progress)
+    // ------------------------------------------------------------------
+
+    /**
+     * Esquema de la V14 tal como lo ve PostgreSQL: tipos reales
+     * ({@code bigint}, {@code integer}, {@code timestamptz}), todo obligatorio,
+     * las claves primarias {@code (user_id, <título>_id)}, las cuatro claves
+     * foráneas en cascada hacia su tabla, los índices (por título para la
+     * cascada y {@code (user_id, updated_at DESC)} para «Seguir viendo») y los
+     * seis {@code CHECK}. Su comportamiento (upsert, rechazos con
+     * {@code SQLSTATE}, cascadas, «Seguir viendo») se prueba en
+     * {@code PostgresWatchProgressIntegrationTest}.
+     */
+    @Test
+    void lasTablasDeProgresoTienenElEsquemaEsperado() {
+        Map<String, String> columns = new java.util.TreeMap<>();
+        jdbc.queryForList("SELECT table_name, column_name, data_type, is_nullable"
+                        + " FROM information_schema.columns WHERE table_schema = 'public'"
+                        + " AND table_name IN ('user_movie_progress', 'user_episode_progress')")
+                .forEach(r -> columns.put(r.get("table_name") + "." + r.get("column_name"), r.get("data_type")
+                        + ("YES".equals(r.get("is_nullable")) ? " NULL" : " NOT NULL")));
+        Map<String, String> expected = new java.util.TreeMap<>();
+        for (String[] table : new String[][] { { "user_movie_progress", "movie_id" },
+                { "user_episode_progress", "episode_id" } }) {
+            expected.put(table[0] + ".user_id", "bigint NOT NULL");
+            expected.put(table[0] + "." + table[1], "bigint NOT NULL");
+            expected.put(table[0] + ".position_seconds", "integer NOT NULL");
+            expected.put(table[0] + ".duration_seconds", "integer NOT NULL");
+            expected.put(table[0] + ".updated_at", "timestamp with time zone NOT NULL");
+        }
+        assertEquals(expected, columns);
+        assertEquals(List.of("user_id", "movie_id"), primaryKeyColumns("user_movie_progress"));
+        assertEquals(List.of("user_id", "episode_id"), primaryKeyColumns("user_episode_progress"));
+
+        Map<String, String> foreignKeys = new java.util.TreeMap<>();
+        jdbc.queryForList("SELECT conname, confrelid::regclass::text AS target, confdeltype FROM pg_constraint"
+                        + " WHERE contype = 'f' AND conrelid IN"
+                        + " ('public.user_movie_progress'::regclass, 'public.user_episode_progress'::regclass)")
+                .forEach(r -> foreignKeys.put((String) r.get("conname"), r.get("target") + " " + r.get("confdeltype")));
+        assertEquals(Map.of(
+                "fk_movie_progress_user", "users c",
+                "fk_movie_progress_movie", "movies c",
+                "fk_episode_progress_user", "users c",
+                "fk_episode_progress_episode", "episodes c"), foreignKeys, "todas ON DELETE CASCADE");
+
+        Map<String, String> definitions = new java.util.HashMap<>();
+        jdbc.queryForList("SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public'")
+                .forEach(r -> definitions.put((String) r.get("indexname"), (String) r.get("indexdef")));
+        assertIndex(definitions, "idx_movie_progress_movie_id", "ON public.user_movie_progress USING btree (movie_id)");
+        assertIndex(definitions, "idx_episode_progress_episode_id",
+                "ON public.user_episode_progress USING btree (episode_id)");
+        assertIndex(definitions, "idx_movie_progress_user_updated_at",
+                "ON public.user_movie_progress USING btree (user_id, updated_at DESC)");
+        assertIndex(definitions, "idx_episode_progress_user_updated_at",
+                "ON public.user_episode_progress USING btree (user_id, updated_at DESC)");
+
+        Set<String> checks = Set.copyOf(jdbc.queryForList(
+                "SELECT conname FROM pg_constraint WHERE contype = 'c' AND connamespace = 'public'::regnamespace",
+                String.class));
+        assertTrue(checks.containsAll(Set.of(
+                "ck_movie_progress_position", "ck_movie_progress_duration",
+                "ck_movie_progress_position_within_duration",
+                "ck_episode_progress_position", "ck_episode_progress_duration",
+                "ck_episode_progress_position_within_duration")), "checks: " + checks);
     }
 
     // ------------------------------------------------------------------

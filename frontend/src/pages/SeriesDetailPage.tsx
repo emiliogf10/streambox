@@ -27,6 +27,7 @@ import { WatchButton } from '../components/WatchButton';
 import { useAuth } from '../context/AuthContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useSeriesDetail } from '../hooks/useSeriesDetail';
+import { useSeriesProgress } from '../hooks/useWatchProgress';
 import { formatAddedDate, seriesPath } from '../lib/catalog';
 import {
   episodeCode,
@@ -36,8 +37,9 @@ import {
   resolveSeasonNumber,
   SEASON_PARAM,
 } from '../lib/series';
-import type { Episode, SeriesDetail } from '../lib/types';
-import { getSafeVideoUrl } from '../lib/utils';
+import { episodePlayerPath, getDirectVideoUrl, seriesWatchTarget } from '../lib/playback';
+import type { SeriesWatchTarget } from '../lib/playback';
+import type { SeriesDetail } from '../lib/types';
 import { getTrailer } from '../lib/youtube';
 import { ADMIN_SERIES_PATH, adminEditSeriesPath } from './admin/adminPaths';
 import type { ReturnToState } from './admin/adminPaths';
@@ -132,9 +134,9 @@ export function SeriesDetailPage() {
  *   con el título como `<h1>`, la sinopsis entera (no hay otro sitio donde
  *   leerla) y el contenido centrado (`layout="page"`), igual que la página de
  *   una película. Encima, «Volver a series» ({@link BackLink}), gemelo de
- *   «Volver a películas». Acciones: «Empezar a ver» o «Ver T2:E3» (el primer
- *   episodio con vídeo, ver {@link StartWatchingButton}; si ningún episodio
- *   tiene vídeo, no aparece), «Ver tráiler» ({@link TrailerButton}, solo si la
+ *   «Volver a películas». Acciones: «Empezar a ver», «Reanudar T1:E3» o «Ver
+ *   T2:E3» (el episodio que toca según el progreso del usuario, ver
+ *   {@link StartWatchingButton}; si ningún episodio tiene vídeo, no aparece), «Ver tráiler» ({@link TrailerButton}, solo si la
  *   serie tiene tráiler; principal si no hay episodio que ver, secundaria si
  *   lo hay), «Mi lista», «Me gusta» ({@link LikeButton}: la viste y te gustó;
  *   alimenta las recomendaciones de la portada) y, solo para un administrador (rol
@@ -146,7 +148,8 @@ export function SeriesDetailPage() {
  *   un `USER` que intente editar. Sin tráiler ni episodio con vídeo, bajo las
  *   acciones va {@link NothingToWatchNote} (texto según el rol).
  * - **Cuerpo** (`SERIES_BODY_GRID_CLASS`), en el mismo contenedor centrado: los
- *   episodios y la {@link FactSheet ficha}; desde `lg`, la ficha va en una
+ *   episodios (con lo visto de cada uno, ver {@link EpisodeList}) y la
+ *   {@link FactSheet ficha}; desde `lg`, la ficha va en una
  *   columna lateral, y en móvil y tableta, debajo de los episodios (que son lo
  *   que se viene a buscar).
  * - **Temporada**: sale de `?temporada=` y se valida con `resolveSeasonNumber`
@@ -162,8 +165,11 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
   const episodesHeadingId = useId();
   const seasonNumber = resolveSeasonNumber(searchParams.get(SEASON_PARAM), series.seasons);
   const season = series.seasons.find((item) => item.seasonNumber === seasonNumber);
-  const firstEpisode = firstWatchableEpisode(series);
-  const nothingToWatch = !firstEpisode && getTrailer(series.trailerUrl) === null;
+  // Solo se pregunta por el progreso si algún episodio se ve aquí: de los que se abren en otra pestaña no hay.
+  const playsHere = series.seasons.some((item) => item.episodes.some((e) => getDirectVideoUrl(e.videoUrl) !== null));
+  const progress = useSeriesProgress(series.id, playsHere);
+  const target = seriesWatchTarget(series, progress);
+  const nothingToWatch = !target && getTrailer(series.trailerUrl) === null;
 
   return (
     <div className="pb-12">
@@ -179,11 +185,11 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
         actionsNote={nothingToWatch && <NothingToWatchNote adminText={ADMIN_NOTHING_TO_WATCH} />}
         actions={
           <>
-            {firstEpisode && <StartWatchingButton series={series} episode={firstEpisode} />}
+            {target && <StartWatchingButton series={series} target={target} />}
             <TrailerButton
               trailerUrl={series.trailerUrl}
               title={series.title}
-              variant={firstEpisode ? 'outline' : 'light'}
+              variant={target ? 'outline' : 'light'}
             />
             <FavoriteButton series={series} />
             <LikeButton series={series} />
@@ -218,7 +224,7 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
               <p role="status" className="mb-1 text-sm text-muted">
                 Temporada {season.seasonNumber} · {formatEpisodeCount(season.episodes.length)}
               </p>
-              <EpisodeList season={season} />
+              <EpisodeList season={season} seriesId={series.id} progress={progress} />
             </>
           ) : (
             // No debería ocurrir (la API da 404 a las series sin episodios), pero si pasa se dice, no se deja en blanco.
@@ -233,46 +239,46 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
 }
 
 /**
- * Acción principal de la cabecera de una serie: abrir el primer episodio con
- * vídeo ({@link firstWatchableEpisode}).
+ * Acción principal de la cabecera de una serie: el episodio que toca ver
+ * ({@link seriesWatchTarget}), con un texto que dice la verdad sobre lo que hace.
  *
- * **El texto dice la verdad sobre dónde se empieza** (incidencia QA trailer-3):
- * - Si ese episodio es el primero de la serie (el primero de la primera
- *   temporada; normalmente T1:E1), «Empezar a ver»: es empezar de verdad.
- * - Si no (el principio no tiene vídeo), «Ver T2:E3», con el mismo código de
- *   episodio que la lista ({@link episodeCode}). Un «Empezar a ver» que abre la
- *   segunda temporada engañaría a quien no ha visto la primera.
+ * - **Sin progreso** (o con todo visto): el primer episodio con vídeo. Si es el
+ *   primero de la serie (normalmente T1:E1), «Empezar a ver»; si no (el
+ *   principio no tiene vídeo), «Ver T2:E3», con el mismo código de episodio que
+ *   la lista ({@link episodeCode}): un «Empezar a ver» que abre la segunda
+ *   temporada engañaría a quien no ha visto la primera (incidencia QA trailer-3).
+ * - **Con un episodio a medias** (el último que tocó): «Reanudar T1:E3».
+ * - **Con el último terminado**: el siguiente, «Ver T1:E4».
  *
  * El nombre accesible empieza por el texto visible (WCAG 2.5.3) y añade la
  * serie y el título del episodio: «Ver T2:E3 de Dark: El regreso». Así no se
  * confunde con el «Ver T2:E3 El regreso» de la lista de episodios.
- */
-function StartWatchingButton({ series, episode }: { series: SeriesDetail; episode: Episode }) {
-  const code = episodeCode(episode.seasonNumber, episode.episodeNumber);
-  const isStart = series.seasons[0]?.episodes[0]?.id === episode.id;
-  const label = isStart ? 'Empezar a ver' : `Ver ${code}`;
-  const accessibleName = isStart
-    ? `Empezar a ver ${series.title}: ${code} ${episode.title}`
-    : `Ver ${code} de ${series.title}: ${episode.title}`;
-  return <WatchButton videoUrl={episode.videoUrl} title={episode.title} label={label} accessibleName={accessibleName} />;
-}
-
-/**
- * Primer episodio, en el orden de la serie (temporadas y números ya vienen
- * ordenados), que tiene un vídeo que se pueda abrir; `undefined` si ninguno.
  *
- * El vídeo de un episodio es opcional: si el primero no lo tiene, el botón de
- * la cabecera lleva al primero que sí (y lo dice: «Ver T1:E2», ver
- * {@link StartWatchingButton}), y si no lo tiene ninguno, no aparece. Se valida
- * con la misma función que usa `WatchButton`, así que «hay episodio» significa
- * «hay botón».
+ * Mientras llega el progreso se comporta como sin progreso: es verdad hasta
+ * saber otra cosa, y un fallo al pedirlo no debe dejar la serie sin botón.
  */
-function firstWatchableEpisode(series: SeriesDetail): Episode | undefined {
-  for (const season of series.seasons) {
-    const episode = season.episodes.find((item) => getSafeVideoUrl(item.videoUrl) !== null);
-    if (episode) return episode;
+function StartWatchingButton({ series, target }: { series: SeriesDetail; target: SeriesWatchTarget }) {
+  const { episode, mode } = target;
+  const code = episodeCode(episode.seasonNumber, episode.episodeNumber);
+  const isStart = mode === 'start' && series.seasons[0]?.episodes[0]?.id === episode.id;
+  let label: string;
+  let accessibleName: string;
+  if (isStart) {
+    label = 'Empezar a ver';
+    accessibleName = `Empezar a ver ${series.title}: ${code} ${episode.title}`;
+  } else {
+    label = mode === 'resume' ? `Reanudar ${code}` : `Ver ${code}`;
+    accessibleName = `${label} de ${series.title}: ${episode.title}`;
   }
-  return undefined;
+  return (
+    <WatchButton
+      videoUrl={episode.videoUrl}
+      title={episode.title}
+      label={label}
+      accessibleName={accessibleName}
+      playerPath={episodePlayerPath(series.id, episode.id)}
+    />
+  );
 }
 
 /**

@@ -694,3 +694,56 @@ describe('SeriesDetailPage: estados', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'La casa de cristal' })).toBeInTheDocument();
   });
 });
+
+describe('SeriesDetailPage: reproductor integrado y progreso', () => {
+  const PROGRESS = 'GET /api/users/me/progress/series/7';
+  const direct = seriesWithVideos(['https://cdn.example/1.mp4', 'https://cdn.example/2.mp4', 'https://cdn.example/3.mp4']);
+  const [e1, e2] = direct.seasons[0].episodes;
+
+  it('con un episodio a medias: la cabecera lo reanuda y su fila lleva la barra, «Reanudar» y lo que queda', async () => {
+    renderDetail('/series/7', () => jsonResponse(direct), {
+      [PROGRESS]: () =>
+        jsonResponse([
+          { episodeId: e1.id, positionSeconds: 2700, durationSeconds: 2700, finished: true, updatedAt: '2026-11-20T10:00:00Z' },
+          { episodeId: e2.id, positionSeconds: 600, durationSeconds: 2700, finished: false, updatedAt: '2026-11-21T10:00:00Z' },
+        ]),
+    });
+
+    expect(await screen.findByRole('link', { name: 'Reanudar T1:E2 de Serie: Episodio 2' })).toHaveAttribute(
+      'href',
+      `/ver/series/7/episodios/${e2.id}`,
+    );
+    const list = episodeList();
+    expect(within(list).getByRole('link', { name: 'Reanudar T1:E2 Episodio 2' })).toHaveAttribute(
+      'href',
+      `/ver/series/7/episodios/${e2.id}`,
+    );
+    expect(within(list).getByRole('progressbar', { name: 'Quedan 35 min' })).toBeInTheDocument();
+    // El terminado: barra llena y «Visto»; su botón vuelve a decir «Ver».
+    expect(within(list).getByRole('progressbar', { name: 'Visto' })).toHaveAttribute('value', '2700');
+    expect(within(list).getByRole('link', { name: 'Ver T1:E1 Episodio 1' })).toBeInTheDocument();
+  });
+
+  it('con el último visto terminado: la cabecera lleva al siguiente («Ver T1:E2»)', async () => {
+    renderDetail('/series/7', () => jsonResponse(direct), {
+      [PROGRESS]: () =>
+        jsonResponse([
+          { episodeId: e1.id, positionSeconds: 2700, durationSeconds: 2700, finished: true, updatedAt: '2026-11-21T10:00:00Z' },
+        ]),
+    });
+
+    expect(await screen.findByRole('link', { name: 'Ver T1:E2 de Serie: Episodio 2' })).toBeInTheDocument();
+  });
+
+  it('sin progreso: «Empezar a ver» al reproductor; si el progreso falla, la serie se ve igual', async () => {
+    renderDetail('/series/7', () => jsonResponse(direct), {
+      [PROGRESS]: () => errorResponse(500, 'INTERNAL_ERROR', 'Fallo.'),
+    });
+
+    expect(await screen.findByRole('link', { name: 'Empezar a ver Serie: T1:E1 Episodio 1' })).toHaveAttribute(
+      'href',
+      `/ver/series/7/episodios/${e1.id}`,
+    );
+    expect(within(episodeList()).queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+});

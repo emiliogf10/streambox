@@ -417,7 +417,7 @@ export async function catalogSize(request: APIRequestContext, token: string): Pr
 }
 
 /** Busca una película por título exacto recorriendo el catálogo (para obtener su id). */
-async function findMovieId(request: APIRequestContext, token: string, title: string): Promise<number> {
+export async function findMovieId(request: APIRequestContext, token: string, title: string): Promise<number> {
   const response = await request.get(`${BACKEND_URL}/api/movies/search`, {
     headers: authHeaders(token),
     params: { title, size: 100 },

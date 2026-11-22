@@ -19,6 +19,12 @@ interface Props<T extends { id: number }> {
    * accesible de la sección (`aria-describedby`): se lee al entrar en ella.
    */
   description?: string;
+  /**
+   * Clave de React de cada tarjeta. Por defecto, su `id`; hace falta otra cuando
+   * la fila mezcla tipos cuyos ids pueden coincidir (en «Seguir viendo», la
+   * película 7 y el episodio 7).
+   */
+  itemKey?: (item: T) => string | number;
 }
 
 /**
@@ -93,7 +99,14 @@ const arrowClass =
  * Es una sección con su título (`<h2>`) como nombre y una lista de tarjetas.
  * Sin elementos no pinta nada.
  */
-export function PosterRow<T extends { id: number }>({ title, items, renderItem, action, description }: Props<T>) {
+export function PosterRow<T extends { id: number }>({
+  title,
+  items,
+  renderItem,
+  action,
+  description,
+  itemKey = (item) => item.id,
+}: Props<T>) {
   const headingId = useId();
   const descriptionId = useId();
   const scrollerRef = useRef<HTMLUListElement>(null);
@@ -190,7 +203,7 @@ export function PosterRow<T extends { id: number }>({ title, items, renderItem, 
         className="scrollbar-hide -mx-4 flex snap-x snap-proximity scroll-px-4 gap-3 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:scroll-px-6 sm:gap-4 sm:px-6"
       >
         {items.map((item) => (
-          <li key={item.id} className="shrink-0 snap-start">
+          <li key={itemKey(item)} className="shrink-0 snap-start">
             {renderItem(item)}
           </li>
         ))}

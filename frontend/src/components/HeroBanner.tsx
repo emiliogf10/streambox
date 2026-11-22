@@ -1,6 +1,7 @@
 import { Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { moviePath } from '../lib/catalog';
+import { moviePlayerPath } from '../lib/playback';
 import type { Movie } from '../lib/types';
 import { getSafeVideoUrl } from '../lib/utils';
 import { getTrailer } from '../lib/youtube';
@@ -35,7 +36,8 @@ interface Props {
  * "Estreno reciente", año y duración ({@link MovieMetaTags}) y las acciones,
  * con UNA sola principal (blanca), que depende de lo que tenga la película:
  *
- * - **Con vídeo**: «Ver ahora» (principal; {@link WatchButton}), «Ver tráiler»
+ * - **Con vídeo**: «Ver ahora» (principal; {@link WatchButton}: si es un archivo
+ *   directo, al reproductor integrado, que reanuda si había progreso), «Ver tráiler»
  *   si lo hay (secundaria, con borde; {@link TrailerButton}), «Mi lista»
  *   (secundaria; {@link FavoriteButton}) y «Más información» (terciaria, sin
  *   borde): un ENLACE a la página de la película (`/peliculas/:id`).
@@ -79,7 +81,7 @@ export function HeroBanner({ movie }: Props) {
           </>
         ) : (
           <>
-            <WatchButton videoUrl={movie.videoUrl} title={movie.title} />
+            <WatchButton videoUrl={movie.videoUrl} title={movie.title} playerPath={moviePlayerPath(movie.id)} />
             <TrailerButton trailerUrl={movie.trailerUrl} title={movie.title} variant={hasVideo ? 'outline' : 'light'} />
             <FavoriteButton movie={movie} />
             {moreInfo}

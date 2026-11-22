@@ -35,6 +35,10 @@ const ENTRIES: Record<string, QueryKey> = {
   misGeneros: queryKeys.favoriteGenres.mine,
   generosElegibles: queryKeys.favoriteGenres.options,
   recomendaciones: queryKeys.recommendations.list(12),
+  progresoPelicula: queryKeys.progress.movie(5),
+  progresoEpisodio: queryKeys.progress.episode(9),
+  progresoSerie: queryKeys.progress.series(3),
+  seguirViendo: queryKeys.progress.continueWatching(10),
 };
 
 /** Nombres de las entradas que quedan invalidadas tras `change`. */
@@ -48,7 +52,7 @@ async function invalidatedBy(change: CatalogChange): Promise<string[]> {
 }
 
 describe('keysAffectedBy', () => {
-  it('una película cambia los listados de películas (con y sin filtros, y el del panel), su página, sus similares, los géneros con películas, los recuentos del panel y los datos personales con copias de títulos', async () => {
+  it('una película cambia los listados de películas (con y sin filtros, y el del panel), su página, sus similares, los géneros con películas, los recuentos del panel, los datos personales con copias de títulos y el progreso («Seguir viendo»)', async () => {
     expect(await invalidatedBy('movies')).toEqual([
       'portada',
       'filtros',
@@ -62,10 +66,14 @@ describe('keysAffectedBy', () => {
       'misGeneros',
       'generosElegibles',
       'recomendaciones',
+      'progresoPelicula',
+      'progresoEpisodio',
+      'progresoSerie',
+      'seguirViendo',
     ]);
   });
 
-  it('una serie o un episodio cambian los listados de series (con y sin filtros), su detalle, el panel, los géneros con series, los recuentos del panel y los datos personales', async () => {
+  it('una serie o un episodio cambian los listados de series (con y sin filtros), su detalle, el panel, los géneros con series, los recuentos del panel, los datos personales y el progreso (un episodio que pierde el vídeo sale de «Seguir viendo»)', async () => {
     expect(await invalidatedBy('series')).toEqual([
       'series',
       'filtrosSeries',
@@ -78,6 +86,10 @@ describe('keysAffectedBy', () => {
       'misGeneros',
       'generosElegibles',
       'recomendaciones',
+      'progresoPelicula',
+      'progresoEpisodio',
+      'progresoSerie',
+      'seguirViendo',
     ]);
   });
 
@@ -100,6 +112,22 @@ describe('keysAffectedBy', () => {
       'generosElegibles',
       'recomendaciones',
     ]);
+  });
+});
+
+describe('queryKeys.progress', () => {
+  it('todo el progreso cuelga de una raíz propia: cada título, cada serie y «Seguir viendo» son entradas distintas', () => {
+    for (const key of [
+      queryKeys.progress.movie(1),
+      queryKeys.progress.episode(1),
+      queryKeys.progress.series(1),
+      queryKeys.progress.continueWatching(10),
+    ]) {
+      expect(key.slice(0, 1)).toEqual(queryKeys.progress.all);
+    }
+    expect(queryKeys.progress.episode(1).slice(0, 2)).toEqual(queryKeys.progress.episodesAll);
+    expect(queryKeys.progress.continueWatching(10).slice(0, 2)).toEqual(queryKeys.progress.continueWatchingAll);
+    expect(queryKeys.progress.movie(1)).not.toEqual(queryKeys.progress.episode(1));
   });
 });
 

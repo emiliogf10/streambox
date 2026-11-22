@@ -161,6 +161,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     /**
+     * 409 al guardar el progreso de visionado de un título sin vídeo: existe,
+     * pero no hay nada que reproducir (ver {@link NoVideoAvailableException}).
+     */
+    @ExceptionHandler(NoVideoAvailableException.class)
+    public ResponseEntity<ErrorResponse> handleNoVideoAvailable(
+            NoVideoAvailableException exception, HttpServletRequest request) {
+        return buildErrorResponse(HttpStatus.CONFLICT, ErrorCode.NO_VIDEO_AVAILABLE,
+                exception.getMessage(), request);
+    }
+
+    /**
      * 401 del login. Incluye {@code remainingAttempts} (intentos antes del
      * bloqueo) cuando la excepción lo trae; si no, el campo se omite.
      */

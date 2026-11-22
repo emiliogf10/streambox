@@ -1,4 +1,6 @@
+import { Link } from 'react-router-dom';
 import { Play } from 'lucide-react';
+import { getDirectVideoUrl } from '../lib/playback';
 import { getSafeVideoUrl } from '../lib/utils';
 import { buttonClasses } from './buttonStyles';
 import type { ButtonVariant } from './buttonStyles';
@@ -21,15 +23,36 @@ interface WatchButtonProps {
   variant?: ButtonVariant;
   /** Clases extra de colocación (ancho dentro de una rejilla de acciones...). */
   className?: string;
+  /**
+   * Página del reproductor integrado de este título (`moviePlayerPath`,
+   * `episodePlayerPath`). Si el vídeo es un archivo directo (`getDirectVideoUrl`),
+   * el botón lleva ahí, dentro de StreamBox; si no, o sin esta propiedad, abre
+   * el vídeo en otra pestaña como siempre.
+   */
+  playerPath?: string;
+  /**
+   * `true` = ir al reproductor SUSTITUYENDO la entrada actual del historial. Lo
+   * usa «Ver el siguiente» dentro del propio reproductor: así «Volver» (y
+   * «Atrás») lleva a la página de la serie y no al episodio que se acaba de
+   * terminar. Solo afecta al reproductor integrado.
+   */
+  replace?: boolean;
 }
 
 /**
  * Botón "Ver ahora" de una película o "Ver" de un episodio.
  *
- * Es un ENLACE (`<a>`), no un botón con `window.open`: se puede abrir con clic
- * central, copiar la dirección o abrir con teclado como cualquier enlace.
- * Se abre en una pestaña nueva con `rel="noopener noreferrer"` para que la
- * página destino no pueda manipular esta (`window.opener`) ni reciba el origen.
+ * Es un ENLACE, no un botón con `window.open`: se puede abrir con clic
+ * central, copiar la dirección o abrir con teclado como cualquier enlace. Hay
+ * dos destinos posibles:
+ * - **Reproductor integrado** (`/ver/...`, un `<Link>` de la aplicación): si se
+ *   pasa `playerPath` y el vídeo es un archivo directo (`.mp4`, `.webm`,
+ *   `.ogg`/`.ogv`; ver `getDirectVideoUrl`). Ahí se guarda el progreso y se
+ *   reanuda («Seguir viendo»). Su nombre no avisa de pestaña nueva: no la abre.
+ * - **Otra pestaña** con el enlace tal cual, para cualquier otro vídeo (una
+ *   página de YouTube, Vimeo, HLS...), que un `<video>` no sabría reproducir.
+ *   Con `rel="noopener noreferrer"`, para que la página destino no pueda
+ *   manipular esta (`window.opener`) ni reciba el origen.
  *
  * Antes de usar la URL se valida que sea http(s) ({@link getSafeVideoUrl}); un
  * `javascript:` guardado en la base de datos no debe ejecutarse al hacer clic.
@@ -54,9 +77,20 @@ export function WatchButton({
   accessibleName,
   variant = 'light',
   className = '',
+  playerPath,
+  replace = false,
 }: WatchButtonProps) {
   const safeUrl = getSafeVideoUrl(videoUrl);
   if (!safeUrl) return null;
+
+  if (playerPath && getDirectVideoUrl(videoUrl)) {
+    return (
+      <Link to={playerPath} replace={replace} aria-label={accessibleName ?? `${label} ${title}`} className={buttonClasses(variant, className)}>
+        <Play aria-hidden="true" className="size-4 fill-current" />
+        {label}
+      </Link>
+    );
+  }
 
   return (
     <a

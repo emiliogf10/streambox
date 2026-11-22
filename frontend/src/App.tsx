@@ -10,6 +10,7 @@ import { RouteChangeFocus } from './components/RouteChangeFocus';
 import { GuardScreen, RedirectIfAuthenticated, RequireAdmin, RequireAuth } from './components/RouteGuards';
 import { SkipLink } from './components/SkipLink';
 import { AuthProvider } from './context/AuthContext';
+import { InAppHistoryProvider } from './context/InAppHistoryContext';
 import { ToastProvider } from './context/ToastContext';
 import { WELCOME_PATH } from './lib/favoriteGenres';
 import { importChunk } from './lib/lazyChunks';
@@ -24,6 +25,7 @@ import { NotFoundPage } from './pages/NotFoundPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { SeriesDetailPage } from './pages/SeriesDetailPage';
 import { SeriesPage } from './pages/SeriesPage';
+import { WatchEpisodePage, WatchMoviePage } from './pages/WatchPage';
 import { WelcomePage } from './pages/WelcomePage';
 
 /*
@@ -120,6 +122,12 @@ function PublicPage({ children }: { children: ReactNode }) {
  *   (`WelcomePage`). Privada (tras `RequireAuth`, que es quien lleva ahí a un
  *   `USER` con la pregunta pendiente, una vez), pero FUERA de `AppShell`: sin
  *   barra, como el login, porque es un paso y sus salidas son sus dos botones.
+ * - `/ver/peliculas/:id` y `/ver/series/:seriesId/episodios/:episodeId`: el
+ *   reproductor integrado (`WatchPage`), para los vídeos que son archivos
+ *   directos (`.mp4`, `.webm`, `.ogg`). Privadas y FUERA de `AppShell`, como
+ *   `/bienvenida`: la pantalla entera es el vídeo, con su propio «Volver».
+ *   Tienen dirección propia para que «Atrás» del navegador cierre el vídeo y
+ *   se puedan recargar sin perder dónde se estaba.
  * - `/admin/*`: panel de administración, también dentro de `AppShell` y además
  *   tras `RequireAdmin` (espera a conocer el rol; si no es `ADMIN`, a `/`).
  *   `/admin` lleva a `/admin/peliculas`; el resto de rutas del panel son el
@@ -188,6 +196,23 @@ export function AppRoutes() {
           </RequireAuth>
         }
       />
+      {/* Reproductor integrado: privado y, como la bienvenida, fuera de AppShell (sin barra: la pantalla es el vídeo). */}
+      <Route
+        path="/ver/peliculas/:id"
+        element={
+          <RequireAuth>
+            <WatchMoviePage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/ver/series/:seriesId/episodios/:episodeId"
+        element={
+          <RequireAuth>
+            <WatchEpisodePage />
+          </RequireAuth>
+        }
+      />
       <Route
         element={
           <RequireAuth>
@@ -244,7 +269,9 @@ export function AppRoutes() {
  * servidor, ver `lib/queryClient.ts`) y `ToastProvider` por fuera porque
  * `AuthProvider` necesita los dos (vacía la caché al cambiar de sesión y avisa
  * de "sesión caducada"). `BrowserRouter` envuelve a todo para que cualquier
- * componente pueda usar el enrutador.
+ * componente pueda usar el enrutador; justo dentro, `InAppHistoryProvider`
+ * cuenta las navegaciones de la visita (el reproductor lo usa para que «Volver»
+ * no saque nunca de StreamBox).
  *
  * El `QueryClient` se crea UNA vez por montaje de `App` (`useState` con
  * inicializador) y no como variable de módulo: así cada montaje, también en
@@ -258,16 +285,18 @@ function App() {
   const [queryClient] = useState(createQueryClient);
   return (
     <BrowserRouter>
-      <QueryClientProvider client={queryClient}>
-        <ToastProvider>
-          <AuthProvider>
-            {/* Primer elemento enfocable de toda la aplicación (ver SkipLink). */}
-            <SkipLink />
-            <AppRoutes />
-            <RouteChangeFocus />
-          </AuthProvider>
-        </ToastProvider>
-      </QueryClientProvider>
+      <InAppHistoryProvider>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <AuthProvider>
+              {/* Primer elemento enfocable de toda la aplicación (ver SkipLink). */}
+              <SkipLink />
+              <AppRoutes />
+              <RouteChangeFocus />
+            </AuthProvider>
+          </ToastProvider>
+        </QueryClientProvider>
+      </InAppHistoryProvider>
     </BrowserRouter>
   );
 }

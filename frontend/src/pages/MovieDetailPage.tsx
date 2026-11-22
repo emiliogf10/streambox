@@ -17,10 +17,14 @@ import { NothingToWatchNote } from '../components/NothingToWatchNote';
 import { SimilarMoviesRow } from '../components/SimilarMoviesRow';
 import { TrailerButton } from '../components/TrailerButton';
 import { WatchButton } from '../components/WatchButton';
+import { WatchProgressBar } from '../components/WatchProgressBar';
 import { useAuth } from '../context/AuthContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useMovieDetail } from '../hooks/useMovieDetail';
+import { useMovieProgress } from '../hooks/useWatchProgress';
 import { formatAddedDate, moviePath } from '../lib/catalog';
+import { getDirectVideoUrl, moviePlayerPath, resumePositionOf } from '../lib/playback';
+import type { WatchProgress } from '../lib/types';
 import type { Movie } from '../lib/types';
 import { formatDuration, getSafeVideoUrl } from '../lib/utils';
 import { getTrailer } from '../lib/youtube';
@@ -129,7 +133,12 @@ export function MovieDetailPage() {
  * queda sola, a todo el ancho: ver «Acciones» en `FeaturedBanner`):
  * - **«Ver ahora»** ({@link WatchButton}): enlace al vídeo validado con
  *   `getSafeVideoUrl`. **Solo si hay vídeo** (es opcional): sin él no aparece,
- *   ni desactivado, porque prometería algo que no existe.
+ *   ni desactivado, porque prometería algo que no existe. Si el vídeo es un
+ *   archivo directo, lleva al reproductor integrado (`/ver/peliculas/:id`) y su
+ *   texto dice la verdad sobre dónde empieza (ver {@link watchLabel}):
+ *   «Reanudar» si se quedó a medias (con la barra y «Quedan 34 min» debajo),
+ *   «Volver a ver» si ya la terminó. Cualquier otro vídeo se abre en otra
+ *   pestaña, sin progreso.
  * - **«Ver tráiler»** ({@link TrailerButton}), solo si hay tráiler de YouTube:
  *   abre un diálogo con el reproductor. Secundaria (borde) si hay «Ver ahora»;
  *   si no, es lo único que se puede ver y pasa a ser la principal (blanca).
@@ -154,6 +163,10 @@ function MovieDetailView({ movie, confirmed }: { movie: Movie; confirmed: boolea
   // La misma condición con la que `WatchButton` decide si se pinta: sin vídeo, el tráiler es la acción principal.
   const hasVideo = getSafeVideoUrl(movie.videoUrl) !== null;
   const nothingToWatch = !hasVideo && getTrailer(movie.trailerUrl) === null;
+  // Solo se pregunta por el progreso si se puede ver aquí: de un vídeo de otra pestaña no hay progreso.
+  const playsHere = getDirectVideoUrl(movie.videoUrl) !== null;
+  const { progress } = useMovieProgress(movie.id, playsHere);
+  const resumable = playsHere && progress !== null && resumePositionOf(progress) > 0;
 
   return (
     <div className="pb-12">
@@ -166,10 +179,29 @@ function MovieDetailView({ movie, confirmed }: { movie: Movie; confirmed: boolea
         clampDescription={false}
         layout="page"
         backLink={<BackLink to="/peliculas">Volver a películas</BackLink>}
-        actionsNote={nothingToWatch && <NothingToWatchNote adminText={ADMIN_NOTHING_TO_WATCH} />}
+        actionsNote={
+          nothingToWatch ? (
+            <NothingToWatchNote adminText={ADMIN_NOTHING_TO_WATCH} />
+          ) : (
+            resumable &&
+            progress && (
+              <WatchProgressBar
+                positionSeconds={progress.positionSeconds}
+                durationSeconds={progress.durationSeconds}
+                className="max-w-xs"
+                textClassName="text-white/75"
+              />
+            )
+          )
+        }
         actions={
           <>
-            <WatchButton videoUrl={movie.videoUrl} title={movie.title} />
+            <WatchButton
+              videoUrl={movie.videoUrl}
+              title={movie.title}
+              label={playsHere ? watchLabel(progress) : undefined}
+              playerPath={moviePlayerPath(movie.id)}
+            />
             <TrailerButton trailerUrl={movie.trailerUrl} title={movie.title} variant={hasVideo ? 'outline' : 'light'} />
             <FavoriteButton movie={movie} />
             <LikeButton movie={movie} />
@@ -202,6 +234,19 @@ function MovieDetailView({ movie, confirmed }: { movie: Movie; confirmed: boolea
       </div>
     </div>
   );
+}
+
+/**
+ * Texto del botón principal cuando la película se ve en StreamBox, según su progreso:
+ * - a medias → «Reanudar» (el reproductor empieza donde se quedó);
+ * - terminada → «Volver a ver» (empieza desde el principio);
+ * - sin progreso, o apenas empezada → «Ver ahora».
+ * Mientras llega el progreso dice «Ver ahora»: es verdad hasta saber otra cosa
+ * (el reproductor, de todos modos, reanuda si había progreso).
+ */
+function watchLabel(progress: WatchProgress | null): string {
+  if (progress?.finished) return 'Volver a ver';
+  return resumePositionOf(progress) > 0 ? 'Reanudar' : 'Ver ahora';
 }
 
 /**

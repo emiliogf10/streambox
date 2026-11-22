@@ -79,6 +79,21 @@ public final class SqlStates {
      * {@code 23506} en H2 cuando falta el registro padre) de la restricción
      * indicada.
      *
+     * <p>
+     * <b>Sentencias de {@code JdbcClient}</b> (p. ej. el progreso de
+     * visionado, {@code WatchProgressRepository}): ahí Spring traduce el
+     * {@link SQLException} del driver directamente, sin pasar por Hibernate,
+     * así que en la cadena no hay {@link ConstraintViolationException} y
+     * {@link #constraintName} devuelve {@code null}. En ese caso se mira si el
+     * mensaje del driver <b>menciona</b> la restricción: los dos motores la
+     * nombran tal cual (PostgreSQL: {@code violates foreign key constraint
+     * "fk_..."}, también con los mensajes traducidos; H2:
+     * {@code Referential integrity constraint violation: "FK_...: ..."}). Es
+     * lo mismo que hace Hibernate para sacar el nombre, y solo se usa para
+     * comparar: el mensaje (que en H2 lleva valores de la fila) nunca se
+     * devuelve ni se registra.
+     * </p>
+     *
      * @param error      excepción de la que partir
      * @param constraint nombre de la restricción en minúsculas (p. ej.
      *                   {@code "fk_movie_genres_genre"})
@@ -92,7 +107,28 @@ public final class SqlStates {
             return false;
         }
         String name = constraintName(error);
-        return name != null && name.contains(constraint);
+        if (name != null) {
+            return name.contains(constraint);
+        }
+        String driverMessage = driverMessage(error);
+        return driverMessage != null && driverMessage.toLowerCase(Locale.ROOT).contains(constraint);
+    }
+
+    /**
+     * Mensaje del primer {@link SQLException} de la cadena de causas (el del
+     * driver), o {@code null} si no hay ninguno. Solo para
+     * {@link #isForeignKeyViolation}: puede llevar valores de la fila.
+     */
+    private static String driverMessage(Throwable error) {
+
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 20; depth++) {
+            if (current instanceof SQLException sql) {
+                return sql.getMessage();
+            }
+            current = current.getCause() == current ? null : current.getCause();
+        }
+        return null;
     }
 
     /**

@@ -124,6 +124,26 @@ export const queryKeys = {
     list: (limit: number) => ['recommendations', { limit }] as const,
   },
   /**
+   * Progreso de visionado del usuario de la sesión y «Seguir viendo»
+   * (`/api/users/me/progress/...` y `/api/users/me/continue-watching`), todo
+   * bajo una raíz. Dato PERSONAL: lo borra el `queryClient.clear()` de cada
+   * cambio de sesión, así que nadie ve dónde se quedó el usuario anterior.
+   * - `movie(id)` / `episode(id)`: el de un título (`null` = sin progreso, el 204).
+   * - `series(id)`: el de los episodios de una serie (la página de la serie).
+   * - `continueWatching(limit)`: la fila de la portada.
+   * El guardado (`useProgressSaver`) escribe el del título que se está viendo y
+   * descarta los otros dos; quitar de «Seguir viendo» descarta lo de ese título.
+   */
+  progress: {
+    all: ['progress'] as const,
+    movie: (id: number) => ['progress', 'movie', id] as const,
+    episodesAll: ['progress', 'episode'] as const,
+    episode: (id: number) => ['progress', 'episode', id] as const,
+    series: (id: number) => ['progress', 'series', id] as const,
+    continueWatchingAll: ['progress', 'continueWatching'] as const,
+    continueWatching: (limit: number) => ['progress', 'continueWatching', { limit }] as const,
+  },
+  /**
    * Un listado paginado del catálogo (`usePagedCatalog`): portada, `/peliculas`
    * y `/series` con o sin filtros, la fila «Series» y las comprobaciones de
    * presencia. El endpoint y los parámetros van en la clave, así que cada
@@ -175,14 +195,31 @@ const PERSONAL_COPIES: QueryKey[] = [
  * panel: la pestaña Géneros las actualiza con la respuesta del servidor (ver
  * `AdminGenresPage`); sí las de los filtros, que llevan los nombres.
  *
+ * El **progreso** (`progress`, con «Seguir viendo») depende de las películas y
+ * de los episodios, no de los géneros: «Seguir viendo» copia el título y la
+ * portada, un título que pierde el vídeo sale de la fila y uno borrado se lleva
+ * su progreso (cascada en la base de datos).
+ *
  * @param change qué tipo de dato se ha escrito
  */
 export function keysAffectedBy(change: CatalogChange): QueryKey[] {
   switch (change) {
     case 'movies':
-      return [queryKeys.movies.all, queryKeys.genres.withTitles('movies'), queryKeys.genres.admin, ...PERSONAL_COPIES];
+      return [
+        queryKeys.movies.all,
+        queryKeys.genres.withTitles('movies'),
+        queryKeys.genres.admin,
+        ...PERSONAL_COPIES,
+        queryKeys.progress.all,
+      ];
     case 'series':
-      return [queryKeys.series.all, queryKeys.genres.withTitles('series'), queryKeys.genres.admin, ...PERSONAL_COPIES];
+      return [
+        queryKeys.series.all,
+        queryKeys.genres.withTitles('series'),
+        queryKeys.genres.admin,
+        ...PERSONAL_COPIES,
+        queryKeys.progress.all,
+      ];
     case 'genres':
       return [queryKeys.movies.all, queryKeys.series.all, queryKeys.genres.withTitlesAll, ...PERSONAL_COPIES];
   }

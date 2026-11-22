@@ -379,7 +379,8 @@ jobs:
       # Mailpit):
       #   1. "/" sirve la SPA (200) con la cabecera Content-Security-Policy,
       #      cuyo frame-src solo admite el reproductor de tráileres
-      #      (https://www.youtube-nocookie.com).
+      #      (https://www.youtube-nocookie.com) y cuyo media-src admite los
+      #      vídeos https del reproductor integrado.
       #   2. "/api/movies" sin token: 401 con el error en JSON (el proxy
       #      llega al backend y la seguridad funciona).
       #   3. Login del administrador: responde 204 con las dos cookies de sesión
@@ -435,6 +436,11 @@ jobs:
           # host impide que pase una lista más larga.
           echo "$csp" | grep -qE "; *frame-src https://www\.youtube-nocookie\.com *(;|$)" \
             || fail "La CSP no permite solo https://www.youtube-nocookie.com en frame-src"
+          # El reproductor integrado carga vídeos https de servidores arbitrarios
+          # (videoUrl validada con @HttpsUrl): sin media-src, la CSP caería en
+          # default-src 'self' y el navegador bloquearía todos los vídeos.
+          echo "$csp" | grep -qE "; *media-src 'self' https: *(;|$)" \
+            || fail "La CSP no permite los vídeos https en media-src"
 
           echo "2/6 API sin token"
           status="$(curl -sS -o "$tmp/movies.json" -D "$tmp/movies.headers" -w '%{http_code}' "$base_url/api/movies")"

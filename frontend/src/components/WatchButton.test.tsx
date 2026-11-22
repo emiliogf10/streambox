@@ -7,6 +7,7 @@
  * que, sin vídeo (es opcional), no queda ningún botón que prometa verlo.
  */
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { WatchButton } from './WatchButton';
 
@@ -76,6 +77,44 @@ describe('WatchButton: variante de episodio («Ver»)', () => {
     expect(container).toBeEmptyDOMElement();
 
     rerender(<WatchButton videoUrl={null} {...episodeProps} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe('WatchButton: reproductor integrado', () => {
+  it('un archivo de vídeo directo con `playerPath` lleva al reproductor de StreamBox, en la misma pestaña', () => {
+    render(
+      <MemoryRouter>
+        <WatchButton videoUrl="https://cdn.example/matrix.mp4" title="Matrix" playerPath="/ver/peliculas/1" label="Reanudar" />
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole('link', { name: 'Reanudar Matrix' });
+    expect(link).toHaveAttribute('href', '/ver/peliculas/1');
+    expect(link).not.toHaveAttribute('target');
+    expect(link).toHaveTextContent(/^Reanudar$/);
+  });
+
+  it('cualquier otro vídeo, aunque se pase `playerPath`, sigue abriéndose en otra pestaña (un <video> no lo reproduciría)', () => {
+    render(<WatchButton videoUrl="https://vimeo.com/123" title="Matrix" playerPath="/ver/peliculas/1" />);
+
+    const link = screen.getByRole('link', { name: 'Ver ahora Matrix (se abre en una pestaña nueva)' });
+    expect(link).toHaveAttribute('href', 'https://vimeo.com/123');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  it('un archivo directo por `http://` se abre en otra pestaña: la CSP y el contenido mixto lo bloquearían en el reproductor', () => {
+    render(<WatchButton videoUrl="http://cdn.example/matrix.mp4" title="Matrix" playerPath="/ver/peliculas/1" />);
+
+    const link = screen.getByRole('link', { name: 'Ver ahora Matrix (se abre en una pestaña nueva)' });
+    expect(link).toHaveAttribute('href', 'http://cdn.example/matrix.mp4');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  it('una URL insegura que termina en .mp4 tampoco pinta nada', () => {
+    const { container } = render(
+      <WatchButton videoUrl="javascript:alert(1)//.mp4" title="Matrix" playerPath="/ver/peliculas/1" />,
+    );
     expect(container).toBeEmptyDOMElement();
   });
 });

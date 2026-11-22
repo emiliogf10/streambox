@@ -42,7 +42,8 @@ import com.emilio.streambox.repository.SeriesRepository;
 @Service
 public class EpisodeService {
 
-    private static final String EPISODE_NOT_FOUND = "Episodio no encontrado";
+    /** Mensaje del 404 de un episodio; de paquete para que el progreso de visionado diga lo mismo. */
+    static final String EPISODE_NOT_FOUND = "Episodio no encontrado";
 
     private final EpisodeRepository episodeRepository;
     private final SeriesRepository seriesRepository;

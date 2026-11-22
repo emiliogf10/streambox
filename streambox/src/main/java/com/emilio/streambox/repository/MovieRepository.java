@@ -59,6 +59,24 @@ public interface MovieRepository
     List<Movie> findAllByTitleIgnoreCase(String title);
 
     /**
+     * Indica si la película existe <b>y tiene vídeo</b> ({@code video_url} no
+     * nulo; es opcional desde la {@code V6}).
+     *
+     * <p>
+     * Es la comprobación previa a guardar el progreso de visionado
+     * ({@code WatchProgressService}): el reproductor guarda cada pocos segundos,
+     * así que en el caso normal basta esta consulta (sin cargar la entidad ni
+     * sus géneros, como haría {@link #findById}). Solo si responde
+     * {@code false} se pregunta {@code existsById} para distinguir el 404 del
+     * 409 «sin vídeo».
+     * </p>
+     *
+     * @param id identificador de la película
+     * @return {@code true} si existe y tiene {@code videoUrl}
+     */
+    boolean existsByIdAndVideoUrlIsNotNull(Long id);
+
+    /**
      * Cuenta cuántas películas tienen asignado un género.
      *
      * <p>
