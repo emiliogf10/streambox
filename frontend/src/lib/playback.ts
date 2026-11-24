@@ -150,6 +150,19 @@ export function isFinishedAt(positionSeconds: number, durationSeconds: number): 
 const MIN_RESUME_SECONDS = 5;
 
 /**
+ * `true` si un título SIN TERMINAR que va por ese segundo se reanuda (el
+ * reproductor salta ahí y el botón puede decir «Reanudar»); `false` si apenas se
+ * había empezado y se abre desde el principio. Es la misma regla que
+ * {@link resumePositionOf}, para quien solo tiene la posición (la tarjeta de
+ * «Seguir viendo»): así ningún botón dice «Reanudar» de algo que empezará en el 0.
+ *
+ * @param positionSeconds segundo guardado del título
+ */
+export function isResumablePosition(positionSeconds: number): boolean {
+  return positionSeconds >= MIN_RESUME_SECONDS;
+}
+
+/**
  * Segundo desde el que se reanuda, o 0 para empezar desde el principio: sin
  * progreso, si ya se terminó (se vuelve a ver entero) o si apenas se había empezado.
  *
@@ -157,7 +170,7 @@ const MIN_RESUME_SECONDS = 5;
  */
 export function resumePositionOf(progress: WatchProgress | null | undefined): number {
   if (!progress || progress.finished) return 0;
-  return progress.positionSeconds >= MIN_RESUME_SECONDS ? progress.positionSeconds : 0;
+  return isResumablePosition(progress.positionSeconds) ? progress.positionSeconds : 0;
 }
 
 /** Proporción vista (0 a 1) para pintar la barra de progreso. */
@@ -206,12 +219,20 @@ export const NO_VIDEO_AVAILABLE = 'NO_VIDEO_AVAILABLE';
 export interface SeriesWatchTarget {
   episode: Episode;
   /**
-   * - `resume`: hay un episodio a medias → «Reanudar T1:E3».
+   * Lo dice el progreso PROPIO del episodio de destino, porque el reproductor
+   * reanuda solo cualquier episodio a medias: el botón no puede decir «Ver» o
+   * «Empezar» de algo que va a empezar por el minuto 20.
+   *
+   * - `resume`: ese episodio está a medias → «Reanudar T1:E3». Puede ser el
+   *   último tocado, el siguiente a uno terminado (si ya lo había empezado) o
+   *   el primero, al volver a empezar.
    * - `episode`: se sigue por un episodio concreto que no se reanuda: el
    *   siguiente al último terminado, o el último tocado si apenas se empezó → «Ver T1:E4».
-   * - `start`: sin progreso que sirva (o todo visto) → el primer episodio con vídeo.
+   * - `start`: sin progreso que sirva (o terminado el último y sin más
+   *   episodios después) → el primer episodio con vídeo, que nunca se ha empezado.
+   * - `rewatch`: como `start`, pero ese primer episodio ya lo vio entero → «Volver a ver».
    */
-  mode: 'resume' | 'episode' | 'start';
+  mode: 'resume' | 'episode' | 'start' | 'rewatch';
 }
 
 /** Episodios de la serie en su orden (temporadas y números ya vienen ordenados de la API). */
@@ -229,9 +250,18 @@ function hasVideo(episode: Episode): boolean {
  * plataforma: al **último que tocó** el usuario (`updatedAt` más reciente).
  * - Si está a medias, se reanuda ese (o se abre sin más, si apenas se había
  *   empezado: ver {@link resumePositionOf}).
- * - Si lo terminó, el siguiente con vídeo (si no hay más, se vuelve a empezar
- *   por el primero).
+ * - Si lo terminó, el siguiente con vídeo, aunque sea de otra temporada; y si
+ *   ese siguiente ya estaba a medias (lo había empezado antes), se reanuda.
+ * - Si lo terminó y no hay más, se vuelve a empezar por el primero con vídeo
+ *   (reanudándolo, si estaba a medias, o «Volver a ver», si ya lo vio).
  * - Sin progreso, el primero con vídeo; `null` si ninguno tiene.
+ *
+ * **Es el mismo criterio que la tarjeta de la serie en «Seguir viendo»**
+ * (decisión QA-4; el servidor lo aplica en `GET /continue-watching`, con
+ * `upNext` cuando la tarjeta es el siguiente): la tarjeta y este botón
+ * proponen el mismo episodio. La única diferencia es el último caso: sin
+ * siguiente, la serie no sale en la fila (no hay nada que «seguir viendo»),
+ * pero su página sí ofrece volver a empezar.
  *
  * Solo cuentan los progresos de episodios que siguen en la serie y con vídeo:
  * uno borrado o que ha perdido el vídeo no puede ser el destino del botón.
@@ -247,17 +277,29 @@ export function seriesWatchTarget(
   const watchable = episodes.filter(hasVideo);
   if (watchable.length === 0) return null;
 
-  const latest = [...(progress ?? [])]
-    .filter((item) => watchable.some((episode) => episode.id === item.episodeId))
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+  const watched = (progress ?? []).filter((item) => watchable.some((episode) => episode.id === item.episodeId));
+  /** Progreso propio de un episodio (el que usará el reproductor para decidir desde dónde empieza). */
+  const progressOf = (episode: Episode) => watched.find((item) => item.episodeId === episode.id);
+  /** `resume` si ese episodio se reanudará al abrirlo; si no, `otherwise`. */
+  const modeFor = (episode: Episode, otherwise: SeriesWatchTarget['mode']): SeriesWatchTarget['mode'] =>
+    resumePositionOf(progressOf(episode)) > 0 ? 'resume' : otherwise;
+
+  // Con la fecha empatada gana el id mayor, igual que en el servidor
+  // (`WatchProgressRepository`: `ORDER BY updated_at DESC, episode_id DESC`):
+  // si no, la tarjeta de «Seguir viendo» y esta página podrían proponer
+  // episodios distintos (revisión QA de QA-4).
+  const latest = [...watched].sort(
+    (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || b.episodeId - a.episodeId,
+  )[0];
   if (latest) {
     const index = episodes.findIndex((episode) => episode.id === latest.episodeId);
     const episode = episodes[index];
-    if (!latest.finished) return { episode, mode: resumePositionOf(latest) > 0 ? 'resume' : 'episode' };
+    if (!latest.finished) return { episode, mode: modeFor(episode, 'episode') };
     const next = episodes.slice(index + 1).find(hasVideo);
-    if (next) return { episode: next, mode: 'episode' };
+    if (next) return { episode: next, mode: modeFor(next, 'episode') };
   }
-  return { episode: watchable[0], mode: 'start' };
+  const first = watchable[0];
+  return { episode: first, mode: modeFor(first, progressOf(first)?.finished ? 'rewatch' : 'start') };
 }
 
 /** «T1:E3 · El regreso»: el código de siempre ({@link episodeCode}) y el título del episodio. */

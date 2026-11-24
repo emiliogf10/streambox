@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **4355** con Docker (2026-11-22) | Sin omitidos ni fallos (reproductor y «Seguir viendo», ejecutado por `qa`) |
-| Frontend (Vitest) | **1984** | |
-| E2E (Playwright) | **263** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
+| Backend (JUnit) | **4390** con Docker (2026-11-22) | Sin omitidos ni fallos (tras QA-4) |
+| Frontend (Vitest) | **1999** | |
+| E2E (Playwright) | **264** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -66,7 +66,7 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 | :--- | :--- | :--- |
 | Revisión visual humana | Media | [2.3](#23-revisión-visual-humana-del-frontend) |
 | CORS y cabeceras por perfil (S12) | Media | [2.5](#25-seguridad) |
-| Reproductor integrado y siguientes pasos de series | Media | [2.9](#29-funcionalidades-nuevas) |
+| Decisión QA-4 y subtítulos del reproductor; siguientes pasos de series | Media | [2.9](#29-funcionalidades-nuevas) |
 
 ### 2.2 Tarea 29: lo que queda (solo HSTS)
 
@@ -313,7 +313,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - **Textos:** que expliquen el porqué («Porque te gustan Acción y Drama»). Para los usuarios que ya existen no se fuerza nada: si no tienen ni gustos ni «me gusta», el inicio puede invitarles con una tarjeta («Dinos qué géneros te gustan…») que lleve a «Tus gustos».
   - **Decisiones del autor (2026-10-18):** (1) el **ADMIN no ve la pregunta**, pero **sí tiene la sección «Tus gustos»** en su perfil; (2) **mínimo 3 y máximo 5** géneros; (3) los usuarios que ya existen **solo ven la tarjeta del inicio**, nunca la pregunta. (4) **cada género elegido pesa como 2 «me gusta»** (decidido el 2026-10-25). **En curso desde el 2026-10-25** (seguimiento en `docs/TRABAJO_EN_CURSO.md`).
 - ✅ ~~**Reproductor integrado y «Seguir viendo»**~~ — **hecho el 2026-11-22** (opción A; ver el [historial](#4-historial-de-trabajos) y el cap. 15 ter del manual). Solo archivos de vídeo directos por `https:` (`.mp4`, `.webm`, `.ogg`); el resto se sigue abriendo en otra pestaña. Pendiente:
-  - **Decisión del autor (QA-4):** la tarjeta de una serie en «Seguir viendo» muestra el episodio **sin terminar** más reciente, y la página de la serie lleva al **último que se tocó** (o al siguiente, si lo terminó). Ejemplo: 1x01 a medias y luego 1x02 terminado → la tarjeta dice «T1:E1» y la serie propone «T1:E3». Elegir uno de los dos criterios para ambos (lo habitual en las plataformas es el segundo, y entonces la tarjeta propondría el siguiente episodio sin progreso todavía: cambia la consulta, `backend`/`database`).
+  - ✅ ~~**Decisión del autor (QA-4)**~~ — **hecho el 2026-11-22** con el criterio de las plataformas grandes: la tarjeta de una serie y su página proponen el **último episodio tocado** o, si lo terminó, **el siguiente** (ver el [historial](#4-historial-de-trabajos)). Opcional (`database`): comprobar con `EXPLAIN ANALYZE` en PostgreSQL si el planificador aplana la subconsulta `lt` de `findContinueWatching` y repite la búsqueda del siguiente; si es así, `OFFSET 0` en `lt` lo impide (hoy el coste es despreciable).
   - **Subtítulos** (WCAG 1.2.2): un campo opcional `subtitlesUrl` (WebVTT, https) en películas y episodios para añadir `<track kind="captions">` (`database` + `backend` + `frontend`).
   - **HLS** (`.m3u8`): exigiría `hls.js` (dependencia nueva). Transcodificar con FFmpeg y servir por CDN es otro proyecto: hoy no hay vídeos propios.
   - **A mano:** probar con vídeos reales en `.mp4` (su servidor debe admitir `Range`; si no, el vídeo empieza en 0 y no aparece «Sigues por»), los controles nativos en Safari de iPhone y el aviso largo del pie («…esta vez no se guardará por dónde vas») a 375 px.
@@ -485,6 +485,15 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-22 · QA-4: misma propuesta en «Seguir viendo» y en la página de la serie
+
+- **Decisión del autor:** criterio de las plataformas grandes. La tarjeta de una serie es el **último episodio tocado**; si lo terminó, **el siguiente con vídeo** (aunque sea de otra temporada); sin siguiente, la serie sale de la fila. Antes la tarjeta proponía el episodio a medias más reciente y la página de la serie otro (1x01 a medias y 1x02 terminado: «T1:E1» frente a «T1:E3»).
+- **`database`:** consulta nueva en `WatchProgressRepository.findContinueWatching` (`ROW_NUMBER` para el último tocado y, solo si está terminado, una subconsulta `FETCH FIRST 1 ROW ONLY` sobre `uk_episodes_series_season_episode` para el siguiente); `ContinueWatchingItem` con `upNext` y fecha propia. Sin migración ni índice.
+- **`backend`:** `ContinueWatchingItemResponse` con `upNext` y `positionSeconds`/`durationSeconds` nulables (siguiente sin progreso propio a medias); OpenAPI, Postman (Newman 162/162). Tras la revisión, las fechas del progreso se guardan **truncadas a milisegundos** (el cliente ordena con `Date.parse`).
+- **`frontend`:** tarjeta «T1:E3 · Siguiente episodio» con la barra vacía; «Reanudar» solo con 5 s o más; `seriesWatchTarget` decide según el progreso propio del destino y añade «Volver a ver»; desempate por `episodeId` como el servidor (este, del orquestador). E2E nuevo en `player.spec.ts`.
+- **Revisión de `qa`:** un fallo BAJO (con la fecha empatada, servidor y cliente elegían distinto episodio), corregido en los dos lados; 5 tests más del contrato de la consulta y 3 de Vitest.
+- **Tests:** backend de 4355 a **4390** (con Docker, sin omitidos); Vitest de 1984 a **1999**; E2E de 263 a **264** + 24 omitidos. Verificado por el orquestador: E2E completo 264/0 (más `player.spec.ts` 5/5 tras los últimos arreglos), Vitest 1999/1999, build 0, lint 0, suite del backend en verde.
 
 ### 2026-11-22 · Reproductor integrado y «Seguir viendo» (opción A)
 

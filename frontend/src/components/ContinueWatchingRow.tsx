@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef } from 'react';
 import { Play, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { continueWatchingName, useContinueWatching, useRemoveFromContinueWatching } from '../hooks/useWatchProgress';
-import { episodePlayerPath, formatRemaining, moviePlayerPath } from '../lib/playback';
+import { episodePlayerPath, formatRemaining, isResumablePosition, moviePlayerPath } from '../lib/playback';
 import { episodeCode } from '../lib/series';
 import type { ContinueWatchingItem } from '../lib/types';
 import { MoviePoster } from './MoviePoster';
@@ -24,13 +24,36 @@ function playerPathOf(item: ContinueWatchingItem): string {
   return item.type === 'MOVIE' ? moviePlayerPath(item.id) : episodePlayerPath(item.seriesId ?? 0, item.id);
 }
 
-/** Línea de datos bajo el título: «T1:E2 · Quedan 34 min» en un episodio, «Quedan 34 min» en una película. */
+/** Por dónde va el usuario en el título de la tarjeta, o `null` si aún no lo ha empezado (el siguiente episodio). */
+function ownProgressOf(item: ContinueWatchingItem): { positionSeconds: number; durationSeconds: number } | null {
+  const { positionSeconds, durationSeconds } = item;
+  return positionSeconds === null || durationSeconds === null ? null : { positionSeconds, durationSeconds };
+}
+
+/**
+ * Línea de datos bajo el título: «Quedan 34 min» en una película, «T1:E2 ·
+ * Quedan 34 min» en un episodio y «T1:E3 · Siguiente episodio» en el siguiente
+ * a uno terminado que aún no se ha empezado (si ya se había empezado, lo que
+ * queda, como cualquier otro: es lo que el usuario necesita saber).
+ */
 function metaOf(item: ContinueWatchingItem): string {
-  const remaining = formatRemaining(item.positionSeconds, item.durationSeconds);
+  const progress = ownProgressOf(item);
+  const detail = progress ? formatRemaining(progress.positionSeconds, progress.durationSeconds) : 'Siguiente episodio';
   if (item.type === 'EPISODE' && item.seasonNumber !== null && item.episodeNumber !== null) {
-    return `${episodeCode(item.seasonNumber, item.episodeNumber)} · ${remaining}`;
+    return `${episodeCode(item.seasonNumber, item.episodeNumber)} · ${detail}`;
   }
-  return remaining;
+  return detail;
+}
+
+/**
+ * Verbo con el que empieza el nombre del enlace: «Reanudar» solo si el
+ * reproductor va a empezar donde se dejó (la misma regla que «Reanudar» en la
+ * página de cada título, {@link isResumablePosition}); si no —el siguiente
+ * episodio sin empezar, o algo que apenas se había empezado—, «Ver».
+ */
+function verbOf(item: ContinueWatchingItem): 'Reanudar' | 'Ver' {
+  const progress = ownProgressOf(item);
+  return progress && isResumablePosition(progress.positionSeconds) ? 'Reanudar' : 'Ver';
 }
 
 /** Clases del botón «Quitar»: visible siempre en pantallas táctiles; con ratón, al pasar por la tarjeta o con el foco. */
@@ -55,6 +78,13 @@ interface CardProps {
  *   aquí quiere seguir viendo. Al pasar el ratón aparece un ▶ sobre la
  *   portada que lo anuncia; el nombre del enlace empieza por «Reanudar»
  *   («Reanudar Dark T1:E2 · Quedan 34 min»).
+ * - **Siguiente episodio** (`upNext`: el usuario terminó el último que vio).
+ *   Si aún no lo ha empezado, dice «T1:E3 · Siguiente episodio», el enlace se
+ *   llama «Ver Dark T1:E3 · Siguiente episodio» (no «Reanudar»: empezará
+ *   desde el principio) y la barra va VACÍA: es verdad (no ha visto nada de
+ *   ese episodio) y todas las tarjetas de la fila conservan la misma altura y
+ *   el texto a la misma línea. Si ya lo había empezado, es una tarjeta normal.
+ *   La página de la serie propone el mismo episodio (`seriesWatchTarget`).
  * - **«Quitar de Seguir viendo»** (✕ en la esquina): un botón HERMANO del
  *   enlace, no dentro de él (un control dentro de un enlace no se puede
  *   pulsar por separado ni con teclado ni con un lector de pantalla). En
@@ -70,6 +100,7 @@ interface CardProps {
  */
 function ContinueWatchingCard({ item, onRemove }: CardProps) {
   const name = continueWatchingName(item);
+  const progress = ownProgressOf(item);
   return (
     <div className="group relative w-36 shrink-0 sm:w-44">
       <Link
@@ -97,15 +128,15 @@ function ContinueWatchingCard({ item, onRemove }: CardProps) {
           </div>
         </div>
         <WatchProgressBar
-          positionSeconds={item.positionSeconds}
-          durationSeconds={item.durationSeconds}
+          positionSeconds={progress?.positionSeconds ?? 0}
+          durationSeconds={progress?.durationSeconds ?? 0}
           withText={false}
           className="mt-2 mb-2"
         />
         <div className="px-0.5">
           <p className="truncate text-sm font-medium text-white/90 transition-colors group-hover:text-white">
             {/* El espacio va fuera del <span> oculto: dentro se perdería al calcular el nombre («ReanudarDark»). */}
-            <span className="sr-only">Reanudar</span> {name}
+            <span className="sr-only">{verbOf(item)}</span> {name}
           </p>
           <p className="text-xs text-muted tabular-nums">{metaOf(item)}</p>
         </div>
@@ -125,8 +156,9 @@ function ContinueWatchingCard({ item, onRemove }: CardProps) {
 /**
  * Fila **«Seguir viendo»** de la portada: lo que el usuario tiene a medias, lo
  * más reciente primero (`GET /api/users/me/continue-watching`). El servidor ya
- * quita lo terminado (≥ 95 %), lo que ya no tiene vídeo y repite una sola
- * tarjeta por serie (su último episodio).
+ * quita las películas terminadas (≥ 95 %) y lo que ya no tiene vídeo, y da una
+ * sola tarjeta por serie: su último episodio, o el siguiente si lo terminó
+ * (`upNext`; sin siguiente, la serie no sale).
  *
  * - **Solo si hay algo.** Sin elementos, o mientras cargan, no pinta nada: no
  *   tiene estado vacío propio («No tienes nada a medias» no ayuda a nadie) ni

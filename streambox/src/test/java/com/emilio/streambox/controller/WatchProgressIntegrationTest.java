@@ -70,7 +70,8 @@ import jakarta.servlet.http.Cookie;
  * validación (400 con el campo), el 404 del título inexistente (mismo cuerpo
  * que su detalle), el 409 {@code NO_VIDEO_AVAILABLE}, el {@code GET} sin
  * progreso (204), la serie oculta indistinguible de una inexistente, que lo
- * terminado (≥ 95 %) sale de «Seguir viendo», el límite, que lo de otro
+ * terminado (≥ 95 %) sale de «Seguir viendo» o, en un episodio con siguiente,
+ * da paso a ese siguiente ({@code upNext}, criterio de QA-4), el límite, que lo de otro
  * usuario no se ve ni se toca, la sesión (401), la defensa CSRF (403 con
  * cookie sin {@code X-Requested-With}) y las carreras con el borrado del
  * título o de la cuenta. Los casos finos de las consultas están en
@@ -184,6 +185,37 @@ class WatchProgressIntegrationTest {
                 .updatedAt());
         assertEquals(BASE, watchProgressService.getEpisodeProgress(alice.getId(), dark11.getId()).orElseThrow()
                 .updatedAt());
+    }
+
+    /**
+     * La fecha se guarda <b>truncada a milisegundos</b>, la precisión con la que
+     * ordena el cliente ({@code Date.parse}): si se guardaran los micros del
+     * reloj, dos guardados en el mismo milisegundo empatarían en el navegador
+     * pero no en la base de datos, y la tarjeta de «Seguir viendo» y la página
+     * de la serie podrían proponer episodios distintos (revisión de QA-4). Se
+     * comprueba en todas las respuestas que exponen la fecha. Sin el
+     * truncado, H2 (como PostgreSQL) conserva los microsegundos y el JSON
+     * saldría con {@code .123456Z}.
+     */
+    @Test
+    void laFechaDelGuardadoSeTruncaAMilisegundosEnTodasLasRespuestas() throws Exception {
+        WatchProgressService fixedClock = new WatchProgressService(watchProgressRepository, movieRepository,
+                episodeRepository, Clock.fixed(BASE.plusNanos(123_456_789), ZoneOffset.UTC));
+        String expected = "2026-01-01T00:00:00.123Z";
+
+        fixedClock.saveMovieProgress(alice.getId(), dune.getId(), new WatchProgressRequest(10, 100));
+        fixedClock.saveEpisodeProgress(alice.getId(), dark11.getId(), new WatchProgressRequest(10, 100));
+
+        mockMvc.perform(get(MOVIE_PROGRESS + "/" + dune.getId()).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.updatedAt").value(expected));
+        mockMvc.perform(get(EPISODE_PROGRESS + "/" + dark11.getId()).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.updatedAt").value(expected));
+        mockMvc.perform(get(SERIES_PROGRESS + "/" + dark.getId()).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$[0].updatedAt").value(expected));
+        mockMvc.perform(get(CONTINUE).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].updatedAt").value(expected))
+                .andExpect(jsonPath("$[1].updatedAt").value(expected));
     }
 
     /** {@code finished} es verdadero desde el 95 % exacto, no antes. */
@@ -471,22 +503,88 @@ class WatchProgressIntegrationTest {
     }
 
     /**
-     * Al terminar (≥ 95 %) desaparece de «Seguir viendo», en películas y en
-     * episodios; el 94 % sigue dentro. El progreso terminado se conserva.
+     * Al terminar (≥ 95 %) desaparece de «Seguir viendo»: una película y el
+     * <b>último</b> episodio de una serie (el 1x02 de Dark, sin siguiente); el
+     * 94 % sigue dentro. El progreso terminado se conserva. (Terminar un
+     * episodio que sí tiene siguiente no vacía la tarjeta: la pasa al
+     * siguiente, ver {@link #terminarUnEpisodioConSiguientePasaLaTarjetaAlSiguiente()}.)
      */
     @Test
     void loTerminadoDesapareceDeSeguirViendo() throws Exception {
         save(aliceToken, MOVIE_PROGRESS, dune.getId(), 94, 100);
-        save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 94, 100);
-        assertEquals(2, json(get(CONTINUE).header("Authorization", aliceToken)).size());
+        save(aliceToken, EPISODE_PROGRESS, dark12.getId(), 94, 100);
+        JsonNode before = json(get(CONTINUE).header("Authorization", aliceToken));
+        assertEquals(2, before.size());
+        before.valueStream().forEach(item -> assertFalse(item.get("upNext").asBoolean(), item.toString()));
 
         save(aliceToken, MOVIE_PROGRESS, dune.getId(), 95, 100);
-        save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 100, 100);
+        save(aliceToken, EPISODE_PROGRESS, dark12.getId(), 100, 100);
 
         mockMvc.perform(get(CONTINUE).header("Authorization", aliceToken))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
         mockMvc.perform(get(MOVIE_PROGRESS + "/" + dune.getId()).header("Authorization", aliceToken))
                 .andExpect(jsonPath("$.finished").value(true));
+        mockMvc.perform(get(EPISODE_PROGRESS + "/" + dark12.getId()).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.finished").value(true));
+    }
+
+    /**
+     * Criterio de QA-4: al terminar el 1x01, la tarjeta de la serie pasa al
+     * 1x02 con {@code upNext = true}. Como el 1x02 no se ha empezado, la
+     * posición y la duración vienen como {@code null} <b>presentes</b> en el
+     * JSON (contrato estable para el cliente), y la fecha es la del 1x01, el
+     * último episodio tocado.
+     */
+    @Test
+    void terminarUnEpisodioConSiguientePasaLaTarjetaAlSiguiente() throws Exception {
+        save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 10, 100);
+        mockMvc.perform(get(CONTINUE).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(dark11.getId()))
+                .andExpect(jsonPath("$[0].upNext").value(false));
+
+        save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 100, 100);
+        setUpdatedAt("user_episode_progress", "episode_id", dark11.getId(), BASE.plusSeconds(60));
+
+        JsonNode row = json(get(CONTINUE).header("Authorization", aliceToken));
+        assertEquals(1, row.size());
+        JsonNode card = row.get(0);
+        assertEquals("EPISODE", card.get("type").asText());
+        assertEquals(dark12.getId().longValue(), card.get("id").asLong());
+        assertEquals("Episodio 1x2", card.get("title").asText());
+        assertEquals(1, card.get("seasonNumber").asInt());
+        assertEquals(2, card.get("episodeNumber").asInt());
+        assertEquals(dark.getId().longValue(), card.get("seriesId").asLong());
+        assertTrue(card.get("upNext").asBoolean());
+        for (String field : List.of("positionSeconds", "durationSeconds")) {
+            assertTrue(card.has(field), field + " debe venir en el JSON");
+            assertTrue(card.get(field).isNull(), field);
+        }
+        assertEquals("2026-01-01T00:01:00Z", card.get("updatedAt").asText());
+    }
+
+    /**
+     * Si el siguiente a uno terminado tiene progreso propio a medias (se
+     * empezó antes), la tarjeta {@code upNext} lo trae para reanudarlo, pero
+     * se ordena y se fecha por el episodio terminado.
+     */
+    @Test
+    void elSiguienteConProgresoPropioAMediasVieneConEl() throws Exception {
+        save(aliceToken, EPISODE_PROGRESS, dark12.getId(), 30, 100);
+        setUpdatedAt("user_episode_progress", "episode_id", dark12.getId(), BASE);
+        save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 100, 100);
+        setUpdatedAt("user_episode_progress", "episode_id", dark11.getId(), BASE.plusSeconds(120));
+
+        mockMvc.perform(get(CONTINUE).header("Authorization", aliceToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].type").value("EPISODE"))
+                .andExpect(jsonPath("$[0].id").value(dark12.getId()))
+                .andExpect(jsonPath("$[0].upNext").value(true))
+                .andExpect(jsonPath("$[0].positionSeconds").value(30))
+                .andExpect(jsonPath("$[0].durationSeconds").value(100))
+                .andExpect(jsonPath("$[0].updatedAt").value("2026-01-01T00:02:00Z"));
     }
 
     /** Si el administrador quita el vídeo, la tarjeta se oculta (y vuelve si el vídeo vuelve). */
@@ -576,6 +674,27 @@ class WatchProgressIntegrationTest {
                 row.valueStream().map(node -> node.get("type").asText() + ":" + node.get("id").asLong())
                         .collect(java.util.stream.Collectors.toSet()));
         assertEquals(1, countRows("user_episode_progress", alice));
+    }
+
+    /**
+     * Quitar la serie también quita una tarjeta {@code upNext} (el siguiente a
+     * uno terminado): borra el progreso del episodio terminado, que es lo que
+     * la hacía salir, y la serie no vuelve con ningún otro episodio.
+     */
+    @Test
+    void quitarUnaSerieQuitaTambienSuTarjetaDeSiguienteEpisodio() throws Exception {
+        save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 100, 100);
+        mockMvc.perform(get(CONTINUE).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(dark12.getId()))
+                .andExpect(jsonPath("$[0].upNext").value(true));
+
+        remove(aliceToken, CONTINUE + "/series/" + dark.getId());
+
+        mockMvc.perform(get(CONTINUE).header("Authorization", aliceToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+        assertEquals(0, countRows("user_episode_progress", alice));
     }
 
     // ------------------------------------------------------------------

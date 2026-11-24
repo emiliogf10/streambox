@@ -166,9 +166,14 @@ export interface WatchProgressRequest {
 }
 
 /**
- * Un elemento de «Seguir viendo» (`GET /api/users/me/continue-watching`): lo que
- * el usuario tiene a medias, lo más reciente primero, sin lo terminado ni lo que
- * ya no tiene vídeo, y una sola tarjeta por serie (su último episodio).
+ * Un elemento de «Seguir viendo» (`GET /api/users/me/continue-watching`), lo más
+ * reciente primero y sin lo que ya no tiene vídeo:
+ *
+ * - **Película:** la que está a medias (lo terminado no sale).
+ * - **Serie:** una sola tarjeta, con el mismo criterio que el botón de su página
+ *   (`seriesWatchTarget`, decisión QA-4): el **último episodio que tocó** el
+ *   usuario si está a medias; si lo terminó, **el siguiente con vídeo**
+ *   (`upNext`, puede ser de otra temporada); si no hay siguiente, la serie no sale.
  */
 export interface ContinueWatchingItem {
   type: 'MOVIE' | 'EPISODE';
@@ -182,8 +187,20 @@ export interface ContinueWatchingItem {
   episodeNumber: number | null;
   seriesId: number | null;
   seriesTitle: string | null;
-  positionSeconds: number;
-  durationSeconds: number;
+  /**
+   * `true` si el usuario TERMINÓ el último episodio que tocó y esta tarjeta es el
+   * siguiente; `false` en las películas y en el episodio a medias de siempre.
+   */
+  upNext: boolean;
+  /**
+   * Por dónde va en ESTE título. `null` solo con `upNext` y si ese siguiente
+   * episodio no tiene progreso propio sin terminar (aún no lo ha empezado); si
+   * lo tiene, viene con él, como cualquier otro elemento.
+   */
+  positionSeconds: number | null;
+  /** Duración del vídeo de ese progreso; `null` en los mismos casos que `positionSeconds`. */
+  durationSeconds: number | null;
+  /** Último guardado del título (en una serie, el del último episodio tocado): ordena la fila. */
   updatedAt: string;
 }
 

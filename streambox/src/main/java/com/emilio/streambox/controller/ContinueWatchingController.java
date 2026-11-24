@@ -68,15 +68,20 @@ public class ContinueWatchingController {
      *
      * @param principal usuario autenticado
      * @param limit     máximo de elementos (1 a 24, por defecto 10)
-     * @return películas y episodios a medio ver, del más reciente al más antiguo
+     * @return películas a medio ver y una tarjeta por serie, del más reciente al más antiguo
      */
     @GetMapping
-    @Operation(summary = "Obtiene mi fila «Seguir viendo»", description = "Devuelve las películas y los "
-            + "episodios que el usuario autenticado tiene a medio ver, mezclados y del guardado más reciente al "
-            + "más antiguo (a igual fecha, primero las películas y después el id mayor). No incluye lo terminado "
-            + "(95 % o más de la duración) ni los títulos que ya no tienen vídeo, y muestra una sola tarjeta por "
-            + "serie: la del episodio sin terminar guardado más recientemente. Cada elemento lleva type (MOVIE o "
-            + "EPISODE); los campos de la serie van a null en las películas.")
+    @Operation(summary = "Obtiene mi fila «Seguir viendo»", description = "Devuelve, mezcladas y del guardado "
+            + "más reciente al más antiguo (a igual fecha, primero las películas y después el id mayor), las "
+            + "películas que el usuario autenticado tiene a medio ver y una sola tarjeta por serie. La tarjeta de "
+            + "una serie es el último episodio que tocó el usuario si lo tiene a medias (upNext false) o, si lo "
+            + "terminó, el siguiente episodio con vídeo en orden de temporada y número, aunque sea de otra "
+            + "temporada (upNext true). Ese siguiente trae su propio progreso si lo tiene a medias; si no, "
+            + "positionSeconds y durationSeconds van a null. Si no queda ningún episodio siguiente con vídeo, la "
+            + "serie no sale. La fecha (updatedAt) y el orden de una serie son los del último episodio tocado. "
+            + "Nunca incluye lo terminado (95 % o más de la duración) como tarjeta ni los títulos que ya no "
+            + "tienen vídeo: una película terminada sale de la fila. Cada elemento lleva type (MOVIE o EPISODE); "
+            + "los campos de la serie van a null en las películas.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Lista obtenida correctamente (puede estar vacía)"),
             @ApiResponse(responseCode = "400", description = "El límite no es un número entero entre 1 y 24"),
@@ -125,7 +130,8 @@ public class ContinueWatchingController {
     @DeleteMapping("/series/{seriesId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "Quita una serie de «Seguir viendo»", description = "Borra el progreso del usuario "
-            + "autenticado en todos los episodios de la serie, para que no la sustituya otro episodio a medias. "
+            + "autenticado en todos los episodios de la serie, para que la tarjeta no la ocupe otro episodio con "
+            + "progreso ni el siguiente a uno terminado (también quita una tarjeta con upNext true). "
             + "Es idempotente: si no había progreso, o la serie no existe o no tiene episodios, también "
             + "responde 204.")
     @ApiResponses({

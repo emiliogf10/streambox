@@ -134,8 +134,8 @@ export function SeriesDetailPage() {
  *   con el título como `<h1>`, la sinopsis entera (no hay otro sitio donde
  *   leerla) y el contenido centrado (`layout="page"`), igual que la página de
  *   una película. Encima, «Volver a series» ({@link BackLink}), gemelo de
- *   «Volver a películas». Acciones: «Empezar a ver», «Reanudar T1:E3» o «Ver
- *   T2:E3» (el episodio que toca según el progreso del usuario, ver
+ *   «Volver a películas». Acciones: «Empezar a ver», «Reanudar T1:E3», «Ver
+ *   T2:E3» o «Volver a ver» (el episodio que toca según el progreso del usuario, ver
  *   {@link StartWatchingButton}; si ningún episodio tiene vídeo, no aparece), «Ver tráiler» ({@link TrailerButton}, solo si la
  *   serie tiene tráiler; principal si no hay episodio que ver, secundaria si
  *   lo hay), «Mi lista», «Me gusta» ({@link LikeButton}: la viste y te gustó;
@@ -247,8 +247,14 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
  *   principio no tiene vídeo), «Ver T2:E3», con el mismo código de episodio que
  *   la lista ({@link episodeCode}): un «Empezar a ver» que abre la segunda
  *   temporada engañaría a quien no ha visto la primera (incidencia QA trailer-3).
- * - **Con un episodio a medias** (el último que tocó): «Reanudar T1:E3».
- * - **Con el último terminado**: el siguiente, «Ver T1:E4».
+ * - **Con un episodio a medias** (el último que tocó, o el siguiente a uno
+ *   terminado si ya lo había empezado): «Reanudar T1:E3». Lo dice el progreso
+ *   del propio episodio, porque el reproductor lo reanudará solo.
+ * - **Con el último terminado**: el siguiente, «Ver T1:E4» (lo mismo que
+ *   propone la tarjeta de la serie en «Seguir viendo»).
+ * - **Terminado el último y sin más después**: se vuelve al primero. «Volver a
+ *   ver» solo si ese primero ya lo vio entero (si no, «Empezar a ver»: quien
+ *   solo vio el final no ha visto el principio; si lo dejó a medias, «Reanudar»).
  *
  * El nombre accesible empieza por el texto visible (WCAG 2.5.3) y añade la
  * serie y el título del episodio: «Ver T2:E3 de Dark: El regreso». Así no se
@@ -260,14 +266,16 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
 function StartWatchingButton({ series, target }: { series: SeriesDetail; target: SeriesWatchTarget }) {
   const { episode, mode } = target;
   const code = episodeCode(episode.seasonNumber, episode.episodeNumber);
-  const isStart = mode === 'start' && series.seasons[0]?.episodes[0]?.id === episode.id;
+  const isSeriesStart = series.seasons[0]?.episodes[0]?.id === episode.id;
   let label: string;
   let accessibleName: string;
-  if (isStart) {
-    label = 'Empezar a ver';
-    accessibleName = `Empezar a ver ${series.title}: ${code} ${episode.title}`;
+  if ((mode === 'start' || mode === 'rewatch') && isSeriesStart) {
+    label = mode === 'start' ? 'Empezar a ver' : 'Volver a ver';
+    accessibleName = `${label} ${series.title}: ${code} ${episode.title}`;
   } else {
-    label = mode === 'resume' ? `Reanudar ${code}` : `Ver ${code}`;
+    if (mode === 'resume') label = `Reanudar ${code}`;
+    else if (mode === 'rewatch') label = `Volver a ver ${code}`;
+    else label = `Ver ${code}`;
     accessibleName = `${label} de ${series.title}: ${episode.title}`;
   }
   return (

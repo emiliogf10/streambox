@@ -1,6 +1,8 @@
 package com.emilio.streambox.service;
 
 import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -61,7 +63,8 @@ import com.emilio.streambox.repository.WatchProgressRepository;
  * merece un bloqueo en la operación más frecuente.</p>
  *
  * <p>La fecha de cada guardado sale del {@link Clock} de la aplicación, no de
- * la base de datos, para que los tests la controlen.</p>
+ * la base de datos, para que los tests la controlen, y se guarda truncada a
+ * milisegundos, la precisión con la que ordena el cliente (ver {@link #now()}).</p>
  */
 @Service
 public class WatchProgressService {
@@ -135,7 +138,7 @@ public class WatchProgressService {
 
         try {
             watchProgressRepository.saveMovieProgress(userId, movieId, request.positionSeconds(),
-                    request.durationSeconds(), clock.instant());
+                    request.durationSeconds(), now());
         } catch (DataIntegrityViolationException e) {
             throw translateSaveViolation(e, WatchProgressRepository.MOVIE_PROGRESS_USER_FK, notFound);
         }
@@ -168,10 +171,32 @@ public class WatchProgressService {
 
         try {
             watchProgressRepository.saveEpisodeProgress(userId, episodeId, request.positionSeconds(),
-                    request.durationSeconds(), clock.instant());
+                    request.durationSeconds(), now());
         } catch (DataIntegrityViolationException e) {
             throw translateSaveViolation(e, WatchProgressRepository.EPISODE_PROGRESS_USER_FK, notFound);
         }
+    }
+
+    /**
+     * Fecha de un guardado: el instante del {@link Clock} <b>truncado a
+     * milisegundos</b>.
+     *
+     * <p>
+     * El servidor y el cliente deben ordenar los episodios de una serie igual
+     * (el «último episodio tocado» decide qué propone la tarjeta de «Seguir
+     * viendo» y qué propone la página de la serie). El cliente ordena con
+     * {@code Date.parse}, que solo ve milisegundos, mientras que
+     * {@code Instant} y PostgreSQL guardan hasta microsegundos: dos guardados
+     * en el mismo milisegundo empatarían en el navegador (y se desempatarían
+     * por id) pero no en la base de datos, y cada lado podría elegir un
+     * episodio distinto. Guardando ya con la precisión común, los dos ven
+     * exactamente las mismas fechas y el mismo desempate.
+     * </p>
+     *
+     * @return el instante actual sin fracción por debajo del milisegundo
+     */
+    private Instant now() {
+        return clock.instant().truncatedTo(ChronoUnit.MILLIS);
     }
 
     // ------------------------------------------------------------------
@@ -253,15 +278,24 @@ public class WatchProgressService {
     }
 
     /**
-     * La fila «Seguir viendo»: películas y episodios a medio ver, del más
-     * reciente al más antiguo, con una tarjeta por serie. Una sola consulta
-     * (ver {@link WatchProgressRepository#findContinueWatching}), que ya deja
-     * fuera lo terminado (≥ 95 %) y lo que no tiene vídeo.
+     * La fila «Seguir viendo»: películas a medio ver y una tarjeta por serie,
+     * del más reciente al más antiguo. Una sola consulta (ver
+     * {@link WatchProgressRepository#findContinueWatching}, donde está el
+     * criterio completo), que ya deja fuera lo que no tiene vídeo.
+     *
+     * <p>
+     * Lo terminado (≥ 95 %) nunca sale como tarjeta, pero en una serie no
+     * desaparece sin más: si el último episodio que tocó el usuario está
+     * terminado, la tarjeta pasa al <b>siguiente con vídeo</b>
+     * ({@code upNext = true}, con progreso nulo si no lo ha empezado) y la
+     * serie solo sale de la fila cuando no queda ninguno. Una película
+     * terminada sí sale de la fila.
+     * </p>
      *
      * @param userId identificador del usuario autenticado
      * @param limit  máximo de elementos (el controlador lo valida:
      *               {@value #MIN_CONTINUE_WATCHING_LIMIT}..{@value #MAX_CONTINUE_WATCHING_LIMIT})
-     * @return sus tarjetas; vacía si no hay nada a medio ver
+     * @return sus tarjetas; vacía si no hay nada que seguir viendo
      */
     @Transactional(readOnly = true)
     public List<ContinueWatchingItemResponse> getContinueWatching(Long userId, int limit) {

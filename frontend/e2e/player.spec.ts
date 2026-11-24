@@ -231,6 +231,57 @@ test.describe('Reproductor y «Seguir viendo»', () => {
   });
 
   /**
+   * Decisión QA-4: la tarjeta de una serie y el botón de su página proponen lo
+   * mismo. Terminado el T1:E1 (el último que se tocó), los dos llevan al T1:E2,
+   * que aún no se ha empezado: la tarjeta dice «Siguiente episodio» y su enlace
+   * empieza por «Ver» (no «Reanudar»: el reproductor empezará en el 0).
+   */
+  test('episodio terminado: la tarjeta de «Seguir viendo» y la serie proponen el siguiente («Ver T1:E2»)', async ({
+    page,
+    request,
+  }) => {
+    test.slow();
+    const seriesId = await findSeriesIdAsAdmin(request, await loginAdmin(request), SERIES_TITLE);
+    await withClip(page, `/api/series/${seriesId}`);
+
+    await page.goto(`/series/${seriesId}`);
+    await page.getByRole('link', { name: /^Empezar a ver / }).click();
+    await expect(page.getByText('T1:E1 · Capítulo 1.1')).toBeVisible();
+
+    // 10 s de reproducción real (si no, no se guarda nada) y después, al final: se guarda como terminado.
+    const video = await waitForVideo(page);
+    await video.evaluate((element: HTMLVideoElement) => {
+      element.muted = true;
+      element.playbackRate = 4;
+      void element.play();
+    });
+    await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime), { timeout: 15_000 }).toBeGreaterThan(12);
+    const finished = page.waitForResponse((response) => {
+      if (response.request().method() !== 'PUT' || !/\/progress\/episodes\/\d+$/.test(response.url())) return false;
+      const sent = response.request().postDataJSON() as { positionSeconds: number; durationSeconds: number };
+      return sent.positionSeconds === sent.durationSeconds;
+    });
+    await video.evaluate((element: HTMLVideoElement) => {
+      element.currentTime = element.duration - 0.5;
+    });
+    expect((await finished).status()).toBe(204);
+
+    await page.goto('/');
+    const card = continueWatching(page).getByRole('link', {
+      name: new RegExp(`^Ver ${escapeRegExp(SERIES_TITLE)} T1:E2 · Siguiente episodio`),
+    });
+    await expect(card).toBeVisible();
+    await expect(continueWatching(page).getByRole('link', { name: /^Reanudar / })).toHaveCount(0);
+    const cardTarget = await card.getAttribute('href');
+    expect(cardTarget).toMatch(new RegExp(`^/ver/series/${seriesId}/episodios/\\d+$`));
+
+    await page.goto(`/series/${seriesId}`);
+    const next = page.getByRole('link', { name: `Ver T1:E2 de ${SERIES_TITLE}: Capítulo 1.2` });
+    await expect(next).toBeVisible();
+    await expect(next).toHaveAttribute('href', cardTarget ?? '');
+  });
+
+  /**
    * Incidencia QA-1, en un navegador de verdad (con `BrowserRouter` y su
    * historial real, que el `MemoryRouter` de Vitest no tiene): el episodio se
    * abre en una pestaña NUEVA, sin nada detrás. «Ver el siguiente» sustituye la

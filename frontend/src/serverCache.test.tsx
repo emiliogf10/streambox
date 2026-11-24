@@ -306,6 +306,7 @@ describe('Cambio de usuario: «Seguir viendo»', () => {
       episodeNumber: null,
       seriesId: null,
       seriesTitle: null,
+      upNext: false,
       positionSeconds: 600,
       durationSeconds: 6000,
       updatedAt: '2026-11-21T10:00:00Z',

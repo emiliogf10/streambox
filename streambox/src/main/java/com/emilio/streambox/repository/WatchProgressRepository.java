@@ -117,27 +117,41 @@ public class WatchProgressRepository {
      */
     private static final int MAX_UPSERT_ATTEMPTS = 3;
 
-    /**
-     * Condición SQL de «no terminado» sobre el alias {@code p}: la negación
-     * exacta de {@link WatchProgress#isFinished(int, int)}, en aritmética
-     * entera (sin desbordamiento: como mucho 86400 × 100).
-     */
-    private static final String NOT_FINISHED =
-            "p.position_seconds * 100 < p.duration_seconds * " + WatchProgress.FINISHED_PERCENT;
+    /** Condición SQL de «no terminado» sobre el alias {@code p} (ver {@link #notFinished(String)}). */
+    private static final String NOT_FINISHED = notFinished("p");
 
     /**
-     * «Seguir viendo»: películas y episodios a medio ver, del más reciente al
-     * más antiguo, en una sola consulta (ver {@link #findContinueWatching}).
+     * «Seguir viendo»: películas a medio ver y una tarjeta por serie, del más
+     * reciente al más antiguo, en una sola consulta (el criterio de las series
+     * y el porqué de cada paso están en {@link #findContinueWatching}).
+     *
+     * <ul>
+     *   <li>{@code t}: los progresos del usuario en episodios con vídeo,
+     *       numerados por serie del más reciente al más antiguo
+     *       ({@code rn = 1} es el <b>último episodio tocado</b>).</li>
+     *   <li>{@code lt}: ese último tocado y, solo si está terminado, el id del
+     *       <b>siguiente con vídeo</b> ({@code next_id}), con una subconsulta
+     *       correlacionada que recorre el índice único
+     *       {@code uk_episodes_series_season_episode} desde su posición y se
+     *       detiene en el primero (el {@code CASE} evita la búsqueda si no está
+     *       terminado). Nulo si no está terminado o si no hay siguiente.</li>
+     *   <li>Fuera: los terminados sin siguiente. La tarjeta es el siguiente
+     *       ({@code COALESCE}) o el propio episodio; el progreso del siguiente
+     *       ({@code np}) solo se usa si está a medias.</li>
+     * </ul>
      */
     private static final String CONTINUE_WATCHING_SQL = """
             SELECT kind, item_id, title, image_url, season_number, episode_number,
-                   series_id, series_title, position_seconds, duration_seconds, updated_at
+                   series_id, series_title, position_seconds, duration_seconds, progress_updated_at,
+                   up_next, updated_at
               FROM (
                     SELECT CAST('MOVIE' AS VARCHAR(7)) AS kind,
                            m.id AS item_id, m.title AS title, m.image_url AS image_url,
                            CAST(NULL AS INTEGER) AS season_number, CAST(NULL AS INTEGER) AS episode_number,
                            CAST(NULL AS BIGINT) AS series_id, CAST(NULL AS VARCHAR(150)) AS series_title,
-                           p.position_seconds, p.duration_seconds, p.updated_at
+                           p.position_seconds AS position_seconds, p.duration_seconds AS duration_seconds,
+                           p.updated_at AS progress_updated_at,
+                           FALSE AS up_next, p.updated_at AS updated_at
                       FROM user_movie_progress p
                       JOIN movies m ON m.id = p.movie_id
                      WHERE p.user_id = :userId
@@ -145,26 +159,50 @@ public class WatchProgressRepository {
                        AND %1$s
                     UNION ALL
                     SELECT CAST('EPISODE' AS VARCHAR(7)),
-                           le.episode_id, le.title, s.image_url, le.season_number, le.episode_number,
+                           c.id, c.title, s.image_url, c.season_number, c.episode_number,
                            s.id, s.title,
-                           le.position_seconds, le.duration_seconds, le.updated_at
+                           CASE WHEN lt.next_id IS NULL THEN lt.position_seconds
+                                WHEN %2$s THEN np.position_seconds END,
+                           CASE WHEN lt.next_id IS NULL THEN lt.duration_seconds
+                                WHEN %2$s THEN np.duration_seconds END,
+                           CASE WHEN lt.next_id IS NULL THEN lt.updated_at
+                                WHEN %2$s THEN np.updated_at END,
+                           lt.next_id IS NOT NULL, lt.updated_at
                       FROM (
-                            SELECT p.episode_id, p.position_seconds, p.duration_seconds, p.updated_at,
-                                   e.series_id, e.season_number, e.episode_number, e.title,
-                                   ROW_NUMBER() OVER (PARTITION BY e.series_id
-                                                      ORDER BY p.updated_at DESC, p.episode_id DESC) AS rn
-                              FROM user_episode_progress p
-                              JOIN episodes e ON e.id = p.episode_id
-                             WHERE p.user_id = :userId
-                               AND e.video_url IS NOT NULL
-                               AND %1$s
-                           ) le
-                      JOIN series s ON s.id = le.series_id
-                     WHERE le.rn = 1
+                            SELECT t.episode_id, t.series_id, t.position_seconds, t.duration_seconds,
+                                   t.updated_at,
+                                   CASE WHEN NOT (%4$s) THEN (
+                                        SELECT n.id
+                                          FROM episodes n
+                                         WHERE n.series_id = t.series_id
+                                           AND n.video_url IS NOT NULL
+                                           AND (n.season_number > t.season_number
+                                                OR (n.season_number = t.season_number
+                                                    AND n.episode_number > t.episode_number))
+                                         ORDER BY n.season_number, n.episode_number
+                                         FETCH FIRST 1 ROW ONLY
+                                   ) END AS next_id
+                              FROM (
+                                    SELECT p.episode_id, p.position_seconds, p.duration_seconds, p.updated_at,
+                                           e.series_id, e.season_number, e.episode_number,
+                                           ROW_NUMBER() OVER (PARTITION BY e.series_id
+                                                              ORDER BY p.updated_at DESC, p.episode_id DESC) AS rn
+                                      FROM user_episode_progress p
+                                      JOIN episodes e ON e.id = p.episode_id
+                                     WHERE p.user_id = :userId
+                                       AND e.video_url IS NOT NULL
+                                   ) t
+                             WHERE t.rn = 1
+                           ) lt
+                      JOIN episodes c ON c.id = COALESCE(lt.next_id, lt.episode_id)
+                      JOIN series s ON s.id = lt.series_id
+                      LEFT JOIN user_episode_progress np
+                             ON np.user_id = :userId AND np.episode_id = lt.next_id
+                     WHERE lt.next_id IS NOT NULL OR %3$s
                    ) items
              ORDER BY updated_at DESC, kind DESC, item_id DESC
              FETCH FIRST :limit ROWS ONLY
-            """.formatted(NOT_FINISHED);
+            """.formatted(NOT_FINISHED, notFinished("np"), notFinished("lt"), notFinished("t"));
 
     private final JdbcClient jdbc;
 
@@ -333,45 +371,75 @@ public class WatchProgressRepository {
     }
 
     /**
-     * La fila «Seguir viendo»: los {@code limit} títulos a medio ver más
-     * recientes del usuario, <b>mezclando películas y episodios</b>, en una
-     * sola consulta ({@code UNION ALL}) que ya trae los datos de la tarjeta:
-     * sin N+1 ni colecciones perezosas.
+     * La fila «Seguir viendo»: las {@code limit} tarjetas más recientes del
+     * usuario, <b>mezclando películas y series</b>, en una sola consulta
+     * ({@code UNION ALL}) que ya trae los datos de cada tarjeta: sin N+1 ni
+     * colecciones perezosas.
      *
-     * <p><b>Qué entra</b></p>
+     * <p><b>Películas</b></p>
+     * <p>
+     * Las que tienen vídeo y están <b>a medias</b>: posición por debajo del
+     * {@value WatchProgress#FINISHED_PERCENT} % de la duración (ver
+     * {@link WatchProgress#FINISHED_PERCENT}).
+     * </p>
+     *
+     * <p><b>Series: una tarjeta por serie (criterio de QA-4)</b></p>
+     * <ol>
+     *   <li>Se toma el <b>último episodio tocado</b>: el de {@code updated_at}
+     *       más reciente (desempate: {@code episode_id} mayor) entre los
+     *       episodios <b>con vídeo</b> de la serie en los que el usuario tiene
+     *       progreso, <b>terminados o no</b>.</li>
+     *   <li>Si está a medias, la tarjeta es él, con su progreso
+     *       ({@code upNext = false}).</li>
+     *   <li>Si está terminado, la tarjeta es el <b>siguiente episodio con
+     *       vídeo</b> en orden de temporada y número (puede ser de la temporada
+     *       siguiente; los que no tienen vídeo se saltan), con
+     *       {@code upNext = true} y su propio progreso solo si lo tiene a
+     *       medias (si no lo empezó, o lo tiene terminado, progreso nulo).</li>
+     *   <li>Si está terminado y no hay siguiente con vídeo, la serie no sale:
+     *       el usuario está al día.</li>
+     *   <li>La tarjeta se ordena por la fecha del episodio del paso 1, también
+     *       cuando muestra el siguiente: es lo último que hizo el usuario.</li>
+     * </ol>
+     * <p>
+     * <b>Por qué así</b> (y no «el episodio a medias más reciente», que era el
+     * criterio anterior): es el de las plataformas grandes y el mismo que la
+     * página de la serie ({@code seriesWatchTarget} en
+     * {@code frontend/src/lib/playback.ts}). Con el anterior, quien dejaba el
+     * 1x01 a medias y luego veía entero el 1x02 encontraba en el inicio «T1:E1»
+     * y en la serie «Ver T1:E3»: dos respuestas distintas a «¿por dónde voy?».
+     * Un episodio <b>sin vídeo</b> no cuenta como «tocado»: si lo contara, la
+     * tarjeta prometería un «Reanudar» imposible o escondería la serie.
+     * </p>
+     *
+     * <p><b>Qué no entra nunca</b></p>
      * <ul>
-     *   <li>Solo lo <b>no terminado</b>: posición por debajo del
-     *       {@value WatchProgress#FINISHED_PERCENT} % de la duración (ver
-     *       {@link WatchProgress#FINISHED_PERCENT}).</li>
-     *   <li>Solo títulos que <b>tienen vídeo</b> ({@code video_url} no nulo; es
-     *       opcional desde la {@code V6}). Si el administrador quita el vídeo
-     *       de algo que el usuario estaba viendo, la tarjeta prometería un
-     *       «Reanudar» imposible: se oculta (la fila se conserva y vuelve a
-     *       salir si el vídeo vuelve).</li>
-     *   <li><b>Una tarjeta por serie</b>, como Netflix: de cada serie, solo el
-     *       episodio no terminado guardado más recientemente. Si no, quien va
-     *       por el 1x03 tras dejar el 1x01 a medias vería la serie dos veces.
-     *       (No calcula el «siguiente episodio» de uno terminado: eso es lógica
-     *       del servicio.)</li>
+     *   <li>Títulos sin vídeo ({@code video_url} es opcional desde la
+     *       {@code V6}): si el administrador lo quita, la tarjeta se oculta (la
+     *       fila de progreso se conserva y vuelve a salir si el vídeo vuelve).</li>
      *   <li>Las series sin episodios están ocultas para los usuarios, pero aquí
      *       no hace falta filtrarlas: un progreso de episodio implica que su
      *       serie tiene al menos ese episodio.</li>
      * </ul>
      *
-     * <p><b>Orden</b></p>
+     * <p><b>Orden y coste</b></p>
      * <p>
-     * Por {@code updated_at} descendente; los empates (mismo instante) se
-     * deshacen por tipo (películas antes) y por id descendente, para que la
-     * paginación o dos peticiones seguidas den siempre el mismo orden. Cada
-     * lado lee las filas del usuario por el índice
-     * {@code idx_*_progress_user_updated_at}.
+     * Por {@code updated_at} descendente (el de la película o el del último
+     * episodio tocado); los empates (mismo instante) se deshacen por tipo
+     * (películas antes) y por id descendente de la tarjeta, para que dos
+     * peticiones seguidas den siempre el mismo orden. Los progresos del usuario
+     * se leen por la PK o por {@code idx_*_progress_user_updated_at}; el
+     * siguiente episodio, con una sola búsqueda por serie terminada en el índice
+     * único {@code uk_episodes_series_season_episode} (que ya está ordenado por
+     * serie, temporada y número); y su progreso, por la PK. No hace falta un
+     * índice nuevo.
      * </p>
      *
      * @param userId identificador del usuario
      * @param limit  número máximo de elementos (positivo; el servicio fija el
      *               tope que pinte la fila)
      * @return elementos del más reciente al más antiguo; vacía si no hay nada
-     *         a medio ver
+     *         que seguir viendo
      * @throws org.springframework.dao.InvalidDataAccessApiUsageException si
      *         {@code limit} no es positivo (es la {@link IllegalArgumentException}
      *         original, traducida por {@code @Repository}; es un error de
@@ -412,9 +480,10 @@ public class WatchProgressRepository {
      * Borra el progreso del usuario en un episodio. Idempotente.
      *
      * <p>
-     * Ojo para «Quitar de Seguir viendo» en la tarjeta de un episodio: si el
-     * usuario tenía otro episodio de la misma serie a medias, ese pasaría a
-     * ocupar la tarjeta. Para quitar la serie entera, usa
+     * Ojo para «Quitar de Seguir viendo» en la tarjeta de una serie: si el
+     * usuario tenía progreso en otros episodios de la misma serie, el más
+     * reciente de ellos pasaría a ser el «último tocado» y la serie seguiría
+     * en la fila (con él o con su siguiente). Para quitar la serie entera, usa
      * {@link #deleteSeriesProgress}.
      * </p>
      *
@@ -458,18 +527,44 @@ public class WatchProgressRepository {
                 rs.getObject("updated_at", OffsetDateTime.class).toInstant());
     }
 
-    /** Construye el elemento de «Seguir viendo» de la fila actual según su tipo. */
+    /**
+     * Construye el elemento de «Seguir viendo» de la fila actual según su tipo.
+     * El progreso de la tarjeta va en {@code position_seconds},
+     * {@code duration_seconds} y {@code progress_updated_at}, que son nulos a
+     * la vez cuando la tarjeta es un siguiente episodio sin progreso a medias;
+     * {@code updated_at} es siempre la fecha que ordena la fila.
+     */
     private static ContinueWatchingItem continueWatchingItem(ResultSet rs) throws SQLException {
-        WatchProgress progress = progress(rs);
+        OffsetDateTime progressUpdatedAt = rs.getObject("progress_updated_at", OffsetDateTime.class);
+        WatchProgress progress = progressUpdatedAt == null ? null
+                : new WatchProgress(rs.getInt("position_seconds"), rs.getInt("duration_seconds"),
+                        progressUpdatedAt.toInstant());
+        Instant updatedAt = rs.getObject("updated_at", OffsetDateTime.class).toInstant();
         String kind = rs.getString("kind");
         return switch (kind) {
             case "MOVIE" -> new ContinueWatchingItem.MovieItem(rs.getLong("item_id"), rs.getString("title"),
                     rs.getString("image_url"), progress);
             case "EPISODE" -> new ContinueWatchingItem.EpisodeItem(rs.getLong("item_id"),
                     rs.getInt("season_number"), rs.getInt("episode_number"), rs.getString("title"),
-                    rs.getLong("series_id"), rs.getString("series_title"), rs.getString("image_url"), progress);
+                    rs.getLong("series_id"), rs.getString("series_title"), rs.getString("image_url"), progress,
+                    rs.getBoolean("up_next"), updatedAt);
             default -> throw new IllegalStateException("Tipo de «Seguir viendo» desconocido: " + kind);
         };
+    }
+
+    /**
+     * Condición SQL de «no terminado» sobre el alias indicado: la negación
+     * exacta de {@link WatchProgress#isFinished(int, int)}, en aritmética
+     * entera (sin desbordamiento: como mucho 86400 × 100). Si las columnas son
+     * nulas (un {@code LEFT JOIN} sin fila) el resultado es desconocido, que en
+     * un {@code WHEN} o un {@code WHERE} cuenta como falso.
+     *
+     * @param alias alias de una tabla de progreso en la consulta (constante de
+     *              esta clase, nunca un dato del usuario: se concatena en el SQL)
+     * @return la condición, lista para insertar en el SQL
+     */
+    private static String notFinished(String alias) {
+        return alias + ".position_seconds * 100 < " + alias + ".duration_seconds * " + WatchProgress.FINISHED_PERCENT;
     }
 
     /**

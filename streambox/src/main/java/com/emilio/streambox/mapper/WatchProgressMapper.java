@@ -59,22 +59,37 @@ public final class WatchProgressMapper {
      * sellada obliga a tratar los dos tipos: si algún día hubiera un tercero,
      * esto dejaría de compilar en vez de olvidarlo.
      *
-     * @param item película o episodio a medio ver
+     * <p>
+     * El progreso de un episodio puede ser nulo: es la tarjeta «siguiente
+     * episodio» ({@code upNext}) de uno que no se ha empezado. Entonces la
+     * posición y la duración salen como {@code null} en el JSON (el cliente no
+     * pinta barra). Una película siempre tiene progreso y nunca es
+     * {@code upNext}. La fecha sale siempre de {@link ContinueWatchingItem#updatedAt()},
+     * que en una serie es la del último episodio tocado y no la del progreso
+     * de la tarjeta.
+     * </p>
+     *
+     * @param item película a medio ver o tarjeta de una serie
      * @return su tarjeta
      */
     public static ContinueWatchingItemResponse toResponse(ContinueWatchingItem item) {
 
-        WatchProgress progress = item.progress();
         return switch (item) {
             case ContinueWatchingItem.MovieItem movie -> new ContinueWatchingItemResponse(
                     ContinueWatchingType.MOVIE, movie.movieId(), movie.title(), movie.imageUrl(),
                     null, null, null, null,
-                    progress.positionSeconds(), progress.durationSeconds(), progress.updatedAt());
-            case ContinueWatchingItem.EpisodeItem episode -> new ContinueWatchingItemResponse(
-                    ContinueWatchingType.EPISODE, episode.episodeId(), episode.episodeTitle(),
-                    episode.seriesImageUrl(), episode.seasonNumber(), episode.episodeNumber(),
-                    episode.seriesId(), episode.seriesTitle(),
-                    progress.positionSeconds(), progress.durationSeconds(), progress.updatedAt());
+                    movie.progress().positionSeconds(), movie.progress().durationSeconds(), false,
+                    movie.updatedAt());
+            case ContinueWatchingItem.EpisodeItem episode -> {
+                WatchProgress progress = episode.progress();
+                yield new ContinueWatchingItemResponse(
+                        ContinueWatchingType.EPISODE, episode.episodeId(), episode.episodeTitle(),
+                        episode.seriesImageUrl(), episode.seasonNumber(), episode.episodeNumber(),
+                        episode.seriesId(), episode.seriesTitle(),
+                        progress == null ? null : progress.positionSeconds(),
+                        progress == null ? null : progress.durationSeconds(),
+                        episode.upNext(), episode.updatedAt());
+            }
         };
     }
 

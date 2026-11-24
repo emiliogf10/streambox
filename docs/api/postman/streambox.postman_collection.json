@@ -5374,7 +5374,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"La película sale una vez, con su progreso\", function () { const items = pm.response.json().filter(i => i.type === \"MOVIE\" && String(i.id) === String(pm.collectionVariables.get(\"movieId\"))); pm.expect(items.length).to.eql(1); pm.expect(items[0].positionSeconds).to.eql(1325); pm.expect(items[0].durationSeconds).to.eql(8160); pm.expect(items[0].title).to.be.a(\"string\"); pm.expect(items[0].imageUrl).to.be.a(\"string\"); pm.expect(items[0].seriesId).to.eql(null); pm.expect(items[0].seasonNumber).to.eql(null); });"
+                  "pm.test(\"La película sale una vez, con su progreso y upNext a false\", function () { const items = pm.response.json().filter(i => i.type === \"MOVIE\" && String(i.id) === String(pm.collectionVariables.get(\"movieId\"))); pm.expect(items.length).to.eql(1); pm.expect(items[0].positionSeconds).to.eql(1325); pm.expect(items[0].durationSeconds).to.eql(8160); pm.expect(items[0].title).to.be.a(\"string\"); pm.expect(items[0].imageUrl).to.be.a(\"string\"); pm.expect(items[0].seriesId).to.eql(null); pm.expect(items[0].seasonNumber).to.eql(null); pm.expect(items[0].upNext).to.eql(false); });"
                 ]
               }
             }

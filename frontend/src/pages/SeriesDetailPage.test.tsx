@@ -735,6 +735,79 @@ describe('SeriesDetailPage: reproductor integrado y progreso', () => {
     expect(await screen.findByRole('link', { name: 'Ver T1:E2 de Serie: Episodio 2' })).toBeInTheDocument();
   });
 
+  it('QA-4: T1:E1 a medias y después T1:E2 terminado → «Ver T1:E3», lo mismo que la tarjeta de «Seguir viendo»', async () => {
+    const e3 = direct.seasons[0].episodes[2];
+    renderDetail('/series/7', () => jsonResponse(direct), {
+      [PROGRESS]: () =>
+        jsonResponse([
+          { episodeId: e1.id, positionSeconds: 600, durationSeconds: 2700, finished: false, updatedAt: '2026-11-20T10:00:00Z' },
+          { episodeId: e2.id, positionSeconds: 2700, durationSeconds: 2700, finished: true, updatedAt: '2026-11-21T10:00:00Z' },
+        ]),
+    });
+
+    expect(await screen.findByRole('link', { name: 'Ver T1:E3 de Serie: Episodio 3' })).toHaveAttribute(
+      'href',
+      `/ver/series/7/episodios/${e3.id}`,
+    );
+    // El T1:E1 sigue a medias en su fila de la lista (su barra y «Reanudar»), pero no es lo que propone la cabecera.
+    expect(screen.queryByRole('link', { name: /^Reanudar T1:E1 de Serie/ })).not.toBeInTheDocument();
+    expect(within(episodeList()).getByRole('link', { name: 'Reanudar T1:E1 Episodio 1' })).toBeInTheDocument();
+  });
+
+  it('terminado el último tocado y el siguiente ya empezado: «Reanudar» el siguiente (el reproductor lo reanudará)', async () => {
+    renderDetail('/series/7', () => jsonResponse(direct), {
+      [PROGRESS]: () =>
+        jsonResponse([
+          { episodeId: e2.id, positionSeconds: 600, durationSeconds: 2700, finished: false, updatedAt: '2026-11-20T10:00:00Z' },
+          { episodeId: e1.id, positionSeconds: 2700, durationSeconds: 2700, finished: true, updatedAt: '2026-11-21T10:00:00Z' },
+        ]),
+    });
+
+    expect(await screen.findByRole('link', { name: 'Reanudar T1:E2 de Serie: Episodio 2' })).toBeInTheDocument();
+  });
+
+  it('toda la serie vista: «Volver a ver» desde el principio (no «Empezar a ver», que no sería verdad)', async () => {
+    const [, , e3] = direct.seasons[0].episodes;
+    const seen = (id: number, updatedAt: string) => ({ episodeId: id, positionSeconds: 2700, durationSeconds: 2700, finished: true, updatedAt });
+    renderDetail('/series/7', () => jsonResponse(direct), {
+      [PROGRESS]: () =>
+        jsonResponse([
+          seen(e1.id, '2026-11-19T10:00:00Z'),
+          seen(e2.id, '2026-11-20T10:00:00Z'),
+          seen(e3.id, '2026-11-21T10:00:00Z'),
+        ]),
+    });
+
+    expect(await screen.findByRole('link', { name: 'Volver a ver Serie: T1:E1 Episodio 1' })).toHaveAttribute(
+      'href',
+      `/ver/series/7/episodios/${e1.id}`,
+    );
+    expect(screen.queryByText('Empezar a ver')).not.toBeInTheDocument();
+  });
+
+  /**
+   * Revisión QA de QA-4: «Volver a ver» cuando el primer episodio CON VÍDEO no
+   * es el primero de la serie (el T1:E1 no tiene vídeo). El botón no puede
+   * decir «Volver a ver Serie» a secas (no empieza por el principio de la
+   * serie) ni «Empezar a ver» (ese episodio ya se vio entero): lleva el código,
+   * «Volver a ver T1:E2», como «Ver T2:E3» en el caso equivalente sin progreso.
+   */
+  it('vista entera y el T1:E1 sin vídeo: «Volver a ver T1:E2» (con su código, no «Volver a ver» la serie)', async () => {
+    const gap = seriesWithVideos([null, 'https://cdn.example/2.mp4', 'https://cdn.example/3.mp4']);
+    const [, g2, g3] = gap.seasons[0].episodes;
+    const seen = (id: number, updatedAt: string) => ({ episodeId: id, positionSeconds: 2700, durationSeconds: 2700, finished: true, updatedAt });
+    renderDetail('/series/7', () => jsonResponse(gap), {
+      [PROGRESS]: () => jsonResponse([seen(g2.id, '2026-11-20T10:00:00Z'), seen(g3.id, '2026-11-21T10:00:00Z')]),
+    });
+
+    expect(await screen.findByRole('link', { name: 'Volver a ver T1:E2 de Serie: Episodio 2' })).toHaveAttribute(
+      'href',
+      `/ver/series/7/episodios/${g2.id}`,
+    );
+    expect(screen.queryByRole('link', { name: /^Volver a ver Serie/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Empezar a ver/ })).not.toBeInTheDocument();
+  });
+
   it('sin progreso: «Empezar a ver» al reproductor; si el progreso falla, la serie se ve igual', async () => {
     renderDetail('/series/7', () => jsonResponse(direct), {
       [PROGRESS]: () => errorResponse(500, 'INTERNAL_ERROR', 'Fallo.'),

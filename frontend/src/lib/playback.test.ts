@@ -217,6 +217,59 @@ describe('seriesWatchTarget', () => {
     expect(seriesWatchTarget(series, [episodeProgress(3, { finished: true })])).toEqual({ episode: e1, mode: 'start' });
   });
 
+  it('QA-4: T1:E1 a medias y luego T1:E2 terminado → el siguiente al último tocado (T2:E1), no el T1:E1 a medias', () => {
+    const list = [
+      episodeProgress(1, { positionSeconds: 600, updatedAt: '2026-11-20T10:00:00Z' }),
+      episodeProgress(2, { finished: true, updatedAt: '2026-11-21T10:00:00Z' }),
+    ];
+    expect(seriesWatchTarget(series, list)).toEqual({ episode: e3, mode: 'episode' });
+  });
+
+  it('terminado el último tocado y el siguiente ya estaba a medias: se REANUDA el siguiente (el reproductor lo reanudará)', () => {
+    const list = [
+      episodeProgress(3, { positionSeconds: 600, updatedAt: '2026-11-20T10:00:00Z' }),
+      episodeProgress(2, { finished: true, updatedAt: '2026-11-21T10:00:00Z' }),
+    ];
+    expect(seriesWatchTarget(series, list)).toEqual({ episode: e3, mode: 'resume' });
+  });
+
+  it('el siguiente apenas empezado o ya visto entero: se abre sin «Reanudar» (el reproductor empezará en el 0)', () => {
+    const barely = [
+      episodeProgress(3, { positionSeconds: 2, updatedAt: '2026-11-20T10:00:00Z' }),
+      episodeProgress(2, { finished: true, updatedAt: '2026-11-21T10:00:00Z' }),
+    ];
+    expect(seriesWatchTarget(series, barely)).toEqual({ episode: e3, mode: 'episode' });
+    const seen = [
+      episodeProgress(3, { finished: true, updatedAt: '2026-11-20T10:00:00Z' }),
+      episodeProgress(2, { finished: true, updatedAt: '2026-11-21T10:00:00Z' }),
+    ];
+    expect(seriesWatchTarget(series, seen)).toEqual({ episode: e3, mode: 'episode' });
+  });
+
+  it('el siguiente con vídeo se salta los que no tienen (aunque sean de otra temporada)', () => {
+    const gap = makeSeriesDetail({
+      seasons: [
+        { seasonNumber: 1, episodes: [e1, { ...e2, videoUrl: null }] },
+        { seasonNumber: 2, episodes: [e3] },
+      ],
+    });
+    expect(seriesWatchTarget(gap, [episodeProgress(1, { finished: true })])).toEqual({ episode: e3, mode: 'episode' });
+  });
+
+  it('terminado el último y sin más: el primero, con el texto que dice su propio progreso', () => {
+    const lastAt = '2026-11-21T10:00:00Z';
+    // Toda la serie vista: «Volver a ver».
+    const all = [
+      episodeProgress(1, { finished: true, updatedAt: '2026-11-19T10:00:00Z' }),
+      episodeProgress(2, { finished: true, updatedAt: '2026-11-20T10:00:00Z' }),
+      episodeProgress(3, { finished: true, updatedAt: lastAt }),
+    ];
+    expect(seriesWatchTarget(series, all)).toEqual({ episode: e1, mode: 'rewatch' });
+    // El primero se quedó a medias: el reproductor lo reanudará, así que el botón también.
+    const firstHalf = [episodeProgress(1, { positionSeconds: 600, updatedAt: '2026-11-19T10:00:00Z' }), all[2]];
+    expect(seriesWatchTarget(series, firstHalf)).toEqual({ episode: e1, mode: 'resume' });
+  });
+
   it('apenas empezado: se abre ese episodio sin «Reanudar»', () => {
     expect(seriesWatchTarget(series, [episodeProgress(3, { positionSeconds: 2 })])).toEqual({ episode: e3, mode: 'episode' });
   });
@@ -231,6 +284,28 @@ describe('seriesWatchTarget', () => {
   it('ningún episodio con vídeo: no hay botón', () => {
     const none = makeSeriesDetail({ seasons: [{ seasonNumber: 1, episodes: [{ ...e1, videoUrl: null }] }] });
     expect(seriesWatchTarget(none, [])).toBeNull();
+  });
+
+  /**
+   * Revisión QA de QA-4 (severidad BAJA, corregida): nació como `it.fails` y
+   * pasó a `it` con el desempate por id de `seriesWatchTarget`.
+   *
+   * Empate de `updatedAt` entre dos episodios de la serie: el servidor
+   * (`WatchProgressRepository.CONTINUE_WATCHING_SQL`, `ORDER BY p.updated_at
+   * DESC, p.episode_id DESC`) toma como último tocado el de **id mayor** (aquí
+   * el T1:E2 terminado) y la tarjeta de «Seguir viendo» es el siguiente, T2:E1.
+   * `seriesWatchTarget` ordenaba solo por fecha con un `sort` estable, así que se
+   * quedaba con el que llega antes del servidor (orden de temporada y número: el
+   * T1:E1 a medias) y la página proponía «Reanudar T1:E1»: tarjeta y página
+   * dejaban de coincidir, que es justo lo que QA-4 quería evitar.
+   */
+  it('empate de fecha: el último tocado es el de id mayor, como en el servidor', () => {
+    const sameInstant = '2026-11-21T10:00:00Z';
+    const list = [
+      episodeProgress(1, { positionSeconds: 600, updatedAt: sameInstant }),
+      episodeProgress(2, { finished: true, updatedAt: sameInstant }),
+    ];
+    expect(seriesWatchTarget(series, list)).toEqual({ episode: e3, mode: 'episode' });
   });
 });
 

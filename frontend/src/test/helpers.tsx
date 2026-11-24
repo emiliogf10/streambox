@@ -18,7 +18,7 @@ import { InAppHistoryProvider } from '../context/InAppHistoryContext';
 import { ToastProvider } from '../context/ToastContext';
 import { LocationProbe } from './LocationProbe';
 import { createTestQueryClient } from './queryClient';
-import type { ApiErrorBody, Episode, Genre, Movie, PageResponse, Recommendations, Series, SeriesDetail, User } from '../lib/types';
+import type { ApiErrorBody, ContinueWatchingItem, Episode, Genre, Movie, PageResponse, Recommendations, Series, SeriesDetail, User } from '../lib/types';
 
 /** Crea un usuario de prueba (`UserResponse`); por defecto, rol `USER`. */
 export function makeUser(overrides: Partial<User> = {}): User {
@@ -155,6 +155,30 @@ export function makeSeriesDetail(overrides: Partial<SeriesDetail> = {}): SeriesD
     episodeCount: seasons.reduce((sum, season) => sum + season.episodes.length, 0),
     ...overrides,
     seasons,
+  };
+}
+
+/**
+ * Crea un elemento de «Seguir viendo» (`ContinueWatchingItemResponse`). Por
+ * defecto, un episodio A MEDIAS (T1:E2 de «Dark», 10 de 50 min, `upNext: false`).
+ * Para el siguiente episodio sin empezar: `{ upNext: true, positionSeconds: null,
+ * durationSeconds: null }` (el contrato solo admite los nulos con `upNext`).
+ */
+export function makeContinueWatchingItem(overrides: Partial<ContinueWatchingItem> = {}): ContinueWatchingItem {
+  return {
+    type: 'EPISODE',
+    id: 102,
+    title: 'Mentiras',
+    imageUrl: 'https://img.example/dark.jpg',
+    seasonNumber: 1,
+    episodeNumber: 2,
+    seriesId: 3,
+    seriesTitle: 'Dark',
+    upNext: false,
+    positionSeconds: 600,
+    durationSeconds: 3000,
+    updatedAt: '2026-11-21T09:00:00Z',
+    ...overrides,
   };
 }
 

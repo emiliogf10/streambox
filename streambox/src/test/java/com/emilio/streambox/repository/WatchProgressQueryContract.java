@@ -2,6 +2,7 @@ package com.emilio.streambox.repository;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,7 +37,8 @@ import com.emilio.streambox.service.SqlStates;
  * claves foráneas, las cascadas al borrar usuario, película, episodio y serie,
  * los borrados de «Quitar de Seguir viendo» y la consulta de «Seguir viendo»
  * (mezcla, orden, desempate, límite, terminados, sin vídeo y una tarjeta por
- * serie). Las fechas se pasan explícitas (el servicio las tomará de su
+ * serie: su último episodio tocado o, si está terminado, el siguiente con
+ * vídeo, criterio de QA-4). Las fechas se pasan explícitas (el servicio las tomará de su
  * {@code Clock}) para que el orden no dependa de la velocidad del test.
  * </p>
  */
@@ -432,7 +434,7 @@ public interface WatchProgressQueryContract {
         assertEquals(new MovieItem(newer, "Reciente", "https://example.com/Reciente.jpg",
                 new WatchProgress(20, 100, BASE.plusSeconds(20))), items.get(0));
         assertEquals(new EpisodeItem(episode, 2, 3, "Episodio 2x3", serie, "Serie", "https://example.com/Serie.jpg",
-                new WatchProgress(30, 2700, BASE.plusSeconds(10))), items.get(1));
+                new WatchProgress(30, 2700, BASE.plusSeconds(10)), false, BASE.plusSeconds(10)), items.get(1));
     }
 
     /**
@@ -528,35 +530,344 @@ public interface WatchProgressQueryContract {
         assertEquals(List.of("E:" + olderEpisode, "M:" + movie), keys(continueWatching(ana)));
     }
 
+    // ------------------------------------------------------------------
+    // «Seguir viendo»: la tarjeta de cada serie (criterio de QA-4)
+    // ------------------------------------------------------------------
+
+    /** La única tarjeta de la serie en la lista (falla si hay cero o más de una). */
+    default EpisodeItem seriesCard(long userId, long seriesId) {
+        List<EpisodeItem> cards = continueWatching(userId).stream()
+                .filter(EpisodeItem.class::isInstance).map(EpisodeItem.class::cast)
+                .filter(e -> e.seriesId() == seriesId).toList();
+        assertEquals(1, cards.size(), "una tarjeta por serie: " + cards);
+        return cards.get(0);
+    }
+
     /**
-     * Una tarjeta por serie: de cada serie solo sale su episodio no terminado
-     * guardado más recientemente (los terminados no cuentan, aunque sean más
-     * recientes); cada serie ocupa su sitio según ese episodio.
+     * Una tarjeta por serie: es el <b>último episodio tocado</b> (el guardado
+     * más reciente), si está a medias, aunque haya otros a medias más
+     * antiguos; cada serie ocupa su sitio según ese episodio. Quitar solo ese
+     * episodio deja como último tocado el anterior; quitar la serie la saca.
      */
     @Test
-    default void deCadaSerieSoloSaleSuEpisodioAMedioVerMasReciente() {
+    default void laTarjetaDeUnaSerieEsSuUltimoEpisodioTocadoSiEstaAMedias() {
+        long ana = user("ana");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        long e2 = episode(serie, 1, 2);
+        long otherSerie = serie("Otra");
+        long o1 = episode(otherSerie, 1, 1);
+        long movie = movie("Pelicula");
+        saveEpisode(ana, e1, 10, 100, BASE);
+        saveEpisode(ana, e2, 20, 100, BASE.plusSeconds(2));
+        saveEpisode(ana, o1, 10, 100, BASE.plusSeconds(1));
+        saveMovie(ana, movie, 10, 100, BASE.plusSeconds(3));
+
+        assertEquals(List.of("M:" + movie, "E:" + e2, "E:" + o1), keys(continueWatching(ana)));
+        EpisodeItem card = seriesCard(ana, serie);
+        assertFalse(card.upNext());
+        assertEquals(new WatchProgress(20, 100, BASE.plusSeconds(2)), card.progress());
+        assertEquals(BASE.plusSeconds(2), card.updatedAt());
+
+        tx().execute(s -> progress().deleteEpisodeProgress(ana, e2));
+        assertEquals(List.of("M:" + movie, "E:" + o1, "E:" + e1), keys(continueWatching(ana)),
+                "al quitar solo el episodio, el último tocado pasa a ser el anterior");
+
+        tx().execute(s -> progress().deleteSeriesProgress(ana, serie));
+        assertEquals(List.of("M:" + movie, "E:" + o1), keys(continueWatching(ana)));
+    }
+
+    /**
+     * El ejemplo de QA-4: 1x01 a medias y después 1x02 terminado. El último
+     * tocado es el 1x02, así que la tarjeta es el <b>siguiente</b>, el 1x03
+     * ({@code upNext}), sin progreso porque nunca lo empezó, y ordenada por la
+     * fecha del 1x02. Lo mismo que dice la página de la serie («Ver T1:E3»),
+     * no el 1x01 a medias.
+     */
+    @Test
+    default void siElUltimoTocadoEstaTerminadoLaTarjetaEsElSiguiente() {
         long ana = user("ana");
         long serie = serie("Serie");
         long e1 = episode(serie, 1, 1);
         long e2 = episode(serie, 1, 2);
         long e3 = episode(serie, 1, 3);
-        long otherSerie = serie("Otra");
-        long o1 = episode(otherSerie, 1, 1);
+        saveEpisode(ana, e1, 10, 100, BASE);
+        saveEpisode(ana, e2, 95, 100, BASE.plusSeconds(5));
+
+        assertEquals(List.of("E:" + e3), keys(continueWatching(ana)));
+        assertEquals(new EpisodeItem(e3, 1, 3, "Episodio 1x3", serie, "Serie", "https://example.com/Serie.jpg",
+                null, true, BASE.plusSeconds(5)), seriesCard(ana, serie));
+        assertTrue(progress().findEpisodeProgress(ana, e1).isPresent(), "el 1x01 conserva su progreso");
+    }
+
+    /**
+     * El siguiente va por temporada y número (no por id ni por fecha de alta):
+     * tras el último de una temporada viene el primero de la siguiente aunque
+     * se diera de alta antes que otros; los episodios sin vídeo se saltan.
+     */
+    @Test
+    default void elSiguientePuedeSerDeOtraTemporadaYSaltaLosQueNoTienenVideo() {
+        long ana = user("ana");
+        long serie = serie("Serie");
+        long s2e1 = episode(serie, 2, 1);
+        long s1e2 = episode(serie, 1, 2);
+        episode(serie, 2, 2);
+        long s1e1 = episode(serie, 1, 1);
+        long other = serie("Otra");
+        long o1 = episode(other, 1, 1);
+        episode(other, 1, 2, null);
+        episode(other, 1, 3, null);
+        long o4 = episode(other, 2, 1);
+        saveEpisode(ana, s1e1, 100, 100, BASE);
+        saveEpisode(ana, s1e2, 100, 100, BASE.plusSeconds(1));
+        saveEpisode(ana, o1, 100, 100, BASE.plusSeconds(2));
+
+        assertEquals(List.of("E:" + o4, "E:" + s2e1), keys(continueWatching(ana)),
+                "el 1x02 sin más episodios en la temporada 1 pasa al 2x01 (dado de alta antes que el 1x01);"
+                        + " el 1x01 de la otra salta el 1x02 y el 1x03 sin vídeo y pasa al 2x01");
+        assertTrue(seriesCard(ana, serie).upNext());
+        assertTrue(seriesCard(ana, other).upNext());
+    }
+
+    /**
+     * Si el último tocado está terminado y no queda ningún episodio con vídeo
+     * después (el último de la serie, o los que quedan no tienen vídeo), la
+     * serie no sale: el usuario está al día. Si el administrador añade (o da
+     * vídeo a) un episodio posterior, vuelve a salir con ese.
+     */
+    @Test
+    default void siElUltimoTocadoEstaTerminadoYNoHaySiguienteLaSerieNoSale() {
+        long ana = user("ana");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        long e2 = episode(serie, 1, 2);
+        long e3 = episode(serie, 1, 3, null);
         long movie = movie("Pelicula");
         saveEpisode(ana, e1, 10, 100, BASE);
-        saveEpisode(ana, e2, 10, 100, BASE.plusSeconds(2));
-        saveEpisode(ana, e3, 100, 100, BASE.plusSeconds(4)); // terminado: no cuenta
-        saveEpisode(ana, o1, 10, 100, BASE.plusSeconds(1));
-        saveMovie(ana, movie, 10, 100, BASE.plusSeconds(3));
+        saveEpisode(ana, e2, 100, 100, BASE.plusSeconds(1));
+        saveMovie(ana, movie, 10, 100, BASE);
 
-        assertEquals(List.of("M:" + movie, "E:" + e2, "E:" + o1), keys(continueWatching(ana)));
+        assertEquals(List.of("M:" + movie), keys(continueWatching(ana)),
+                "ni el 1x01 a medias ni el 1x03 sin vídeo");
 
-        tx().execute(s -> progress().deleteEpisodeProgress(ana, e2));
-        assertEquals(List.of("M:" + movie, "E:" + o1, "E:" + e1), keys(continueWatching(ana)),
-                "al quitar solo el episodio, sale el anterior a medias de la misma serie");
+        jdbc().update("UPDATE episodes SET video_url = 'https://example.com/v.mp4' WHERE id = ?", e3);
 
-        tx().execute(s -> progress().deleteSeriesProgress(ana, serie));
-        assertEquals(List.of("M:" + movie, "E:" + o1), keys(continueWatching(ana)));
+        assertEquals(List.of("E:" + e3, "M:" + movie), keys(continueWatching(ana)));
+    }
+
+    /**
+     * El progreso del siguiente: si lo tiene a medias (lo empezó antes) la
+     * tarjeta lo muestra para reanudarlo; si lo tiene terminado (lo vio antes
+     * entero), progreso nulo, porque se vuelve a ver desde el principio. En los
+     * dos casos la tarjeta se ordena por la fecha del episodio terminado, no
+     * por la del siguiente.
+     */
+    @Test
+    default void elSiguienteLlevaSuProgresoSoloSiLoTieneAMedias() {
+        long ana = user("ana");
+        long halfSerie = serie("A medias");
+        long h1 = episode(halfSerie, 1, 1);
+        long h2 = episode(halfSerie, 1, 2);
+        long doneSerie = serie("Terminado");
+        long d1 = episode(doneSerie, 1, 1);
+        long d2 = episode(doneSerie, 1, 2);
+        long movie = movie("Pelicula");
+        saveEpisode(ana, h2, 30, 100, BASE);
+        saveEpisode(ana, h1, 100, 100, BASE.plusSeconds(10));
+        saveEpisode(ana, d2, 99, 100, BASE.plusSeconds(1));
+        saveEpisode(ana, d1, 96, 100, BASE.plusSeconds(8));
+        saveMovie(ana, movie, 10, 100, BASE.plusSeconds(9));
+
+        assertEquals(List.of("E:" + h2, "M:" + movie, "E:" + d2), keys(continueWatching(ana)));
+        EpisodeItem half = seriesCard(ana, halfSerie);
+        assertTrue(half.upNext());
+        assertEquals(new WatchProgress(30, 100, BASE), half.progress());
+        assertEquals(BASE.plusSeconds(10), half.updatedAt());
+        EpisodeItem done = seriesCard(ana, doneSerie);
+        assertTrue(done.upNext());
+        assertNull(done.progress());
+        assertEquals(BASE.plusSeconds(8), done.updatedAt());
+    }
+
+    /**
+     * Un episodio sin vídeo no cuenta como «tocado», aunque sea el guardado más
+     * reciente: si el usuario tiene a medias otro con vídeo, la tarjeta es
+     * ese; y si el último con vídeo está terminado, su siguiente (saltándose
+     * el que no tiene vídeo).
+     */
+    @Test
+    default void unEpisodioSinVideoNoCuentaComoUltimoTocado() {
+        long ana = user("ana");
+        long halfSerie = serie("A medias");
+        long h1 = episode(halfSerie, 1, 1);
+        long h2 = episode(halfSerie, 1, 2);
+        long doneSerie = serie("Terminado");
+        long d1 = episode(doneSerie, 1, 1);
+        long d2 = episode(doneSerie, 1, 2);
+        long d3 = episode(doneSerie, 1, 3);
+        saveEpisode(ana, h1, 10, 100, BASE);
+        saveEpisode(ana, h2, 100, 100, BASE.plusSeconds(5));
+        saveEpisode(ana, d1, 100, 100, BASE.plusSeconds(1));
+        saveEpisode(ana, d2, 10, 100, BASE.plusSeconds(6));
+        jdbc().update("UPDATE episodes SET video_url = NULL WHERE id IN (?, ?)", h2, d2);
+
+        assertEquals(List.of("E:" + d3, "E:" + h1), keys(continueWatching(ana)));
+        EpisodeItem half = seriesCard(ana, halfSerie);
+        assertFalse(half.upNext());
+        assertEquals(BASE, half.updatedAt());
+        EpisodeItem next = seriesCard(ana, doneSerie);
+        assertTrue(next.upNext());
+        assertNull(next.progress());
+        assertEquals(BASE.plusSeconds(1), next.updatedAt(), "la fecha es la del 1x01, el último tocado con vídeo");
+    }
+
+    /**
+     * Dos episodios de la misma serie guardados en el mismo instante: el
+     * último tocado es el de id mayor, también si es el terminado (la tarjeta
+     * pasa entonces a su siguiente). El resultado no cambia de una petición a
+     * otra.
+     */
+    @Test
+    default void elEmpateDelUltimoTocadoSeDeshacePorIdTambienSiEstaTerminado() {
+        long ana = user("ana");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        long e2 = episode(serie, 1, 2);
+        long e3 = episode(serie, 1, 3);
+        saveEpisode(ana, e1, 10, 100, BASE); // id menor (dado de alta antes), a medias
+        saveEpisode(ana, e2, 100, 100, BASE); // id mayor, terminado: gana el empate
+
+        assertEquals(List.of("E:" + e3), keys(continueWatching(ana)));
+        assertEquals(List.of("E:" + e3), keys(continueWatching(ana)), "la misma petición da lo mismo");
+    }
+
+    /**
+     * Revisión QA de QA-4: el progreso del <b>siguiente</b> ({@code LEFT JOIN
+     * np}) es solo el del propio usuario. Si otra persona tiene ese episodio a
+     * medias (o más reciente), la tarjeta de Ana sigue sin progreso y con su
+     * propia fecha; y la de Bea no se ve afectada por lo que hizo Ana. Protege
+     * el filtro {@code np.user_id = :userId}: sin él, Ana vería «Reanudar» con
+     * la posición de Bea.
+     */
+    @Test
+    default void elProgresoDelSiguienteEsSoloElDelPropioUsuario() {
+        long ana = user("ana");
+        long bea = user("bea");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        long e2 = episode(serie, 1, 2);
+        saveEpisode(ana, e1, 100, 100, BASE.plusSeconds(1));
+        saveEpisode(bea, e2, 30, 100, BASE.plusSeconds(5));
+
+        EpisodeItem anaCard = seriesCard(ana, serie);
+        assertEquals(e2, anaCard.episodeId());
+        assertTrue(anaCard.upNext());
+        assertNull(anaCard.progress(), "el progreso de Bea en el 1x02 no es de Ana");
+        assertEquals(BASE.plusSeconds(1), anaCard.updatedAt());
+
+        EpisodeItem beaCard = seriesCard(bea, serie);
+        assertEquals(e2, beaCard.episodeId());
+        assertFalse(beaCard.upNext(), "Bea no ha terminado nada: su tarjeta es su propio 1x02 a medias");
+        assertEquals(new WatchProgress(30, 100, BASE.plusSeconds(5)), beaCard.progress());
+    }
+
+    /**
+     * Revisión QA de QA-4: el umbral de «terminado» del siguiente es el mismo
+     * 95 % que el del último tocado ({@code notFinished("np")}): al 94,9 % la
+     * tarjeta lleva su progreso para reanudarlo; al 95 % exacto, progreso nulo
+     * (se verá desde el principio). Coincide con {@link WatchProgress#isFinished(int, int)}.
+     */
+    @Test
+    default void elUmbralDeTerminadoDelSiguienteEsElMismoNoventaYCincoPorCiento() {
+        long ana = user("ana");
+        long almostSerie = serie("Casi");
+        long a1 = episode(almostSerie, 1, 1);
+        long a2 = episode(almostSerie, 1, 2);
+        long doneSerie = serie("Al 95");
+        long b1 = episode(doneSerie, 1, 1);
+        long b2 = episode(doneSerie, 1, 2);
+        // El siguiente se guardó ANTES que el terminado (si no, sería él el último tocado).
+        saveEpisode(ana, a2, 949, 1000, BASE);
+        saveEpisode(ana, b2, 950, 1000, BASE.plusSeconds(1));
+        saveEpisode(ana, a1, 1000, 1000, BASE.plusSeconds(2));
+        saveEpisode(ana, b1, 1000, 1000, BASE.plusSeconds(3));
+
+        EpisodeItem almost = seriesCard(ana, almostSerie);
+        assertEquals(a2, almost.episodeId());
+        assertTrue(almost.upNext());
+        assertEquals(new WatchProgress(949, 1000, BASE), almost.progress());
+
+        EpisodeItem done = seriesCard(ana, doneSerie);
+        assertEquals(b2, done.episodeId());
+        assertTrue(done.upNext());
+        assertNull(done.progress(), "al 95 % el siguiente ya está visto: no hay nada que reanudar");
+    }
+
+    /**
+     * Revisión QA de QA-4: una serie de un solo episodio. A medias, la tarjeta
+     * es ese episodio; terminado, no hay siguiente y la serie sale de la fila
+     * (la fila de progreso se conserva).
+     */
+    @Test
+    default void unaSerieDeUnSoloEpisodioSaleAMediasYDesapareceAlTerminarla() {
+        long ana = user("ana");
+        long serie = serie("Miniserie");
+        long only = episode(serie, 1, 1);
+        saveEpisode(ana, only, 10, 100, BASE);
+
+        EpisodeItem card = seriesCard(ana, serie);
+        assertEquals(only, card.episodeId());
+        assertFalse(card.upNext());
+
+        saveEpisode(ana, only, 100, 100, BASE.plusSeconds(1));
+
+        assertEquals(List.of(), continueWatching(ana));
+        assertTrue(progress().findEpisodeProgress(ana, only).isPresent());
+    }
+
+    /**
+     * Revisión QA de QA-4: el límite se aplica <b>después</b> de quitar las
+     * series terminadas sin siguiente. Una serie al día más reciente no puede
+     * ocupar el único hueco y dejar la fila vacía (o con una tarjeta de menos).
+     */
+    @Test
+    default void elLimiteNoLoGastanLasSeriesQueNoSalen() {
+        long ana = user("ana");
+        long movie = movie("Pelicula");
+        long serie = serie("Al dia");
+        long last = episode(serie, 1, 1);
+        saveMovie(ana, movie, 10, 100, BASE);
+        saveEpisode(ana, last, 100, 100, BASE.plusSeconds(5));
+
+        assertEquals(List.of("M:" + movie), keys(progress().findContinueWatching(ana, 1)));
+    }
+
+    /**
+     * Revisión QA de QA-4: si el administrador <b>borra</b> episodios, la
+     * tarjeta se recalcula con lo que queda (las cascadas de la {@code V14} se
+     * llevan su progreso): borrado el último tocado, manda el anterior; borrado
+     * el siguiente previsto, pasa al que venga después.
+     */
+    @Test
+    default void borrarEpisodiosRecalculaLaTarjetaConLosQueQuedan() {
+        long ana = user("ana");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        long e2 = episode(serie, 1, 2);
+        long e3 = episode(serie, 1, 3);
+        long e4 = episode(serie, 1, 4);
+        saveEpisode(ana, e1, 100, 100, BASE);
+        saveEpisode(ana, e3, 50, 100, BASE.plusSeconds(1));
+
+        assertEquals(List.of("E:" + e3), keys(continueWatching(ana)), "el último tocado, a medias");
+
+        jdbc().update("DELETE FROM episodes WHERE id = ?", e3);
+        assertEquals(List.of("E:" + e2), keys(continueWatching(ana)),
+                "sin el 1x03, el último tocado es el 1x01 terminado: su siguiente es el 1x02");
+        assertEquals(BASE, seriesCard(ana, serie).updatedAt());
+
+        jdbc().update("DELETE FROM episodes WHERE id = ?", e2);
+        assertEquals(List.of("E:" + e4), keys(continueWatching(ana)), "y sin el 1x02, el 1x04");
     }
 
     /**
