@@ -108,7 +108,9 @@ public class ContinueWatchingController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "Quita una película de «Seguir viendo»", description = "Borra el progreso del usuario "
             + "autenticado en la película: deja de salir en «Seguir viendo» y, al volver a abrirla, empieza desde "
-            + "el principio. Es idempotente: si no había progreso, o la película no existe, también responde 204.")
+            + "el principio. Como el historial y las cifras del perfil salen de ese mismo progreso, también deja "
+            + "de salir en GET /api/users/me/watch-history y de contar en GET /api/users/me/watch-stats. "
+            + "Es idempotente: si no había progreso, o la película no existe, también responde 204.")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "La película ya no está en «Seguir viendo»"),
             @ApiResponse(responseCode = "400", description = INVALID_ID_DESCRIPTION),
@@ -131,7 +133,9 @@ public class ContinueWatchingController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "Quita una serie de «Seguir viendo»", description = "Borra el progreso del usuario "
             + "autenticado en todos los episodios de la serie, para que la tarjeta no la ocupe otro episodio con "
-            + "progreso ni el siguiente a uno terminado (también quita una tarjeta con upNext true). "
+            + "progreso ni el siguiente a uno terminado (también quita una tarjeta con upNext true). Como el "
+            + "historial y las cifras del perfil salen de ese mismo progreso, la serie también deja de salir en "
+            + "GET /api/users/me/watch-history y sus episodios de contar en GET /api/users/me/watch-stats. "
             + "Es idempotente: si no había progreso, o la serie no existe o no tiene episodios, también "
             + "responde 204.")
     @ApiResponses({

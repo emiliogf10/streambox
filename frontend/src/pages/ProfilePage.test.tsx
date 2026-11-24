@@ -44,6 +44,10 @@ import {
   noContentResponse,
   renderWithProviders,
   routeFetch,
+  WATCH_HISTORY,
+  WATCH_STATS,
+  makeWatchHistoryItem,
+  makeWatchStats,
 } from '../test/helpers';
 import type { Movie, Series, User } from '../lib/types';
 import { Navbar } from '../components/Navbar';
@@ -336,12 +340,16 @@ describe('ProfilePage: con la lista llena', () => {
     expect(within(preview).getByRole('link', { name: 'Ver toda mi lista' })).toHaveAttribute('href', '/favorites');
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
       'Resumen de tu lista',
+      // Las cifras de lo visto, junto a las de la lista (ver `WatchStatsSummary.test.tsx`).
+      'Resumen de lo que has visto',
       'Cuenta',
       'Sesiones',
       'Géneros que más guardas',
       // «Tus gustos» (los géneros favoritos que elige el usuario), a todo el ancho bajo las tarjetas.
       'Tus gustos',
       'De tu lista',
+      // El historial de visionado (ver `WatchHistorySection.test.tsx`).
+      'Vistos recientemente',
       // «Te gusta» va al final: son los «Me gusta» (otra lista, ver `LikedTitlesSection.test.tsx`).
       'Te gusta',
     ]);
@@ -1040,5 +1048,50 @@ describe('ProfilePage: cerrar sesión en todos los dispositivos', () => {
 
     expect(await within(dialog).findByText(LOGOUT_ALL_FAILED_NETWORK)).toBeInTheDocument();
     expectSessionStillOpen();
+  });
+});
+
+describe('ProfilePage: lo visto', () => {
+  it.each(['USER', 'ADMIN'] as const)(
+    '%s: las cifras de lo visto junto a las de la lista y «Vistos recientemente» con su tarjeta',
+    async (role) => {
+      renderProfile({
+        user: makeUser({ username: 'ana', role }),
+        movies: [makeMovie({ id: 1, title: 'Dune' })],
+        extra: {
+          [WATCH_STATS]: () => jsonResponse(makeWatchStats({ finishedMovies: 2, finishedEpisodes: 5, watchedSeconds: 45_000 })),
+          [WATCH_HISTORY]: () => jsonResponse([makeWatchHistoryItem({ id: 4, title: 'Arrival', finished: true })]),
+        },
+      });
+      await findName('ana');
+
+      const stats = await screen.findByRole('region', { name: 'Resumen de lo que has visto' });
+      expect(await within(stats).findByText('Películas vistas')).toBeInTheDocument();
+      expect(valueOf('Películas vistas')).toHaveTextContent('2');
+      expect(valueOf('Episodios vistos')).toHaveTextContent('5');
+      expect(within(valueOf('Tiempo visto (aprox.)') as HTMLElement).getByText('12 h')).toBeInTheDocument();
+      // Las de la lista siguen ahí, aparte.
+      expect(valueOf('Película en mi lista')).toHaveTextContent('1');
+
+      const history = section('Vistos recientemente');
+      expect(await within(history).findByRole('link', { name: 'Arrival Visto' })).toHaveAttribute('href', '/peliculas/4');
+    },
+  );
+
+  it('si fallan las cifras de lo visto, solo esa franja lo dice: la lista y el historial siguen', async () => {
+    renderProfile({
+      movies: [makeMovie({ id: 1, title: 'Dune' })],
+      extra: {
+        [WATCH_STATS]: () => errorResponse(500, 'INTERNAL_ERROR', 'x'),
+        [WATCH_HISTORY]: () => jsonResponse([makeWatchHistoryItem({ id: 4, title: 'Arrival' })]),
+      },
+    });
+    await findName('ana');
+
+    const stats = section('Resumen de lo que has visto');
+    expect(await within(stats).findByRole('alert')).toHaveTextContent('No se pudieron cargar las cifras de lo que has visto.');
+    expect(within(stats).queryByRole('term')).not.toBeInTheDocument();
+    expect(await within(section('Vistos recientemente')).findByRole('link', { name: /^Arrival/ })).toBeInTheDocument();
+    expect(valueOf('Película en mi lista')).toHaveTextContent('1');
   });
 });

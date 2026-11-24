@@ -204,6 +204,57 @@ export interface ContinueWatchingItem {
   updatedAt: string;
 }
 
+/**
+ * Una entrada del historial de visionado (`GET /api/users/me/watch-history`),
+ * de la más reciente a la más antigua.
+ *
+ * - **Película:** una entrada por película, terminada o no.
+ * - **Serie:** una sola entrada por serie, la de su **último episodio tocado**
+ *   (`id`/`title` son los del episodio; `seriesId`, `seriesTitle` e `imageUrl`,
+ *   los de la serie).
+ *
+ * A diferencia de «Seguir viendo», es historial: salen también lo terminado y
+ * los títulos que ya no tienen vídeo.
+ */
+export interface WatchHistoryItem {
+  type: 'MOVIE' | 'EPISODE';
+  /** Id de la película o del EPISODIO (no de la serie: esa va en `seriesId`). */
+  id: number;
+  /** Título de la película o del episodio. */
+  title: string;
+  /** Portada de la película o, en un episodio, la de su serie. */
+  imageUrl: string;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  seriesId: number | null;
+  seriesTitle: string | null;
+  /** Hasta dónde llegó (segundos enteros). */
+  positionSeconds: number;
+  /** Duración del vídeo de ese progreso (segundos enteros). */
+  durationSeconds: number;
+  /** `true` si lo vio casi entero (≥ 95 %, regla del servidor). */
+  finished: boolean;
+  /** Último guardado (ISO-8601, UTC): ordena el historial. */
+  updatedAt: string;
+}
+
+/**
+ * Cifras de lo visto (`GET /api/users/me/watch-stats`).
+ *
+ * `watchedSeconds` es una **estimación**: por cada título suma la duración si lo
+ * terminó y la posición a la que llegó si no. Como solo se guarda el último
+ * punto de cada título, no cuenta las veces que se vuelve a ver ni lo que se
+ * rebobina: la interfaz lo presenta como aproximado.
+ */
+export interface WatchStats {
+  /** Películas terminadas (≥ 95 %). */
+  finishedMovies: number;
+  /** Episodios terminados (≥ 95 %). */
+  finishedEpisodes: number;
+  /** Tiempo visto aproximado, en segundos. */
+  watchedSeconds: number;
+}
+
 /** Página de resultados con los metadatos de paginación (`MoviePageResponse`, `SeriesPageResponse`). */
 export interface PageResponse<T> {
   content: T[];

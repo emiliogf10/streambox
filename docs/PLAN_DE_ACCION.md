@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **4390** con Docker (2026-11-22) | Sin omitidos ni fallos (tras QA-4) |
-| Frontend (Vitest) | **1999** | |
-| E2E (Playwright) | **264** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
+| Backend (JUnit) | **4390** con Docker (2026-11-22) | Sin omitidos ni fallos (tras QA-4). Tras el historial (2026-11-24): **4226 sin Docker** (386 de PostgreSQL omitidos), 0 fallos; **falta la pasada con Docker** |
+| Frontend (Vitest) | **2045** | |
+| E2E (Playwright) | **265** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -329,7 +329,11 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   1. **Recomendado para empezar: elegir entre avatares predefinidos** (como los perfiles de Netflix): un conjunto de iconos o ilustraciones propias en `public/avatars/` (licencia libre y comprobada), y el usuario elige uno en «Editar perfil». En la BD solo se guarda la **clave** del avatar (columna `users.avatar` con una migración nueva y un `CHECK` o lista blanca en el backend), vía `PATCH /api/users/me` (id del token, sin IDOR). Sin subida de archivos: no hay que reactivar multipart, ni almacenar imágenes, ni validar contenido; la CSP no cambia.
   2. **Más adelante, subir una imagen propia:** exige reactivar multipart **solo** para esa ruta y con límite bajo (cap. 13 del manual), validar el contenido de verdad (tipo real por los primeros bytes, no por la extensión; dimensiones; reescribir la imagen para quitar EXIF con la ubicación y cualquier contenido incrustado), guardarla fuera de la BD (Supabase Storage o similar, con URLs firmadas o un bucket público solo de avatares), un límite por usuario y la CSP de `img-src` para ese origen. Es bastante más superficie de ataque: mejor cuando haya despliegue real.
   - En los dos casos: el avatar se ve en `/perfil`, en el menú de usuario de la barra y (si se añade) en cualquier lista de usuarios del panel; respaldo con la inicial si falta; texto alternativo correcto; la caché de TanStack se invalida al cambiarlo.
-- **Perfil: historial y suscripción** (2026-10-07) — *Opcional · ALTA*. La captura de referencia mostraba títulos vistos, horas, vistos recientemente y suscripción. No hay nada de eso en el modelo de datos: solo tendría sentido si se añade historial de reproducción (tabla nueva + endpoint).
+- ✅ ~~**Perfil: historial**~~ — **hecho el 2026-11-24** (ver el [historial](#4-historial-de-trabajos)): «Vistos recientemente» y cifras de lo visto, a partir del progreso del reproductor. La **suscripción** sigue sin sentido (no hay planes). Pendiente:
+  - **Ejecutar con Docker** `.\mvnw.cmd test "-Dtest=Postgres*"`: los 10 casos nuevos de `WatchProgressQueryContract` (historial y cifras) solo se han probado en H2 (Docker Desktop no arrancaba el 2026-11-24). El CI los ejecuta en cada push.
+  - **Decisión del autor:** volver a ver algo terminado lo «desmarca» (solo se guarda el último punto: si reabres una película vista y paras en el minuto 2, deja de contar como vista y el tiempo baja). Arreglarlo exige guardar aparte que se terminó (columna nueva, migración; `database` + `backend`). Hoy está documentado (cap. 15 ter.2 del manual).
+  - Opcional (`backend` + `frontend`): dos títulos con el mismo nombre darían dos enlaces con el mismo nombre accesible en «Vistos recientemente»; añadir el año a la respuesta y al nombre.
+  - Opcional (`frontend`): a 375 px «Quedan 1 h 40 min» se parte en dos líneas y los títulos largos se cortan sin forma de leerlos enteros a la vista.
 
 ### 2.10 Tests, herramientas y notas informativas
 
@@ -485,6 +489,16 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-24 · Historial en el perfil y revisión de las PR de Dependabot
+
+- **PR #38 (npm, Playwright 1.65.1 con Chromium 159):** falló un E2E en el CI (`likes.spec.ts`). La traza mostraba el navegador del CI congelado durante el clic (ni una imagen nueva en 90 s); con las mismas versiones en local, el test 3/3 y la suite completa 263/0. Diagnóstico: bloqueo puntual del CI. Recomendado: `@dependabot rebase` y, tras fusionar, `npm ci` + `npx playwright install chromium`. #36 y #37, en verde.
+- **Qué:** en `/perfil`, las cifras de lo visto («Películas vistas», «Episodios vistos», «Tiempo visto (aprox.)») y «Vistos recientemente» (hasta 12, una entrada por película y por serie, terminadas o no; enlazan a la página del título). Manual: cap. 15 ter.2 y 20.10.
+- **`database`:** `findWatchHistory` (`UNION ALL` + `ROW_NUMBER`, registro `WatchHistoryItem`) y `getWatchStats` (un agregado por tabla, suma en `BIGINT`) en `WatchProgressRepository`. Sin migración: bastan los índices de la V14.
+- **`backend`:** `WatchHistoryController` con `GET /api/users/me/watch-history?limit=` (1–24, por defecto 12) y `GET /api/users/me/watch-stats`; DTOs, OpenAPI y Postman (Newman 166/166).
+- **`frontend`:** `WatchStatsSummary` (franja propia junto a la de «Mi lista»; nunca un «0» falso mientras carga), `WatchHistorySection`, `lib/watchHistory.ts` (`formatWatchedTime`), claves bajo `progress` (se invalidan al guardar y al quitar). **Decisión del orquestador:** «Quitar de Seguir viendo» borra la fila de progreso, así que también lo quita del historial y de las cifras; el aviso ahora lo dice («… ni en lo que has visto…»).
+- **Revisión de `qa`:** sin fallos de producción; 19 tests de casos límite (`WatchHistoryQaEdgeCasesIntegrationTest`) y comprobación en el navegador por rol y a 375/768/1280/1920. Tres incidencias bajas, en 2.9. **Además**, arregló una carrera en `movies.spec.ts:426` que encontró el orquestador: tras bajar al final en móvil, la barra está apartada y el clic en «Inicio» caía durante su transición de vuelta (ahora `revealMobileNavbar` en `e2e/support/fixtures.ts`; 40/40 con 8 workers).
+- **Tests:** backend **4226 sin Docker** (386 omitidos; antes 4390 con Docker), Vitest de 1999 a **2045**, E2E de 264 a **265** + 24 omitidos. Verificado por el orquestador: E2E completo 265/0, build y lint 0, tipos de los E2E 0.
 
 ### 2026-11-22 · QA-4: misma propuesta en «Seguir viendo» y en la página de la serie
 

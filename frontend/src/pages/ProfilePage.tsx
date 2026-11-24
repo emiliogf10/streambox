@@ -16,6 +16,9 @@ import { FavoriteGenresSection } from '../components/profile/FavoriteGenresSecti
 import { LikedTitlesSection } from '../components/profile/LikedTitlesSection';
 import { ProfileCard } from '../components/profile/ProfileCard';
 import { SessionsCard } from '../components/profile/SessionsCard';
+import { Stat, STAT_STRIP_CLASS } from '../components/profile/Stat';
+import { WatchHistorySection } from '../components/profile/WatchHistorySection';
+import { WatchStatsSummary } from '../components/profile/WatchStatsSummary';
 import { useAuth } from '../context/AuthContext';
 import { useFavorites } from '../context/FavoritesContext';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -86,32 +89,6 @@ function ProfileHeader({ user, isAdmin, onLogout, isLoggingOut }: ProfileHeaderP
           {isLoggingOut ? 'Cerrando sesión...' : 'Cerrar sesión'}
         </Button>
       </div>
-    </div>
-  );
-}
-
-/** Propiedades de {@link Stat}. */
-interface StatProps {
-  value: number;
-  label: string;
-}
-
-/**
- * Una estadística: número y etiqueta. Es un grupo `dt`/`dd` de una lista de
- * descripción (la etiqueta nombra el dato); `flex-col-reverse` la pone DEBAJO
- * del número a la vista sin cambiar el orden de lectura (etiqueta y luego valor).
- *
- * Las tres van en UNA franja de tres columnas a cualquier ancho, separadas por
- * una línea (D-6). Antes eran tres tarjetas que en móvil se apilaban a todo el
- * ancho: unos 330 px de pantalla para tres números, empujando lo útil fuera de
- * la vista. En móvil el número baja a `text-2xl` y la etiqueta a `text-xs` (se
- * parte en dos líneas si hace falta); desde `sm`, tamaño de escritorio.
- */
-function Stat({ value, label }: StatProps) {
-  return (
-    <div className="flex min-w-0 flex-col-reverse justify-end gap-1 px-3 py-3 sm:px-5 sm:py-4">
-      <dt className="text-xs leading-snug text-muted sm:text-sm">{label}</dt>
-      <dd className="text-2xl font-bold tracking-tight text-white tabular-nums sm:text-4xl">{value}</dd>
     </div>
   );
 }
@@ -266,14 +243,29 @@ function ListPreview({ movies, series }: ListPreviewProps) {
  * Página «Mi perfil» (`/perfil`): quién eres y qué has guardado.
  *
  * **De dónde sale cada dato (no hay nada inventado).** El usuario viene de
- * `GET /api/users/me` (`AuthContext`), las estadísticas, «Géneros que más guardas» y «De tu
+ * `GET /api/users/me` (`AuthContext`), las cifras de la lista, «Géneros que más guardas» y «De tu
  * lista» de la lista compartida de favoritos (`FavoritesContext`, que `AppShell`
  * ya cargó), «Tus gustos» de los géneros favoritos (`useFavoriteGenres`) y «Te
  * gusta» de los «Me gusta» (`useLikes`). Las escrituras son las de «Editar
  * perfil» (nombre, icono de perfil y contraseña en {@link AccountCard}; cerrar
  * sesión en todos los dispositivos en {@link SessionsCard}) y las de «Tus
- * gustos» (elegir, editar y quitar los géneros favoritos, {@link FavoriteGenresSection}). Por eso no hay «títulos vistos», «horas», suscripción ni
- * preferencias de idioma: no existen ni historial de reproducción ni planes.
+ * gustos» (elegir, editar y quitar los géneros favoritos, {@link FavoriteGenresSection}).
+ * Lo visto sale del progreso que guarda el reproductor integrado: las cifras
+ * ({@link WatchStatsSummary}, `GET /api/users/me/watch-stats`) y «Vistos
+ * recientemente» ({@link WatchHistorySection}, `GET /api/users/me/watch-history`).
+ * No hay suscripción ni preferencias de idioma: la aplicación no tiene planes
+ * ni idiomas que elegir.
+ *
+ * **Cifras.** Dos franjas de tres: las de «Mi lista» y las de lo visto
+ * (películas y episodios terminados y tiempo visto, «aprox.» porque el servidor
+ * solo guarda el último punto de cada título). Cada una con sus estados: la de
+ * la lista solo aparece con la lista cargada; la de lo visto tiene silueta y
+ * error con «Reintentar» propios. Ninguna enseña un «0» mientras carga.
+ *
+ * **«Vistos recientemente»** ({@link WatchHistorySection}), entre «De tu lista»
+ * y «Te gusta»: lo último que viste aquí, terminado o a medias, cada tarjeta
+ * enlazada a la página de su título (no al reproductor: para eso está «Seguir
+ * viendo» en el inicio).
  *
  * **«Tus gustos»** ({@link FavoriteGenresSection}), a todo el ancho bajo las
  * tarjetas (el selector de géneros lo necesita): los géneros que el usuario
@@ -283,8 +275,9 @@ function ListPreview({ movies, series }: ListPreviewProps) {
  * **«Te gusta»** ({@link LikedTitlesSection}), al final: lo que vio y le gustó
  * (distinto de «Mi lista», que es lo que quiere ver), con sus propios estados.
  *
- * **Estados.** Cuatro fuentes independientes, cada una con los tres estados (las
- * de «Tus gustos» y «Te gusta», dentro de su sección):
+ * **Estados.** Seis fuentes independientes, cada una con los tres estados (las
+ * de «Tus gustos», «Te gusta», las cifras de lo visto y «Vistos recientemente»,
+ * dentro de su sección):
  * - El usuario (cabecera y «Cuenta»): cargando o error con «Reintentar»
  *   (`refreshUser`). El `<h1>` «Mi perfil» está siempre; con el usuario cargado
  *   pasa a ser su nombre.
@@ -332,18 +325,22 @@ export function ProfilePage() {
       <>
         <ProfileHeader user={user} isAdmin={isAdmin} onLogout={() => void logout()} isLoggingOut={isLoggingOut} />
 
-        {status === 'ready' && (
-          <section aria-labelledby={summaryId} className="mb-4">
-            <h2 id={summaryId} className="sr-only">
-              Resumen de tu lista
-            </h2>
-            <dl className="grid grid-cols-3 divide-x divide-line rounded-xl border border-line bg-surface">
-              <Stat value={movies.length} label={movies.length === 1 ? 'Película en mi lista' : 'Películas en mi lista'} />
-              <Stat value={series.length} label={series.length === 1 ? 'Serie en mi lista' : 'Series en mi lista'} />
-              <Stat value={genres.length} label={genres.length === 1 ? 'Género distinto' : 'Géneros distintos'} />
-            </dl>
-          </section>
-        )}
+        {/* Dos franjas de cifras: una al lado de la otra desde `lg` (aprovechan el ancho) y apiladas por debajo. */}
+        <div className="mb-4 grid items-start gap-4 lg:grid-cols-2">
+          {status === 'ready' && (
+            <section aria-labelledby={summaryId}>
+              <h2 id={summaryId} className="sr-only">
+                Resumen de tu lista
+              </h2>
+              <dl className={STAT_STRIP_CLASS}>
+                <Stat value={movies.length} label={movies.length === 1 ? 'Película en mi lista' : 'Películas en mi lista'} />
+                <Stat value={series.length} label={series.length === 1 ? 'Serie en mi lista' : 'Series en mi lista'} />
+                <Stat value={genres.length} label={genres.length === 1 ? 'Género distinto' : 'Géneros distintos'} />
+              </dl>
+            </section>
+          )}
+          <WatchStatsSummary />
+        </div>
 
         <div className="grid items-start gap-4 lg:grid-cols-2">
           <div className="flex flex-col gap-4">
@@ -367,6 +364,8 @@ export function ProfilePage() {
         {status === 'ready' && totalTitles > 0 && (
           <ListPreview movies={movies} series={series} />
         )}
+
+        <WatchHistorySection />
 
         <LikedTitlesSection />
       </>

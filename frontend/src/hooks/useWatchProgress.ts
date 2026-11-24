@@ -5,7 +5,13 @@ import { useToast } from '../context/ToastContext';
 import { apiFetch, currentSessionKey, getErrorMessage } from '../lib/api';
 import { loadStatusOf } from '../lib/queryClient';
 import { queryKeys } from '../lib/queryKeys';
-import type { ContinueWatchingItem, EpisodeProgress, WatchProgress } from '../lib/types';
+import type {
+  ContinueWatchingItem,
+  EpisodeProgress,
+  WatchHistoryItem,
+  WatchProgress,
+  WatchStats,
+} from '../lib/types';
 
 /**
  * Cuántos elementos pide la fila «Seguir viendo». Doce, como las demás filas de
@@ -119,6 +125,79 @@ export function useContinueWatching(): ContinueWatchingValue {
   };
 }
 
+/**
+ * Cuántas entradas pide «Vistos recientemente» del perfil. Doce, como «Seguir
+ * viendo» y el tope de «Te gusta»: son filas completas en la rejilla compacta del
+ * perfil (cuatro de 3 en el móvil, dos de 6 desde `md`) y el perfil no se
+ * convierte en un catálogo. El servidor admite de 1 a 24.
+ */
+export const WATCH_HISTORY_LIMIT = 12;
+
+/** Lo que devuelve {@link useWatchHistory}. */
+export interface WatchHistoryValue {
+  items: WatchHistoryItem[];
+  status: 'loading' | 'ready' | 'error';
+  errorMessage: string;
+  reload: () => void;
+}
+
+const NO_HISTORY: WatchHistoryItem[] = [];
+
+/**
+ * Historial de visionado del usuario de la sesión
+ * (`GET /api/users/me/watch-history?limit=12`): lo más reciente primero, una
+ * entrada por película y una por serie, terminado o no. Lo enseña «Vistos
+ * recientemente» del perfil. Cuelga de la raíz `progress`: lo descartan el
+ * guardado del reproductor, quitar de «Seguir viendo», los cambios del catálogo
+ * y el `queryClient.clear()` de cada cambio de sesión.
+ */
+export function useWatchHistory(): WatchHistoryValue {
+  const query = useQuery({
+    queryKey: queryKeys.progress.history(WATCH_HISTORY_LIMIT),
+    queryFn: ({ signal }) =>
+      apiFetch<WatchHistoryItem[]>('/users/me/watch-history', { params: { limit: WATCH_HISTORY_LIMIT }, signal }),
+  });
+  const status = loadStatusOf(query);
+  const { refetch } = query;
+  const reload = useCallback(() => void refetch(), [refetch]);
+  return {
+    items: query.data ?? NO_HISTORY,
+    status,
+    errorMessage: status === 'error' ? getErrorMessage(query.error) : '',
+    reload,
+  };
+}
+
+/** Lo que devuelve {@link useWatchStats}. */
+export interface WatchStatsValue {
+  /** Las cifras, o `null` mientras cargan o si fallan (nunca unos ceros inventados). */
+  stats: WatchStats | null;
+  status: 'loading' | 'ready' | 'error';
+  errorMessage: string;
+  reload: () => void;
+}
+
+/**
+ * Cifras de lo visto del usuario de la sesión (`GET /api/users/me/watch-stats`):
+ * películas y episodios terminados y tiempo visto aproximado. Misma raíz y
+ * mismas invalidaciones que {@link useWatchHistory}.
+ */
+export function useWatchStats(): WatchStatsValue {
+  const query = useQuery({
+    queryKey: queryKeys.progress.stats,
+    queryFn: ({ signal }) => apiFetch<WatchStats>('/users/me/watch-stats', { signal }),
+  });
+  const status = loadStatusOf(query);
+  const { refetch } = query;
+  const reload = useCallback(() => void refetch(), [refetch]);
+  return {
+    stats: query.data ?? null,
+    status,
+    errorMessage: status === 'error' ? getErrorMessage(query.error) : '',
+    reload,
+  };
+}
+
 /** Nombre con el que se habla del elemento en los avisos: la película, o la serie (no el episodio). */
 export function continueWatchingName(item: ContinueWatchingItem): string {
   return item.type === 'EPISODE' && item.seriesTitle ? item.seriesTitle : item.title;
@@ -132,14 +211,17 @@ function sameItem(a: ContinueWatchingItem, b: ContinueWatchingItem): boolean {
 /**
  * Descarta en la caché todo lo que sabía del progreso del título de `item`
  * (la película, o la serie y todos sus episodios), para que su página deje de
- * decir «Reanudar». Se cancela antes lo que estuviera en vuelo: una lectura
- * empezada antes del `DELETE` traería el progreso borrado.
+ * decir «Reanudar», y el historial y las cifras del perfil, porque el servidor
+ * ha borrado ese progreso (el título sale de «Vistos recientemente» y deja de
+ * sumar). Se cancela antes lo que estuviera en vuelo: una lectura empezada
+ * antes del `DELETE` traería el progreso borrado.
  */
 async function forgetTitleProgress(queryClient: QueryClient, item: ContinueWatchingItem): Promise<void> {
-  const keys =
+  const titleKeys =
     item.type === 'MOVIE'
       ? [queryKeys.progress.movie(item.id)]
       : [queryKeys.progress.series(item.seriesId ?? 0), queryKeys.progress.episodesAll];
+  const keys = [...titleKeys, queryKeys.progress.historyAll, queryKeys.progress.stats];
   await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
   await Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
 }
@@ -192,7 +274,7 @@ export function useRemoveFromContinueWatching(): (item: ContinueWatchingItem) =>
       if (currentSessionKey() !== sessionKey) return false;
       void forgetTitleProgress(queryClient, item);
       void queryClient.invalidateQueries({ queryKey: queryKeys.progress.continueWatchingAll });
-      toast.success(`«${name}» ya no está en Seguir viendo. Si vuelves a verla, empezará desde el principio.`);
+      toast.success(`«${name}» ya no está en Seguir viendo ni en lo que has visto. Si vuelves a verla, empezará desde el principio.`);
       return true;
     },
     [queryClient, toast],

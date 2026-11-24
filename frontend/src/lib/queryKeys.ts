@@ -131,8 +131,12 @@ export const queryKeys = {
    * - `movie(id)` / `episode(id)`: el de un título (`null` = sin progreso, el 204).
    * - `series(id)`: el de los episodios de una serie (la página de la serie).
    * - `continueWatching(limit)`: la fila de la portada.
+   * - `history(limit)`: «Vistos recientemente» del perfil (`/watch-history`).
+   * - `stats`: las cifras de lo visto del perfil (`/watch-stats`).
    * El guardado (`useProgressSaver`) escribe el del título que se está viendo y
-   * descarta los otros dos; quitar de «Seguir viendo» descarta lo de ese título.
+   * descarta «Seguir viendo», el historial, las cifras y el progreso de la serie;
+   * quitar de «Seguir viendo» descarta lo de ese título, el historial y las cifras
+   * (el servidor ha borrado su progreso).
    */
   progress: {
     all: ['progress'] as const,
@@ -142,6 +146,9 @@ export const queryKeys = {
     series: (id: number) => ['progress', 'series', id] as const,
     continueWatchingAll: ['progress', 'continueWatching'] as const,
     continueWatching: (limit: number) => ['progress', 'continueWatching', { limit }] as const,
+    historyAll: ['progress', 'history'] as const,
+    history: (limit: number) => ['progress', 'history', { limit }] as const,
+    stats: ['progress', 'stats'] as const,
   },
   /**
    * Un listado paginado del catálogo (`usePagedCatalog`): portada, `/peliculas`
@@ -195,10 +202,11 @@ const PERSONAL_COPIES: QueryKey[] = [
  * panel: la pestaña Géneros las actualiza con la respuesta del servidor (ver
  * `AdminGenresPage`); sí las de los filtros, que llevan los nombres.
  *
- * El **progreso** (`progress`, con «Seguir viendo») depende de las películas y
- * de los episodios, no de los géneros: «Seguir viendo» copia el título y la
- * portada, un título que pierde el vídeo sale de la fila y uno borrado se lleva
- * su progreso (cascada en la base de datos).
+ * El **progreso** (`progress`, con «Seguir viendo», el historial y las cifras)
+ * depende de las películas y de los episodios, no de los géneros: «Seguir
+ * viendo» y el historial copian el título y la portada, un título que pierde el
+ * vídeo sale de la fila y uno borrado se lleva su progreso (cascada en la base
+ * de datos), así que también cambian el historial y las cifras.
  *
  * @param change qué tipo de dato se ha escrito
  */

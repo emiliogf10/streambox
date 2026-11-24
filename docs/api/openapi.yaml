@@ -2265,6 +2265,82 @@ paths:
       security:
       - cookieAuth: []
       - bearerAuth: []
+  /api/users/me/watch-stats:
+    get:
+      tags:
+      - watch-history-controller
+      summary: Obtiene mis cifras de visionado
+      description: 'Devuelve cuántas películas (finishedMovies) y cuántos episodios (finishedEpisodes) ha terminado el usuario
+        autenticado (95 % o más de la duración; cada episodio cuenta por separado) y el tiempo visto en segundos (watchedSeconds).
+        Ese tiempo es una estimación: solo se guarda el último punto de cada título, así que suma la duración de lo terminado
+        y la posición de lo que está a medias, sin contar lo vuelto a ver. Cuenta todo el progreso, tenga hoy vídeo el título
+        o no; lo quitado de «Seguir viendo» o borrado del catálogo deja de contar. Sin progreso, las tres cifras son 0.'
+      operationId: getWatchStats
+      responses:
+        '200':
+          description: Cifras obtenidas correctamente
+          content:
+            '*/*':
+              schema:
+                $ref: '#/components/schemas/WatchStatsResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
+  /api/users/me/watch-history:
+    get:
+      tags:
+      - watch-history-controller
+      summary: Obtiene mi historial de visionado
+      description: 'Devuelve, del guardado más reciente al más antiguo (a igual fecha, primero las películas y después el
+        id mayor), lo que el usuario autenticado ha empezado a ver: una entrada por película y una sola por serie, la de su
+        último episodio tocado, con el progreso de ese episodio (nunca propone el siguiente). A diferencia de «Seguir viendo»,
+        incluye lo terminado (finished true, 95 % o más de la duración) y los títulos que ya no tienen vídeo. Cada entrada
+        lleva type (MOVIE o EPISODE): en EPISODE, id y title son los del episodio e imageUrl, seriesId y seriesTitle los de
+        la serie; en MOVIE, seasonNumber, episodeNumber, seriesId y seriesTitle van a null. No hay una tabla de historial
+        aparte: sale del progreso guardado, así que quitar un título de «Seguir viendo» (DELETE /api/users/me/continue-watching/...)
+        o borrarlo del catálogo también lo quita de aquí.'
+      operationId: getWatchHistory
+      parameters:
+      - name: limit
+        in: query
+        description: 'Número máximo de entradas: de 1 a 24 (por defecto, 12)'
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 12
+          maximum: 24
+          minimum: 1
+      responses:
+        '200':
+          description: Historial obtenido correctamente (puede estar vacío)
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WatchHistoryItemResponse'
+        '400':
+          description: El límite no es un número entero entre 1 y 24
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
   /api/users/me/recommendations:
     get:
       tags:
@@ -2998,8 +3074,10 @@ paths:
       - continue-watching-controller
       summary: Quita una serie de «Seguir viendo»
       description: 'Borra el progreso del usuario autenticado en todos los episodios de la serie, para que la tarjeta no la
-        ocupe otro episodio con progreso ni el siguiente a uno terminado (también quita una tarjeta con upNext true). Es idempotente:
-        si no había progreso, o la serie no existe o no tiene episodios, también responde 204.'
+        ocupe otro episodio con progreso ni el siguiente a uno terminado (también quita una tarjeta con upNext true). Como
+        el historial y las cifras del perfil salen de ese mismo progreso, la serie también deja de salir en GET /api/users/me/watch-history
+        y sus episodios de contar en GET /api/users/me/watch-stats. Es idempotente: si no había progreso, o la serie no existe
+        o no tiene episodios, también responde 204.'
       operationId: removeSeriesFromContinueWatching
       parameters:
       - name: seriesId
@@ -3039,8 +3117,9 @@ paths:
       - continue-watching-controller
       summary: Quita una película de «Seguir viendo»
       description: 'Borra el progreso del usuario autenticado en la película: deja de salir en «Seguir viendo» y, al volver
-        a abrirla, empieza desde el principio. Es idempotente: si no había progreso, o la película no existe, también responde
-        204.'
+        a abrirla, empieza desde el principio. Como el historial y las cifras del perfil salen de ese mismo progreso, también
+        deja de salir en GET /api/users/me/watch-history y de contar en GET /api/users/me/watch-stats. Es idempotente: si
+        no había progreso, o la película no existe, también responde 204.'
       operationId: removeMovieFromContinueWatching
       parameters:
       - name: movieId
@@ -3640,6 +3719,95 @@ components:
             ninguno: entonces se muestra la inicial del nombre. Trátala como texto: si el cliente no conoce la clave, debe
             mostrar también la inicial.'
           example: rocket
+    WatchStatsResponse:
+      type: object
+      properties:
+        finishedMovies:
+          type: integer
+          format: int64
+          description: Películas que el usuario ha visto enteras (95 % o más de la duración)
+          example: 7
+        finishedEpisodes:
+          type: integer
+          format: int64
+          description: Episodios que el usuario ha visto enteros (95 % o más); cada episodio cuenta por separado, aunque sean
+            de la misma serie
+          example: 23
+        watchedSeconds:
+          type: integer
+          format: int64
+          description: 'Tiempo visto aproximado, en segundos: la duración de cada título terminado más la posición de cada
+            uno a medias. No cuenta lo vuelto a ver ni descuenta lo saltado'
+          example: 98400
+    WatchHistoryItemResponse:
+      type: object
+      properties:
+        type:
+          type: string
+          description: MOVIE (película) o EPISODE (episodio de una serie)
+          enum:
+          - MOVIE
+          - EPISODE
+          example: EPISODE
+        id:
+          type: integer
+          format: int64
+          description: Id de la película (MOVIE) o del episodio (EPISODE), nunca el de la serie
+          example: 12
+        title:
+          type: string
+          description: Título de la película o del episodio
+          example: Secretos
+        imageUrl:
+          type: string
+          description: Portada de la película o, en un episodio, la de su serie
+          example: https://example.com/dark.jpg
+        seasonNumber:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Temporada del episodio; null en una película
+          example: 1
+        episodeNumber:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          description: Número del episodio en su temporada; null en una película
+          example: 1
+        seriesId:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Id de la serie del episodio; null en una película
+          example: 4
+        seriesTitle:
+          type:
+          - string
+          - 'null'
+          description: Título de la serie del episodio; null en una película
+          example: Dark
+        positionSeconds:
+          type: integer
+          format: int32
+          description: Segundo del vídeo hasta el que llegó el usuario
+          example: 2600
+        durationSeconds:
+          type: integer
+          format: int32
+          description: Duración del vídeo reproducido, en segundos
+          example: 2700
+        finished:
+          type: boolean
+          description: true si la posición alcanza el 95 % de la duración (visto entero)
+          example: true
+        updatedAt:
+          type: string
+          format: date-time
+          description: 'Instante del último guardado de la película o del episodio (UTC, ISO-8601): ordena el historial'
+          example: '2026-11-21T18:30:00Z'
     RecommendationsResponse:
       type: object
       properties:

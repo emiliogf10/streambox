@@ -39,6 +39,8 @@ const ENTRIES: Record<string, QueryKey> = {
   progresoEpisodio: queryKeys.progress.episode(9),
   progresoSerie: queryKeys.progress.series(3),
   seguirViendo: queryKeys.progress.continueWatching(10),
+  historial: queryKeys.progress.history(12),
+  cifrasVisto: queryKeys.progress.stats,
 };
 
 /** Nombres de las entradas que quedan invalidadas tras `change`. */
@@ -70,6 +72,8 @@ describe('keysAffectedBy', () => {
       'progresoEpisodio',
       'progresoSerie',
       'seguirViendo',
+      'historial',
+      'cifrasVisto',
     ]);
   });
 
@@ -90,6 +94,8 @@ describe('keysAffectedBy', () => {
       'progresoEpisodio',
       'progresoSerie',
       'seguirViendo',
+      'historial',
+      'cifrasVisto',
     ]);
   });
 
@@ -116,17 +122,23 @@ describe('keysAffectedBy', () => {
 });
 
 describe('queryKeys.progress', () => {
-  it('todo el progreso cuelga de una raíz propia: cada título, cada serie y «Seguir viendo» son entradas distintas', () => {
+  it('todo el progreso cuelga de una raíz propia: cada título, cada serie, «Seguir viendo», el historial y las cifras son entradas distintas', () => {
     for (const key of [
       queryKeys.progress.movie(1),
       queryKeys.progress.episode(1),
       queryKeys.progress.series(1),
       queryKeys.progress.continueWatching(10),
+      queryKeys.progress.history(12),
+      queryKeys.progress.stats,
     ]) {
       expect(key.slice(0, 1)).toEqual(queryKeys.progress.all);
     }
     expect(queryKeys.progress.episode(1).slice(0, 2)).toEqual(queryKeys.progress.episodesAll);
     expect(queryKeys.progress.continueWatching(10).slice(0, 2)).toEqual(queryKeys.progress.continueWatchingAll);
+    expect(queryKeys.progress.history(12).slice(0, 2)).toEqual(queryKeys.progress.historyAll);
+    // El historial y las cifras no se pisan con «Seguir viendo»: son respuestas distintas.
+    expect(queryKeys.progress.history(12)).not.toEqual(queryKeys.progress.continueWatching(12));
+    expect(queryKeys.progress.stats).not.toEqual(queryKeys.progress.historyAll);
     expect(queryKeys.progress.movie(1)).not.toEqual(queryKeys.progress.episode(1));
   });
 });

@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "36f1cc7d-d712-5ceb-bd83-b75fec0d4c79",
     "name": "StreamBox API",
-    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend. Son necesarios: además de las peticiones de administrador, la carpeta 1 lee como ADMIN el correo de verificación de la bandeja del perfil `e2e` (arranca el backend con ese perfil; si no, pon el token del enlace a mano en `verificationToken`).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9, en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones, en la 11 la restablece con «He olvidado mi contraseña» (y la restaura) y en la 12 cierra la sesión del ADMIN. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos, sus «me gusta», ve sus recomendaciones y guarda su progreso de visionado («Seguir viendo»); ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Verificación del correo.** El registro responde 202 siempre igual y deja la cuenta pendiente: el login con la contraseña correcta responde el mismo 401 INVALID_CREDENTIALS que una contraseña incorrecta (no revela que el email está registrado) hasta confirmar el correo con `POST /api/auth/email-verification` (token del enlace; 204, o 400 INVALID_VERIFICATION_TOKEN). `POST /api/auth/email-verification/resend` pide otro enlace (202 siempre igual). Las dos son públicas.\n\n**He olvidado mi contraseña.** `POST /api/auth/password-reset` (`{\"email\"}`) responde 202 siempre igual y, si hay cuenta, envía un enlace `<STREAMBOX_PUBLIC_URL>/restablecer-contrasena#token=...` (1 h, un solo uso). `POST /api/auth/password-reset/confirm` (`{\"token\", \"newPassword\"}`) fija la contraseña nueva: 204 (sin iniciar sesión; cierra todas las sesiones y confirma el correo), 400 INVALID_RESET_TOKEN o 400 VALIDATION_ERROR en `newPassword` (el token no se gasta). Las dos son públicas; la carpeta 11 lee el correo de la bandeja del perfil `e2e`.\n\n**Límites**: login, registro, refresh, verificación del correo y restablecimiento de la contraseña tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 2 de los 5 reenvíos por hora, 2 de las 5 peticiones de restablecimiento por hora, **los 10 logins por minuto** y 6 de las 30 renovaciones por minuto: entre dos ejecuciones hay que esperar un minuto (también por el límite silencioso de un correo de restablecimiento por minuto y cuenta) y a la tercera ejecución en una hora el registro, el reenvío y el restablecimiento responden 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` (y `..._LOGIN_`, `..._EMAIL_VERIFICATION_RESEND_` y `..._PASSWORD_RESET_MAX_REQUESTS`) más altos y `STREAMBOX_EMAIL_RESEND_MIN_INTERVAL=0s`. No la ejecutes en bucle contra un entorno real.",
+    "description": "Colección de la API REST de StreamBox (Spring Boot). Equivale a `docs/api/openapi.yaml`.\n\n**Cómo usarla**\n1. Importa esta colección y el entorno `StreamBox - Local`, y selecciona el entorno.\n2. Rellena `adminEmail` y `adminPassword` con los de `ADMIN_EMAIL` / `ADMIN_PASSWORD` del backend. Son necesarios: además de las peticiones de administrador, la carpeta 1 lee como ADMIN el correo de verificación de la bandeja del perfil `e2e` (arranca el backend con ese perfil; si no, pon el token del enlace a mano en `verificationToken`).\n3. Ejecuta la colección entera (Runner) en orden: crea sus propios datos, los borra en la carpeta 8, cierra las sesiones en la 9, en la 10 cambia la contraseña del USER (y la restaura) y cierra todas sus sesiones, en la 11 la restablece con «He olvidado mi contraseña» (y la restaura) y en la 12 cierra la sesión del ADMIN. Los ids se guardan solos en variables de colección.\n\n**Autenticación: dos formas, las dos reales**\n- **USER, por cookies (como el navegador).** `POST /api/auth/login` responde 204 sin cuerpo y deja dos cookies HttpOnly: `streambox_token` (JWT de acceso, 15 min, `Path=/api`) y `streambox_refresh` (refresh token, 7 días, `Path=/api/auth`). Postman (y Newman) las guarda en su *cookie jar* por dominio y las reenvía solo a las rutas de su `Path`, sin scripts. Las peticiones del USER no llevan autorización: van con la cookie.\n- **ADMIN, por `Authorization: Bearer` (como un cliente de API).** Su login desactiva el jar (*Settings → Disable cookie jar*, `protocolProfileBehavior.disableCookies`) para no pisar la sesión del USER: el jar guarda una sola cookie `streambox_token` por dominio. El JWT se lee del `Set-Cookie` de la respuesta y se guarda en `adminToken`. Sus peticiones también desactivan el jar.\n\n**Defensa CSRF.** Toda petición no segura (POST/PUT/PATCH/DELETE) autenticada por cookie debe llevar `X-Requested-With: StreamBox`; si no, 403 `CSRF_REJECTED`. La añade el *pre-request* de la colección. Con `Authorization: Bearer` no hace falta y el script no la pone (así se ve que no se exige), salvo en `/api/auth/refresh` y `/api/auth/logout`, que la exigen siempre. Las peticiones que comprueban el 403 la quitan en su propio *pre-request*.\n\n**Roles**: USER lee el catálogo y gestiona sus favoritos, sus «me gusta», ve sus recomendaciones y guarda su progreso de visionado («Seguir viendo», historial y cifras del perfil); ADMIN además crea, edita y borra películas, géneros, series y episodios, y usa `/api/admin/**`.\n\n**Verificación del correo.** El registro responde 202 siempre igual y deja la cuenta pendiente: el login con la contraseña correcta responde el mismo 401 INVALID_CREDENTIALS que una contraseña incorrecta (no revela que el email está registrado) hasta confirmar el correo con `POST /api/auth/email-verification` (token del enlace; 204, o 400 INVALID_VERIFICATION_TOKEN). `POST /api/auth/email-verification/resend` pide otro enlace (202 siempre igual). Las dos son públicas.\n\n**He olvidado mi contraseña.** `POST /api/auth/password-reset` (`{\"email\"}`) responde 202 siempre igual y, si hay cuenta, envía un enlace `<STREAMBOX_PUBLIC_URL>/restablecer-contrasena#token=...` (1 h, un solo uso). `POST /api/auth/password-reset/confirm` (`{\"token\", \"newPassword\"}`) fija la contraseña nueva: 204 (sin iniciar sesión; cierra todas las sesiones y confirma el correo), 400 INVALID_RESET_TOKEN o 400 VALIDATION_ERROR en `newPassword` (el token no se gasta). Las dos son públicas; la carpeta 11 lee el correo de la bandeja del perfil `e2e`.\n\n**Límites**: login, registro, refresh, verificación del correo y restablecimiento de la contraseña tienen rate limiting por IP (429 RATE_LIMIT_EXCEEDED) y las cuentas se bloquean tras 5 logins fallidos en 15 minutos (429 ACCOUNT_LOCKED). Cada ejecución completa gasta 2 de las 5 altas por hora que permite el registro, 2 de los 5 reenvíos por hora, 2 de las 5 peticiones de restablecimiento por hora, **los 10 logins por minuto** y 6 de las 30 renovaciones por minuto: entre dos ejecuciones hay que esperar un minuto (también por el límite silencioso de un correo de restablecimiento por minuto y cuenta) y a la tercera ejecución en una hora el registro, el reenvío y el restablecimiento responden 429. Para iterar, arranca el backend local con `STREAMBOX_SECURITY_RATE_LIMIT_REGISTER_MAX_REQUESTS` (y `..._LOGIN_`, `..._EMAIL_VERIFICATION_RESEND_` y `..._PASSWORD_RESET_MAX_REQUESTS`) más altos y `STREAMBOX_EMAIL_RESEND_MIN_INTERVAL=0s`. No la ejecutes en bucle contra un entorno real.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -5502,6 +5502,113 @@
           ]
         },
         {
+          "name": "Historial: la película terminada sí sale",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/watch-history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "watch-history"
+              ]
+            },
+            "description": "Historial de visionado del perfil: una entrada por película y una por serie (su último episodio tocado), terminadas o no y con o sin vídeo, del guardado más reciente al más antiguo (por defecto, como mucho 12). A diferencia de «Seguir viendo», la película terminada sí sale, con finished true. En las películas, los campos de serie y temporada van a null."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"La película sale una vez, terminada y con los campos de serie a null\", function () { const items = pm.response.json().filter(i => i.type === \"MOVIE\" && String(i.id) === String(pm.collectionVariables.get(\"movieId\"))); pm.expect(items.length).to.eql(1); pm.expect(items[0].positionSeconds).to.eql(8000); pm.expect(items[0].durationSeconds).to.eql(8160); pm.expect(items[0].finished).to.eql(true); pm.expect(items[0].title).to.be.a(\"string\"); pm.expect(items[0].imageUrl).to.be.a(\"string\"); pm.expect(items[0].updatedAt).to.be.a(\"string\"); pm.expect(items[0].seasonNumber).to.eql(null); pm.expect(items[0].episodeNumber).to.eql(null); pm.expect(items[0].seriesId).to.eql(null); pm.expect(items[0].seriesTitle).to.eql(null); });",
+                  "pm.test(\"Cada entrada trae exactamente las claves del contrato y como mucho 12\", function () { const list = pm.response.json(); pm.expect(list.length).to.be.at.most(12); list.forEach(i => pm.expect(Object.keys(i).sort()).to.eql([\"durationSeconds\",\"episodeNumber\",\"finished\",\"id\",\"imageUrl\",\"positionSeconds\",\"seasonNumber\",\"seriesId\",\"seriesTitle\",\"title\",\"type\",\"updatedAt\"])); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Historial con limit=0 (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/watch-history?limit=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "watch-history"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error de validación en limit\", function () { const b = pm.response.json(); pm.expect(b.code).to.eql(\"VALIDATION_ERROR\"); pm.expect(b.validationErrors.limit).to.eql(\"El límite mínimo es 1\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mis cifras de visionado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/watch-stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "watch-stats"
+              ]
+            },
+            "description": "Películas y episodios terminados (95 % o más) y tiempo visto aproximado en segundos: la duración de lo terminado más la posición de lo que está a medias. Sin progreso, todo a 0."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Tres enteros no negativos\", function () { const s = pm.response.json(); pm.expect(Object.keys(s).sort()).to.eql([\"finishedEpisodes\",\"finishedMovies\",\"watchedSeconds\"]); Object.values(s).forEach(v => { pm.expect(Number.isInteger(v)).to.eql(true); pm.expect(v).to.be.at.least(0); }); });",
+                  "pm.test(\"Cuenta la película terminada con su duración entera\", function () { const s = pm.response.json(); pm.expect(s.finishedMovies).to.be.at.least(1); pm.expect(s.watchedSeconds).to.be.at.least(8160); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Quitar la película de Seguir viendo",
           "request": {
             "method": "DELETE",
@@ -5566,6 +5673,39 @@
                 "exec": [
                   "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
                   "pm.test(\"Sin cuerpo\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Historial: la película quitada de Seguir viendo ya no sale",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/watch-history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "watch-history"
+              ]
+            },
+            "description": "El historial no tiene tabla propia: sale del progreso guardado, así que quitar la película de «Seguir viendo» (que borra su progreso) también la quita de aquí y de las cifras."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"La película ya no está\", function () { const items = pm.response.json().filter(i => i.type === \"MOVIE\" && String(i.id) === String(pm.collectionVariables.get(\"movieId\"))); pm.expect(items.length).to.eql(0); });"
                 ]
               }
             }

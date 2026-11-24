@@ -18,7 +18,7 @@ import type { Locator, Page } from '@playwright/test';
 import { genreIdByName } from './support/api';
 import { HERO_TITLE, MOVIES, PAGE_SIZE } from './support/catalog';
 import type { SeedMovie } from './support/catalog';
-import { expect, movieCard, test } from './support/fixtures';
+import { expect, movieCard, revealMobileNavbar, test } from './support/fixtures';
 
 /** Mensaje del campo «Año» con un año que no se puede buscar (`YEAR_ERROR_MESSAGE` de `useCatalogFilters`). */
 const YEAR_ERROR = 'Escribe un año entre 1888 y 2100.';
@@ -435,8 +435,16 @@ test.describe('Página Películas', () => {
     await expect(section.getByText(`Mostrando ${MOVIES.length} de ${MOVIES.length} películas`)).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(812);
+    // Al bajar, la barra se ha apartado: una persona sube un poco para verla antes de pulsar «Inicio». Pulsarla
+    // apartada hacía que Playwright la trajera con su propio desplazamiento y pulsara a mitad del deslizamiento
+    // (ver `revealMobileNavbar`). La página sigue muy abajo, que es lo que esta prueba necesita.
+    await expect(page.getByRole('banner')).toHaveAttribute('data-navbar-away', 'true');
+    await revealMobileNavbar(page);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(812);
 
-    await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Inicio' }).click();
+    const home = page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Inicio' });
+    await expect(home).toBeInViewport({ ratio: 1 });
+    await home.click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
     // Comprobación de que la prueba sirve: la portada es más alta que la pantalla, así que podría quedarse abajo.

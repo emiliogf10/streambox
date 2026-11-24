@@ -18,7 +18,20 @@ import { InAppHistoryProvider } from '../context/InAppHistoryContext';
 import { ToastProvider } from '../context/ToastContext';
 import { LocationProbe } from './LocationProbe';
 import { createTestQueryClient } from './queryClient';
-import type { ApiErrorBody, ContinueWatchingItem, Episode, Genre, Movie, PageResponse, Recommendations, Series, SeriesDetail, User } from '../lib/types';
+import type {
+  ApiErrorBody,
+  ContinueWatchingItem,
+  Episode,
+  Genre,
+  Movie,
+  PageResponse,
+  Recommendations,
+  Series,
+  SeriesDetail,
+  User,
+  WatchHistoryItem,
+  WatchStats,
+} from '../lib/types';
 
 /** Crea un usuario de prueba (`UserResponse`); por defecto, rol `USER`. */
 export function makeUser(overrides: Partial<User> = {}): User {
@@ -73,6 +86,41 @@ export const SAVE_FAVORITE_GENRES = 'PUT /api/users/me/genres';
 
 /** «Seguir viendo» de la portada (`GET /api/users/me/continue-watching?limit=12`); por defecto, vacío. */
 export const CONTINUE_WATCHING = 'GET /api/users/me/continue-watching?limit=12';
+
+/** «Vistos recientemente» del perfil (`GET /api/users/me/watch-history?limit=12`); por defecto, vacío. */
+export const WATCH_HISTORY = 'GET /api/users/me/watch-history?limit=12';
+
+/** Cifras de lo visto del perfil (`GET /api/users/me/watch-stats`); por defecto, todo a cero. */
+export const WATCH_STATS = 'GET /api/users/me/watch-stats';
+
+/** Cifras de lo visto de prueba; por defecto, las de quien aún no ha visto nada (todo a cero). */
+export function makeWatchStats(overrides: Partial<WatchStats> = {}): WatchStats {
+  return { finishedMovies: 0, finishedEpisodes: 0, watchedSeconds: 0, ...overrides };
+}
+
+/**
+ * Crea una entrada del historial de visionado (`WatchHistoryItemResponse`). Por
+ * defecto, una PELÍCULA a medias («Dune», 10 de 50 min). Para un episodio:
+ * `{ type: 'EPISODE', seasonNumber, episodeNumber, seriesId, seriesTitle }`
+ * (`id`/`title` del episodio, `imageUrl` de la serie).
+ */
+export function makeWatchHistoryItem(overrides: Partial<WatchHistoryItem> = {}): WatchHistoryItem {
+  return {
+    type: 'MOVIE',
+    id: 1,
+    title: 'Dune',
+    imageUrl: 'https://img.example/dune.jpg',
+    seasonNumber: null,
+    episodeNumber: null,
+    seriesId: null,
+    seriesTitle: null,
+    positionSeconds: 600,
+    durationSeconds: 3000,
+    finished: false,
+    updatedAt: '2026-11-21T09:00:00Z',
+    ...overrides,
+  };
+}
 
 /** Clave de {@link routeFetch} de la renovación de la sesión, que `apiFetch` pide ante un 401. */
 export const REFRESH_SESSION = 'POST /api/auth/refresh';
@@ -282,7 +330,9 @@ export function currentUserAs(user: User): () => Response {
  * `PUT` no tiene valor por defecto: sus tests lo declaran.)
  *
  * «Seguir viendo» ({@link CONTINUE_WATCHING}) responde vacío: la portada lo pide
- * siempre y sin nada a medias no pinta nada, como antes de existir.
+ * siempre y sin nada a medias no pinta nada, como antes de existir. El
+ * historial ({@link WATCH_HISTORY}: vacío) y las cifras de lo visto
+ * ({@link WATCH_STATS}: ceros), igual: el perfil los pide siempre.
  *
  * Y {@link REFRESH_SESSION} (`POST /api/auth/refresh`) responde por defecto 401
  * `SESSION_EXPIRED` («no hay sesión que renovar»): `apiFetch` lo pide ante
@@ -304,6 +354,8 @@ export function routeFetch(fetchMock: Mock<typeof fetch>, routes: Record<string,
     [FAVORITE_GENRES]: () => jsonResponse([]),
     [GENRE_OPTIONS]: () => jsonResponse(DEFAULT_GENRE_OPTIONS),
     [CONTINUE_WATCHING]: () => jsonResponse([]),
+    [WATCH_HISTORY]: () => jsonResponse([]),
+    [WATCH_STATS]: () => jsonResponse(makeWatchStats()),
     [REFRESH_SESSION]: sessionExpiredResponse,
     ...routes,
   };

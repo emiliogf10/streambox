@@ -13,8 +13,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.emilio.streambox.dto.ContinueWatchingItemResponse;
 import com.emilio.streambox.dto.EpisodeProgressResponse;
+import com.emilio.streambox.dto.WatchHistoryItemResponse;
 import com.emilio.streambox.dto.WatchProgressRequest;
 import com.emilio.streambox.dto.WatchProgressResponse;
+import com.emilio.streambox.dto.WatchStatsResponse;
 import com.emilio.streambox.exception.EpisodeNotFoundException;
 import com.emilio.streambox.exception.MovieNotFoundException;
 import com.emilio.streambox.exception.NoVideoAvailableException;
@@ -26,9 +28,12 @@ import com.emilio.streambox.repository.MovieRepository;
 import com.emilio.streambox.repository.WatchProgressRepository;
 
 /**
- * Servicio del <b>progreso de visionado</b> y de la fila <b>«Seguir viendo»</b>
- * del usuario autenticado ({@code /api/users/me/progress/...} y
- * {@code /api/users/me/continue-watching/...}).
+ * Servicio del <b>progreso de visionado</b>, de la fila <b>«Seguir viendo»</b>
+ * y del <b>historial y las cifras del perfil</b> del usuario autenticado
+ * ({@code /api/users/me/progress/...}, {@code /api/users/me/continue-watching/...},
+ * {@code /api/users/me/watch-history} y {@code /api/users/me/watch-stats}).
+ * Todo sale de las mismas tablas de progreso ({@code V14}): el historial no
+ * tiene tabla propia.
  *
  * <p><b>Contrato</b></p>
  * <ul>
@@ -80,6 +85,22 @@ public class WatchProgressService {
      * las recomendaciones, el tope de una fila horizontal del inicio.
      */
     public static final int MAX_CONTINUE_WATCHING_LIMIT = 24;
+
+    /**
+     * Entradas del historial del perfil si el cliente no indica {@code limit}:
+     * las que pinta la sección «Vistos recientemente» (el frontend pide 12).
+     */
+    public static final int DEFAULT_WATCH_HISTORY_LIMIT = 12;
+
+    /** Límite mínimo del historial. */
+    public static final int MIN_WATCH_HISTORY_LIMIT = 1;
+
+    /**
+     * Límite máximo del historial: el mismo tope que «Seguir viendo». Acota el
+     * tamaño de la respuesta; la consulta lee igualmente todo el progreso del
+     * usuario (ver {@link WatchProgressRepository#findWatchHistory}).
+     */
+    public static final int MAX_WATCH_HISTORY_LIMIT = 24;
 
     private static final String MOVIE_NOT_FOUND = "Película no encontrada";
     private static final String MOVIE_WITHOUT_VIDEO =
@@ -304,12 +325,57 @@ public class WatchProgressService {
     }
 
     // ------------------------------------------------------------------
+    // Historial y cifras del perfil
+    // ------------------------------------------------------------------
+
+    /**
+     * El historial de visionado del perfil («Vistos recientemente»): una
+     * entrada por película y una por serie (su último episodio tocado), del
+     * guardado más reciente al más antiguo. Una sola consulta (el criterio
+     * completo está en {@link WatchProgressRepository#findWatchHistory}).
+     *
+     * <p>
+     * A diferencia de «Seguir viendo», incluye lo terminado y lo que ya no
+     * tiene vídeo: es lo que se vio, no lo que se puede reanudar. Como sale de
+     * las mismas filas de progreso, «Quitar de Seguir viendo» (que las borra)
+     * también lo quita del historial y de las cifras.
+     * </p>
+     *
+     * @param userId identificador del usuario autenticado
+     * @param limit  máximo de entradas (el controlador lo valida:
+     *               {@value #MIN_WATCH_HISTORY_LIMIT}..{@value #MAX_WATCH_HISTORY_LIMIT})
+     * @return sus entradas; vacía si no ha empezado nada
+     */
+    @Transactional(readOnly = true)
+    public List<WatchHistoryItemResponse> getWatchHistory(Long userId, int limit) {
+
+        return WatchProgressMapper.toHistoryResponseList(watchProgressRepository.findWatchHistory(userId, limit));
+    }
+
+    /**
+     * Las cifras de visionado del perfil: películas y episodios terminados
+     * (≥ 95 %) y el tiempo visto estimado (duración de lo terminado más
+     * posición de lo que está a medias; ver
+     * {@link WatchProgressRepository#getWatchStats}). Una sola consulta.
+     *
+     * @param userId identificador del usuario autenticado
+     * @return las cifras; todo ceros si no ha empezado nada
+     */
+    @Transactional(readOnly = true)
+    public WatchStatsResponse getWatchStats(Long userId) {
+
+        return WatchProgressMapper.toStatsResponse(watchProgressRepository.getWatchStats(userId));
+    }
+
+    // ------------------------------------------------------------------
     // Quitar de «Seguir viendo»
     // ------------------------------------------------------------------
 
     /**
      * Quita una película de «Seguir viendo» borrando su progreso (al volver a
-     * abrirla empieza desde el principio). Idempotente y sin 404.
+     * abrirla empieza desde el principio). Como el historial y las cifras del
+     * perfil salen de la misma fila, también deja de contar en ellos.
+     * Idempotente y sin 404.
      *
      * @param userId  identificador del usuario autenticado
      * @param movieId identificador de la película
@@ -324,6 +390,8 @@ public class WatchProgressService {
      * Quita una serie de «Seguir viendo» borrando el progreso de <b>todos</b>
      * sus episodios: si solo se borrara el de la tarjeta, otro episodio a
      * medias de la misma serie ocuparía su lugar y la serie no desaparecería.
+     * También la quita del historial y de las cifras del perfil (las mismas
+     * filas).
      * Idempotente y sin 404 (también para series ocultas o inexistentes: la
      * respuesta es siempre la misma, así que no revela nada).
      *

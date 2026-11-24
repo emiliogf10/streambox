@@ -242,6 +242,18 @@ describe('useProgressSaver: caché', () => {
     expect(queryClient.getQueryState(queryKeys.progress.movie(7))?.isInvalidated).toBe(false);
   });
 
+  it('descarta también el historial y las cifras de lo visto del perfil (el título sube al principio y suma tiempo)', async () => {
+    queryClient.setQueryData(queryKeys.progress.history(12), []);
+    queryClient.setQueryData(queryKeys.progress.stats, { finishedMovies: 0, finishedEpisodes: 0, watchedSeconds: 0 });
+
+    renderSaver();
+    video.play(30);
+    video.pause();
+
+    await vi.waitFor(() => expect(queryClient.getQueryState(queryKeys.progress.history(12))?.isInvalidated).toBe(true));
+    expect(queryClient.getQueryState(queryKeys.progress.stats)?.isInvalidated).toBe(true);
+  });
+
   it('al terminar, la caché lo da por visto (la página del título ya no dirá «Reanudar»)', async () => {
     renderSaver();
     video.play(20);

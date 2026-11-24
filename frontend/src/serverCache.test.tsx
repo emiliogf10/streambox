@@ -10,8 +10,9 @@
  *   el viejo).
  * - **Cambio de usuario:** al cerrar sesión (o al caducar la sesión) y entrar
  *   con otra cuenta no aparece ni un instante la lista de la anterior
- *   (`AuthProvider` vacía la caché). Lo mismo con sus «Me gusta» (perfil) y
- *   sus recomendaciones (portada).
+ *   (`AuthProvider` vacía la caché). Lo mismo con sus «Me gusta» (perfil), sus
+ *   recomendaciones (portada), «Seguir viendo» y su historial y cifras de lo
+ *   visto (perfil).
  *
  * `fetch` está simulado con un pequeño «servidor» en memoria que recuerda qué
  * sesión hay y qué datos tiene cada usuario.
@@ -28,6 +29,8 @@ import {
   makeMovie,
   makePage,
   makeUser,
+  makeWatchHistoryItem,
+  makeWatchStats,
   noContentResponse,
   renderWithProviders,
   routeFetch,
@@ -348,5 +351,55 @@ describe('Cambio de usuario: «Seguir viendo»', () => {
       expect(queryClient.getQueryState(queryKeys.progress.continueWatching(12))?.status).toBe('success'),
     );
     expect(screen.queryByRole('region', { name: 'Seguir viendo' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Cambio de usuario: historial y cifras de lo visto', () => {
+  it('quien entra después no ve ni un instante lo que vio el anterior ni sus cifras', async () => {
+    const ana = makeUser({ id: 1, username: 'ana', email: 'ana@example.com' });
+    const bea = makeUser({ id: 2, username: 'bea', email: 'bea@example.com' });
+    let current: User | null = ana;
+
+    routeFetch(fetchMock, {
+      ...commonRoutes(() => [makeMovie({ id: 1, title: 'Interstellar' })]),
+      'GET /api/users/me': () => (current ? jsonResponse(current) : errorResponse(401, 'UNAUTHORIZED', 'No autenticado.')),
+      'GET /api/users/me/watch-history?limit=12': () =>
+        jsonResponse(current?.id === 1 ? [makeWatchHistoryItem({ id: 9, title: 'La que vio Ana', finished: true })] : []),
+      'GET /api/users/me/watch-stats': () =>
+        jsonResponse(makeWatchStats(current?.id === 1 ? { finishedMovies: 37, watchedSeconds: 90_000 } : {})),
+      'POST /api/auth/logout': () => {
+        current = null;
+        return noContentResponse();
+      },
+      'POST /api/auth/login': () => {
+        current = bea;
+        return noContentResponse();
+      },
+    });
+    const queryClient = createTestQueryClient();
+    const user = userEvent.setup();
+    renderWithProviders(<AppRoutes />, { route: '/perfil', session: true, queryClient });
+    const anaHistory = await screen.findByRole('region', { name: 'Vistos recientemente' });
+    expect(await within(anaHistory).findByText('La que vio Ana')).toBeInTheDocument();
+    expect(await screen.findByText('37')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+    expect(await screen.findByText('ruta:/login')).toBeInTheDocument();
+    expect(queryClient.getQueryData(queryKeys.progress.history(12))).toBeUndefined();
+    expect(queryClient.getQueryData(queryKeys.progress.stats)).toBeUndefined();
+
+    await user.type(screen.getByLabelText('Correo electrónico'), bea.email);
+    await user.type(screen.getByLabelText('Contraseña'), 'una-contraseña-cualquiera');
+    await user.click(screen.getByRole('button', { name: 'Iniciar sesión' }));
+    await waitFor(() => expect(screen.queryByText('ruta:/login')).not.toBeInTheDocument());
+
+    await user.click(await screen.findByRole('button', { name: 'Menú de usuario' }));
+    await user.click(screen.getByRole('link', { name: 'Mi perfil' }));
+    expect(screen.queryByText('La que vio Ana')).not.toBeInTheDocument();
+    expect(screen.queryByText('37')).not.toBeInTheDocument();
+    const beaHistory = await screen.findByRole('region', { name: 'Vistos recientemente' });
+    expect(await within(beaHistory).findByText('Aún no has visto nada')).toBeInTheDocument();
+    expect(screen.queryByText('La que vio Ana')).not.toBeInTheDocument();
+    expect(screen.queryByText('37')).not.toBeInTheDocument();
   });
 });

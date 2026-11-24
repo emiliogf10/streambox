@@ -9,7 +9,9 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { queryKeys } from '../lib/queryKeys';
 import type { ContinueWatchingItem } from '../lib/types';
+import { createTestQueryClient } from '../test/queryClient';
 import {
   CONTINUE_WATCHING,
   errorResponse,
@@ -188,7 +190,7 @@ describe('ContinueWatchingRow', () => {
 
     await waitFor(() => expect(within(row).queryByRole('link', { name: /Interstellar/ })).not.toBeInTheDocument());
     expect(
-      await screen.findByText('«Interstellar» ya no está en Seguir viendo. Si vuelves a verla, empezará desde el principio.'),
+      await screen.findByText('«Interstellar» ya no está en Seguir viendo ni en lo que has visto. Si vuelves a verla, empezará desde el principio.'),
     ).toBeInTheDocument();
     expect(within(row).getByRole('link', { name: /^Reanudar Dark/ })).toHaveFocus();
     const deleteCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'DELETE');
@@ -209,6 +211,47 @@ describe('ContinueWatchingRow', () => {
     expect(await screen.findByText(/«Dark» ya no está en Seguir viendo/)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Seguir viendo' })).not.toBeInTheDocument());
     expect(document.getElementById(MAIN_CONTENT_ID)).toHaveFocus();
+  });
+
+  it('«Quitar» descarta también el historial y las cifras del perfil: el servidor ha borrado ese progreso', async () => {
+    serverItems = [movie];
+    routeFetch(fetchMock, {
+      [CONTINUE_WATCHING]: () => jsonResponse(serverItems),
+      'DELETE /api/users/me/continue-watching/movies/7': () => {
+        serverItems = [];
+        return noContentResponse();
+      },
+    });
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(queryKeys.progress.history(12), []);
+    queryClient.setQueryData(queryKeys.progress.stats, { finishedMovies: 0, finishedEpisodes: 0, watchedSeconds: 600 });
+    const user = userEvent.setup();
+    renderWithProviders(<ContinueWatchingRow />, { session: true, queryClient });
+    const row = await screen.findByRole('region', { name: 'Seguir viendo' });
+    expect(queryClient.getQueryState(queryKeys.progress.history(12))?.isInvalidated).toBe(false);
+
+    await user.click(within(row).getByRole('button', { name: 'Quitar Interstellar de Seguir viendo' }));
+
+    await waitFor(() => expect(queryClient.getQueryState(queryKeys.progress.history(12))?.isInvalidated).toBe(true));
+    expect(queryClient.getQueryState(queryKeys.progress.stats)?.isInvalidated).toBe(true);
+  });
+
+  it('si falla «Quitar», el historial y las cifras no se tocan (el progreso sigue en el servidor)', async () => {
+    serverItems = [movie];
+    routeFetch(fetchMock, {
+      [CONTINUE_WATCHING]: () => jsonResponse(serverItems),
+      'DELETE /api/users/me/continue-watching/movies/7': () => errorResponse(500, 'INTERNAL_ERROR', 'boom'),
+    });
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(queryKeys.progress.history(12), []);
+    const user = userEvent.setup();
+    renderWithProviders(<ContinueWatchingRow />, { session: true, queryClient });
+    const row = await screen.findByRole('region', { name: 'Seguir viendo' });
+
+    await user.click(within(row).getByRole('button', { name: 'Quitar Interstellar de Seguir viendo' }));
+
+    expect(await screen.findByText(/El servidor ha tenido un problema/)).toBeInTheDocument();
+    expect(queryClient.getQueryState(queryKeys.progress.history(12))?.isInvalidated).toBe(false);
   });
 
   it('si el servidor falla, la tarjeta vuelve a su sitio y se avisa del error', async () => {

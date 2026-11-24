@@ -6,13 +6,18 @@ import java.util.Map;
 import com.emilio.streambox.dto.ContinueWatchingItemResponse;
 import com.emilio.streambox.dto.ContinueWatchingType;
 import com.emilio.streambox.dto.EpisodeProgressResponse;
+import com.emilio.streambox.dto.WatchHistoryItemResponse;
 import com.emilio.streambox.dto.WatchProgressResponse;
+import com.emilio.streambox.dto.WatchStatsResponse;
 import com.emilio.streambox.repository.ContinueWatchingItem;
+import com.emilio.streambox.repository.WatchHistoryItem;
 import com.emilio.streambox.repository.WatchProgress;
+import com.emilio.streambox.repository.WatchStats;
 
 /**
  * Convierte los valores de la capa de datos del progreso de visionado
- * ({@link WatchProgress}, {@link ContinueWatchingItem}) en los DTOs de la API.
+ * ({@link WatchProgress}, {@link ContinueWatchingItem}, {@link WatchHistoryItem},
+ * {@link WatchStats}) en los DTOs de la API.
  *
  * <p>
  * No hay entidades: los valores ya vienen completos de
@@ -102,5 +107,57 @@ public final class WatchProgressMapper {
     public static List<ContinueWatchingItemResponse> toResponseList(List<ContinueWatchingItem> items) {
 
         return items.stream().map(WatchProgressMapper::toResponse).toList();
+    }
+
+    /**
+     * Una entrada del historial de visionado. Como en «Seguir viendo», el
+     * {@code switch} sobre la interfaz sellada obliga a tratar los dos tipos.
+     *
+     * <p>
+     * A diferencia de la tarjeta de «Seguir viendo», el progreso nunca es nulo
+     * (toda entrada sale de una fila de progreso) y {@code finished} se copia
+     * de {@link WatchHistoryItem#finished()}, el único criterio del 95 % en
+     * Java: el mapper no lo recalcula.
+     * </p>
+     *
+     * @param item película o último episodio tocado de una serie
+     * @return su entrada en la API (campos de serie a {@code null} en una película)
+     */
+    public static WatchHistoryItemResponse toHistoryResponse(WatchHistoryItem item) {
+
+        WatchProgress progress = item.progress();
+        return switch (item) {
+            case WatchHistoryItem.MovieEntry movie -> new WatchHistoryItemResponse(
+                    ContinueWatchingType.MOVIE, movie.movieId(), movie.title(), movie.imageUrl(),
+                    null, null, null, null,
+                    progress.positionSeconds(), progress.durationSeconds(), item.finished(), item.updatedAt());
+            case WatchHistoryItem.EpisodeEntry episode -> new WatchHistoryItemResponse(
+                    ContinueWatchingType.EPISODE, episode.episodeId(), episode.episodeTitle(),
+                    episode.seriesImageUrl(), episode.seasonNumber(), episode.episodeNumber(),
+                    episode.seriesId(), episode.seriesTitle(),
+                    progress.positionSeconds(), progress.durationSeconds(), item.finished(), item.updatedAt());
+        };
+    }
+
+    /**
+     * El historial completo, en el mismo orden.
+     *
+     * @param items entradas del repositorio
+     * @return sus entradas en la API
+     */
+    public static List<WatchHistoryItemResponse> toHistoryResponseList(List<WatchHistoryItem> items) {
+
+        return items.stream().map(WatchProgressMapper::toHistoryResponse).toList();
+    }
+
+    /**
+     * Las cifras de visionado del perfil.
+     *
+     * @param stats cifras del repositorio
+     * @return el DTO con los mismos valores
+     */
+    public static WatchStatsResponse toStatsResponse(WatchStats stats) {
+
+        return new WatchStatsResponse(stats.finishedMovies(), stats.finishedEpisodes(), stats.watchedSeconds());
     }
 }

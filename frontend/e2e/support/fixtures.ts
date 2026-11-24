@@ -85,6 +85,53 @@ export async function waitForLoginPage(page: Page): Promise<void> {
 }
 
 /**
+ * En el móvil (< 768 px), deja la barra superior a la vista y QUIETA antes de pulsar algo en ella, como haría una
+ * persona: sube un poco la página con la rueda y espera a que la barra haya terminado de entrar.
+ *
+ * **Por qué hace falta.** Al bajar, la barra se aparta (`useHideOnScroll`, `-translate-y-full`) y vuelve al subir
+ * con un deslizamiento de 200 ms. Si se pulsa un enlace suyo estando apartada, Playwright desplaza la página para
+ * alcanzarlo; ese desplazamiento es hacia arriba, así que la barra empieza a entrar, y Playwright puede darla por
+ * «estable» y pulsar a mitad del deslizamiento: el clic cae donde estaba el enlace un instante antes (en la traza,
+ * el enlace «Inicio» con 15 px aún fuera de la pantalla) y no navega. Una persona no pulsa algo que no ve: primero
+ * sube para que aparezca. No es un fallo de la app: durante esos 200 ms el enlace se mueve de verdad.
+ *
+ * Espera, por este orden: que la barra ya no esté marcada como apartada (`data-navbar-away`), que no le quede
+ * ninguna animación en curso (las transiciones CSS salen en `getAnimations()`), que esté en su sitio (arriba del
+ * todo) y que la página haya dejado de desplazarse (la rueda puede ser suave): así, lo que se pulse después está
+ * donde Playwright lo mide.
+ *
+ * @param scrollUp cuánto subir con la rueda (px); poco, para que la página siga lejos de arriba
+ */
+export async function revealMobileNavbar(page: Page, scrollUp = 150): Promise<void> {
+  const banner = page.getByRole('banner');
+  await page.mouse.wheel(0, -scrollUp);
+  await expect(banner).not.toHaveAttribute('data-navbar-away');
+  await expect
+    .poll(
+      () =>
+        banner.evaluate((element) => ({
+          animating: element.getAnimations().length > 0,
+          inPlace: element.getBoundingClientRect().top >= -0.5,
+        })),
+      { message: 'la barra ha vuelto y está quieta' },
+    )
+    .toEqual({ animating: false, inPlace: true });
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            new Promise<boolean>((resolve) => {
+              const y = window.scrollY;
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY === y)));
+            }),
+        ),
+      { message: 'la página ha dejado de desplazarse' },
+    )
+    .toBe(true);
+}
+
+/**
  * Espera a que la tabla del panel enseñe los resultados de la búsqueda `term` (`useAdminSearchList`). Hay que llamarla
  * antes de actuar sobre una fila tras buscar.
  *

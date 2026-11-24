@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -20,6 +21,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.emilio.streambox.repository.ContinueWatchingItem.EpisodeItem;
 import com.emilio.streambox.repository.ContinueWatchingItem.MovieItem;
+import com.emilio.streambox.repository.WatchHistoryItem.EpisodeEntry;
+import com.emilio.streambox.repository.WatchHistoryItem.MovieEntry;
 import com.emilio.streambox.service.SqlStates;
 
 /**
@@ -906,5 +909,302 @@ public interface WatchProgressQueryContract {
         saveMovie(ana, movie("Vista"), 100, 100, BASE);
 
         assertEquals(List.of(), continueWatching(ana));
+    }
+
+    // ------------------------------------------------------------------
+    // Historial del perfil («Vistos recientemente»)
+    // ------------------------------------------------------------------
+
+    /** Historial con un límite amplio. */
+    default List<WatchHistoryItem> history(long userId) {
+        return progress().findWatchHistory(userId, 50);
+    }
+
+    /** Identificación compacta de cada entrada del historial: {@code M:<id>} o {@code E:<id>}. */
+    default List<String> historyKeys(List<WatchHistoryItem> items) {
+        return items.stream().map(item -> switch (item) {
+            case MovieEntry m -> "M:" + m.movieId();
+            case EpisodeEntry e -> "E:" + e.episodeId();
+        }).toList();
+    }
+
+    /**
+     * El historial mezcla películas y series del más reciente al más antiguo,
+     * con los datos de cada entrada (película: id, título, portada; episodio:
+     * id, temporada, número, título y la serie con su id, título y portada),
+     * su progreso real y si está terminada; los terminados <b>sí</b> salen
+     * (a diferencia de «Seguir viendo») y no aparece nada de otro usuario.
+     */
+    @Test
+    default void elHistorialMezclaPeliculasYSeriesConSusDatosYTerminadosIncluidos() {
+        long ana = user("ana");
+        long bea = user("bea");
+        long older = movie("Antigua");
+        long done = movie("Terminada");
+        long serie = serie("Serie");
+        long episode = episode(serie, 2, 3);
+        saveMovie(ana, older, 10, 100, BASE);
+        saveEpisode(ana, episode, 2700, 2700, BASE.plusSeconds(10));
+        saveMovie(ana, done, 95, 100, BASE.plusSeconds(20));
+        saveMovie(bea, movie("De otra persona"), 1, 100, BASE.plusSeconds(99));
+        saveEpisode(bea, episode(serie, 2, 4), 1, 100, BASE.plusSeconds(99));
+
+        List<WatchHistoryItem> items = history(ana);
+
+        assertEquals(List.of("M:" + done, "E:" + episode, "M:" + older), historyKeys(items));
+        assertEquals(new MovieEntry(done, "Terminada", "https://example.com/Terminada.jpg",
+                new WatchProgress(95, 100, BASE.plusSeconds(20))), items.get(0));
+        assertEquals(new EpisodeEntry(episode, 2, 3, "Episodio 2x3", serie, "Serie", "https://example.com/Serie.jpg",
+                new WatchProgress(2700, 2700, BASE.plusSeconds(10))), items.get(1));
+        assertEquals(List.of(true, true, false), items.stream().map(WatchHistoryItem::finished).toList());
+        assertEquals(BASE.plusSeconds(10), items.get(1).updatedAt());
+        assertEquals(List.of(), continueWatching(ana).stream()
+                .filter(item -> item instanceof MovieItem m && m.movieId() == done).toList(),
+                "la terminada sale en el historial pero no en «Seguir viendo»");
+    }
+
+    /**
+     * Una entrada por serie: su <b>último episodio tocado</b>, con su propio
+     * progreso aunque esté terminado (el historial no salta al siguiente, como
+     * hace «Seguir viendo»); el que se dejó a medias antes no aparece. Cada
+     * serie ocupa su sitio según ese episodio.
+     */
+    @Test
+    default void elHistorialTieneUnaEntradaPorSerieLaDelUltimoTocadoAunqueEsteTerminado() {
+        long ana = user("ana");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        long e2 = episode(serie, 1, 2);
+        long e3 = episode(serie, 1, 3);
+        long other = serie("Otra");
+        long o1 = episode(other, 1, 1);
+        long o2 = episode(other, 1, 2);
+        saveEpisode(ana, e1, 10, 100, BASE);
+        saveEpisode(ana, e2, 95, 100, BASE.plusSeconds(5));
+        saveEpisode(ana, o2, 50, 100, BASE.plusSeconds(3));
+        saveEpisode(ana, o1, 100, 100, BASE.plusSeconds(1));
+
+        List<WatchHistoryItem> items = history(ana);
+
+        assertEquals(List.of("E:" + e2, "E:" + o2), historyKeys(items));
+        assertTrue(items.get(0).finished());
+        assertEquals(new WatchProgress(95, 100, BASE.plusSeconds(5)), items.get(0).progress());
+        assertFalse(items.get(1).finished());
+        assertEquals(List.of("E:" + e3, "E:" + o2), keys(continueWatching(ana)),
+                "«Seguir viendo» propone el siguiente; el historial, lo que se vio");
+    }
+
+    /**
+     * Lo visto sigue siendo verdad aunque el administrador quite el vídeo: las
+     * películas y los episodios sin vídeo salen en el historial, y un episodio
+     * sin vídeo <b>sí</b> cuenta como último tocado (en «Seguir viendo», no).
+     */
+    @Test
+    default void elHistorialIncluyeLoQueYaNoTieneVideo() {
+        long ana = user("ana");
+        long movie = movie("Sin video");
+        long serie = serie("Serie");
+        long olderEpisode = episode(serie, 1, 1);
+        long episode = episode(serie, 1, 2);
+        saveMovie(ana, movie, 10, 100, BASE);
+        saveEpisode(ana, olderEpisode, 10, 100, BASE.plusSeconds(1));
+        saveEpisode(ana, episode, 100, 100, BASE.plusSeconds(2));
+        jdbc().update("UPDATE movies SET video_url = NULL WHERE id = ?", movie);
+        jdbc().update("UPDATE episodes SET video_url = NULL WHERE id = ?", episode);
+
+        assertEquals(List.of("E:" + episode, "M:" + movie), historyKeys(history(ana)));
+        assertEquals(List.of("E:" + olderEpisode), keys(continueWatching(ana)));
+    }
+
+    /**
+     * El límite corta después de ordenar (se quedan las más recientes) y
+     * después de dejar una entrada por serie (los episodios repetidos de una
+     * serie no gastan huecos); un límite no positivo es un error de
+     * programación.
+     */
+    @Test
+    default void elLimiteDelHistorialSeQuedaConLasMasRecientes() {
+        long ana = user("ana");
+        long bigSerie = serie("Larga");
+        for (int i = 1; i <= 5; i++) {
+            saveEpisode(ana, episode(bigSerie, 1, i), 10, 100, BASE.plusSeconds(100 + i));
+        }
+        for (int i = 0; i < 4; i++) {
+            saveMovie(ana, movie("Pelicula " + i), 100, 100, BASE.plusSeconds(i * 2L));
+            saveEpisode(ana, episode(serie("Serie " + i), 1, 1), 10, 100, BASE.plusSeconds(i * 2L + 1));
+        }
+
+        List<WatchHistoryItem> all = history(ana);
+        List<WatchHistoryItem> top3 = progress().findWatchHistory(ana, 3);
+
+        assertEquals(9, all.size(), "8 títulos sueltos y una entrada para la serie de 5 episodios");
+        assertEquals(historyKeys(all).subList(0, 3), historyKeys(top3));
+        assertEquals(BASE.plusSeconds(105), top3.get(0).updatedAt());
+        assertEquals(BASE.plusSeconds(7), top3.get(1).updatedAt());
+        assertEquals(1, progress().findWatchHistory(ana, 1).size());
+        assertThrows(InvalidDataAccessApiUsageException.class, () -> progress().findWatchHistory(ana, 0));
+    }
+
+    /**
+     * Empates de fecha (mismo instante): orden estable, películas antes que
+     * episodios y, dentro de cada tipo, id descendente; dos episodios de la
+     * misma serie empatados dejan el de id mayor, esté terminado o no.
+     */
+    @Test
+    default void losEmpatesDelHistorialTienenUnOrdenEstable() {
+        long ana = user("ana");
+        long m1 = movie("Uno");
+        long m2 = movie("Dos");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        long e2 = episode(serie, 1, 2);
+        long o1 = episode(serie("Otra"), 1, 1);
+        saveMovie(ana, m1, 100, 100, BASE);
+        saveMovie(ana, m2, 10, 100, BASE);
+        saveEpisode(ana, e1, 10, 100, BASE);
+        saveEpisode(ana, e2, 100, 100, BASE);
+        saveEpisode(ana, o1, 10, 100, BASE);
+
+        List<String> expected = List.of("M:" + Math.max(m1, m2), "M:" + Math.min(m1, m2),
+                "E:" + Math.max(e2, o1), "E:" + Math.min(e2, o1));
+        assertEquals(expected, historyKeys(history(ana)));
+        assertEquals(expected, historyKeys(history(ana)), "la misma petición da el mismo orden");
+    }
+
+    /**
+     * El historial no tiene tabla propia: lo borrado deja de salir. Borrar una
+     * película la quita; borrar el último episodio tocado deja como entrada el
+     * anterior; «Quitar de Seguir viendo» una serie o borrarla la quita;
+     * borrar un usuario deja su historial vacío sin tocar el de otro.
+     */
+    @Test
+    default void elHistorialReflejaLosBorradosYLasCascadas() {
+        long ana = user("ana");
+        long bea = user("bea");
+        long doomedMovie = movie("Se borra");
+        long keptMovie = movie("Sigue");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        long e2 = episode(serie, 1, 2);
+        long removedSerie = serie("Se quita");
+        long r1 = episode(removedSerie, 1, 1);
+        long doomedSerie = serie("Se borra entera");
+        long d1 = episode(doomedSerie, 1, 1);
+        for (long user : new long[] { ana, bea }) {
+            saveMovie(user, keptMovie, 10, 100, BASE);
+            saveMovie(user, doomedMovie, 10, 100, BASE.plusSeconds(1));
+            saveEpisode(user, e1, 100, 100, BASE.plusSeconds(2));
+            saveEpisode(user, e2, 10, 100, BASE.plusSeconds(3));
+            saveEpisode(user, r1, 10, 100, BASE.plusSeconds(4));
+            saveEpisode(user, d1, 10, 100, BASE.plusSeconds(5));
+        }
+        assertEquals(List.of("E:" + d1, "E:" + r1, "E:" + e2, "M:" + doomedMovie, "M:" + keptMovie),
+                historyKeys(history(ana)));
+
+        jdbc().update("DELETE FROM movies WHERE id = ?", doomedMovie);
+        jdbc().update("DELETE FROM episodes WHERE id = ?", e2);
+        jdbc().update("DELETE FROM series WHERE id = ?", doomedSerie);
+        tx().execute(s -> progress().deleteSeriesProgress(ana, removedSerie));
+
+        assertEquals(List.of("E:" + e1, "M:" + keptMovie), historyKeys(history(ana)),
+                "sin el 1x02, la entrada de la serie es el 1x01 (terminado)");
+        assertEquals(List.of("E:" + r1, "E:" + e1, "M:" + keptMovie), historyKeys(history(bea)),
+                "lo que quitó Ana de «Seguir viendo» sigue en el historial de Bea");
+
+        jdbc().update("DELETE FROM users WHERE id = ?", ana);
+
+        assertEquals(List.of(), history(ana));
+        assertEquals(3, history(bea).size());
+    }
+
+    /** Sin progreso (o un usuario que no existe), el historial está vacío y no falla. */
+    @Test
+    default void sinProgresoElHistorialEstaVacio() {
+        long ana = user("ana");
+        saveMovie(user("bea"), movie("De otra persona"), 10, 100, BASE);
+
+        assertEquals(List.of(), history(ana));
+        assertEquals(List.of(), history(Long.MAX_VALUE));
+    }
+
+    // ------------------------------------------------------------------
+    // Cifras del perfil
+    // ------------------------------------------------------------------
+
+    /** Sin progreso (o un usuario que no existe), las cifras son ceros, no un error. */
+    @Test
+    default void sinProgresoLasCifrasSonCeros() {
+        long ana = user("ana");
+        saveMovie(user("bea"), movie("De otra persona"), 100, 100, BASE);
+        saveEpisode(user("carla"), episode(serie("Serie"), 1, 1), 100, 100, BASE);
+
+        assertEquals(WatchStats.EMPTY, progress().getWatchStats(ana));
+        assertEquals(WatchStats.EMPTY, progress().getWatchStats(Long.MAX_VALUE));
+    }
+
+    /**
+     * «Terminado» es el 95 % exacto, con la misma aritmética entera que
+     * {@link WatchProgress#isFinished(int, int)}: 9499 de 10000 no cuenta y
+     * suma su posición; 9500 de 10000 cuenta y suma la duración entera. Cada
+     * episodio cuenta aunque sean de la misma serie; los títulos sin vídeo
+     * cuentan; lo de otro usuario, no.
+     */
+    @Test
+    default void lasCifrasCuentanTerminadosAlNoventaYCincoYSumanDuracionOPosicion() {
+        long ana = user("ana");
+        long bea = user("bea");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        long e2 = episode(serie, 1, 2);
+        long e3 = episode(serie, 1, 3, null);
+        long noVideo = movie("Sin video", null);
+        saveMovie(ana, movie("Casi"), 9499, 10000, BASE);
+        saveMovie(ana, movie("Al 95"), 9500, 10000, BASE);
+        saveMovie(ana, noVideo, 30, 30, BASE);
+        saveEpisode(ana, e1, 9499, 10000, BASE);
+        saveEpisode(ana, e2, 9500, 10000, BASE);
+        saveEpisode(ana, e3, 100, 100, BASE);
+        saveMovie(bea, noVideo, 30, 30, BASE);
+        saveEpisode(bea, e1, 10000, 10000, BASE);
+
+        assertFalse(WatchProgress.isFinished(9499, 10000));
+        assertTrue(WatchProgress.isFinished(9500, 10000));
+        assertEquals(new WatchStats(2, 2, 9499 + 10000 + 30 + 9499 + 10000 + 100), progress().getWatchStats(ana));
+        assertEquals(new WatchStats(1, 1, 30 + 10000), progress().getWatchStats(bea));
+    }
+
+    /**
+     * El tiempo visto se suma en {@code BIGINT}: 25 000 películas vistas de
+     * 24 h suman 2 160 000 000 s, más que {@link Integer#MAX_VALUE}; un
+     * {@code SUM} o una lectura en {@code int} se desbordaría (o fallaría).
+     * Los datos se crean en bloque y se borran al terminar con SQL directo
+     * (la limpieza de cada test borra las películas una a una con JPA).
+     */
+    @Test
+    default void elTiempoVistoNoSeDesbordaConMuchosTitulosDeVeinticuatroHoras() {
+        int movies = 25_000;
+        int day = WatchProgress.MAX_DURATION_SECONDS;
+        long ana = user("ana");
+        long episode = episode(serie("Serie"), 1, 1);
+        List<Object[]> rows = new ArrayList<>(movies);
+        for (int i = 0; i < movies; i++) {
+            rows.add(new Object[] { "Larga " + i, "https://example.com/larga.jpg" });
+        }
+        try {
+            jdbc().batchUpdate("INSERT INTO movies (title, description, duration, release_year, image_url,"
+                    + " created_at) VALUES (?, 'd', 1440, 2000, ?, CURRENT_TIMESTAMP)", rows);
+            jdbc().update("INSERT INTO user_movie_progress (user_id, movie_id, position_seconds, duration_seconds,"
+                    + " updated_at) SELECT ?, id, ?, ?, CURRENT_TIMESTAMP FROM movies WHERE title LIKE 'Larga %'",
+                    ana, day, day);
+            saveEpisode(ana, episode, 3600, day, BASE); // a medias: suma su posición
+
+            WatchStats stats = progress().getWatchStats(ana);
+
+            long expected = (long) movies * day + 3600;
+            assertTrue(expected > Integer.MAX_VALUE, "el caso tiene que desbordar un int");
+            assertEquals(new WatchStats(movies, 0, expected), stats);
+        } finally {
+            jdbc().update("DELETE FROM movies WHERE title LIKE 'Larga %'");
+        }
     }
 }

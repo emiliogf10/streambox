@@ -44,8 +44,10 @@ function isPermanentFailure(error: unknown): boolean {
  * Pone la caché al día tras un guardado correcto:
  * - el progreso del título se ESCRIBE con lo enviado (sin volver a pedirlo: el
  *   reproductor lo tiene en pantalla y pedirlo cada 15 s no aportaría nada);
- * - «Seguir viendo» y, en un episodio, el progreso de su serie se DESCARTAN:
- *   los vuelve a pedir quien los enseñe (la portada, la página de la serie).
+ * - «Seguir viendo», el historial y las cifras de lo visto (el perfil) y, en un
+ *   episodio, el progreso de su serie se DESCARTAN: los vuelve a pedir quien los
+ *   enseñe (la portada, el perfil, la página de la serie). Si nadie los enseña en
+ *   ese momento, solo quedan marcados como anticuados: no se piden cada 15 s.
  *
  * Antes se cancelan las lecturas en vuelo de esas claves: una empezada antes de
  * guardar traería el progreso de antes y lo dejaría como bueno. Esto importa al
@@ -57,6 +59,8 @@ async function applySaved(queryClient: QueryClient, target: ProgressTarget, save
   const titleKey = target.kind === 'movie' ? queryKeys.progress.movie(target.id) : queryKeys.progress.episode(target.id);
   const staleKeys = [
     queryKeys.progress.continueWatchingAll,
+    queryKeys.progress.historyAll,
+    queryKeys.progress.stats,
     ...(target.kind === 'episode' ? [queryKeys.progress.series(target.seriesId)] : []),
   ];
   await Promise.all([titleKey, ...staleKeys].map((queryKey) => queryClient.cancelQueries({ queryKey })));

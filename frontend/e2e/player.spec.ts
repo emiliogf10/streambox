@@ -3,7 +3,8 @@
  * verdad (el `<video>` de Chromium con `fixtures/clip.webm`, 60 s), que el
  * progreso se guarde en el servidor, reanudar desde su página y desde la fila
  * «Seguir viendo» del inicio, y quitarlo de esa fila. Con una película y con
- * un episodio (cuya tarjeta es de la serie).
+ * un episodio (cuya tarjeta es de la serie). También el historial del perfil:
+ * lo visto aparece en «Vistos recientemente» y cambia las cifras de lo visto.
  *
  * **Sin tocar el catálogo compartido.** Los vídeos sembrados son enlaces a
  * otra web (`https://videos.streambox.example/...`), que el reproductor no
@@ -158,11 +159,68 @@ test.describe('Reproductor y «Seguir viendo»', () => {
     );
     await continueWatching(page).getByRole('button', { name: `Quitar ${MOVIE_TITLE} de Seguir viendo` }).click();
     expect((await removed).status()).toBe(204);
-    await expect(page.getByText(`«${MOVIE_TITLE}» ya no está en Seguir viendo.`, { exact: false })).toBeVisible();
+    await expect(page.getByText(`«${MOVIE_TITLE}» ya no está en Seguir viendo ni en lo que has visto.`, { exact: false })).toBeVisible();
     await expect(continueWatching(page)).toHaveCount(0);
     await page.reload();
     await expect(page.getByRole('region', { name: 'Novedades' })).toBeVisible();
     await expect(continueWatching(page)).toHaveCount(0);
+  });
+
+  test('perfil: lo visto sale en «Vistos recientemente» (enlazado a su página) y las cifras pasan de cero a lo real', async ({
+    page,
+    request,
+    user,
+  }) => {
+    test.slow();
+    const movieId = await findMovieId(request, user.token, MOVIE_TITLE);
+    await withClip(page, `/api/movies/${movieId}`);
+    const stats = page.getByRole('region', { name: 'Resumen de lo que has visto' });
+    const history = page.getByRole('region', { name: 'Vistos recientemente' });
+
+    // Cuenta recién creada: ceros que dice el servidor (no una silueta) y el historial vacío.
+    await page.goto('/perfil');
+    await expect(history.getByText('Aún no has visto nada')).toBeVisible();
+    await expect(stats.locator('dt:text-is("Películas vistas") + dd')).toHaveText('0');
+    await expect(stats.locator('dt:text-is("Tiempo visto (aprox.)") + dd')).toContainText('0 minutos');
+
+    // Más de 10 s de reproducción real (si no, no se guarda nada) y después, hasta el final: queda terminada.
+    await page.goto(`/peliculas/${movieId}`);
+    await page.getByRole('link', { name: `Ver ahora ${MOVIE_TITLE}` }).click();
+    await expect(page.getByRole('heading', { level: 1, name: MOVIE_TITLE })).toBeVisible();
+    const progressPath = new RegExp(`/api/users/me/progress/movies/${movieId}$`);
+    expect((await watchAndPause(page, progressPath)).status()).toBe(204);
+    const finished = page.waitForResponse((response) => {
+      if (response.request().method() !== 'PUT' || !progressPath.test(response.url())) return false;
+      const sent = response.request().postDataJSON() as { positionSeconds: number; durationSeconds: number };
+      return sent.positionSeconds === sent.durationSeconds;
+    });
+    await page.locator('video').evaluate((element: HTMLVideoElement) => {
+      element.currentTime = element.duration - 0.5;
+      void element.play();
+    });
+    expect((await finished).status()).toBe(204);
+
+    // Al perfil sin recargar (como un usuario): «Volver» y el menú de usuario.
+    await page.getByRole('button', { name: 'Volver' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: MOVIE_TITLE })).toBeVisible();
+    await page.getByRole('button', { name: 'Menú de usuario' }).click();
+    await page.getByRole('link', { name: 'Mi perfil' }).click();
+
+    // La tarjeta lleva a la página de la película (no al reproductor) y dice «Visto», sin barra.
+    const card = history.getByRole('link', { name: new RegExp(`^${escapeRegExp(MOVIE_TITLE)}\\s+Visto$`) });
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('href', `/peliculas/${movieId}`);
+    await expect(card.locator('progress')).toHaveCount(0);
+    await expect(history.getByText('1 título · lo más reciente primero')).toBeVisible();
+
+    // Las cifras: una película vista (en singular) y el minuto del clip (60 s terminados).
+    await expect(stats.locator('dt:text-is("Película vista") + dd')).toHaveText('1');
+    await expect(stats.locator('dt:text-is("Episodios vistos") + dd')).toHaveText('0');
+    await expect(stats.locator('dt:text-is("Tiempo visto (aprox.)") + dd')).toContainText('1 minuto');
+
+    await card.click();
+    await expect(page).toHaveURL(new RegExp(`/peliculas/${movieId}$`));
+    await expect(page.getByRole('heading', { level: 1, name: MOVIE_TITLE })).toBeVisible();
   });
 
   test('menos de 10 s de reproducción no se guardan: abrir un vídeo por error no llena «Seguir viendo»', async ({

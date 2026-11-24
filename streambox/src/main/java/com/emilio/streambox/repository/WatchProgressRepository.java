@@ -20,13 +20,15 @@ import org.springframework.transaction.annotation.Transactional;
  * Acceso a datos del <b>progreso de visionado</b> (tablas
  * {@code user_movie_progress} y {@code user_episode_progress}, migración
  * {@code V14}): por dónde va cada usuario en cada película o episodio, para
- * reanudar el reproductor y para la fila «Seguir viendo».
+ * reanudar el reproductor, para la fila «Seguir viendo» y para el historial y
+ * las cifras del perfil ({@link #findWatchHistory}, {@link #getWatchStats}).
  *
  * <h2>Modelo</h2>
  * <ul>
  *   <li>Una fila por (usuario, título) que se <b>sobrescribe</b> en cada
  *       guardado ({@link #saveMovieProgress}, {@link #saveEpisodeProgress}):
- *       no hay historial.</li>
+ *       no se guardan las sesiones, solo el último punto. El «historial» del
+ *       perfil son estas mismas filas ordenadas por fecha.</li>
  *   <li>Posición y duración en segundos enteros del vídeo reproducido (ver
  *       {@link WatchProgress}); la base de datos exige
  *       {@code 0 <= posición <= duración <= 86400} y {@code duración >= 1}.</li>
@@ -203,6 +205,88 @@ public class WatchProgressRepository {
              ORDER BY updated_at DESC, kind DESC, item_id DESC
              FETCH FIRST :limit ROWS ONLY
             """.formatted(NOT_FINISHED, notFinished("np"), notFinished("lt"), notFinished("t"));
+
+    /**
+     * Historial del perfil: una entrada por película con progreso y una por
+     * serie (su último episodio tocado), terminadas o no y con o sin vídeo, del
+     * más reciente al más antiguo (el criterio está en {@link #findWatchHistory}).
+     *
+     * <ul>
+     *   <li>Primera rama: las películas del usuario, tal cual.</li>
+     *   <li>{@code t}: los progresos del usuario en episodios (todos, sin mirar
+     *       el vídeo), numerados por serie del más reciente al más antiguo con
+     *       el mismo desempate que «Seguir viendo»; se queda {@code rn = 1}.</li>
+     *   <li>El orden final y el desempate son los de «Seguir viendo»: fecha
+     *       descendente, películas antes ({@code 'MOVIE' > 'EPISODE'}) e id
+     *       descendente.</li>
+     * </ul>
+     */
+    private static final String WATCH_HISTORY_SQL = """
+            SELECT kind, item_id, title, image_url, season_number, episode_number,
+                   series_id, series_title, position_seconds, duration_seconds, updated_at
+              FROM (
+                    SELECT CAST('MOVIE' AS VARCHAR(7)) AS kind,
+                           m.id AS item_id, m.title AS title, m.image_url AS image_url,
+                           CAST(NULL AS INTEGER) AS season_number, CAST(NULL AS INTEGER) AS episode_number,
+                           CAST(NULL AS BIGINT) AS series_id, CAST(NULL AS VARCHAR(150)) AS series_title,
+                           p.position_seconds AS position_seconds, p.duration_seconds AS duration_seconds,
+                           p.updated_at AS updated_at
+                      FROM user_movie_progress p
+                      JOIN movies m ON m.id = p.movie_id
+                     WHERE p.user_id = :userId
+                    UNION ALL
+                    SELECT CAST('EPISODE' AS VARCHAR(7)),
+                           t.episode_id, t.episode_title, s.image_url, t.season_number, t.episode_number,
+                           s.id, s.title,
+                           t.position_seconds, t.duration_seconds, t.updated_at
+                      FROM (
+                            SELECT p.episode_id, p.position_seconds, p.duration_seconds, p.updated_at,
+                                   e.series_id, e.season_number, e.episode_number, e.title AS episode_title,
+                                   ROW_NUMBER() OVER (PARTITION BY e.series_id
+                                                      ORDER BY p.updated_at DESC, p.episode_id DESC) AS rn
+                              FROM user_episode_progress p
+                              JOIN episodes e ON e.id = p.episode_id
+                             WHERE p.user_id = :userId
+                           ) t
+                      JOIN series s ON s.id = t.series_id
+                     WHERE t.rn = 1
+                   ) items
+             ORDER BY updated_at DESC, kind DESC, item_id DESC
+             FETCH FIRST :limit ROWS ONLY
+            """;
+
+    /**
+     * Cifras del perfil en una sola consulta: un agregado por tabla (cada uno
+     * devuelve siempre una fila, también sin progreso) unidos con
+     * {@code CROSS JOIN}.
+     *
+     * <ul>
+     *   <li>Terminados: {@code COUNT} de las filas que <b>no</b> cumplen
+     *       {@code NOT_FINISHED} (la misma aritmética entera, negada).</li>
+     *   <li>Segundos: duración si está terminado, posición si no. La suma de
+     *       una columna {@code INTEGER} ya es {@code BIGINT} en PostgreSQL y en
+     *       H2; el {@code CAST} lo deja escrito y fija el tipo del
+     *       {@code COALESCE} (sin filas, {@code SUM} es nulo).</li>
+     * </ul>
+     */
+    private static final String WATCH_STATS_SQL = """
+            SELECT mv.finished AS finished_movies, ep.finished AS finished_episodes,
+                   mv.watched + ep.watched AS watched_seconds
+              FROM (
+                    SELECT COUNT(CASE WHEN NOT (%1$s) THEN 1 END) AS finished,
+                           CAST(COALESCE(SUM(CASE WHEN %1$s THEN p.position_seconds
+                                                  ELSE p.duration_seconds END), 0) AS BIGINT) AS watched
+                      FROM user_movie_progress p
+                     WHERE p.user_id = :userId
+                   ) mv
+             CROSS JOIN (
+                    SELECT COUNT(CASE WHEN NOT (%1$s) THEN 1 END) AS finished,
+                           CAST(COALESCE(SUM(CASE WHEN %1$s THEN p.position_seconds
+                                                  ELSE p.duration_seconds END), 0) AS BIGINT) AS watched
+                      FROM user_episode_progress p
+                     WHERE p.user_id = :userId
+                   ) ep
+            """.formatted(NOT_FINISHED);
 
     private final JdbcClient jdbc;
 
@@ -457,6 +541,102 @@ public class WatchProgressRepository {
     }
 
     // ------------------------------------------------------------------
+    // Historial y cifras del perfil
+    // ------------------------------------------------------------------
+
+    /**
+     * El historial de visionado del perfil («Vistos recientemente»): las
+     * {@code limit} entradas más recientes del usuario, <b>mezclando películas
+     * y series</b>, en una sola consulta ({@code UNION ALL}) que ya trae los
+     * datos de cada entrada: sin N+1 ni colecciones perezosas.
+     *
+     * <p><b>Qué entra</b></p>
+     * <ul>
+     *   <li><b>Una entrada por película</b> con progreso guardado.</li>
+     *   <li><b>Una entrada por serie</b>: su <b>último episodio tocado</b>, el de
+     *       {@code updated_at} más reciente (desempate: {@code episode_id}
+     *       mayor), igual que el paso 1 de {@link #findContinueWatching}. Con
+     *       su propio progreso y sin «siguiente episodio»: el historial cuenta
+     *       lo que se vio, no lo que toca ver. Una serie con diez episodios
+     *       vistos ocupa un solo hueco y no tapa al resto.</li>
+     *   <li><b>Terminados o no</b>: cada entrada dice si lo está
+     *       ({@link WatchHistoryItem#finished()}, regla del
+     *       {@value WatchProgress#FINISHED_PERCENT} %).</li>
+     *   <li><b>Con o sin vídeo</b>: a diferencia de «Seguir viendo» (que no
+     *       puede prometer un «Reanudar» imposible), lo visto sigue siendo
+     *       verdad aunque el administrador quite el vídeo. Por la misma razón,
+     *       un episodio sin vídeo <b>sí</b> cuenta como último tocado aquí.</li>
+     *   <li>Lo borrado no sale: borrar el título (cascada de la {@code V14}) o
+     *       «Quitar de Seguir viendo» borra su fila de progreso, que es la única
+     *       fuente (no hay tabla de historial aparte).</li>
+     * </ul>
+     *
+     * <p><b>Orden y coste</b></p>
+     * <p>
+     * Por {@code updated_at} descendente; los empates se deshacen como en
+     * «Seguir viendo» (películas antes, luego id descendente de la película o
+     * del episodio), así que dos peticiones seguidas dan siempre el mismo
+     * orden. Lee todos los progresos del usuario por la PK (que empieza por
+     * {@code user_id}) o por {@code idx_*_progress_user_updated_at}, y ordena en
+     * memoria: el {@code ROW_NUMBER} por serie necesita ver todos sus episodios
+     * antes de cortar. Son las filas de <b>un</b> usuario (una por título que
+     * ha empezado), así que no hace falta un índice nuevo.
+     * </p>
+     *
+     * @param userId identificador del usuario
+     * @param limit  número máximo de entradas (positivo; el servicio fija el
+     *               tope que pinte el perfil)
+     * @return entradas de la más reciente a la más antigua; vacía si el usuario
+     *         no tiene progreso
+     * @throws org.springframework.dao.InvalidDataAccessApiUsageException si
+     *         {@code limit} no es positivo (error de programación, como en
+     *         {@link #findContinueWatching})
+     */
+    public List<WatchHistoryItem> findWatchHistory(long userId, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("El límite debe ser positivo: " + limit);
+        }
+        return jdbc.sql(WATCH_HISTORY_SQL)
+                .param("userId", userId)
+                .param("limit", limit)
+                .query((rs, row) -> watchHistoryItem(rs))
+                .list();
+    }
+
+    /**
+     * Las cifras de visionado del perfil, en una sola consulta.
+     *
+     * <ul>
+     *   <li><b>Terminados</b>: películas y episodios cuyo progreso alcanza el
+     *       {@value WatchProgress#FINISHED_PERCENT} % (la negación exacta de la
+     *       condición de «Seguir viendo», en aritmética entera:
+     *       {@code posición * 100 >= duración * 95}). Cada episodio cuenta por
+     *       separado, aunque sean de la misma serie.</li>
+     *   <li><b>Tiempo visto</b> (estimación): la suma, en películas y
+     *       episodios, de la <b>duración</b> si el título está terminado y de la
+     *       <b>posición</b> si no. Solo se guarda el último punto de cada
+     *       título, así que no cuenta lo vuelto a ver ni descuenta lo saltado:
+     *       es «hasta dónde llegó», no «cuánto rato estuvo». Terminado suma la
+     *       duración entera (y no la posición) porque quien llega a los créditos
+     *       y cierra lo ha visto entero. Se suma en {@code BIGINT}: no se
+     *       desborda aunque el usuario tenga miles de títulos de 24 h.</li>
+     *   <li>Cuenta <b>todo</b> el progreso, con o sin vídeo (igual que
+     *       {@link #findWatchHistory}).</li>
+     * </ul>
+     *
+     * @param userId identificador del usuario
+     * @return las cifras; todo ceros ({@link WatchStats#EMPTY}) si no tiene
+     *         progreso (o si el usuario no existe)
+     */
+    public WatchStats getWatchStats(long userId) {
+        return jdbc.sql(WATCH_STATS_SQL)
+                .param("userId", userId)
+                .query((rs, row) -> new WatchStats(rs.getLong("finished_movies"), rs.getLong("finished_episodes"),
+                        rs.getLong("watched_seconds")))
+                .single();
+    }
+
+    // ------------------------------------------------------------------
     // Borrar («Quitar de Seguir viendo»)
     // ------------------------------------------------------------------
 
@@ -549,6 +729,23 @@ public class WatchProgressRepository {
                     rs.getLong("series_id"), rs.getString("series_title"), rs.getString("image_url"), progress,
                     rs.getBoolean("up_next"), updatedAt);
             default -> throw new IllegalStateException("Tipo de «Seguir viendo» desconocido: " + kind);
+        };
+    }
+
+    /**
+     * Construye la entrada del historial de la fila actual según su tipo (el
+     * progreso nunca es nulo: cada entrada sale de una fila de progreso).
+     */
+    private static WatchHistoryItem watchHistoryItem(ResultSet rs) throws SQLException {
+        WatchProgress progress = progress(rs);
+        String kind = rs.getString("kind");
+        return switch (kind) {
+            case "MOVIE" -> new WatchHistoryItem.MovieEntry(rs.getLong("item_id"), rs.getString("title"),
+                    rs.getString("image_url"), progress);
+            case "EPISODE" -> new WatchHistoryItem.EpisodeEntry(rs.getLong("item_id"),
+                    rs.getInt("season_number"), rs.getInt("episode_number"), rs.getString("title"),
+                    rs.getLong("series_id"), rs.getString("series_title"), rs.getString("image_url"), progress);
+            default -> throw new IllegalStateException("Tipo de entrada del historial desconocido: " + kind);
         };
     }
 
