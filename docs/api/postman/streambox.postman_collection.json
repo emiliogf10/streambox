@@ -2086,7 +2086,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Película de Postman\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 2021,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"videoUrl\": \"https://videos.streambox.example/watch/postman\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "raw": "{\n  \"title\": \"Película de Postman\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 2021,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"videoUrl\": \"https://videos.streambox.example/watch/postman\",\n  \"subtitlesUrl\": \"https://videos.streambox.example/subtitulos/postman.es.vtt\",\n  \"genreIds\": [{{genreId}}]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2122,6 +2122,9 @@
                   "  const m = pm.response.json();",
                   "  pm.expect(m).to.have.property(\"trailerUrl\");",
                   "  pm.expect(m.trailerUrl).to.be.null;",
+                  "});",
+                  "pm.test(\"Devuelve los subtítulos (WebVTT) tal cual\", function () {",
+                  "  pm.expect(pm.response.json().subtitlesUrl).to.eql(\"https://videos.streambox.example/subtitulos/postman.es.vtt\");",
                   "});"
                 ]
               }
@@ -2306,6 +2309,132 @@
                   "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
                   "  pm.expect(Object.keys(b.validationErrors)).to.eql([\"title\"]);",
                   "  pm.expect(b.validationErrors.title).to.eql(\"El título no puede contener caracteres de control\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Crear película con subtítulos y sin vídeo (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies"
+              ]
+            },
+            "description": "Los subtítulos exigen vídeo: el error va en subtitlesUrl (no en videoUrl, que es opcional). La base de datos lo prohíbe también con un CHECK.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Película de Postman con subtítulos sin vídeo\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 2021,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"subtitlesUrl\": \"https://videos.streambox.example/subtitulos/postman.es.vtt\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR solo en subtitlesUrl, con el mensaje exacto\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(Object.keys(b.validationErrors)).to.eql([\"subtitlesUrl\"]);",
+                  "  pm.expect(b.validationErrors.subtitlesUrl).to.eql(\"Los subtítulos necesitan un vídeo: indica también la URL del vídeo\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableCookies": true
+          }
+        },
+        {
+          "name": "Crear película con subtítulos que no son .vtt (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/movies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "movies"
+              ]
+            },
+            "description": "Solo WebVTT por https://: lo anterior al primer ? o # debe terminar en .vtt (sin distinguir mayúsculas). Un .srt da el error de formato.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Película de Postman con subtítulos .srt\",\n  \"description\": \"Película creada por la colección de Postman.\",\n  \"duration\": 120,\n  \"releaseYear\": 2021,\n  \"imageUrl\": \"https://image.tmdb.org/t/p/w500/portada.jpg\",\n  \"videoUrl\": \"https://videos.streambox.example/watch/postman\",\n  \"subtitlesUrl\": \"https://videos.streambox.example/subtitulos/postman.es.srt\",\n  \"genreIds\": [{{genreId}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR solo en subtitlesUrl, con el mensaje exacto\", function () {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.code).to.eql(\"VALIDATION_ERROR\");",
+                  "  pm.expect(Object.keys(b.validationErrors)).to.eql([\"subtitlesUrl\"]);",
+                  "  pm.expect(b.validationErrors.subtitlesUrl).to.eql(\"Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://\");",
                   "});"
                 ]
               }
@@ -2748,6 +2877,11 @@
                   "});",
                   "pm.test(\"Conserva el vídeo enviado\", function () {",
                   "  pm.expect(pm.response.json().videoUrl).to.eql(\"https://videos.streambox.example/watch/postman\");",
+                  "});",
+                  "pm.test(\"Sin subtitlesUrl en el PUT, los subtítulos se borran (null)\", function () {",
+                  "  const m = pm.response.json();",
+                  "  pm.expect(m).to.have.property(\"subtitlesUrl\");",
+                  "  pm.expect(m.subtitlesUrl).to.be.null;",
                   "});"
                 ]
               }
@@ -3291,7 +3425,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"seasonNumber\": 1,\n  \"episodeNumber\": 1,\n  \"title\": \"Piloto\",\n  \"description\": \"Primer episodio.\",\n  \"duration\": 45,\n  \"videoUrl\": \"https://videos.streambox.example/watch/serie-1x01\"\n}",
+              "raw": "{\n  \"seasonNumber\": 1,\n  \"episodeNumber\": 1,\n  \"title\": \"Piloto\",\n  \"description\": \"Primer episodio.\",\n  \"duration\": 45,\n  \"videoUrl\": \"https://videos.streambox.example/watch/serie-1x01\",\n  \"subtitlesUrl\": \"https://videos.streambox.example/subtitulos/serie-1x01.es.VTT?firma=postman\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3322,6 +3456,9 @@
                   "  pm.expect(e.seasonNumber).to.eql(1);",
                   "  pm.expect(e.episodeNumber).to.eql(1);",
                   "  pm.collectionVariables.set(\"episodeId\", e.id);",
+                  "});",
+                  "pm.test(\"Devuelve los subtítulos tal cual (.VTT con consulta también vale)\", function () {",
+                  "  pm.expect(pm.response.json().subtitlesUrl).to.eql(\"https://videos.streambox.example/subtitulos/serie-1x01.es.VTT?firma=postman\");",
                   "});"
                 ]
               }
@@ -3464,6 +3601,10 @@
                   "});",
                   "pm.test(\"El detalle trae el tráiler normalizado\", function () {",
                   "  pm.expect(pm.response.json().trailerUrl).to.eql(\"https://www.youtube.com/watch?v=Zx9_Yw8-Vu7\");",
+                  "});",
+                  "pm.test(\"Cada episodio trae sus subtítulos (EpisodeResponse.subtitlesUrl)\", function () {",
+                  "  const e = pm.response.json().seasons[0].episodes[0];",
+                  "  pm.expect(e.subtitlesUrl).to.eql(\"https://videos.streambox.example/subtitulos/serie-1x01.es.VTT?firma=postman\");",
                   "});"
                 ]
               }
@@ -3749,6 +3890,11 @@
                   "  const e = pm.response.json();",
                   "  pm.expect(e).to.have.property(\"videoUrl\");",
                   "  pm.expect(e.videoUrl).to.be.null;",
+                  "});",
+                  "pm.test(\"Sin subtitlesUrl, el episodio queda también sin subtítulos (null)\", function () {",
+                  "  const e = pm.response.json();",
+                  "  pm.expect(e).to.have.property(\"subtitlesUrl\");",
+                  "  pm.expect(e.subtitlesUrl).to.be.null;",
                   "});"
                 ]
               }
@@ -5089,7 +5235,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"Devuelve lo guardado\", function () { const b = pm.response.json(); pm.expect(b.positionSeconds).to.eql(1325); pm.expect(b.durationSeconds).to.eql(8160); pm.expect(b.finished).to.eql(false); pm.expect(b.updatedAt).to.be.a(\"string\"); });"
+                  "pm.test(\"Devuelve lo guardado\", function () { const b = pm.response.json(); pm.expect(b.positionSeconds).to.eql(1325); pm.expect(b.durationSeconds).to.eql(8160); pm.expect(b.finished).to.eql(false); pm.expect(b.watched).to.eql(false); pm.expect(b.updatedAt).to.be.a(\"string\"); });"
                 ]
               }
             }
@@ -5528,8 +5674,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"La película sale una vez, terminada y con los campos de serie a null\", function () { const items = pm.response.json().filter(i => i.type === \"MOVIE\" && String(i.id) === String(pm.collectionVariables.get(\"movieId\"))); pm.expect(items.length).to.eql(1); pm.expect(items[0].positionSeconds).to.eql(8000); pm.expect(items[0].durationSeconds).to.eql(8160); pm.expect(items[0].finished).to.eql(true); pm.expect(items[0].title).to.be.a(\"string\"); pm.expect(items[0].imageUrl).to.be.a(\"string\"); pm.expect(items[0].updatedAt).to.be.a(\"string\"); pm.expect(items[0].seasonNumber).to.eql(null); pm.expect(items[0].episodeNumber).to.eql(null); pm.expect(items[0].seriesId).to.eql(null); pm.expect(items[0].seriesTitle).to.eql(null); });",
-                  "pm.test(\"Cada entrada trae exactamente las claves del contrato y como mucho 12\", function () { const list = pm.response.json(); pm.expect(list.length).to.be.at.most(12); list.forEach(i => pm.expect(Object.keys(i).sort()).to.eql([\"durationSeconds\",\"episodeNumber\",\"finished\",\"id\",\"imageUrl\",\"positionSeconds\",\"seasonNumber\",\"seriesId\",\"seriesTitle\",\"title\",\"type\",\"updatedAt\"])); });"
+                  "pm.test(\"La película sale una vez, terminada y con los campos de serie a null\", function () { const items = pm.response.json().filter(i => i.type === \"MOVIE\" && String(i.id) === String(pm.collectionVariables.get(\"movieId\"))); pm.expect(items.length).to.eql(1); pm.expect(items[0].positionSeconds).to.eql(8000); pm.expect(items[0].durationSeconds).to.eql(8160); pm.expect(items[0].finished).to.eql(true); pm.expect(items[0].watched).to.eql(true); pm.expect(items[0].title).to.be.a(\"string\"); pm.expect(items[0].imageUrl).to.be.a(\"string\"); pm.expect(items[0].updatedAt).to.be.a(\"string\"); pm.expect(items[0].seasonNumber).to.eql(null); pm.expect(items[0].episodeNumber).to.eql(null); pm.expect(items[0].seriesId).to.eql(null); pm.expect(items[0].seriesTitle).to.eql(null); });",
+                  "pm.test(\"Cada entrada trae exactamente las claves del contrato y como mucho 12\", function () { const list = pm.response.json(); pm.expect(list.length).to.be.at.most(12); list.forEach(i => pm.expect(Object.keys(i).sort()).to.eql([\"durationSeconds\",\"episodeNumber\",\"finished\",\"id\",\"imageUrl\",\"positionSeconds\",\"seasonNumber\",\"seriesId\",\"seriesTitle\",\"title\",\"type\",\"updatedAt\",\"watched\"])); });"
                 ]
               }
             }
@@ -5603,6 +5749,88 @@
                   "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
                   "pm.test(\"Tres enteros no negativos\", function () { const s = pm.response.json(); pm.expect(Object.keys(s).sort()).to.eql([\"finishedEpisodes\",\"finishedMovies\",\"watchedSeconds\"]); Object.values(s).forEach(v => { pm.expect(Number.isInteger(v)).to.eql(true); pm.expect(v).to.be.at.least(0); }); });",
                   "pm.test(\"Cuenta la película terminada con su duración entera\", function () { const s = pm.response.json(); pm.expect(s.finishedMovies).to.be.at.least(1); pm.expect(s.watchedSeconds).to.be.at.least(8160); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Volver a ver la película (guardar 100 de 8160)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/progress/movies/{{movieId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "progress",
+                "movies",
+                "{{movieId}}"
+              ]
+            },
+            "description": "Volver a verla y parar al principio: la posición ya no está al 95 % (finished false), pero se terminó una vez (watched sigue a true).",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"positionSeconds\": 100, \"durationSeconds\": 8160 }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 204\", function () { pm.response.to.have.status(204); });",
+                  "pm.test(\"Sin cuerpo\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Historial: vuelta a ver, sigue vista (watched)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me/watch-history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "me",
+                "watch-history"
+              ]
+            },
+            "description": "«Vista» sale de watched (terminada alguna vez), que no se pierde al volver a verla; finished sigue la posición actual."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Responde 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"La película sigue vista aunque ya no esté terminada\", function () { const items = pm.response.json().filter(i => i.type === \"MOVIE\" && String(i.id) === String(pm.collectionVariables.get(\"movieId\"))); pm.expect(items.length).to.eql(1); pm.expect(items[0].positionSeconds).to.eql(100); pm.expect(items[0].finished).to.eql(false); pm.expect(items[0].watched).to.eql(true); });"
                 ]
               }
             }

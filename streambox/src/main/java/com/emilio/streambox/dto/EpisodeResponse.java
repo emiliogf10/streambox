@@ -20,6 +20,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param duration      duración en minutos
  * @param videoUrl      URL del vídeo, o {@code null} si el episodio no tiene
  *                      (el tráiler está en la serie)
+ * @param subtitlesUrl  URL de los subtítulos WebVTT en español, o {@code null}
+ *                      si no tiene (nunca sin {@code videoUrl})
  */
 public record EpisodeResponse(
         Long id,
@@ -30,5 +32,8 @@ public record EpisodeResponse(
         Integer duration,
         @Schema(types = { "string", "null" },
                 description = "URL del vídeo del episodio, o null si no tiene (el tráiler va en la serie).")
-        String videoUrl) {
+        String videoUrl,
+        @Schema(types = { "string", "null" }, description = MovieResponse.SUBTITLES_URL_DESCRIPTION,
+                example = "https://videos.streambox.example/subtitulos/serie-1x01.es.vtt")
+        String subtitlesUrl) {
 }

@@ -22,12 +22,32 @@ import java.util.Objects;
  * las escribe el administrador a mano.
  * </p>
  *
+ * <h2>«Terminado» y «visto» no son lo mismo (migración {@code V15})</h2>
+ * <ul>
+ *   <li>{@link #finished()}: la posición <b>actual</b> llega al
+ *       {@value #FINISHED_PERCENT} %. Se pierde si el usuario vuelve a verlo y
+ *       para antes. Decide «Seguir viendo» y si el reproductor empieza de
+ *       cero.</li>
+ *   <li>{@link #watched()}: lo terminó <b>alguna vez</b>
+ *       ({@code finishedAt} no es nulo). No se pierde al volver a verlo. Es lo
+ *       que cuentan el historial y las cifras del perfil.</li>
+ * </ul>
+ * <p>
+ * Todo lo terminado está visto (la base de datos lo exige con
+ * {@code ck_*_progress_finished_has_finished_at} y este {@code record} lo
+ * comprueba); al revés no: visto y ahora a medias es justo volver a verlo.
+ * </p>
+ *
  * @param positionSeconds segundo por el que va ({@code 0..durationSeconds})
  * @param durationSeconds duración del vídeo reproducido
  *                        ({@code 1..}{@value #MAX_DURATION_SECONDS})
  * @param updatedAt       instante del último guardado
+ * @param finishedAt      instante en que se terminó <b>por primera vez</b>
+ *                        (columna {@code finished_at}), o {@code null} si
+ *                        nunca se ha terminado. Nunca posterior a
+ *                        {@code updatedAt}
  */
-public record WatchProgress(int positionSeconds, int durationSeconds, Instant updatedAt) {
+public record WatchProgress(int positionSeconds, int durationSeconds, Instant updatedAt, Instant finishedAt) {
 
     /**
      * Porcentaje de la duración a partir del cual un título se considera
@@ -43,6 +63,61 @@ public record WatchProgress(int positionSeconds, int durationSeconds, Instant up
      * ({@link WatchProgressRepository#findContinueWatching}), que lo comparan
      * con aritmética entera ({@code position * 100 >= duration * 95}) para no
      * depender del redondeo de cada motor.
+     * </p>
+     *
+     * <p><b>Cambiarlo exige una migración nueva</b></p>
+     * <p>
+     * El 95 <b>no</b> vive solo aquí: está escrito a mano en la migración
+     * {@code V15__subtitles_and_finished_at.sql}, en el {@code CHECK}
+     * {@code ck_movie_progress_finished_has_finished_at} y en
+     * {@code ck_episode_progress_finished_has_finished_at}
+     * ({@code finished_at IS NOT NULL OR position_seconds * 100 < duration_seconds * 95})
+     * y en la aritmética del relleno de {@code finished_at} de esa misma
+     * migración. La consulta de «Seguir viendo» sí usa esta constante, así que
+     * se adapta sola; la base de datos, no. Como la {@code V15} ya está
+     * aplicada, <b>no se edita</b> (Flyway rechazaría el checksum): cambiar
+     * este valor exige una migración {@code V<N+1>} que haga dos cosas.
+     * </p>
+     * <ol>
+     *   <li>Reemplazar los dos {@code CHECK} ({@code DROP CONSTRAINT} +
+     *       {@code ADD CONSTRAINT} con el valor nuevo).</li>
+     *   <li>Decidir qué hacer con {@code finished_at} de las filas cuya
+     *       posición queda entre el valor antiguo y el nuevo, y hacerlo
+     *       <b>antes</b> de añadir el {@code CHECK} nuevo.</li>
+     * </ol>
+     * <p>
+     * Qué falla si solo se cambia la constante:
+     * </p>
+     * <ul>
+     *   <li><b>Al subirlo</b> (por ejemplo, al 97 %): falla la <b>escritura</b>.
+     *       Un guardado al 96 % de un título nunca terminado ya no es
+     *       «terminado» en Java, así que {@code WatchProgressRepository} lo
+     *       guarda con {@code finished_at} nulo; pero el {@code CHECK} de la
+     *       {@code V15} sigue exigiéndolo a partir del 95 % y rechaza el
+     *       {@code INSERT}/{@code UPDATE} (violación de restricción: un 500 al
+     *       guardar el progreso). El constructor no falla: una fila existente
+     *       al 96 % con {@code finished_at} queda como «vista pero no
+     *       terminada», que es un estado válido. Lo que hay que decidir en la
+     *       migración es si esas filas, marcadas como vistas con el criterio
+     *       antiguo, lo siguen estando (lo razonable: no se puede saber si el
+     *       usuario llegó más allá) o se les quita {@code finished_at}.</li>
+     *   <li><b>Al bajarlo</b> (por ejemplo, al 90 %): falla la <b>lectura</b>.
+     *       Las filas que ya existen entre el 90 % y el 95 % no tienen
+     *       {@code finished_at} (la {@code V15} no se lo exigía), pero para
+     *       Java ya están terminadas, así que este constructor lanza
+     *       {@link IllegalArgumentException} al leerlas (500 en «Seguir viendo»,
+     *       el historial, las cifras y la página del título). Guardar sí
+     *       funciona, porque Java pone {@code finished_at}. La migración debe
+     *       rellenar {@code finished_at = updated_at} en esas filas (igual que
+     *       el relleno de la {@code V15}) y después cambiar el {@code CHECK};
+     *       si solo hiciera el relleno, el {@code CHECK} quedaría más laxo que
+     *       Java, sin romper nada pero sin proteger el intervalo nuevo.</li>
+     * </ul>
+     * <p>
+     * Los tests que fijan el borde del 95 % en la base de datos
+     * ({@code FlywaySchemaIntegrationTest}, {@code PostgresSchemaIntegrationTest},
+     * {@code PostgresWatchedAtMigrationIntegrationTest},
+     * {@code WatchProgressQueryContract}) también habría que revisarlos.
      * </p>
      */
     public static final int FINISHED_PERCENT = 95;
@@ -60,7 +135,8 @@ public record WatchProgress(int positionSeconds, int durationSeconds, Instant up
      * cumple.
      *
      * @throws IllegalArgumentException si la posición o la duración están
-     *         fuera de rango
+     *         fuera de rango, si {@code finishedAt} es posterior a
+     *         {@code updatedAt} o si está terminado sin {@code finishedAt}
      * @throws NullPointerException     si {@code updatedAt} es nulo
      */
     public WatchProgress {
@@ -71,6 +147,24 @@ public record WatchProgress(int positionSeconds, int durationSeconds, Instant up
         if (positionSeconds < 0 || positionSeconds > durationSeconds) {
             throw new IllegalArgumentException("Posición fuera de rango: " + positionSeconds);
         }
+        if (finishedAt != null && finishedAt.isAfter(updatedAt)) {
+            throw new IllegalArgumentException("Terminado (" + finishedAt + ") después del último guardado ("
+                    + updatedAt + ")");
+        }
+        if (finishedAt == null && isFinished(positionSeconds, durationSeconds)) {
+            throw new IllegalArgumentException("Un progreso terminado debe tener la fecha en que se terminó");
+        }
+    }
+
+    /**
+     * Indica si el título se ha terminado <b>alguna vez</b>, aunque ahora se
+     * esté volviendo a ver y la posición actual no llegue al 95 % (ver la
+     * clase).
+     *
+     * @return {@code true} si {@code finishedAt} no es nulo
+     */
+    public boolean watched() {
+        return finishedAt != null;
     }
 
     /**

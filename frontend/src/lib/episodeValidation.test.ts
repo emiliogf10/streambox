@@ -26,6 +26,7 @@ const VALID: EpisodeFormValues = {
   description: '',
   duration: '45',
   videoUrl: 'https://videos.example.com/t1e3',
+  subtitlesUrl: '',
 };
 
 /** Temporada `seasonNumber` con episodios de los números indicados. */
@@ -46,6 +47,7 @@ describe('validateEpisodeForm', () => {
       description: '',
       duration: '',
       videoUrl: '',
+      subtitlesUrl: '',
     };
     expect(validateEpisodeForm(empty)).toEqual({
       seasonNumber: 'La temporada es obligatoria',
@@ -135,6 +137,7 @@ describe('toEpisodeRequest / toEpisodeFormValues', () => {
         description: '   ',
         duration: ' 52',
         videoUrl: ' https://v.example.com/p ',
+        subtitlesUrl: ' https://v.example.com/p.vtt ',
       }),
     ).toEqual({
       seasonNumber: 2,
@@ -143,6 +146,7 @@ describe('toEpisodeRequest / toEpisodeFormValues', () => {
       description: null,
       duration: 52,
       videoUrl: 'https://v.example.com/p',
+      subtitlesUrl: 'https://v.example.com/p.vtt',
     });
     expect(toEpisodeRequest({ ...VALID, description: ' Algo pasa. ' }).description).toBe('Algo pasa.');
   });
@@ -156,6 +160,22 @@ describe('toEpisodeRequest / toEpisodeFormValues', () => {
     expect(validateEpisodeForm({ ...VALID, videoUrl: '   ' })).toEqual({});
     expect(toEpisodeRequest({ ...VALID, videoUrl: '   ' }).videoUrl).toBeNull();
     expect(toEpisodeFormValues(makeEpisode({ videoUrl: null })).videoUrl).toBe('');
+  });
+
+  it('los subtítulos: opcionales, con las reglas y mensajes de las películas, y se editan y envían como el vídeo', () => {
+    expect(validateEpisodeForm({ ...VALID, subtitlesUrl: 'https://cdn.example/t1e3.vtt' })).toEqual({});
+    expect(validateEpisodeForm({ ...VALID, subtitlesUrl: 'https://cdn.example/t1e3.srt' })).toEqual({
+      subtitlesUrl: 'Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://',
+    });
+    expect(validateEpisodeForm({ ...VALID, videoUrl: ' ', subtitlesUrl: 'https://cdn.example/t1e3.vtt' })).toEqual({
+      subtitlesUrl: 'Los subtítulos necesitan un vídeo: indica también la URL del vídeo',
+    });
+    expect(toEpisodeRequest({ ...VALID, subtitlesUrl: '  ' }).subtitlesUrl).toBeNull();
+    expect(toEpisodeFormValues(makeEpisode({ subtitlesUrl: null })).subtitlesUrl).toBe('');
+    expect(toEpisodeFormValues(makeEpisode({ subtitlesUrl: 'https://cdn.example/a.vtt' })).subtitlesUrl).toBe(
+      'https://cdn.example/a.vtt',
+    );
+    expect(newEpisodeFormValues([]).subtitlesUrl).toBe('');
   });
 });
 

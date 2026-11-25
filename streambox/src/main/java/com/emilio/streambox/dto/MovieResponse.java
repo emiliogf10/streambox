@@ -15,9 +15,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * </p>
  *
  * <p>
- * {@code videoUrl} y {@code trailerUrl} pueden ser {@code null} (y salen en
- * el JSON como {@code null}, no se omiten): una película puede no tener vídeo
- * del contenido, tráiler, o ninguno de los dos. En OpenAPI 3.1 eso se documenta
+ * {@code videoUrl}, {@code trailerUrl} y {@code subtitlesUrl} pueden ser
+ * {@code null} (y salen en el JSON como {@code null}, no se omiten): una
+ * película puede no tener vídeo del contenido, tráiler, subtítulos o ninguno
+ * (los subtítulos solo existen si hay vídeo). En OpenAPI 3.1 eso se documenta
  * con el tipo {@code ["string", "null"]}.
  * </p>
  *
@@ -31,6 +32,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param trailerUrl  tráiler de YouTube normalizado
  *                    ({@code https://www.youtube.com/watch?v=<id>}), o
  *                    {@code null} si no tiene
+ * @param subtitlesUrl URL de los subtítulos WebVTT en español, o {@code null}
+ *                    si no tiene (nunca sin {@code videoUrl})
  * @param createdAt   instante en el que se registró la película
  * @param genres      géneros de la película, ordenados por nombre
  */
@@ -47,6 +50,9 @@ public record MovieResponse(
         @Schema(types = { "string", "null" }, description = MovieResponse.TRAILER_URL_DESCRIPTION,
                 example = "https://www.youtube.com/watch?v=aBcDeFgHiJk")
         String trailerUrl,
+        @Schema(types = { "string", "null" }, description = MovieResponse.SUBTITLES_URL_DESCRIPTION,
+                example = "https://videos.streambox.example/subtitulos/dune.es.vtt")
+        String subtitlesUrl,
         Instant createdAt,
         Set<GenreResponse> genres) {
 
@@ -57,4 +63,12 @@ public record MovieResponse(
     public static final String TRAILER_URL_DESCRIPTION = "Tráiler en YouTube, siempre en la forma "
             + "normalizada https://www.youtube.com/watch?v=<id> (id de 11 caracteres de letras, números, "
             + "guion o guion bajo), o null si no tiene.";
+
+    /**
+     * Texto OpenAPI del {@code subtitlesUrl} de las respuestas, compartido con
+     * {@link EpisodeResponse}.
+     */
+    public static final String SUBTITLES_URL_DESCRIPTION = "URL de los subtítulos en español (archivo "
+            + "WebVTT, https://…/archivo.vtt), o null si no tiene. Solo hay subtítulos si hay videoUrl. El "
+            + "reproductor los carga como pista de subtítulos; su servidor debe permitir CORS.";
 }

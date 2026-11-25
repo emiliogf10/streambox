@@ -111,6 +111,23 @@ public class Movie {
     private String trailerUrl;
 
     /**
+     * URL de los subtítulos en español (un archivo WebVTT, {@code .vtt}), o
+     * {@code null} si no tiene.
+     *
+     * <p>
+     * Opcional desde la migración {@code V15}. La base de datos exige con dos
+     * {@code CHECK} que empiece por {@code https://}
+     * ({@code ck_movies_subtitles_url}) y que la película tenga vídeo
+     * ({@code ck_movies_subtitles_require_video}: no hay subtítulos sin
+     * {@link #videoUrl}). Que sea un {@code .vtt} lo valida la API, no la base
+     * de datos. Guardar algo que incumpla un {@code CHECK} lanza una violación
+     * de integridad, así que el servicio debe validarlo antes.
+     * </p>
+     */
+    @Column(name = "subtitles_url", length = 500)
+    private String subtitlesUrl;
+
+    /**
      * Instante en el que se creó el registro.
      *
      * <p>

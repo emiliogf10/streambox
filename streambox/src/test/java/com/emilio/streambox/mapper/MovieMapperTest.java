@@ -21,7 +21,7 @@ class MovieMapperTest {
 
     private static MovieRequest request(String title) {
         return new MovieRequest(title, "Sinopsis", 120, 2001,
-                "https://example.com/i.jpg", "https://example.com/v.mp4", null, Set.of(1L));
+                "https://example.com/i.jpg", "https://example.com/v.mp4", null, null, Set.of(1L));
     }
 
     private static Genre genre(Long id, String name) {
@@ -53,7 +53,7 @@ class MovieMapperTest {
     @Test
     void elTrailerSeGuardaNormalizadoYSaleEnLaRespuesta() {
         Movie movie = MovieMapper.toEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
-                "https://example.com/i.jpg", null, "https://youtu.be/aB3_-eFgHiJ?si=x", Set.of(1L)));
+                "https://example.com/i.jpg", null, "https://youtu.be/aB3_-eFgHiJ?si=x", null, Set.of(1L)));
 
         assertEquals("https://www.youtube.com/watch?v=aB3_-eFgHiJ", movie.getTrailerUrl());
         assertEquals("https://www.youtube.com/watch?v=aB3_-eFgHiJ", MovieMapper.toResponse(movie).trailerUrl());
@@ -64,7 +64,7 @@ class MovieMapperTest {
     @Test
     void unVideoOUnTrailerEnBlancoSeGuardanComoNull() {
         Movie blank = MovieMapper.toEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
-                "https://example.com/i.jpg", " \t ", "", Set.of(1L)));
+                "https://example.com/i.jpg", " \t ", "", null, Set.of(1L)));
 
         assertNull(blank.getVideoUrl());
         assertNull(blank.getTrailerUrl());
@@ -78,7 +78,7 @@ class MovieMapperTest {
         movie.setTrailerUrl("https://www.youtube.com/watch?v=aB3_-eFgHiJ");
 
         MovieMapper.updateEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
-                "https://example.com/i.jpg", null, null, Set.of(1L)), movie);
+                "https://example.com/i.jpg", null, null, null, Set.of(1L)), movie);
 
         assertNull(movie.getVideoUrl());
         assertNull(movie.getTrailerUrl());

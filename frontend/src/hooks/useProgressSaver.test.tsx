@@ -260,7 +260,48 @@ describe('useProgressSaver: caché', () => {
     video.end();
 
     await vi.waitFor(() =>
-      expect(queryClient.getQueryData<WatchProgress>(queryKeys.progress.movie(7))).toMatchObject({ finished: true }),
+      expect(queryClient.getQueryData<WatchProgress>(queryKeys.progress.movie(7))).toMatchObject({
+        finished: true,
+        watched: true,
+      }),
+    );
+  });
+
+  it('volver a ver algo ya visto no lo desmarca: `finished` pasa a false (posición) pero `watched` sigue a true', async () => {
+    queryClient.setQueryData<WatchProgress>(queryKeys.progress.movie(7), {
+      positionSeconds: 120,
+      durationSeconds: 120,
+      finished: true,
+      watched: true,
+      updatedAt: '2026-11-20T10:00:00Z',
+    });
+
+    renderSaver();
+    video.play(30);
+    video.pause();
+
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryData<WatchProgress>(queryKeys.progress.movie(7))).toMatchObject({
+        positionSeconds: 30,
+        finished: false,
+        watched: true,
+      }),
+    );
+  });
+
+  it('a medias y sin haberlo terminado nunca: ni terminado ni visto', async () => {
+    queryClient.setQueryData(queryKeys.progress.movie(7), null);
+
+    renderSaver();
+    video.play(30);
+    video.pause();
+
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryData<WatchProgress>(queryKeys.progress.movie(7))).toMatchObject({
+        positionSeconds: 30,
+        finished: false,
+        watched: false,
+      }),
     );
   });
 });

@@ -118,6 +118,21 @@ public class Episode {
     private String videoUrl;
 
     /**
+     * URL de los subtítulos en español del episodio (un archivo WebVTT,
+     * {@code .vtt}), o {@code null} si no tiene.
+     *
+     * <p>
+     * Opcional desde la migración {@code V15}, con las mismas reglas que
+     * {@link Movie#getSubtitlesUrl()}: la base de datos exige que empiece por
+     * {@code https://} ({@code ck_episodes_subtitles_url}) y que el episodio
+     * tenga vídeo ({@code ck_episodes_subtitles_require_video}); que sea un
+     * {@code .vtt} lo valida la API.
+     * </p>
+     */
+    @Column(name = "subtitles_url", length = 500)
+    private String subtitlesUrl;
+
+    /**
      * Instante en el que se creó el registro (lo asigna Hibernate al insertar).
      */
     @CreationTimestamp

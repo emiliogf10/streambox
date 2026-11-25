@@ -77,6 +77,7 @@ const field = {
   image: () => screen.getByLabelText('URL de la portada'),
   video: () => screen.getByLabelText('URL del vídeo (opcional)'),
   trailer: () => screen.getByLabelText('Tráiler de YouTube (opcional)'),
+  subtitles: () => screen.getByLabelText('URL de los subtítulos (opcional)'),
 };
 /**
  * `user-event` sin la pausa que mete por defecto entre acción y acción (`delay: null`). Este formulario es
@@ -244,6 +245,7 @@ describe('MovieFormPage: alta', () => {
       imageUrl: '/covers/interstellar.webp',
       videoUrl: 'https://videos.example.com/interstellar',
       trailerUrl: 'https://youtu.be/zSWdZVtXT7E',
+      subtitlesUrl: null,
       genreIds: [1, 2],
     });
 
@@ -251,6 +253,81 @@ describe('MovieFormPage: alta', () => {
 
     expect(await screen.findByText('Listado de películas')).toBeInTheDocument();
     expect(screen.getByText('«Interstellar» se ha añadido al catálogo.')).toBeInTheDocument();
+  });
+
+  it('subtítulos: ayuda con lo que hace falta (WebVTT, reproductor de StreamBox, CORS) y se envían recortados', async () => {
+    routeFetch(fetchMock, { ...GENRES_ROUTE, 'POST /api/movies': () => jsonResponse(interstellar, 201) });
+    const user = setupUser();
+    renderForm('/admin/peliculas/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    expect(field.subtitles()).toHaveAccessibleDescription(
+      'Archivo WebVTT (.vtt) en español por https://. Solo en el reproductor de StreamBox (vídeo .mp4, .webm, .ogg u .ogv). Ambos servidores deben permitir CORS; si no, el vídeo irá sin ellos.',
+    );
+    await fillValid(user);
+    await fill(user, field.subtitles(), ' https://subs.example/interstellar.VTT?v=2 ');
+
+    await user.click(submitNew());
+
+    expect(await screen.findByText('Listado de películas')).toBeInTheDocument();
+    expect(sentBody('POST', '/api/movies')).toMatchObject({ subtitlesUrl: 'https://subs.example/interstellar.VTT?v=2' });
+  });
+
+  it('subtítulos que no son .vtt: el mensaje del contrato en su campo, con el foco, y no se envía', async () => {
+    routeFetch(fetchMock, { ...GENRES_ROUTE });
+    const user = setupUser();
+    renderForm('/admin/peliculas/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+    await fill(user, field.subtitles(), 'https://subs.example/interstellar.srt');
+
+    await user.click(submitNew());
+
+    expect(field.subtitles()).toHaveFocus();
+    expect(field.subtitles()).toHaveAccessibleDescription(
+      'Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://',
+    );
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
+
+  it('subtítulos sin vídeo: «necesitan un vídeo» en el campo de los subtítulos; al escribir el vídeo, desaparece', async () => {
+    routeFetch(fetchMock, { ...GENRES_ROUTE });
+    const user = setupUser();
+    renderForm('/admin/peliculas/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+    await user.clear(field.video());
+    await fill(user, field.subtitles(), 'https://subs.example/interstellar.vtt');
+
+    await user.click(submitNew());
+
+    expect(field.subtitles()).toHaveFocus();
+    expect(field.subtitles()).toHaveAccessibleDescription('Los subtítulos necesitan un vídeo: indica también la URL del vídeo');
+    expect(field.video()).toHaveAttribute('aria-invalid', 'false');
+
+    await fill(user, field.video(), 'https://videos.example.com/interstellar.mp4');
+    expect(field.subtitles()).toHaveAttribute('aria-invalid', 'false');
+  });
+
+  it('400 del servidor en los subtítulos: su mensaje junto a «URL de los subtítulos» y el foco en él', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'POST /api/movies': () =>
+        errorResponse(400, 'VALIDATION_ERROR', 'Datos no válidos', {
+          validationErrors: { subtitlesUrl: 'Los subtítulos necesitan un vídeo: indica también la URL del vídeo' },
+        }),
+    });
+    const user = setupUser();
+    renderForm('/admin/peliculas/nueva');
+    await within(genresGroup()).findAllByRole('checkbox');
+    await fillValid(user);
+    await fill(user, field.subtitles(), 'https://subs.example/interstellar.vtt');
+
+    await user.click(submitNew());
+
+    expect(await screen.findByText('Revisa los campos marcados.')).toHaveAttribute('role', 'alert');
+    expect(field.subtitles()).toHaveAttribute('aria-invalid', 'true');
+    expect(field.subtitles()).toHaveAccessibleDescription('Los subtítulos necesitan un vídeo: indica también la URL del vídeo');
+    expect(field.subtitles()).toHaveFocus();
   });
 
   it('400 del servidor: cada mensaje junto a su campo, aviso general y foco al primero', async () => {
@@ -472,6 +549,9 @@ describe('MovieFormPage: edición', () => {
     expect(field.image()).toHaveValue('/covers/interstellar.webp');
     expect(field.video()).toHaveValue('https://videos.example.com/interstellar');
     expect(field.trailer()).toHaveValue('https://www.youtube.com/watch?v=zSWdZVtXT7E');
+    // Sin subtítulos en la película: el campo vacío (y sin error).
+    expect(field.subtitles()).toHaveValue('');
+    expect(field.subtitles()).toHaveAttribute('aria-invalid', 'false');
     expect(await within(genresGroup()).findByRole('checkbox', { name: 'Ciencia ficción' })).toBeChecked();
     expect(within(genresGroup()).getByRole('checkbox', { name: 'Drama' })).toBeChecked();
     expect(within(genresGroup()).getByRole('checkbox', { name: 'Acción' })).not.toBeChecked();

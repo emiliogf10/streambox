@@ -7,7 +7,9 @@
  * administrador lea lo mismo lo detecte el cliente o el servidor. La URL del
  * vídeo usa exactamente las reglas y mensajes de las películas
  * (`validateVideoUrl`), que es lo que hace también el servidor; como allí, es
- * **opcional** (vacío = el episodio no tiene vídeo y no muestra «Ver»).
+ * **opcional** (vacío = el episodio no tiene vídeo y no muestra «Ver»). Los
+ * subtítulos, también opcionales, usan `validateSubtitlesUrl`, la misma regla
+ * que en las películas (y exigen vídeo).
  *
  * Es solo comodidad: **manda la validación del servidor**. Sus
  * `validationErrors` se pintan igualmente junto a cada campo, y lo que el
@@ -23,6 +25,7 @@ import {
   hasDisallowedMultilineControlCharacters,
   optionalUrl,
   parseWholeNumber,
+  validateSubtitlesUrl,
   validateVideoUrl,
 } from './movieValidation';
 import { SERIES_MESSAGES } from './seriesValidation';
@@ -65,6 +68,8 @@ export interface EpisodeFormValues {
   duration: string;
   /** Opcional: vacío (o solo espacios) = sin vídeo (`null`). */
   videoUrl: string;
+  /** Opcional: subtítulos WebVTT; vacío = sin subtítulos (`null`). Exigen vídeo. */
+  subtitlesUrl: string;
 }
 
 /** Errores por campo del formulario de episodio; un campo sin error no aparece. */
@@ -148,6 +153,9 @@ export function validateEpisodeForm(values: EpisodeFormValues): EpisodeFormError
   const video = validateVideoUrl(values.videoUrl.trim());
   if (video) errors.videoUrl = video;
 
+  const subtitles = validateSubtitlesUrl(values.subtitlesUrl.trim(), values.videoUrl.trim());
+  if (subtitles) errors.subtitlesUrl = subtitles;
+
   return errors;
 }
 
@@ -166,10 +174,11 @@ export function toEpisodeRequest(values: EpisodeFormValues): EpisodeRequest {
     description: description || null,
     duration: Number(values.duration.trim()),
     videoUrl: optionalUrl(values.videoUrl),
+    subtitlesUrl: optionalUrl(values.subtitlesUrl),
   };
 }
 
-/** Pasa un episodio de la API a los valores del formulario (edición). Sin sinopsis o sin vídeo = campo vacío. */
+/** Pasa un episodio de la API a los valores del formulario (edición). Sin sinopsis, vídeo o subtítulos = campo vacío. */
 export function toEpisodeFormValues(episode: Episode): EpisodeFormValues {
   return {
     seasonNumber: String(episode.seasonNumber),
@@ -178,6 +187,7 @@ export function toEpisodeFormValues(episode: Episode): EpisodeFormValues {
     description: episode.description ?? '',
     duration: String(episode.duration),
     videoUrl: episode.videoUrl ?? '',
+    subtitlesUrl: episode.subtitlesUrl ?? '',
   };
 }
 
@@ -225,5 +235,6 @@ export function newEpisodeFormValues(seasons: readonly Season[]): EpisodeFormVal
     description: '',
     duration: '',
     videoUrl: '',
+    subtitlesUrl: '',
   };
 }

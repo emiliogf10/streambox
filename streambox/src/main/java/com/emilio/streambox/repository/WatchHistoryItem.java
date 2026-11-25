@@ -31,12 +31,13 @@ import java.util.Objects;
  *       puede importar los cuatro sin choques de nombres.</li>
  * </ul>
  *
- * <h2>«Terminado» no es un campo, se deriva</h2>
+ * <h2>«Terminado» y «visto» no son campos, se derivan</h2>
  * <p>
  * {@link #finished()} sale de {@link WatchProgress#finished()} (regla del
- * {@value WatchProgress#FINISHED_PERCENT} %): así hay <b>un único</b> criterio
- * en Java y no puede existir una entrada cuyo indicador contradiga su posición
- * y duración.
+ * {@value WatchProgress#FINISHED_PERCENT} %) y {@link #watched()} de
+ * {@link WatchProgress#watched()} ({@code finished_at}, {@code V15}): así hay
+ * <b>un único</b> criterio en Java y no puede existir una entrada cuyo
+ * indicador contradiga su progreso.
  * </p>
  */
 public sealed interface WatchHistoryItem
@@ -58,6 +59,18 @@ public sealed interface WatchHistoryItem
      */
     default boolean finished() {
         return progress().finished();
+    }
+
+    /**
+     * Indica si la entrada se ha terminado <b>alguna vez</b> (migración
+     * {@code V15}): no se pierde al volver a verla y parar antes del final.
+     * Es lo que debe mostrar el historial como «Vista»; {@link #finished()}
+     * solo dice si la posición actual llega al final.
+     *
+     * @return {@code progress().watched()}
+     */
+    default boolean watched() {
+        return progress().watched();
     }
 
     /**

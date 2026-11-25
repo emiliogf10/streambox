@@ -93,7 +93,8 @@ public class WatchProgressController {
     @Operation(summary = "Guarda mi progreso en una película", description = "Guarda el segundo por el que va "
             + "el usuario autenticado en la película y la duración del vídeo, sustituyendo lo anterior. El "
             + "reproductor lo envía periódicamente y al pausar o salir; repetirlo es idempotente. Si la posición "
-            + "alcanza el 95 % de la duración, la película cuenta como vista y deja de salir en «Seguir viendo».")
+            + "alcanza el 95 % de la duración, la película cuenta como vista (watched, que ya no se pierde "
+            + "aunque se vuelva a ver) y deja de salir en «Seguir viendo».")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Progreso guardado"),
             @ApiResponse(responseCode = "400", description = INVALID_PROGRESS_DESCRIPTION),
@@ -120,8 +121,8 @@ public class WatchProgressController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Operation(summary = "Guarda mi progreso en un episodio", description = "Guarda el segundo por el que va "
             + "el usuario autenticado en el episodio y la duración del vídeo, sustituyendo lo anterior. "
-            + "Idempotente. Si la posición alcanza el 95 % de la duración, el episodio cuenta como visto y deja "
-            + "de salir en «Seguir viendo».")
+            + "Idempotente. Si la posición alcanza el 95 % de la duración, el episodio cuenta como visto "
+            + "(watched, que ya no se pierde aunque se vuelva a ver) y deja de salir en «Seguir viendo».")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Progreso guardado"),
             @ApiResponse(responseCode = "400", description = INVALID_PROGRESS_DESCRIPTION),
@@ -147,8 +148,8 @@ public class WatchProgressController {
      */
     @GetMapping("/movies/{movieId}")
     @Operation(summary = "Obtiene mi progreso en una película", description = "Devuelve el segundo por el que "
-            + "va el usuario autenticado en la película, la duración del vídeo, si ya la terminó (95 % o más) y "
-            + "cuándo se guardó. Si nunca la empezó (o la quitó de «Seguir viendo»), 204 sin cuerpo.")
+            + "va el usuario autenticado en la película, la duración del vídeo, si la posición actual llega al "
+            + "final (finished, 95 % o más), si la ha terminado alguna vez (watched) y cuándo se guardó. Si nunca la empezó (o la quitó de «Seguir viendo»), 204 sin cuerpo.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Progreso obtenido"),
             @ApiResponse(responseCode = "204", description = "La película existe, pero no hay progreso guardado",
@@ -175,8 +176,8 @@ public class WatchProgressController {
      */
     @GetMapping("/episodes/{episodeId}")
     @Operation(summary = "Obtiene mi progreso en un episodio", description = "Devuelve el segundo por el que va "
-            + "el usuario autenticado en el episodio, la duración del vídeo, si ya lo terminó (95 % o más) y "
-            + "cuándo se guardó. Si nunca lo empezó, 204 sin cuerpo.")
+            + "el usuario autenticado en el episodio, la duración del vídeo, si la posición actual llega al "
+            + "final (finished, 95 % o más), si lo ha terminado alguna vez (watched) y cuándo se guardó. Si nunca lo empezó, 204 sin cuerpo.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Progreso obtenido"),
             @ApiResponse(responseCode = "204", description = "El episodio existe, pero no hay progreso guardado",

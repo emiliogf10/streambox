@@ -78,8 +78,9 @@ public class WatchHistoryController {
             + "reciente al más antiguo (a igual fecha, primero las películas y después el id mayor), lo que el "
             + "usuario autenticado ha empezado a ver: una entrada por película y una sola por serie, la de su "
             + "último episodio tocado, con el progreso de ese episodio (nunca propone el siguiente). A diferencia "
-            + "de «Seguir viendo», incluye lo terminado (finished true, 95 % o más de la duración) y los títulos "
-            + "que ya no tienen vídeo. Cada entrada lleva type (MOVIE o EPISODE): en EPISODE, id y title son los "
+            + "de «Seguir viendo», incluye lo terminado (finished true: la posición actual llega al 95 % de la "
+            + "duración), lo visto alguna vez aunque se esté volviendo a ver (watched true; es lo que se muestra "
+            + "como «Vista») y los títulos que ya no tienen vídeo. Cada entrada lleva type (MOVIE o EPISODE): en EPISODE, id y title son los "
             + "del episodio e imageUrl, seriesId y seriesTitle los de la serie; en MOVIE, seasonNumber, "
             + "episodeNumber, seriesId y seriesTitle van a null. No hay una tabla de historial aparte: sale del "
             + "progreso guardado, así que quitar un título de «Seguir viendo» (DELETE "
@@ -104,15 +105,15 @@ public class WatchHistoryController {
      * Obtiene las cifras de visionado del perfil.
      *
      * @param principal usuario autenticado
-     * @return películas y episodios terminados y tiempo visto estimado
+     * @return películas y episodios vistos alguna vez y tiempo visto estimado
      */
     @GetMapping("/watch-stats")
     @Operation(summary = "Obtiene mis cifras de visionado", description = "Devuelve cuántas películas "
-            + "(finishedMovies) y cuántos episodios (finishedEpisodes) ha terminado el usuario autenticado (95 % "
-            + "o más de la duración; cada episodio cuenta por separado) y el tiempo visto en segundos "
-            + "(watchedSeconds). Ese tiempo es una estimación: solo se guarda el último punto de cada título, así "
-            + "que suma la duración de lo terminado y la posición de lo que está a medias, sin contar lo vuelto "
-            + "a ver. Cuenta todo el progreso, tenga hoy vídeo el título o no; lo quitado de «Seguir viendo» o "
+            + "(finishedMovies) y cuántos episodios (finishedEpisodes) ha terminado alguna vez el usuario "
+            + "autenticado (llegó al 95 % o más de la duración al menos una vez, watched; volver a verlos no los "
+            + "resta; cada episodio cuenta por separado) y el tiempo visto en segundos (watchedSeconds). Ese "
+            + "tiempo es una estimación: solo se guarda el último punto de cada título, así que suma la duración "
+            + "de lo visto alguna vez y la posición de lo que nunca se ha terminado, sin contar lo vuelto a ver. Cuenta todo el progreso, tenga hoy vídeo el título o no; lo quitado de «Seguir viendo» o "
             + "borrado del catálogo deja de contar. Sin progreso, las tres cifras son 0.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Cifras obtenidas correctamente"),

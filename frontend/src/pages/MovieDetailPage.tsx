@@ -188,6 +188,7 @@ function MovieDetailView({ movie, confirmed }: { movie: Movie; confirmed: boolea
               <WatchProgressBar
                 positionSeconds={progress.positionSeconds}
                 durationSeconds={progress.durationSeconds}
+                watched={progress.watched}
                 className="max-w-xs"
                 textClassName="text-white/75"
               />

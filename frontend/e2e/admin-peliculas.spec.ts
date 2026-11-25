@@ -18,11 +18,19 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { Page } from '@playwright/test';
-import { deleteMoviesMatching, loginAdmin } from './support/api';
+import { deleteMoviesMatching, findMovieId, loginAdmin, movieByIdApi } from './support/api';
 import { escapeRegExp, expect, formAlert, test, waitForAdminSearchResults, waitForMovieForm } from './support/fixtures';
 
 /** Sufijo único de la película de este test (también sirve para buscarla y limpiarla). */
 const SUFFIX = `e2e${randomUUID().slice(0, 8)}`;
+
+/**
+ * Uno detrás de otro, en el mismo proceso: el primer test comprueba que SU
+ * película es la más reciente (la primera fila del panel y el banner de
+ * `/peliculas`), y la del test de subtítulos le quitaría ese puesto si se
+ * crearan a la vez. `default` (y no `serial`): si uno falla, el otro corre igual.
+ */
+test.describe.configure({ mode: 'default' });
 
 /** Fila de la tabla del panel cuya película se titula exactamente `title`. */
 function movieRow(page: Page, title: string) {
@@ -163,4 +171,106 @@ test('crea una película con portada propia, la edita y la borra con confirmaci�
   await expect(page.getByRole('heading', { level: 1, name: editedTitle, exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Ver todas las películas' })).toHaveAttribute('href', '/peliculas');
   expect(await page.evaluate(() => (window as { __sinRecargar?: boolean }).__sinRecargar)).toBe(true);
+});
+
+/** Texto de los errores y de la ayuda del campo de subtítulos (los del contrato con el servidor). */
+const SUBTITLES = {
+  label: 'URL de los subtítulos (opcional)',
+  format: 'Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://',
+  requireVideo: 'Los subtítulos necesitan un vídeo: indica también la URL del vídeo',
+  hint: 'Archivo WebVTT (.vtt) en español por https://. Solo en el reproductor de StreamBox (vídeo .mp4, .webm, .ogg u .ogv). Ambos servidores deben permitir CORS; si no, el vídeo irá sin ellos.',
+};
+
+/**
+ * Subtítulos de una película desde el panel (V15): los dos errores del cliente
+ * con el foco en el campo (sin vídeo y `.srt`), el alta con un `.vtt` con
+ * consulta y en mayúsculas (el servidor lo guarda TAL CUAL: no lo normaliza),
+ * editar otra cosa sin perderlos y borrarlos vaciando el campo. Lo guardado se
+ * comprueba en la API, que es lo que usará el reproductor.
+ */
+test('subtítulos: exige vídeo y .vtt con el foco en el campo, guarda uno con consulta y en mayúsculas, los conserva al editar y se borran vaciando el campo', async ({
+  page,
+  request,
+  signIn,
+}) => {
+  const title = `Película con subtítulos ${SUFFIX}`;
+  const subtitlesUrl = 'https://cdn.streambox.example/subs/PELICULA.ES.VTT?token=AbC&exp=1';
+  const adminToken = await loginAdmin(request);
+  await signIn({ token: adminToken });
+  await page.goto('/admin/peliculas/nueva');
+  await waitForMovieForm(page);
+
+  await page.getByLabel('Título', { exact: true }).fill(title);
+  await page.getByLabel('Sinopsis').fill('Una película creada por la suite E2E para probar los subtítulos.');
+  await page.getByLabel('Duración (minutos)').fill('100');
+  await page.getByLabel('Año de estreno').fill('2024');
+  await page.getByLabel('URL de la portada').fill('/covers/interstellar.webp');
+  await page.getByRole('group', { name: 'Géneros' }).getByRole('checkbox', { name: 'Drama' }).check();
+  const create = page.getByRole('button', { name: 'Crear película' });
+  const subtitles = page.getByLabel(SUBTITLES.label);
+  const video = page.getByLabel('URL del vídeo (opcional)');
+
+  // Sin error, el campo se describe con su ayuda.
+  await expect(subtitles).toHaveAccessibleDescription(SUBTITLES.hint);
+
+  // Subtítulos válidos sin vídeo: el error va en los subtítulos (el vídeo vacío está bien) y el foco, a ellos.
+  await subtitles.fill(subtitlesUrl);
+  await create.click();
+  await expect(subtitles).toBeFocused();
+  await expect(subtitles).toHaveAccessibleDescription(SUBTITLES.requireVideo);
+  await expect(subtitles).toHaveAttribute('aria-invalid', 'true');
+  await expect(video).not.toHaveAttribute('aria-invalid', 'true');
+  // Escribir el vídeo retira ese aviso, que dependía de él.
+  await video.fill('https://videos.streambox.example/watch/e2e-subtitulos.mp4');
+  await expect(subtitles).toHaveAccessibleDescription(SUBTITLES.hint);
+
+  // Un .srt no es WebVTT: error de formato y foco en el campo, sin llegar al servidor.
+  await subtitles.fill('https://cdn.streambox.example/subs/pelicula.srt');
+  let posts = 0;
+  page.on('request', (sent) => {
+    if (sent.method() === 'POST' && sent.url().endsWith('/api/movies')) posts += 1;
+  });
+  await create.click();
+  await expect(subtitles).toBeFocused();
+  await expect(subtitles).toHaveAccessibleDescription(SUBTITLES.format);
+  expect(posts).toBe(0);
+
+  // Con consulta y en mayúsculas sí vale: se crea y el servidor lo guarda tal cual.
+  await subtitles.fill(subtitlesUrl);
+  await create.click();
+  await expect(page).toHaveURL(/\/admin\/peliculas$/);
+  await expect(page.getByText(`«${title}» se ha añadido al catálogo.`)).toBeVisible();
+  const movieId = await findMovieId(request, adminToken, title);
+  expect((await movieByIdApi(request, adminToken, movieId)).subtitlesUrl).toBe(subtitlesUrl);
+
+  // Editar otra cosa (la duración) los conserva: el formulario los carga y los vuelve a mandar.
+  await page.goto(`/admin/peliculas/${movieId}/editar`);
+  await expect(page.getByRole('heading', { level: 2, name: `Editar «${title}»` })).toBeVisible();
+  await expect(subtitles).toHaveValue(subtitlesUrl);
+  await expect(subtitles).toHaveAccessibleDescription(SUBTITLES.hint);
+  await page.getByLabel('Duración (minutos)').fill('101');
+  await page.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText(`Se han guardado los cambios de «${title}».`)).toBeVisible();
+  const kept = await movieByIdApi(request, adminToken, movieId);
+  expect(kept.subtitlesUrl).toBe(subtitlesUrl);
+
+  // Quitar el vídeo dejando los subtítulos: el mismo error del cliente, ahora en la edición.
+  await page.goto(`/admin/peliculas/${movieId}/editar`);
+  await expect(subtitles).toHaveValue(subtitlesUrl);
+  await video.fill('');
+  await page.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(subtitles).toBeFocused();
+  await expect(subtitles).toHaveAccessibleDescription(SUBTITLES.requireVideo);
+
+  // Vaciar el campo los borra (se manda `null`) y el vídeo puede seguir como estaba.
+  await video.fill(kept.videoUrl ?? '');
+  await subtitles.fill('');
+  await page.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText(`Se han guardado los cambios de «${title}».`)).toBeVisible();
+  const cleared = await movieByIdApi(request, adminToken, movieId);
+  expect(cleared.subtitlesUrl).toBeNull();
+  expect(cleared.videoUrl).toBe(kept.videoUrl);
+  await page.goto(`/admin/peliculas/${movieId}/editar`);
+  await expect(page.getByRole('heading', { level: 2, name: `Editar «${title}»` })).toBeVisible();
+  await expect(subtitles).toHaveValue('');
 });

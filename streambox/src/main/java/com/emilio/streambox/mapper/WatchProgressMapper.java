@@ -35,12 +35,12 @@ public final class WatchProgressMapper {
      * Progreso de un título, para reanudarlo.
      *
      * @param progress progreso guardado
-     * @return DTO con {@code finished} ya calculado
+     * @return DTO con {@code finished} y {@code watched} ya calculados
      */
     public static WatchProgressResponse toResponse(WatchProgress progress) {
 
         return new WatchProgressResponse(progress.positionSeconds(), progress.durationSeconds(),
-                progress.finished(), progress.updatedAt());
+                progress.finished(), progress.watched(), progress.updatedAt());
     }
 
     /**
@@ -55,7 +55,7 @@ public final class WatchProgressMapper {
         return byEpisode.entrySet().stream()
                 .map(entry -> new EpisodeProgressResponse(entry.getKey(), entry.getValue().positionSeconds(),
                         entry.getValue().durationSeconds(), entry.getValue().finished(),
-                        entry.getValue().updatedAt()))
+                        entry.getValue().watched(), entry.getValue().updatedAt()))
                 .toList();
     }
 
@@ -115,9 +115,10 @@ public final class WatchProgressMapper {
      *
      * <p>
      * A diferencia de la tarjeta de «Seguir viendo», el progreso nunca es nulo
-     * (toda entrada sale de una fila de progreso) y {@code finished} se copia
-     * de {@link WatchHistoryItem#finished()}, el único criterio del 95 % en
-     * Java: el mapper no lo recalcula.
+     * (toda entrada sale de una fila de progreso) y {@code finished} y
+     * {@code watched} se copian de {@link WatchHistoryItem#finished()} y
+     * {@link WatchHistoryItem#watched()}, los únicos criterios en Java: el
+     * mapper no los recalcula.
      * </p>
      *
      * @param item película o último episodio tocado de una serie
@@ -130,12 +131,14 @@ public final class WatchProgressMapper {
             case WatchHistoryItem.MovieEntry movie -> new WatchHistoryItemResponse(
                     ContinueWatchingType.MOVIE, movie.movieId(), movie.title(), movie.imageUrl(),
                     null, null, null, null,
-                    progress.positionSeconds(), progress.durationSeconds(), item.finished(), item.updatedAt());
+                    progress.positionSeconds(), progress.durationSeconds(), item.finished(), item.watched(),
+                    item.updatedAt());
             case WatchHistoryItem.EpisodeEntry episode -> new WatchHistoryItemResponse(
                     ContinueWatchingType.EPISODE, episode.episodeId(), episode.episodeTitle(),
                     episode.seriesImageUrl(), episode.seasonNumber(), episode.episodeNumber(),
                     episode.seriesId(), episode.seriesTitle(),
-                    progress.positionSeconds(), progress.durationSeconds(), item.finished(), item.updatedAt());
+                    progress.positionSeconds(), progress.durationSeconds(), item.finished(), item.watched(),
+                    item.updatedAt());
         };
     }
 

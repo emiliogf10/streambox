@@ -17,7 +17,10 @@ export const MOVIE_TITLE_MAX = 150;
 export const MOVIE_DESCRIPTION_MAX = 1000;
 export const MOVIE_YEAR_MIN = 1888;
 export const MOVIE_YEAR_MAX = 2100;
-/** Longitud máxima de `imageUrl` y `videoUrl` (columnas `VARCHAR(500)`; la del tráiler, en `youtube.ts`). */
+/**
+ * Longitud máxima de `imageUrl`, `videoUrl` y `subtitlesUrl` (columnas
+ * `VARCHAR(500)`; la del tráiler, en `youtube.ts`).
+ */
 export const URL_MAX = 500;
 /**
  * Mayor entero que cabe en un `Integer` de Java (`duration` y `releaseYear`).
@@ -40,6 +43,13 @@ export const IMAGE_URL_FORMAT_MESSAGE =
 export const IMAGE_URL_SIZE_MESSAGE = `La URL de la imagen no puede superar los ${URL_MAX} caracteres`;
 export const VIDEO_URL_FORMAT_MESSAGE = 'La URL del vídeo debe empezar por https://';
 export const VIDEO_URL_SIZE_MESSAGE = `La URL del vídeo no puede superar los ${URL_MAX} caracteres`;
+/** Subtítulos demasiado largos (`SUBTITLES_URL_SIZE_MESSAGE` del backend; películas y episodios). */
+export const SUBTITLES_URL_SIZE_MESSAGE = `La URL de los subtítulos no puede superar los ${URL_MAX} caracteres`;
+/** Subtítulos que no son una URL `https://` de un archivo `.vtt` (`SUBTITLES_URL_FORMAT_MESSAGE`). */
+export const SUBTITLES_URL_FORMAT_MESSAGE =
+  'Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://';
+/** Subtítulos válidos sin vídeo al que acompañar (`SUBTITLES_REQUIRE_VIDEO_MESSAGE`). */
+export const SUBTITLES_REQUIRE_VIDEO_MESSAGE = 'Los subtítulos necesitan un vídeo: indica también la URL del vídeo';
 export const GENRE_NAME_SIZE_MESSAGE = `El nombre del género debe tener entre ${GENRE_NAME_MIN} y ${GENRE_NAME_MAX} caracteres`;
 /**
  * Título con caracteres de control (`MovieRequest.TITLE_CONTROL_CHARACTERS_MESSAGE`,
@@ -117,6 +127,8 @@ export interface MovieFormValues {
   videoUrl: string;
   /** Opcional: enlace de YouTube; vacío = sin tráiler (`null`). */
   trailerUrl: string;
+  /** Opcional: subtítulos WebVTT; vacío = sin subtítulos (`null`). Exigen vídeo. */
+  subtitlesUrl: string;
   genreIds: number[];
 }
 
@@ -132,6 +144,7 @@ export const EMPTY_MOVIE_FORM: MovieFormValues = {
   imageUrl: '',
   videoUrl: '',
   trailerUrl: '',
+  subtitlesUrl: '',
   genreIds: [],
 };
 
@@ -215,6 +228,86 @@ export function validateVideoUrl(value: string): string | undefined {
   return undefined;
 }
 
+/** Terminación obligatoria de la ruta de los subtítulos (archivo WebVTT). */
+const SUBTITLES_EXTENSION = '.vtt';
+
+/**
+ * Indica si la RUTA de una URL termina en `.vtt`, sin distinguir mayúsculas.
+ *
+ * La ruta es lo que hay antes del primer `?` o `#`, igual que en el backend:
+ * `subs.vtt?token=…` y `SUBS.VTT` valen; `subs.srt`, `subs.vtt.html` o
+ * `/descargar?f=subs.vtt` (la terminación está en la consulta), no. Se corta el
+ * texto tal cual y no se usa `URL` para no depender de cómo normaliza cada
+ * navegador. Solo se llama con texto ASCII ya comprobado, así que `toLowerCase`
+ * equivale a las «minúsculas ASCII» del servidor.
+ *
+ * @param value URL ya recortada
+ */
+function hasVttPath(value: string): boolean {
+  const path = value.split(/[?#]/, 1)[0];
+  return path.toLowerCase().endsWith(SUBTITLES_EXTENSION);
+}
+
+/**
+ * Valida la URL de los subtítulos (de una película o de un episodio), con la
+ * misma prioridad que el backend y UN mensaje por caso:
+ *
+ * 1. vacía → sin subtítulos (opcional, como el vídeo);
+ * 2. más de {@link URL_MAX} caracteres → {@link SUBTITLES_URL_SIZE_MESSAGE};
+ * 3. no es una URL `https://` válida (las reglas de {@link validateVideoUrl}) o
+ *    su ruta no termina en `.vtt` → {@link SUBTITLES_URL_FORMAT_MESSAGE};
+ * 4. válida pero SIN vídeo → {@link SUBTITLES_REQUIRE_VIDEO_MESSAGE}: unos
+ *    subtítulos sin nada que reproducir no se verían nunca. El error va en este
+ *    campo y no en el del vídeo (que es opcional y está bien vacío): lo que
+ *    sobra o falta lo decide quien escribió los subtítulos.
+ *
+ * El vídeo cuenta como «hay» con solo no estar en blanco, aunque tenga su propio
+ * error: ese se ve en su campo, y aquí se repetiría un aviso que no ayuda.
+ *
+ * @param value URL de los subtítulos, ya recortada (`trim`)
+ * @param videoUrl URL del vídeo, ya recortada
+ * @returns el mensaje de error, o `undefined` si es válida o está vacía
+ */
+export function validateSubtitlesUrl(value: string, videoUrl: string): string | undefined {
+  if (!value) return undefined;
+  if (value.length > URL_MAX) return SUBTITLES_URL_SIZE_MESSAGE;
+  if (!isPrintableAscii(value) || !isAbsoluteHttpsUrl(value) || !hasVttPath(value)) return SUBTITLES_URL_FORMAT_MESSAGE;
+  if (!videoUrl) return SUBTITLES_REQUIRE_VIDEO_MESSAGE;
+  return undefined;
+}
+
+/**
+ * Ayuda del campo de subtítulos en los formularios de película y de episodio.
+ * Dice lo que el administrador necesita saber para que funcionen de verdad:
+ * - qué archivo (WebVTT, `.vtt`, por https) y que se presentan como español
+ *   (la pista se llama «Español»);
+ * - que solo los usa el reproductor de StreamBox: un vídeo que no es un archivo
+ *   directo (las terminaciones de `DIRECT_VIDEO_EXTENSIONS` en `lib/playback.ts`,
+ *   todas listadas: lo vigila un test) se abre en otra pestaña, sin ellos. El
+ *   «por https» del vídeo no se repite: su propio campo ya lo exige;
+ * - CORS en los DOS servidores («ambos»: el del vídeo y el de los subtítulos):
+ *   con una pista de otro origen el navegador también pide el vídeo con CORS.
+ *   Si falla, el vídeo se ve sin subtítulos (nunca deja de verse), que es
+ *   exactamente lo que dice la última frase.
+ *
+ * Corta a propósito (revisión QA, BAJA-4): la anterior ocupaba cinco líneas a 375 px.
+ */
+export const SUBTITLES_HINT =
+  'Archivo WebVTT (.vtt) en español por https://. Solo en el reproductor de StreamBox (vídeo .mp4, .webm, .ogg u .ogv). Ambos servidores deben permitir CORS; si no, el vídeo irá sin ellos.';
+
+/**
+ * Quita el error «Los subtítulos necesitan un vídeo» ({@link SUBTITLES_REQUIRE_VIDEO_MESSAGE})
+ * cuando el administrador cambia el vídeo: dependía de él y ya no se sabe si
+ * sigue siendo verdad (se vuelve a comprobar al guardar). Los demás errores de
+ * los subtítulos son de su propio texto y se quedan.
+ *
+ * @param errors errores actuales del formulario (película o episodio)
+ * @returns los mismos errores, sin ese aviso si estaba
+ */
+export function withoutStaleSubtitlesError<T extends { subtitlesUrl?: string }>(errors: T): T {
+  return errors.subtitlesUrl === SUBTITLES_REQUIRE_VIDEO_MESSAGE ? { ...errors, subtitlesUrl: undefined } : errors;
+}
+
 /**
  * URL que puede usar la vista previa de la portada, o `null` si no cumple las
  * reglas. Así la vista previa nunca pide al navegador una URL que el servidor
@@ -293,6 +386,9 @@ export function validateMovieForm(values: MovieFormValues): MovieFormErrors {
   const trailerError = validateTrailerUrl(values.trailerUrl.trim());
   if (trailerError) errors.trailerUrl = trailerError;
 
+  const subtitlesError = validateSubtitlesUrl(values.subtitlesUrl.trim(), values.videoUrl.trim());
+  if (subtitlesError) errors.subtitlesUrl = subtitlesError;
+
   if (values.genreIds.length === 0) errors.genreIds = 'Elige al menos un género';
 
   return errors;
@@ -308,8 +404,8 @@ export function optionalUrl(raw: string): string | null {
 
 /**
  * Convierte el formulario (ya validado) en el cuerpo de la petición: recorta
- * los textos de los extremos, pasa los números a `number` y el vídeo y el
- * tráiler vacíos a `null` (el servidor haría lo mismo con una cadena vacía;
+ * los textos de los extremos, pasa los números a `number` y el vídeo, el
+ * tráiler y los subtítulos vacíos a `null` (el servidor haría lo mismo con una cadena vacía;
  * mandarlo ya así deja claro en la petición que «no tiene»). El tráiler se
  * envía tal como se escribió: lo normaliza el servidor.
  *
@@ -326,6 +422,7 @@ export function toMovieRequest(values: MovieFormValues): MovieRequest {
     imageUrl: values.imageUrl.trim(),
     videoUrl: optionalUrl(values.videoUrl),
     trailerUrl: optionalUrl(values.trailerUrl),
+    subtitlesUrl: optionalUrl(values.subtitlesUrl),
     genreIds: [...values.genreIds],
   };
 }

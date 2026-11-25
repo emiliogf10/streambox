@@ -1,6 +1,7 @@
 package com.emilio.streambox.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -82,7 +83,7 @@ class WatchHistoryIntegrationTest {
     /** Las claves exactas de cada entrada del historial (el contrato del frontend). */
     private static final Set<String> ENTRY_FIELDS = Set.of("type", "id", "title", "imageUrl", "seasonNumber",
             "episodeNumber", "seriesId", "seriesTitle", "positionSeconds", "durationSeconds", "finished",
-            "updatedAt");
+            "watched", "updatedAt");
 
     private static final Instant BASE = Instant.parse("2026-01-01T00:00:00Z");
 
@@ -177,6 +178,7 @@ class WatchHistoryIntegrationTest {
         assertEquals(2700, episode.get("positionSeconds").asInt());
         assertEquals(2700, episode.get("durationSeconds").asInt());
         assertTrue(episode.get("finished").asBoolean());
+        assertTrue(episode.get("watched").asBoolean());
         assertEquals("2026-01-01T00:00:01Z", episode.get("updatedAt").asText());
 
         JsonNode movie = history.get(1);
@@ -190,6 +192,7 @@ class WatchHistoryIntegrationTest {
         assertEquals(1325, movie.get("positionSeconds").asInt());
         assertEquals(8160, movie.get("durationSeconds").asInt());
         assertEquals(false, movie.get("finished").asBoolean());
+        assertEquals(false, movie.get("watched").asBoolean());
         assertEquals("2026-01-01T00:00:00Z", movie.get("updatedAt").asText());
     }
 
@@ -209,6 +212,30 @@ class WatchHistoryIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(content().json("{\"finishedMovies\":1,\"finishedEpisodes\":1,\"watchedSeconds\":"
                         + (1325 + 100 + 2700 + 100) + "}", true));
+    }
+
+    /**
+     * Volver a ver lo terminado: la entrada del historial deja de estar
+     * {@code finished} (posición actual) pero sigue {@code watched}, que es lo
+     * que el perfil muestra como «Vista»; las cifras la siguen contando.
+     */
+    @Test
+    void volverAVerUnTituloLoDejaWatchedEnElHistorialYEnLasCifras() throws Exception {
+        save(aliceToken, MOVIE_PROGRESS, dune.getId(), 100, 100);
+        save(aliceToken, MOVIE_PROGRESS, dune.getId(), 10, 100);
+        save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 100, 100);
+        save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 3, 100);
+
+        JsonNode history = json(get(HISTORY).header("Authorization", aliceToken));
+
+        assertEquals(2, history.size());
+        for (JsonNode entry : history) {
+            assertFalse(entry.get("finished").asBoolean(), entry.toString());
+            assertTrue(entry.get("watched").asBoolean(), entry.toString());
+        }
+        mockMvc.perform(get(STATS).header("Authorization", aliceToken))
+                .andExpect(content().json(
+                        "{\"finishedMovies\":1,\"finishedEpisodes\":1,\"watchedSeconds\":200}", true));
     }
 
     // ------------------------------------------------------------------
@@ -395,6 +422,26 @@ class WatchHistoryIntegrationTest {
         }
     }
 
+    /**
+     * {@code watched} (V15) está publicado como booleano en las
+     * tres respuestas de progreso, con una descripción que lo distingue de
+     * {@code finished}.
+     */
+    @Test
+    void elOpenApiDocumentaWatchedEnLasTresRespuestas() throws Exception {
+        JsonNode schemas = objectMapper.readTree(mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString())
+                .at("/components/schemas");
+
+        for (String schema : List.of("WatchProgressResponse", "EpisodeProgressResponse", "WatchHistoryItemResponse")) {
+            JsonNode watched = schemas.at("/" + schema + "/properties/watched");
+            assertEquals("boolean", watched.get("type").asText(), schema);
+            assertTrue(watched.get("description").asText().contains("alguna vez"), schema);
+            assertTrue(schemas.at("/" + schema + "/properties/finished/description").asText().contains("ACTUAL"),
+                    schema);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Utilidades
     // ------------------------------------------------------------------
@@ -425,9 +472,16 @@ class WatchHistoryIntegrationTest {
         return objectMapper.readTree(json);
     }
 
+    /**
+     * Fija la fecha del último guardado. Si el título está visto, su
+     * {@code finished_at} se lleva a la misma fecha: la {@code V15} exige
+     * {@code finished_at <= updated_at} y aquí se mueve la fecha hacia atrás.
+     */
     private void setUpdatedAt(String table, String column, long id, Instant at) {
-        jdbc.update("UPDATE " + table + " SET updated_at = ? WHERE user_id = ? AND " + column + " = ?",
-                OffsetDateTime.ofInstant(at, ZoneOffset.UTC), alice.getId(), id);
+        OffsetDateTime when = OffsetDateTime.ofInstant(at, ZoneOffset.UTC);
+        jdbc.update("UPDATE " + table + " SET updated_at = ?, finished_at = CASE WHEN finished_at IS NOT NULL"
+                + " THEN CAST(? AS TIMESTAMP WITH TIME ZONE) END WHERE user_id = ? AND " + column + " = ?",
+                when, when, alice.getId(), id);
     }
 
     private String token(User user) {

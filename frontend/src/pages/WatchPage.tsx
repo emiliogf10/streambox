@@ -16,7 +16,7 @@ import { useSeriesDetail } from '../hooks/useSeriesDetail';
 import { useEpisodeProgress, useMovieProgress } from '../hooks/useWatchProgress';
 import type { TitleProgressValue } from '../hooks/useWatchProgress';
 import { moviePath, seriesPath } from '../lib/catalog';
-import { episodeLabel, episodePlayerPath, getDirectVideoUrl, resumePositionOf } from '../lib/playback';
+import { episodeLabel, episodePlayerPath, getDirectVideoUrl, getSubtitlesUrl, resumePositionOf } from '../lib/playback';
 import type { Episode, SeriesDetail } from '../lib/types';
 import { getSafeVideoUrl, parseRouteId } from '../lib/utils';
 import { adminEditMoviePath, adminEditSeriesPath } from './admin/adminPaths';
@@ -171,6 +171,7 @@ export function WatchMoviePage() {
         key={movie.id}
         title={movie.title}
         videoUrl={directUrl}
+        subtitlesUrl={getSubtitlesUrl(movie.subtitlesUrl)}
         posterUrl={movie.imageUrl}
         resumeAt={start.resumeAt}
         progressUnavailable={start.progressUnavailable}
@@ -291,6 +292,7 @@ export function WatchEpisodePage() {
         title={series.title}
         subtitle={episodeLabel(episode)}
         videoUrl={directUrl}
+        subtitlesUrl={getSubtitlesUrl(episode.subtitlesUrl)}
         posterUrl={series.imageUrl}
         resumeAt={start.resumeAt}
         progressUnavailable={start.progressUnavailable}

@@ -702,7 +702,7 @@ class SeriesAdminIntegrationTest {
     }
 
     private static EpisodeRequest request(int season, int number) {
-        return new EpisodeRequest(season, number, "Episodio", null, 40, "https://example.com/v.mp4");
+        return new EpisodeRequest(season, number, "Episodio", null, 40, "https://example.com/v.mp4", null);
     }
 
     private int count(String sql, Object... args) {

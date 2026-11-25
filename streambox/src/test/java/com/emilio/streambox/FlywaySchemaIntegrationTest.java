@@ -41,7 +41,10 @@ import com.emilio.streambox.migration.UserAvatarSchemaCases;
  * de nombre de usuario en {@code V13}, cuyas consultas se prueban en
  * {@code repository.UsernameReservationRepositoryIntegrationTest}; el
  * progreso de visionado («Seguir viendo») en {@code V14}, cuyas consultas se
- * prueban en {@code repository.WatchProgressRepositoryIntegrationTest}).
+ * prueban en {@code repository.WatchProgressRepositoryIntegrationTest}; los
+ * subtítulos y la fecha de «visto» ({@code finished_at}) en {@code V15}, cuyo
+ * relleno de los progresos existentes se prueba en
+ * {@code migration.WatchedAtMigrationH2Test}).
  * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
  * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
  * de PostgreSQL.
@@ -1187,7 +1190,8 @@ class FlywaySchemaIntegrationTest {
 
     /**
      * Columnas de las dos tablas de la V14 (todas obligatorias; segundos
-     * enteros y fecha con zona), sus claves primarias {@code (user_id,
+     * enteros y fecha con zona; más {@code finished_at}, opcional, de la
+     * {@code V15}), sus claves primarias {@code (user_id,
      * <título>_id)} y sus índices: por título (cascada al borrarlo) y
      * {@code (user_id, updated_at DESC)} («Seguir viendo», lo más reciente
      * primero).
@@ -1199,13 +1203,15 @@ class FlywaySchemaIntegrationTest {
                 "movie_id", "BIGINT NOT NULL",
                 "position_seconds", "INTEGER NOT NULL",
                 "duration_seconds", "INTEGER NOT NULL",
-                "updated_at", "TIMESTAMP WITH TIME ZONE NOT NULL"), columnsOf("user_movie_progress"));
+                "updated_at", "TIMESTAMP WITH TIME ZONE NOT NULL",
+                "finished_at", "TIMESTAMP WITH TIME ZONE NULL"), columnsOf("user_movie_progress"));
         assertEquals(Map.of(
                 "user_id", "BIGINT NOT NULL",
                 "episode_id", "BIGINT NOT NULL",
                 "position_seconds", "INTEGER NOT NULL",
                 "duration_seconds", "INTEGER NOT NULL",
-                "updated_at", "TIMESTAMP WITH TIME ZONE NOT NULL"), columnsOf("user_episode_progress"));
+                "updated_at", "TIMESTAMP WITH TIME ZONE NOT NULL",
+                "finished_at", "TIMESTAMP WITH TIME ZONE NULL"), columnsOf("user_episode_progress"));
         assertEquals(List.of("user_id", "movie_id"), keyColumns("pk_user_movie_progress"));
         assertEquals(List.of("user_id", "episode_id"), keyColumns("pk_user_episode_progress"));
         assertEquals(List.of("movie_id ASC"), indexColumns("idx_movie_progress_movie_id"));
@@ -1242,7 +1248,7 @@ class FlywaySchemaIntegrationTest {
         long seriesId = insertSeries("Serie progreso", 2010, null);
         insertEpisode(seriesId, 1, 1, 45);
         long episodeId = jdbc.queryForObject("SELECT id FROM episodes WHERE series_id = ?", Long.class, seriesId);
-        insertProgress("user_movie_progress", "movie_id", userId, movieId, 86_400, 86_400, T0);
+        insertProgress("user_movie_progress", "movie_id", userId, movieId, 86_400, 86_400, T0, T0);
         insertProgress("user_episode_progress", "episode_id", userId, episodeId, 0, 1, T0);
 
         Map<String, int[]> rejected = Map.of(
@@ -1277,9 +1283,150 @@ class FlywaySchemaIntegrationTest {
 
     private void insertProgress(String table, String titleColumn, long userId, long titleId, int position,
             int duration, OffsetDateTime updatedAt) {
+        insertProgress(table, titleColumn, userId, titleId, position, duration, updatedAt, null);
+    }
+
+    private void insertProgress(String table, String titleColumn, long userId, long titleId, int position,
+            int duration, OffsetDateTime updatedAt, OffsetDateTime finishedAt) {
         jdbc.update("INSERT INTO " + table + " (user_id, " + titleColumn
-                + ", position_seconds, duration_seconds, updated_at) VALUES (?, ?, ?, ?, ?)",
-                userId, titleId, position, duration, updatedAt);
+                + ", position_seconds, duration_seconds, updated_at, finished_at) VALUES (?, ?, ?, ?, ?, ?)",
+                userId, titleId, position, duration, updatedAt, finishedAt);
+    }
+
+    // --- V15: subtítulos (subtitles_url) y «visto alguna vez» (finished_at) ---
+
+    /** Subtítulos válidos para la base de datos (la API exige además que sea un {@code .vtt}). */
+    private static final String SUBTITLES = "https://example.com/subtitulos/es.vtt";
+
+    @Test
+    void v15EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '15' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * {@code subtitles_url} existe en películas y episodios (no en series, que
+     * no tienen vídeo propio), opcional y con el tamaño de la entidad; una
+     * película y un episodio nacen sin subtítulos.
+     */
+    @Test
+    void losSubtitulosSonOpcionalesYTienenElTamanoDeLaEntidad() {
+        assertEquals("CHARACTER VARYING(500) NULL", columnsOf("movies").get("subtitles_url"));
+        assertEquals("CHARACTER VARYING(500) NULL", columnsOf("episodes").get("subtitles_url"));
+        assertEquals(null, columnsOf("series").get("subtitles_url"), "las series no tienen vídeo propio");
+
+        long movieId = insertMovie("Sin subtitulos", 2000);
+        insertEpisode(insertSeries("Sin subtitulos", 2010, null), 1, 1, 45);
+        assertEquals(null, jdbc.queryForObject("SELECT subtitles_url FROM movies WHERE id = ?", String.class, movieId));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM episodes WHERE subtitles_url IS NOT NULL",
+                Integer.class));
+    }
+
+    /**
+     * {@code ck_movies_subtitles_url} y {@code ck_episodes_subtitles_url}: los
+     * subtítulos son {@code NULL} o una URL que empieza por {@code https://}
+     * (en minúsculas, como exige la API) con algo detrás. Lo demás
+     * ({@code http:}, otro esquema, el prefijo a secas, mayúsculas) se rechaza.
+     */
+    @Test
+    void losSubtitulosSoloAdmitenNuloOUnaUrlHttps() {
+        long movieId = insertMovie("Subtitulos", 2000);
+        long seriesId = insertSeries("Subtitulos", 2010, null);
+        insertEpisode(seriesId, 1, 1, 45);
+        long episodeId = jdbc.queryForObject("SELECT id FROM episodes WHERE series_id = ?", Long.class, seriesId);
+
+        for (String valid : java.util.Arrays.asList(SUBTITLES, "https://x", "https://cdn.example.com/a.vtt?v=2", null)) {
+            jdbc.update("UPDATE movies SET subtitles_url = ? WHERE id = ?", valid, movieId);
+            jdbc.update("UPDATE episodes SET subtitles_url = ? WHERE id = ?", valid, episodeId);
+            assertEquals(valid, jdbc.queryForObject("SELECT subtitles_url FROM movies WHERE id = ?", String.class,
+                    movieId));
+            assertEquals(valid, jdbc.queryForObject("SELECT subtitles_url FROM episodes WHERE id = ?", String.class,
+                    episodeId));
+        }
+        for (String invalid : List.of("http://example.com/es.vtt", "https://", "HTTPS://example.com/es.vtt",
+                "javascript:alert(1)//.vtt", "data:text/vtt,WEBVTT", "//example.com/es.vtt", "es.vtt", "")) {
+            assertRejectedBy("ck_movies_subtitles_url",
+                    () -> jdbc.update("UPDATE movies SET subtitles_url = ? WHERE id = ?", invalid, movieId));
+            assertRejectedBy("ck_episodes_subtitles_url",
+                    () -> jdbc.update("UPDATE episodes SET subtitles_url = ? WHERE id = ?", invalid, episodeId));
+        }
+    }
+
+    /**
+     * {@code ck_movies_subtitles_require_video} y
+     * {@code ck_episodes_subtitles_require_video}: no hay subtítulos sin vídeo,
+     * ni al guardarlos ni al quitar después el vídeo de un título que los
+     * tiene. Sin subtítulos, el vídeo sigue siendo opcional (V6).
+     */
+    @Test
+    void noHaySubtitulosSinVideo() {
+        long movieId = insertMovie("Con video", 2000);
+        long seriesId = insertSeries("Con video", 2010, null);
+        insertEpisode(seriesId, 1, 1, 45);
+        long episodeId = jdbc.queryForObject("SELECT id FROM episodes WHERE series_id = ?", Long.class, seriesId);
+        jdbc.update("UPDATE movies SET subtitles_url = ? WHERE id = ?", SUBTITLES, movieId);
+        jdbc.update("UPDATE episodes SET subtitles_url = ? WHERE id = ?", SUBTITLES, episodeId);
+
+        assertRejectedBy("ck_movies_subtitles_require_video",
+                () -> jdbc.update("UPDATE movies SET video_url = NULL WHERE id = ?", movieId));
+        assertRejectedBy("ck_episodes_subtitles_require_video",
+                () -> jdbc.update("UPDATE episodes SET video_url = NULL WHERE id = ?", episodeId));
+        assertRejectedBy("ck_movies_subtitles_require_video",
+                () -> jdbc.update("INSERT INTO movies (title, description, duration, release_year, image_url,"
+                        + " video_url, subtitles_url, created_at) VALUES ('Sin video', 'd', 100, 2000, 'u', NULL, ?,"
+                        + " CURRENT_TIMESTAMP)", SUBTITLES));
+        assertRejectedBy("ck_episodes_subtitles_require_video",
+                () -> jdbc.update("INSERT INTO episodes (series_id, season_number, episode_number, title, duration,"
+                        + " video_url, subtitles_url, created_at) VALUES (?, 1, 2, 't', 30, NULL, ?, CURRENT_TIMESTAMP)",
+                        seriesId, SUBTITLES));
+
+        jdbc.update("UPDATE movies SET video_url = NULL, subtitles_url = NULL WHERE id = ?", movieId);
+        jdbc.update("UPDATE episodes SET video_url = NULL, subtitles_url = NULL WHERE id = ?", episodeId);
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM movies WHERE id = ? AND video_url IS NULL",
+                Integer.class, movieId), "quitando los dos a la vez sí se puede");
+    }
+
+    /**
+     * Las restricciones de {@code finished_at}:
+     * {@code ck_*_progress_finished_at_not_after_updated_at} (no se termina
+     * después del último guardado) y {@code ck_*_progress_finished_has_finished_at}
+     * (una posición terminada, al 95 %, siempre tiene fecha de «visto»). Sí se
+     * admiten: visto y ahora a medias (se está volviendo a ver), las dos fechas
+     * iguales y a medias sin fecha.
+     */
+    @Test
+    void laFechaDeVistoEsCoherenteConElGuardadoYConLaPosicion() {
+        long userId = insertUser("visto");
+        long seriesId = insertSeries("Serie visto", 2010, null);
+        for (String[] table : new String[][] { { "user_movie_progress", "movie_id", "movie" },
+                { "user_episode_progress", "episode_id", "episode" } }) {
+            java.util.function.LongSupplier title = () -> "movie".equals(table[2])
+                    ? insertMovie("Visto " + java.util.UUID.randomUUID(), 2000) : insertEpisodeFor(seriesId);
+
+            insertProgress(table[0], table[1], userId, title.getAsLong(), 2, 100, T0, T0.minusDays(1));
+            insertProgress(table[0], table[1], userId, title.getAsLong(), 95, 100, T0, T0);
+            insertProgress(table[0], table[1], userId, title.getAsLong(), 94, 100, T0, null);
+
+            long late = title.getAsLong();
+            assertRejectedBy("ck_" + table[2] + "_progress_finished_at_not_after_updated_at",
+                    () -> insertProgress(table[0], table[1], userId, late, 2, 100, T0, T0.plusNanos(1_000)));
+            long unmarked = title.getAsLong();
+            assertRejectedBy("ck_" + table[2] + "_progress_finished_has_finished_at",
+                    () -> insertProgress(table[0], table[1], userId, unmarked, 95, 100, T0, null));
+            assertRejectedBy("ck_" + table[2] + "_progress_finished_has_finished_at",
+                    () -> jdbc.update("UPDATE " + table[0] + " SET finished_at = NULL WHERE position_seconds = 95"));
+            assertEquals(3, count(table[0]));
+        }
+    }
+
+    /** Comprueba que la sentencia la rechaza la restricción indicada (por su nombre en el mensaje). */
+    private static void assertRejectedBy(String constraint, Runnable statement) {
+        DataIntegrityViolationException error = assertThrows(DataIntegrityViolationException.class, statement::run,
+                constraint);
+        assertTrue(error.getMessage().toLowerCase(java.util.Locale.ROOT).contains(constraint), error.getMessage());
     }
 
     /** Añade a la serie un episodio en la siguiente posición libre de la temporada 1 y devuelve su id. */

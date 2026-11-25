@@ -58,9 +58,9 @@ class SeriesMapperTest {
     @Test
     void unaSinopsisDeEpisodioEnBlancoSeGuardaComoNull() {
         Episode blank = EpisodeMapper.toEntity(
-                new EpisodeRequest(1, 1, "Piloto", "  \t ", 45, "https://e.com/v.mp4"), series());
+                new EpisodeRequest(1, 1, "Piloto", "  \t ", 45, "https://e.com/v.mp4", null), series());
         Episode kept = EpisodeMapper.toEntity(
-                new EpisodeRequest(1, 1, "Piloto", " Texto ", 45, "https://e.com/v.mp4"), series());
+                new EpisodeRequest(1, 1, "Piloto", " Texto ", 45, "https://e.com/v.mp4", null), series());
 
         assertNull(blank.getDescription());
         assertEquals(" Texto ", kept.getDescription());
@@ -69,8 +69,8 @@ class SeriesMapperTest {
     /** El vídeo del episodio es opcional desde la V6: en blanco se guarda como {@code null}. */
     @Test
     void unVideoDeEpisodioEnBlancoSeGuardaComoNull() {
-        Episode blank = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, "   "), series());
-        Episode none = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, null), series());
+        Episode blank = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, "   ", null), series());
+        Episode none = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, null, null), series());
 
         assertNull(blank.getVideoUrl());
         assertNull(none.getVideoUrl());

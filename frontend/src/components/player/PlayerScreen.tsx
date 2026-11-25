@@ -26,6 +26,18 @@ const PROGRESS_UNAVAILABLE_TEXT =
   'No se ha podido recuperar por dónde ibas: el vídeo empieza desde el principio y, para no borrar lo que tenías guardado, esta vez no se guardará por dónde vas.';
 
 /**
+ * Aviso del pie cuando los subtítulos no se han podido usar (no cargó la pista,
+ * o el vídeo no admitía CORS y se ha vuelto a cargar sin ella). Dice lo que ha
+ * pasado y lo que importa a quien mira: el vídeo sigue. No culpa a nadie: desde
+ * el navegador no se sabe si fue CORS, un 404 o la red.
+ */
+const SUBTITLES_UNAVAILABLE_TEXT = 'No se han podido cargar los subtítulos: el vídeo sigue sin ellos.';
+
+/** Lo que se añade al aviso de subtítulos para un administrador: dónde mirar. */
+const SUBTITLES_UNAVAILABLE_ADMIN_TEXT =
+  ' Comprueba su URL en el panel y que los servidores del vídeo y de los subtítulos permitan CORS.';
+
+/**
  * Tiempo antes de enseñar «Cargando el vídeo…». Un archivo que llega enseguida
  * no debe hacer parpadear un aviso que nadie llega a leer.
  */
@@ -33,6 +45,17 @@ const LOADING_HINT_DELAY_MS = 400;
 
 /** Qué ha pasado con el vídeo: cargando, listo o error (con el código de `MediaError`). */
 type VideoPhase = { kind: 'loading' } | { kind: 'ready' } | { kind: 'error'; code: number | null };
+
+/**
+ * Cómo se monta el `<video>` en cada intento: `attempt` es su `key` (cambiarla lo
+ * vuelve a montar desde cero) y `crossOrigin` dice si va con CORS. Van juntos
+ * porque CORS se decide al montar y no se cambia en un elemento vivo: el
+ * navegador lo lee al empezar a descargar, y cambiarlo a mitad no recargaría nada.
+ */
+interface VideoMount {
+  attempt: number;
+  crossOrigin: boolean;
+}
 
 /**
  * Explicación de un fallo del `<video>` según su `MediaError.code`, con
@@ -70,6 +93,11 @@ export interface PlayerScreenProps {
   resumeAt: number;
   /** Qué título se está viendo, para guardar su progreso. */
   target: ProgressTarget;
+  /**
+   * Subtítulos en español (WebVTT), ya validados con `getSubtitlesUrl`, o `null`
+   * si no hay. Ver «Subtítulos» en {@link PlayerScreen}.
+   */
+  subtitlesUrl?: string | null;
   /** Página del título: destino de «Volver» sin historial y de los enlaces de error y fin. */
   titlePath: string;
   /** Texto del enlace a la página del título: «Volver a Interstellar». */
@@ -133,6 +161,37 @@ export interface PlayerScreenProps {
  * - Fin: el pie dice que ha terminado (`role="status"`, se anuncia sin mover el
  *   foco) con «Volver a…» y, si se pasa, la siguiente acción (el siguiente episodio).
  *
+ * **Subtítulos.** Si el título los tiene, el `<video>` lleva una pista
+ * `<track kind="subtitles" srcLang="es" label="Español">` sin `default`:
+ * desactivada salvo que el usuario la active con el botón de subtítulos de los
+ * controles nativos (o que su sistema pida mostrarlos siempre). Reglas, todas
+ * para que **los subtítulos nunca rompan ni retrasen el vídeo**:
+ * - Una pista de otro origen solo se carga si el `<video>` lleva
+ *   `crossOrigin="anonymous"`, y entonces el navegador pide **también el vídeo**
+ *   con CORS: un servidor de vídeo que no lo admite haría fallar un vídeo que
+ *   sin subtítulos se vería bien. Por eso `crossOrigin` solo se pone cuando hay
+ *   pista (sin subtítulos, el vídeo se carga como siempre).
+ * - Si el vídeo falla con `crossOrigin` puesto **antes de sus metadatos**
+ *   (`loadedmetadata`), se vuelve a montar UNA vez sin `crossOrigin` y sin
+ *   pista, sin pasar por la pantalla de error. `MediaError` no distingue un
+ *   rechazo de CORS de otros fallos (y no debe: el navegador lo oculta a
+ *   propósito), pero un rechazo de CORS impide leer la respuesta del vídeo, así
+ *   que llega siempre antes de los metadatos. Si vuelve a fallar, es un error
+ *   del vídeo de los de siempre. Empieza en el mismo sitio: si aún no había
+ *   empezado, en `resumeAt` (con su «Sigues por…»); si ya iba por un punto,
+ *   desde ahí (`lastPositionRef`). El guardado se engancha al elemento nuevo
+ *   como al reintentar.
+ * - Un error **después** de los metadatos (p. ej. la red se corta a mitad) ya
+ *   no puede ser de CORS: el vídeo se estaba viendo con él. Es el error de
+ *   siempre, con «Reintentar», sin culpar a los subtítulos, y al reintentar se
+ *   vuelve a montar **con** pista, porque no han fallado (revisión QA, BAJA-3).
+ * - Si lo que falla es solo la pista (evento `error` del `<track>`, que no
+ *   burbujea: se escucha en el propio elemento), se quita y el vídeo sigue.
+ * - En los dos casos el pie lo dice con {@link SUBTITLES_UNAVAILABLE_TEXT}
+ *   (`role="status"`: se anuncia sin mover el foco ni tapar el vídeo) y no se
+ *   vuelven a intentar en esta visita, tampoco con «Reintentar»: si el vídeo
+ *   falla después por otra causa, no se arriesga a fallar dos veces.
+ *
  * **Progreso.** Lo guarda {@link useProgressSaver} con el elemento montado,
  * salvo si no se pudo leer el guardado (`progressUnavailable`): entonces no se
  * guarda nada en toda la sesión del reproductor (incidencia QA-3). Sin saber
@@ -147,6 +206,7 @@ export function PlayerScreen({
   title,
   subtitle,
   videoUrl,
+  subtitlesUrl = null,
   posterUrl,
   resumeAt,
   target,
@@ -168,7 +228,11 @@ export function PlayerScreen({
   }, []);
   const [phase, setPhase] = useState<VideoPhase>({ kind: 'loading' });
   const [showLoadingHint, setShowLoadingHint] = useState(false);
-  const [attempt, setAttempt] = useState(0);
+  const [mount, setMount] = useState<VideoMount>(() => ({ attempt: 0, crossOrigin: subtitlesUrl !== null }));
+  /** Los subtítulos han fallado (la pista o el vídeo con CORS): ya no se usan en esta visita y el pie lo dice. */
+  const [subtitlesFailed, setSubtitlesFailed] = useState(false);
+  /** Pista que lleva el `<video>` de este intento: solo con CORS puesto (sin él no cargaría) y si no ha fallado. */
+  const trackUrl = mount.crossOrigin && !subtitlesFailed ? subtitlesUrl : null;
   const [resumedFrom, setResumedFrom] = useState<number | null>(null);
   const [ended, setEnded] = useState(false);
   /** Último segundo conocido: «Reintentar» tras un error sigue desde ahí y no desde `resumeAt`. */
@@ -182,6 +246,13 @@ export function PlayerScreen({
    * navegador se queda en el segundo 0 sin dar ningún error.
    */
   const pendingResumeRef = useRef<number | null>(null);
+  /**
+   * Si el `<video>` montado ahora ha llegado a `loadedmetadata`. Separa un fallo
+   * que puede ser de CORS (antes: el navegador no ha podido leer el vídeo) de
+   * uno del vídeo que ya se estaba viendo (después). Es una `ref` porque solo
+   * la lee el manejador del error, y vuelve a `false` en cada montaje nuevo.
+   */
+  const metadataLoadedRef = useRef(false);
   const errorHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useProgressSaver(phase.kind === 'error' ? null : video, progressUnavailable ? null : target);
@@ -193,7 +264,7 @@ export function PlayerScreen({
       clearTimeout(timer);
       setShowLoadingHint(false);
     };
-  }, [phase.kind, attempt]);
+  }, [phase.kind, mount.attempt]);
 
   // El foco estaba en el vídeo (o en ningún sitio) y el vídeo ha desaparecido: al aviso, no a <body>.
   useEffect(() => {
@@ -205,6 +276,7 @@ export function PlayerScreen({
   const handleLoadedMetadata = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+    metadataLoadedRef.current = true;
     const from = startedRef.current ? lastPositionRef.current : resumeAt;
     // Solo si cabe: si el archivo ha cambiado y es más corto, se empieza por el principio.
     if (from > 0 && from < video.duration - 1) {
@@ -242,10 +314,43 @@ export function PlayerScreen({
   };
 
   const retry = () => {
+    metadataLoadedRef.current = false;
     setPhase({ kind: 'loading' });
     setEnded(false);
-    setAttempt((value) => value + 1);
+    setMount((current) => ({
+      attempt: current.attempt + 1,
+      crossOrigin: subtitlesUrl !== null && !subtitlesFailed,
+    }));
   };
+
+  /**
+   * Error del `<video>`. Con `crossOrigin` puesto y **antes de los metadatos**
+   * (el único momento en que CORS puede impedir el vídeo), se vuelve a montar
+   * sin él ni pista y sin pasar por la pantalla de error (ver «Subtítulos»); en
+   * cualquier otro caso es el error de siempre, sin tocar los subtítulos.
+   */
+  const handleVideoError = (code: number | null) => {
+    if (mount.crossOrigin && !metadataLoadedRef.current) {
+      setSubtitlesFailed(true);
+      setEnded(false);
+      setPhase({ kind: 'loading' });
+      setMount((current) => ({ attempt: current.attempt + 1, crossOrigin: false }));
+      return;
+    }
+    setPhase({ kind: 'error', code });
+  };
+
+  /**
+   * Escucha el `error` de la pista (no burbujea, así que no basta con escuchar
+   * en el `<video>`). Es una `ref` con limpieza (React 19): se engancha al
+   * montarse la pista y se suelta al quitarla.
+   */
+  const attachTrack = useCallback((track: HTMLTrackElement | null) => {
+    if (!track) return undefined;
+    const onError = () => setSubtitlesFailed(true);
+    track.addEventListener('error', onError);
+    return () => track.removeEventListener('error', onError);
+  }, []);
 
   const heading = (
     <>
@@ -270,9 +375,16 @@ export function PlayerScreen({
             {backToTitle}
           </>
         ) : (
-          progressUnavailable && (
-            <p className="text-sm text-white/75">{PROGRESS_UNAVAILABLE_TEXT}</p>
-          )
+          <>
+            {progressUnavailable && <p className="text-sm text-white/75">{PROGRESS_UNAVAILABLE_TEXT}</p>}
+            {/* Con el vídeo en error no se dice: «el vídeo sigue» sería mentira y ya hay un aviso mayor. */}
+            {subtitlesFailed && phase.kind !== 'error' && (
+              <p className="text-sm text-white/75">
+                {SUBTITLES_UNAVAILABLE_TEXT}
+                {isAdmin && SUBTITLES_UNAVAILABLE_ADMIN_TEXT}
+              </p>
+            )}
+          </>
         )}
       </div>
       {!ended && resumedFrom !== null && (
@@ -321,9 +433,10 @@ export function PlayerScreen({
         ) : (
           <>
             <video
-              key={attempt}
+              key={mount.attempt}
               ref={attachVideo}
               src={videoUrl}
+              crossOrigin={mount.crossOrigin ? 'anonymous' : undefined}
               poster={posterUrl}
               controls
               playsInline
@@ -337,9 +450,13 @@ export function PlayerScreen({
               }}
               onPlay={() => setEnded(false)}
               onEnded={() => setEnded(true)}
-              onError={(event) => setPhase({ kind: 'error', code: event.currentTarget.error?.code ?? null })}
+              onError={(event) => handleVideoError(event.currentTarget.error?.code ?? null)}
               className="size-full bg-black object-contain"
-            />
+            >
+              {trackUrl && (
+                <track ref={attachTrack} kind="subtitles" srcLang="es" label="Español" src={trackUrl} />
+              )}
+            </video>
             {phase.kind === 'loading' && showLoadingHint && (
               <div
                 role="status"

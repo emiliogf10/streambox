@@ -173,10 +173,10 @@ public interface WatchProgressQueryContract {
         assertTrue(saveEpisode(ana, episode, 20, 2700, BASE));
         assertFalse(saveEpisode(ana, episode, 25, 2700, BASE.plusSeconds(5)));
 
-        assertEquals(Optional.of(new WatchProgress(300, 6001, BASE.plusSeconds(60))),
+        assertEquals(Optional.of(new WatchProgress(300, 6001, BASE.plusSeconds(60), null)),
                 progress().findMovieProgress(ana, movie));
-        assertEquals(Optional.of(new WatchProgress(5, 6000, BASE)), progress().findMovieProgress(bea, movie));
-        assertEquals(Optional.of(new WatchProgress(25, 2700, BASE.plusSeconds(5))),
+        assertEquals(Optional.of(new WatchProgress(5, 6000, BASE, null)), progress().findMovieProgress(bea, movie));
+        assertEquals(Optional.of(new WatchProgress(25, 2700, BASE.plusSeconds(5), null)),
                 progress().findEpisodeProgress(ana, episode));
         assertEquals(Optional.empty(), progress().findEpisodeProgress(bea, episode));
         assertEquals(2, rows("user_movie_progress", "movie_id", movie));
@@ -217,7 +217,7 @@ public interface WatchProgressQueryContract {
         Map<Long, WatchProgress> bySeries = progress().findEpisodeProgressBySeries(ana, serie);
 
         assertEquals(List.of(s1e1, s1e2, s2e1), List.copyOf(bySeries.keySet()));
-        assertEquals(new WatchProgress(50, 100, BASE.plusSeconds(2)), bySeries.get(s1e1));
+        assertEquals(new WatchProgress(50, 100, BASE.plusSeconds(2), null), bySeries.get(s1e1));
         assertTrue(bySeries.get(s1e2).finished());
     }
 
@@ -236,12 +236,12 @@ public interface WatchProgressQueryContract {
         long episode = episode(serie("Serie"), 1, 1);
 
         saveMovie(ana, movie, 0, 1, BASE);
-        assertEquals(Optional.of(new WatchProgress(0, 1, BASE)), progress().findMovieProgress(ana, movie));
+        assertEquals(Optional.of(new WatchProgress(0, 1, BASE, null)), progress().findMovieProgress(ana, movie));
         saveMovie(ana, movie, 1, 1, BASE);
         saveMovie(ana, movie, WatchProgress.MAX_DURATION_SECONDS, WatchProgress.MAX_DURATION_SECONDS, BASE);
         saveEpisode(ana, episode, 0, WatchProgress.MAX_DURATION_SECONDS, BASE);
 
-        assertEquals(Optional.of(new WatchProgress(86_400, 86_400, BASE)), progress().findMovieProgress(ana, movie));
+        assertEquals(Optional.of(new WatchProgress(86_400, 86_400, BASE, BASE)), progress().findMovieProgress(ana, movie));
     }
 
     /**
@@ -285,7 +285,7 @@ public interface WatchProgressQueryContract {
         assertRejectedByCheck("ck_movie_progress_position_within_duration",
                 () -> saveMovie(ana, movie, 200, 100, BASE.plusSeconds(1)));
 
-        assertEquals(Optional.of(new WatchProgress(10, 100, BASE)), progress().findMovieProgress(ana, movie));
+        assertEquals(Optional.of(new WatchProgress(10, 100, BASE, null)), progress().findMovieProgress(ana, movie));
     }
 
     /**
@@ -435,9 +435,9 @@ public interface WatchProgressQueryContract {
 
         assertEquals(List.of("M:" + newer, "E:" + episode, "M:" + older), keys(items));
         assertEquals(new MovieItem(newer, "Reciente", "https://example.com/Reciente.jpg",
-                new WatchProgress(20, 100, BASE.plusSeconds(20))), items.get(0));
+                new WatchProgress(20, 100, BASE.plusSeconds(20), null)), items.get(0));
         assertEquals(new EpisodeItem(episode, 2, 3, "Episodio 2x3", serie, "Serie", "https://example.com/Serie.jpg",
-                new WatchProgress(30, 2700, BASE.plusSeconds(10)), false, BASE.plusSeconds(10)), items.get(1));
+                new WatchProgress(30, 2700, BASE.plusSeconds(10), null), false, BASE.plusSeconds(10)), items.get(1));
     }
 
     /**
@@ -569,7 +569,7 @@ public interface WatchProgressQueryContract {
         assertEquals(List.of("M:" + movie, "E:" + e2, "E:" + o1), keys(continueWatching(ana)));
         EpisodeItem card = seriesCard(ana, serie);
         assertFalse(card.upNext());
-        assertEquals(new WatchProgress(20, 100, BASE.plusSeconds(2)), card.progress());
+        assertEquals(new WatchProgress(20, 100, BASE.plusSeconds(2), null), card.progress());
         assertEquals(BASE.plusSeconds(2), card.updatedAt());
 
         tx().execute(s -> progress().deleteEpisodeProgress(ana, e2));
@@ -684,7 +684,7 @@ public interface WatchProgressQueryContract {
         assertEquals(List.of("E:" + h2, "M:" + movie, "E:" + d2), keys(continueWatching(ana)));
         EpisodeItem half = seriesCard(ana, halfSerie);
         assertTrue(half.upNext());
-        assertEquals(new WatchProgress(30, 100, BASE), half.progress());
+        assertEquals(new WatchProgress(30, 100, BASE, null), half.progress());
         assertEquals(BASE.plusSeconds(10), half.updatedAt());
         EpisodeItem done = seriesCard(ana, doneSerie);
         assertTrue(done.upNext());
@@ -771,7 +771,7 @@ public interface WatchProgressQueryContract {
         EpisodeItem beaCard = seriesCard(bea, serie);
         assertEquals(e2, beaCard.episodeId());
         assertFalse(beaCard.upNext(), "Bea no ha terminado nada: su tarjeta es su propio 1x02 a medias");
-        assertEquals(new WatchProgress(30, 100, BASE.plusSeconds(5)), beaCard.progress());
+        assertEquals(new WatchProgress(30, 100, BASE.plusSeconds(5), null), beaCard.progress());
     }
 
     /**
@@ -798,7 +798,7 @@ public interface WatchProgressQueryContract {
         EpisodeItem almost = seriesCard(ana, almostSerie);
         assertEquals(a2, almost.episodeId());
         assertTrue(almost.upNext());
-        assertEquals(new WatchProgress(949, 1000, BASE), almost.progress());
+        assertEquals(new WatchProgress(949, 1000, BASE, null), almost.progress());
 
         EpisodeItem done = seriesCard(ana, doneSerie);
         assertEquals(b2, done.episodeId());
@@ -953,9 +953,9 @@ public interface WatchProgressQueryContract {
 
         assertEquals(List.of("M:" + done, "E:" + episode, "M:" + older), historyKeys(items));
         assertEquals(new MovieEntry(done, "Terminada", "https://example.com/Terminada.jpg",
-                new WatchProgress(95, 100, BASE.plusSeconds(20))), items.get(0));
+                new WatchProgress(95, 100, BASE.plusSeconds(20), BASE.plusSeconds(20))), items.get(0));
         assertEquals(new EpisodeEntry(episode, 2, 3, "Episodio 2x3", serie, "Serie", "https://example.com/Serie.jpg",
-                new WatchProgress(2700, 2700, BASE.plusSeconds(10))), items.get(1));
+                new WatchProgress(2700, 2700, BASE.plusSeconds(10), BASE.plusSeconds(10))), items.get(1));
         assertEquals(List.of(true, true, false), items.stream().map(WatchHistoryItem::finished).toList());
         assertEquals(BASE.plusSeconds(10), items.get(1).updatedAt());
         assertEquals(List.of(), continueWatching(ana).stream()
@@ -988,7 +988,7 @@ public interface WatchProgressQueryContract {
 
         assertEquals(List.of("E:" + e2, "E:" + o2), historyKeys(items));
         assertTrue(items.get(0).finished());
-        assertEquals(new WatchProgress(95, 100, BASE.plusSeconds(5)), items.get(0).progress());
+        assertEquals(new WatchProgress(95, 100, BASE.plusSeconds(5), BASE.plusSeconds(5)), items.get(0).progress());
         assertFalse(items.get(1).finished());
         assertEquals(List.of("E:" + e3, "E:" + o2), keys(continueWatching(ana)),
                 "«Seguir viendo» propone el siguiente; el historial, lo que se vio");
@@ -1194,7 +1194,8 @@ public interface WatchProgressQueryContract {
             jdbc().batchUpdate("INSERT INTO movies (title, description, duration, release_year, image_url,"
                     + " created_at) VALUES (?, 'd', 1440, 2000, ?, CURRENT_TIMESTAMP)", rows);
             jdbc().update("INSERT INTO user_movie_progress (user_id, movie_id, position_seconds, duration_seconds,"
-                    + " updated_at) SELECT ?, id, ?, ?, CURRENT_TIMESTAMP FROM movies WHERE title LIKE 'Larga %'",
+                    + " updated_at, finished_at) SELECT ?, id, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM movies"
+                    + " WHERE title LIKE 'Larga %'",
                     ana, day, day);
             saveEpisode(ana, episode, 3600, day, BASE); // a medias: suma su posición
 
@@ -1206,5 +1207,196 @@ public interface WatchProgressQueryContract {
         } finally {
             jdbc().update("DELETE FROM movies WHERE title LIKE 'Larga %'");
         }
+    }
+
+    // ------------------------------------------------------------------
+    // «Visto alguna vez» (finished_at, V15)
+    // ------------------------------------------------------------------
+
+    /** {@code finished_at} tal como está en la tabla (para ver lo que guarda el upsert, no lo que se lee). */
+    default Instant finishedAtInTable(String table, String column, long userId, long titleId) {
+        java.time.OffsetDateTime value = jdbc().queryForObject("SELECT finished_at FROM " + table
+                + " WHERE user_id = ? AND " + column + " = ?", java.time.OffsetDateTime.class, userId, titleId);
+        return value == null ? null : value.toInstant();
+    }
+
+    /**
+     * El problema que resuelve la {@code V15}: volver a ver una película
+     * terminada y parar en el minuto 2 ya no la «desmarca». La posición
+     * actual deja de estar terminada ({@code finished} falso, así que vuelve a
+     * «Seguir viendo»), pero sigue vista ({@code watched}) desde la primera
+     * vez, en la lectura, en el historial y en las cifras (que suman su
+     * duración entera, no los 2 minutos).
+     */
+    @Test
+    default void volverAVerUnaPeliculaTerminadaNoLaDesmarca() {
+        long ana = user("ana");
+        long movie = movie("Vista");
+        saveMovie(ana, movie, 95, 100, BASE);
+
+        assertFalse(saveMovie(ana, movie, 2, 100, BASE.plusSeconds(60)));
+
+        WatchProgress rewatching = progress().findMovieProgress(ana, movie).orElseThrow();
+        assertEquals(new WatchProgress(2, 100, BASE.plusSeconds(60), BASE), rewatching);
+        assertFalse(rewatching.finished());
+        assertTrue(rewatching.watched());
+        WatchHistoryItem entry = history(ana).get(0);
+        assertTrue(entry.watched(), "el historial la sigue mostrando como vista");
+        assertFalse(entry.finished());
+        assertEquals(new WatchStats(1, 0, 100), progress().getWatchStats(ana));
+        assertEquals(List.of("M:" + movie), keys(continueWatching(ana)),
+                "«Seguir viendo» sigue por la posición: se está volviendo a ver");
+        assertEquals(new WatchProgress(2, 100, BASE.plusSeconds(60), BASE),
+                ((MovieItem) continueWatching(ana).get(0)).progress());
+    }
+
+    /**
+     * Lo mismo con un episodio, en las tres lecturas que lo exponen: su
+     * progreso suelto, el de la serie (la lista de episodios) y el historial;
+     * la tarjeta de «Seguir viendo» de la serie es ese episodio, a medias.
+     */
+    @Test
+    default void volverAVerUnEpisodioTerminadoNoLoDesmarca() {
+        long ana = user("ana");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        episode(serie, 1, 2);
+        saveEpisode(ana, e1, 2700, 2700, BASE);
+
+        saveEpisode(ana, e1, 120, 2700, BASE.plusSeconds(60));
+
+        WatchProgress expected = new WatchProgress(120, 2700, BASE.plusSeconds(60), BASE);
+        assertEquals(Optional.of(expected), progress().findEpisodeProgress(ana, e1));
+        assertEquals(Map.of(e1, expected), progress().findEpisodeProgressBySeries(ana, serie));
+        assertTrue(history(ana).get(0).watched());
+        assertEquals(new WatchStats(0, 1, 2700), progress().getWatchStats(ana));
+        EpisodeItem card = seriesCard(ana, serie);
+        assertEquals(e1, card.episodeId());
+        assertFalse(card.upNext());
+        assertEquals(expected, card.progress());
+    }
+
+    /**
+     * {@code finished_at} es la fecha de la <b>primera</b> vez: volver a
+     * terminarlo (por el {@code UPDATE} del upsert) no la mueve.
+     */
+    @Test
+    default void volverATerminarloNoMueveLaFechaDeLaPrimeraVez() {
+        long ana = user("ana");
+        long movie = movie("Pelicula");
+        long episode = episode(serie("Serie"), 1, 1);
+        saveMovie(ana, movie, 100, 100, BASE);
+        saveMovie(ana, movie, 10, 100, BASE.plusSeconds(10));
+        saveEpisode(ana, episode, 96, 100, BASE);
+
+        saveMovie(ana, movie, 99, 100, BASE.plusSeconds(20));
+        saveEpisode(ana, episode, 100, 100, BASE.plusSeconds(30));
+
+        assertEquals(new WatchProgress(99, 100, BASE.plusSeconds(20), BASE),
+                progress().findMovieProgress(ana, movie).orElseThrow());
+        assertEquals(new WatchProgress(100, 100, BASE.plusSeconds(30), BASE),
+                progress().findEpisodeProgress(ana, episode).orElseThrow());
+    }
+
+    /**
+     * Cuándo se marca: el primer guardado ya terminado (el {@code INSERT}) lo
+     * marca con su fecha; los guardados a medias (también al 94 %) no marcan
+     * nada; el primero que llega al 95 % sobre una fila existente (el
+     * {@code UPDATE}) lo marca con <b>su</b> fecha.
+     */
+    @Test
+    default void seMarcaAlLlegarAlNoventaYCincoPorCientoConLaFechaDeEseGuardado() {
+        long ana = user("ana");
+        long direct = movie("Directa");
+        long gradual = movie("Poco a poco");
+        long episode = episode(serie("Serie"), 1, 1);
+
+        saveMovie(ana, direct, 95, 100, BASE.plusSeconds(5));
+        saveMovie(ana, gradual, 10, 100, BASE);
+        saveMovie(ana, gradual, 94, 100, BASE.plusSeconds(10));
+        saveEpisode(ana, episode, 949, 1000, BASE);
+        assertEquals(BASE.plusSeconds(5), finishedAtInTable("user_movie_progress", "movie_id", ana, direct));
+        assertNull(finishedAtInTable("user_movie_progress", "movie_id", ana, gradual));
+        assertNull(finishedAtInTable("user_episode_progress", "episode_id", ana, episode));
+
+        saveMovie(ana, gradual, 95, 100, BASE.plusSeconds(20));
+        saveEpisode(ana, episode, 950, 1000, BASE.plusSeconds(30));
+
+        assertEquals(BASE.plusSeconds(20), finishedAtInTable("user_movie_progress", "movie_id", ana, gradual));
+        assertEquals(BASE.plusSeconds(30), finishedAtInTable("user_episode_progress", "episode_id", ana, episode));
+    }
+
+    /**
+     * Si llega un guardado con una fecha <b>anterior</b> a la de «visto» (dos
+     * pestañas cuyos guardados se cruzan, o el reloj del servidor que
+     * retrocede), no falla por
+     * {@code ck_*_progress_finished_at_not_after_updated_at}: la fecha de
+     * «visto» se recorta a la del guardado y el título sigue visto.
+     */
+    @Test
+    default void unGuardadoConFechaAnteriorAlVistoRecortaLaFechaEnVezDeFallar() {
+        long ana = user("ana");
+        long movie = movie("Pelicula");
+        long episode = episode(serie("Serie"), 1, 1);
+        saveMovie(ana, movie, 100, 100, BASE.plusSeconds(100));
+        saveEpisode(ana, episode, 100, 100, BASE.plusSeconds(100));
+
+        assertFalse(saveMovie(ana, movie, 10, 100, BASE.plusSeconds(40)));
+        assertFalse(saveEpisode(ana, episode, 100, 100, BASE.plusSeconds(50)));
+
+        assertEquals(new WatchProgress(10, 100, BASE.plusSeconds(40), BASE.plusSeconds(40)),
+                progress().findMovieProgress(ana, movie).orElseThrow());
+        assertEquals(new WatchProgress(100, 100, BASE.plusSeconds(50), BASE.plusSeconds(50)),
+                progress().findEpisodeProgress(ana, episode).orElseThrow());
+    }
+
+    /**
+     * Las cifras cuentan lo visto alguna vez y suman su duración entera,
+     * aunque se esté volviendo a ver; lo que nunca se terminó suma su
+     * posición. Lo de otro usuario no cuenta.
+     */
+    @Test
+    default void lasCifrasCuentanLoVistoAlgunaVezAunqueSeEsteVolviendoAVer() {
+        long ana = user("ana");
+        long bea = user("bea");
+        long rewatched = movie("Otra vez");
+        long half = movie("A medias");
+        long serie = serie("Serie");
+        long e1 = episode(serie, 1, 1);
+        long e2 = episode(serie, 1, 2);
+        saveMovie(ana, rewatched, 6000, 6000, BASE);
+        saveMovie(ana, rewatched, 60, 6000, BASE.plusSeconds(1));
+        saveMovie(ana, half, 300, 1000, BASE);
+        saveEpisode(ana, e1, 2700, 2700, BASE);
+        saveEpisode(ana, e1, 0, 2700, BASE.plusSeconds(1));
+        saveEpisode(ana, e2, 100, 2700, BASE);
+        saveMovie(bea, half, 1000, 1000, BASE);
+
+        assertEquals(new WatchStats(1, 1, 6000 + 300 + 2700 + 100), progress().getWatchStats(ana));
+    }
+
+    /**
+     * Los dos {@code CHECK} de {@code finished_at} en este motor, con su
+     * {@code SQLSTATE} y su nombre, saltándose el repositorio: una fecha de
+     * «visto» posterior al guardado y una posición terminada sin fecha.
+     */
+    @Test
+    default void laBaseDeDatosRechazaFechasDeVistoIncoherentes() {
+        long ana = user("ana");
+        long movie = movie("Pelicula");
+        long episode = episode(serie("Serie"), 1, 1);
+        saveMovie(ana, movie, 10, 100, BASE);
+        saveEpisode(ana, episode, 100, 100, BASE);
+
+        assertRejectedByCheck("ck_movie_progress_finished_at_not_after_updated_at",
+                () -> jdbc().update("UPDATE user_movie_progress SET finished_at = ? WHERE user_id = ?",
+                        java.time.OffsetDateTime.ofInstant(BASE.plusSeconds(1), java.time.ZoneOffset.UTC), ana));
+        assertRejectedByCheck("ck_movie_progress_finished_has_finished_at",
+                () -> jdbc().update("UPDATE user_movie_progress SET position_seconds = 95 WHERE user_id = ?", ana));
+        assertRejectedByCheck("ck_episode_progress_finished_has_finished_at",
+                () -> jdbc().update("UPDATE user_episode_progress SET finished_at = NULL WHERE user_id = ?", ana));
+
+        assertEquals(new WatchProgress(10, 100, BASE, null), progress().findMovieProgress(ana, movie).orElseThrow());
+        assertTrue(progress().findEpisodeProgress(ana, episode).orElseThrow().watched());
     }
 }

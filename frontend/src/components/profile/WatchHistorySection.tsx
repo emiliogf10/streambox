@@ -33,13 +33,21 @@ const cardClass =
  * - **Terminado** (≥ 95 %): sin barra (su hueco se conserva, para que los títulos
  *   de la fila queden a la misma altura) y la marca «Visto» con un ✓; no se
  *   distingue solo por el color: lo dice el texto.
+ * - **Visto y vuelto a empezar** (`watched` sin `finished`): la marca «Visto»
+ *   (lo terminó alguna vez y eso no se pierde) y, como uno a medias, la barra
+ *   y «Quedan 34 min» de la vez actual. Son las mismas dos piezas que la lista
+ *   de episodios («Visto · Quedan 12 min»), en dos líneas porque la tarjeta es estrecha.
+ *
+ * «Visto» sale de `watched` (o de `finished`, por si acaso: lo terminado por
+ * posición siempre está visto); la barra y lo que queda, de la posición.
  * - **Episodio:** el nombre es el de la SERIE (lo que se reconoce y lo que abre
  *   el enlace) y debajo «T1:E2 · Mentiras».
  *
  * La barra va dentro del enlace y oculta a los lectores de pantalla
  * (`withText={false}`): lo que dice ya está escrito («Quedan 34 min») y un
  * `progressbar` dentro de un enlace se colaría en su nombre. El nombre del enlace
- * sale del texto: «Dark T1:E2 · Mentiras Quedan 34 min» o «Dune Visto».
+ * sale del texto: «Dark T1:E2 · Mentiras Quedan 34 min», «Dune Visto» o «Dune
+ * Visto Quedan 34 min».
  *
  * Mismo póster, borde y efectos que `PosterCard`, para que se lea igual que «De
  * tu lista» y «Te gusta» en el mismo perfil.
@@ -47,6 +55,7 @@ const cardClass =
 function WatchHistoryCard({ item }: { item: WatchHistoryItem }) {
   const name = watchHistoryName(item);
   const episodeLine = watchHistoryEpisodeLine(item);
+  const seen = item.watched || item.finished;
   return (
     <Link to={watchHistoryPath(item)} className={cardClass}>
       <div className="relative overflow-hidden rounded-xl">
@@ -74,12 +83,13 @@ function WatchHistoryCard({ item }: { item: WatchHistoryItem }) {
       <div className="px-0.5">
         <p className="truncate text-sm font-medium text-white/90 transition-colors group-hover:text-white">{name}</p>
         {episodeLine && <p className="truncate text-xs text-muted tabular-nums">{episodeLine}</p>}
-        {item.finished ? (
+        {seen && (
           <p className="inline-flex items-center gap-1 text-xs font-medium text-white/90">
             <Check aria-hidden="true" className="size-3.5 text-accent" strokeWidth={3} />
             Visto
           </p>
-        ) : (
+        )}
+        {!item.finished && (
           <p className="text-xs text-muted tabular-nums">{formatRemaining(item.positionSeconds, item.durationSeconds)}</p>
         )}
       </div>

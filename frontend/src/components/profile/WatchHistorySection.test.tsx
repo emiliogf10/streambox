@@ -172,6 +172,32 @@ describe('WatchHistorySection: tarjetas', () => {
     expect(within(link).queryByText(/^Queda/)).not.toBeInTheDocument();
   });
 
+  it('visto y vuelto a empezar (`watched` sin `finished`): la marca «Visto» Y la barra con lo que queda de esta vez', async () => {
+    const rewatching = makeWatchHistoryItem({
+      id: 8,
+      title: 'Arrival',
+      positionSeconds: 600,
+      durationSeconds: 6360,
+      finished: false,
+      watched: true,
+    });
+    routeFetch(fetchMock, { [WATCH_HISTORY]: () => jsonResponse([rewatching]) });
+    const { container } = renderWithProviders(<WatchHistorySection />, { session: true });
+
+    const link = await within(section()).findByRole('link', { name: 'Arrival Visto Quedan 1 h 36 min' });
+    expect(within(link).getByText('Visto')).toBeInTheDocument();
+    expect(within(link).getByText('Quedan 1 h 36 min')).toBeInTheDocument();
+    expect(container.querySelector('progress')).toHaveAttribute('value', '600');
+  });
+
+  it('«Visto» sale de `watched`, no de la posición: uno a medias que nunca se terminó no lo lleva', async () => {
+    routeFetch(fetchMock, { [WATCH_HISTORY]: () => jsonResponse([makeWatchHistoryItem({ watched: false, finished: false })]) });
+    renderWithProviders(<WatchHistorySection />, { session: true });
+
+    const link = await within(section()).findByRole('link', { name: 'Dune Quedan 40 min' });
+    expect(within(link).queryByText('Visto')).not.toBeInTheDocument();
+  });
+
   it('episodio: el nombre es la SERIE y debajo «T1:E2 · título del episodio»; la portada es la de la serie', async () => {
     routeFetch(fetchMock, { [WATCH_HISTORY]: () => jsonResponse([darkEpisode]) });
     renderWithProviders(<WatchHistorySection />, { session: true });

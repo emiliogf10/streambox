@@ -610,6 +610,72 @@ export async function addSeriesFavoritesByTitle(
   }
 }
 
+/** Lo que los tests de subtítulos leen de una película o de un episodio de la API. */
+export interface ApiPlayable {
+  id: number;
+  title: string;
+  videoUrl: string | null;
+  subtitlesUrl: string | null;
+}
+
+/** Una película por id (`GET /api/movies/{id}`), para comprobar qué ha guardado el servidor. */
+export async function movieByIdApi(request: APIRequestContext, token: string, id: number): Promise<ApiPlayable> {
+  const response = await request.get(`${BACKEND_URL}/api/movies/${id}`, { headers: authHeaders(token) });
+  await expectOk(response, `Leer la película ${id}`);
+  return (await response.json()) as ApiPlayable;
+}
+
+/** Episodio de la API con su temporada y número (lo que usan los tests de subtítulos y de progreso). */
+export interface ApiEpisode extends ApiPlayable {
+  seasonNumber: number;
+  episodeNumber: number;
+}
+
+/**
+ * Episodios de una serie (`GET /api/series/{id}`, aplanando sus temporadas). Con un usuario solo
+ * funciona si la serie tiene episodios (si no, 404 como si no existiera); el administrador la ve siempre.
+ */
+export async function seriesEpisodesApi(request: APIRequestContext, token: string, seriesId: number): Promise<ApiEpisode[]> {
+  const response = await request.get(`${BACKEND_URL}/api/series/${seriesId}`, { headers: authHeaders(token) });
+  await expectOk(response, `Leer la serie ${seriesId}`);
+  const series = (await response.json()) as { seasons: { episodes: ApiEpisode[] }[] };
+  return series.seasons.flatMap((season) => season.episodes);
+}
+
+/**
+ * Guarda el progreso de una película como lo haría el reproductor
+ * (`PUT /api/users/me/progress/movies/{id}`, 204). Sirve para preparar en un
+ * instante lo que con el vídeo llevaría minutos (terminarla, volver a verla).
+ */
+export async function saveMovieProgressApi(
+  request: APIRequestContext,
+  token: string,
+  movieId: number,
+  positionSeconds: number,
+  durationSeconds: number,
+): Promise<void> {
+  const response = await request.put(`${BACKEND_URL}/api/users/me/progress/movies/${movieId}`, {
+    headers: authHeaders(token),
+    data: { positionSeconds, durationSeconds },
+  });
+  await expectOk(response, `Guardar el progreso de la película ${movieId}`);
+}
+
+/** Guarda el progreso de un episodio (`PUT /api/users/me/progress/episodes/{id}`); ver {@link saveMovieProgressApi}. */
+export async function saveEpisodeProgressApi(
+  request: APIRequestContext,
+  token: string,
+  episodeId: number,
+  positionSeconds: number,
+  durationSeconds: number,
+): Promise<void> {
+  const response = await request.put(`${BACKEND_URL}/api/users/me/progress/episodes/${episodeId}`, {
+    headers: authHeaders(token),
+    data: { positionSeconds, durationSeconds },
+  });
+  await expectOk(response, `Guardar el progreso del episodio ${episodeId}`);
+}
+
 /** Añade películas (por título) a la lista del usuario, directamente por API. */
 export async function addFavoritesByTitle(
   request: APIRequestContext,

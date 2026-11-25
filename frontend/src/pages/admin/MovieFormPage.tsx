@@ -21,8 +21,11 @@ import {
   MOVIE_DESCRIPTION_MAX,
   toMovieRequest,
   validateImageUrl,
+  SUBTITLES_HINT,
   validateMovieForm,
+  validateSubtitlesUrl,
   validateVideoUrl,
+  withoutStaleSubtitlesError,
 } from '../../lib/movieValidation';
 import type { MovieFormErrors, MovieFormValues } from '../../lib/movieValidation';
 import type { Movie } from '../../lib/types';
@@ -40,6 +43,7 @@ const FIELD_ORDER: (keyof MovieFormValues)[] = [
   'releaseYear',
   'imageUrl',
   'videoUrl',
+  'subtitlesUrl',
   'trailerUrl',
   'genreIds',
 ];
@@ -52,11 +56,12 @@ const FIELD_IDS: Record<keyof MovieFormValues, string> = {
   releaseYear: 'movie-year',
   imageUrl: 'movie-image-url',
   videoUrl: 'movie-video-url',
+  subtitlesUrl: 'movie-subtitles-url',
   trailerUrl: 'movie-trailer-url',
   genreIds: 'movie-genres',
 };
 
-/** Pasa una película de la API a los valores del formulario (los números, como texto; sin vídeo o sin tráiler, vacío). */
+/** Pasa una película de la API a los valores del formulario (los números, como texto; sin vídeo, tráiler o subtítulos, vacío). */
 function toFormValues(movie: Movie): MovieFormValues {
   return {
     title: movie.title,
@@ -66,6 +71,7 @@ function toFormValues(movie: Movie): MovieFormValues {
     imageUrl: movie.imageUrl,
     videoUrl: movie.videoUrl ?? '',
     trailerUrl: movie.trailerUrl ?? '',
+    subtitlesUrl: movie.subtitlesUrl ?? '',
     genreIds: movie.genres.map((genre) => genre.id),
   };
 }
@@ -74,7 +80,7 @@ function toFormValues(movie: Movie): MovieFormValues {
  * Errores de URL de una película recién cargada.
  *
  * Las películas antiguas pueden tener URL que hoy no se admiten (p. ej.
- * `http://`). El vídeo y el tráiler son opcionales: vacíos no son un error. Se marcan nada más abrir la edición, y no al pulsar «Guardar»,
+ * `http://`). El vídeo, el tráiler y los subtítulos son opcionales: vacíos no son un error. Se marcan nada más abrir la edición, y no al pulsar «Guardar»,
  * para que el administrador vea desde el principio qué tiene que corregir.
  */
 function legacyUrlErrors(values: MovieFormValues): MovieFormErrors {
@@ -82,9 +88,11 @@ function legacyUrlErrors(values: MovieFormValues): MovieFormErrors {
   const image = validateImageUrl(values.imageUrl.trim());
   const video = validateVideoUrl(values.videoUrl.trim());
   const trailer = validateTrailerUrl(values.trailerUrl.trim());
+  const subtitles = validateSubtitlesUrl(values.subtitlesUrl.trim(), values.videoUrl.trim());
   if (image) errors.imageUrl = image;
   if (video) errors.videoUrl = video;
   if (trailer) errors.trailerUrl = trailer;
+  if (subtitles) errors.subtitlesUrl = subtitles;
   return errors;
 }
 
@@ -141,9 +149,10 @@ interface LoadResult {
  * - **Enlace de vuelta**: «Volver a la película» si se vino de ella; si no,
  *   «Volver al listado». Cuando la película no existe (404) siempre lleva al
  *   listado: volver a su página sería otro «no encontrada», un callejón sin salida.
- * - **Vídeo y tráiler, opcionales**: vacíos se envían como `null`. El tráiler
- *   solo admite enlaces de YouTube (`validateTrailerUrl`, mismas formas y
- *   mensajes que el servidor, que lo guarda normalizado).
+ * - **Vídeo, subtítulos y tráiler, opcionales**: vacíos se envían como `null`.
+ *   El tráiler solo admite enlaces de YouTube (`validateTrailerUrl`, mismas
+ *   formas y mensajes que el servidor, que lo guarda normalizado); los
+ *   subtítulos, un `.vtt` por https y solo con vídeo (`validateSubtitlesUrl`).
  * - **Vista previa de la portada**: ver {@link CoverPreview}.
  * - **Géneros**: casillas cargadas de `GET /api/genres`. Si no hay ninguno, se
  *   explica que hay que crear uno antes y se enlaza a la pestaña Géneros.
@@ -191,10 +200,17 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
   const current = loadResult?.attempt === loadAttempt ? loadResult : null;
   const loadStatus = !isEdit ? 'ready' : editId === null ? 'not-found' : (current?.status ?? 'loading');
 
-  /** Actualiza un campo de texto y borra su error: ya lo está corrigiendo. */
+  /**
+   * Actualiza un campo de texto y borra su error: ya lo está corrigiendo. Al
+   * tocar el vídeo se retira también «Los subtítulos necesitan un vídeo», que
+   * dependía de él (ver `withoutStaleSubtitlesError`).
+   */
   const setField = (field: Exclude<keyof MovieFormValues, 'genreIds'>, value: string) => {
     setValues((previous) => ({ ...previous, [field]: value }));
-    setErrors((previous) => ({ ...previous, [field]: undefined }));
+    setErrors((previous) => {
+      const next = { ...previous, [field]: undefined };
+      return field === 'videoUrl' ? withoutStaleSubtitlesError(next) : next;
+    });
   };
 
   const toggleGenre = (genreId: number) => {
@@ -372,6 +388,18 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
             error={errors.videoUrl}
             value={values.videoUrl}
             onChange={(event) => setField('videoUrl', event.target.value)}
+          />
+          <FormField
+            id={FIELD_IDS.subtitlesUrl}
+            label="URL de los subtítulos (opcional)"
+            type="url"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="https://…/subtitulos.vtt"
+            hint={SUBTITLES_HINT}
+            error={errors.subtitlesUrl}
+            value={values.subtitlesUrl}
+            onChange={(event) => setField('subtitlesUrl', event.target.value)}
           />
           <FormField
             id={FIELD_IDS.trailerUrl}

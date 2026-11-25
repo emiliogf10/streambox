@@ -137,7 +137,7 @@ class CatalogGenreRaceTest {
 
     private static MovieRequest movieRequest() {
         return new MovieRequest("Duna", "Sinopsis", 155, 2021, "https://cdn.example.com/duna.jpg",
-                null, null, Set.of(GENRE_ID));
+                null, null, null, Set.of(GENRE_ID));
     }
 
     private static SeriesRequest seriesRequest() {

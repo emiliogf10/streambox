@@ -22,7 +22,7 @@ import { getSafeVideoUrl } from './utils';
  * entra HLS (`.m3u8`): fuera de Safari exige una biblioteca (`hls.js`). Todo lo
  * que no sea un archivo directo sigue abriéndose en otra pestaña, como antes.
  */
-const DIRECT_VIDEO_EXTENSIONS = ['.mp4', '.webm', '.ogg', '.ogv'] as const;
+export const DIRECT_VIDEO_EXTENSIONS = ['.mp4', '.webm', '.ogg', '.ogv'] as const;
 
 /**
  * La URL del vídeo si es un **archivo de vídeo directo** que el reproductor
@@ -53,6 +53,26 @@ export function getDirectVideoUrl(rawUrl: string | null | undefined): string | n
   if (url.protocol !== 'https:') return null;
   const path = url.pathname.toLowerCase();
   return DIRECT_VIDEO_EXTENSIONS.some((extension) => path.endsWith(extension)) ? safe : null;
+}
+
+/**
+ * La URL de los subtítulos si el reproductor integrado puede usarla; `null` si
+ * no hay o no es segura (entonces el vídeo se ve sin pista de subtítulos).
+ *
+ * Las mismas barreras que el vídeo ({@link getDirectVideoUrl}): primero
+ * {@link getSafeVideoUrl} (solo http/https, sin credenciales) y después **solo
+ * `https:`** (la CSP de nginx abre `media-src` a `https:`, que cubre también
+ * `<track>`, y un `http:` sería contenido mixto). No se exige aquí la
+ * terminación `.vtt`: eso lo valida el servidor al guardarla, y si el archivo no
+ * es WebVTT el navegador no muestra nada y avisa con el `error` de la pista, que
+ * el reproductor ya trata.
+ *
+ * @param rawUrl `subtitlesUrl` tal como viene de la API
+ */
+export function getSubtitlesUrl(rawUrl: string | null | undefined): string | null {
+  const safe = getSafeVideoUrl(rawUrl);
+  if (!safe) return null;
+  return new URL(safe).protocol === 'https:' ? safe : null;
 }
 
 /** Página del reproductor de una película (`/ver/peliculas/:id`). */
@@ -277,9 +297,12 @@ export function seriesWatchTarget(
   const watchable = episodes.filter(hasVideo);
   if (watchable.length === 0) return null;
 
-  const watched = (progress ?? []).filter((item) => watchable.some((episode) => episode.id === item.episodeId));
+  // Progresos de episodios que se pueden ver (no «vistos»: eso es el campo `watched` de cada progreso).
+  const watchableProgress = (progress ?? []).filter((item) =>
+    watchable.some((episode) => episode.id === item.episodeId),
+  );
   /** Progreso propio de un episodio (el que usará el reproductor para decidir desde dónde empieza). */
-  const progressOf = (episode: Episode) => watched.find((item) => item.episodeId === episode.id);
+  const progressOf = (episode: Episode) => watchableProgress.find((item) => item.episodeId === episode.id);
   /** `resume` si ese episodio se reanudará al abrirlo; si no, `otherwise`. */
   const modeFor = (episode: Episode, otherwise: SeriesWatchTarget['mode']): SeriesWatchTarget['mode'] =>
     resumePositionOf(progressOf(episode)) > 0 ? 'resume' : otherwise;
@@ -288,7 +311,7 @@ export function seriesWatchTarget(
   // (`WatchProgressRepository`: `ORDER BY updated_at DESC, episode_id DESC`):
   // si no, la tarjeta de «Seguir viendo» y esta página podrían proponer
   // episodios distintos (revisión QA de QA-4).
-  const latest = [...watched].sort(
+  const latest = [...watchableProgress].sort(
     (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || b.episodeId - a.episodeId,
   )[0];
   if (latest) {

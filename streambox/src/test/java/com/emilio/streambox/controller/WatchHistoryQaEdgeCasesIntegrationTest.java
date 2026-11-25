@@ -328,9 +328,7 @@ class WatchHistoryQaEdgeCasesIntegrationTest {
         save(aliceToken, MOVIE_PROGRESS, alien.getId(), 100, 100);
         save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 10, 100);
         save(aliceToken, EPISODE_PROGRESS, lost11.getId(), 100, 100);
-        jdbc.update("UPDATE user_movie_progress SET updated_at = ?", OffsetDateTime.ofInstant(BASE, ZoneOffset.UTC));
-        jdbc.update("UPDATE user_episode_progress SET updated_at = ?",
-                OffsetDateTime.ofInstant(BASE, ZoneOffset.UTC));
+        rewindAllTo(BASE);
 
         List<String> expected = List.of("MOVIE:" + Math.max(dune.getId(), alien.getId()),
                 "MOVIE:" + Math.min(dune.getId(), alien.getId()),
@@ -419,9 +417,29 @@ class WatchHistoryQaEdgeCasesIntegrationTest {
                 alice.getId());
     }
 
+    /**
+     * Fija la fecha del último guardado. Si el episodio está visto, su
+     * {@code finished_at} se lleva a la misma fecha: la {@code V15} exige
+     * {@code finished_at <= updated_at} y aquí se mueve la fecha hacia atrás.
+     */
     private void setEpisodeUpdatedAt(long episodeId, Instant at) {
-        jdbc.update("UPDATE user_episode_progress SET updated_at = ? WHERE user_id = ? AND episode_id = ?",
-                OffsetDateTime.ofInstant(at, ZoneOffset.UTC), alice.getId(), episodeId);
+        OffsetDateTime when = OffsetDateTime.ofInstant(at, ZoneOffset.UTC);
+        jdbc.update("UPDATE user_episode_progress SET updated_at = ?, finished_at = CASE WHEN finished_at IS NOT NULL"
+                + " THEN CAST(? AS TIMESTAMP WITH TIME ZONE) END WHERE user_id = ? AND episode_id = ?",
+                when, when, alice.getId(), episodeId);
+    }
+
+    /**
+     * Pone el mismo último guardado a <b>todo</b> el progreso (películas y
+     * episodios, de cualquier usuario), moviendo también {@code finished_at} si
+     * está visto (la {@code V15} exige {@code finished_at <= updated_at}).
+     */
+    private void rewindAllTo(Instant at) {
+        OffsetDateTime when = OffsetDateTime.ofInstant(at, ZoneOffset.UTC);
+        for (String table : List.of("user_movie_progress", "user_episode_progress")) {
+            jdbc.update("UPDATE " + table + " SET updated_at = ?, finished_at = CASE WHEN finished_at IS NOT NULL"
+                    + " THEN CAST(? AS TIMESTAMP WITH TIME ZONE) END", when, when);
+        }
     }
 
     private User saveUser(String name, Role role, boolean verified) {

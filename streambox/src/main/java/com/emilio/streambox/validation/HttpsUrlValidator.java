@@ -97,6 +97,27 @@ public class HttpsUrlValidator implements ConstraintValidator<HttpsUrl, String> 
     }
 
     /**
+     * Indica si el texto es una URL {@code https://} válida según las reglas de
+     * {@link HttpsUrl} sin portadas propias: solo ASCII visible, prefijo
+     * {@code https://} en minúsculas, con host y sin credenciales.
+     *
+     * <p>
+     * Existe para que otras restricciones que se apoyan en esta regla
+     * ({@link WebVttUrlValidator} y {@link SubtitlesRequireVideoValidator})
+     * usen <b>exactamente</b> el mismo criterio en lugar de copiarlo: si algún
+     * día cambia, cambia para todas a la vez. A diferencia de
+     * {@link #isValid}, no tiene en cuenta la longitud ni da por válido un
+     * texto en blanco: quien la llama decide qué hacer con esos casos.
+     * </p>
+     *
+     * @param value texto a comprobar (no nulo)
+     * @return {@code true} si es una URL {@code https://} absoluta válida
+     */
+    public static boolean isHttpsUrl(String value) {
+        return isPrintableAscii(value) && isAbsoluteHttpsUrl(value);
+    }
+
+    /**
      * Indica si el texto solo contiene caracteres ASCII visibles (del
      * {@code !} al {@code ~}).
      *

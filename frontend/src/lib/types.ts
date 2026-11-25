@@ -48,6 +48,11 @@ export interface Movie extends CatalogItem {
    * (`https://www.youtube.com/watch?v=<id>`), o `null`. Para mostrarlo, `getTrailer`.
    */
   trailerUrl: string | null;
+  /**
+   * Subtítulos en español (archivo WebVTT, `https://…/archivo.vtt`) o `null`.
+   * Solo los usa el reproductor integrado; sin validar: antes, `getSubtitlesUrl`.
+   */
+  subtitlesUrl: string | null;
 }
 
 /** Episodio de una serie (`EpisodeResponse`). No tiene imagen propia: usa la de la serie. */
@@ -66,6 +71,8 @@ export interface Episode {
    * Sin validar: antes de enlazarla hay que pasarla por `getSafeVideoUrl`.
    */
   videoUrl: string | null;
+  /** Subtítulos del episodio (WebVTT) o `null`; como en {@link Movie.subtitlesUrl}. */
+  subtitlesUrl: string | null;
 }
 
 /** Temporada de una serie (`SeasonResponse`), con sus episodios ordenados por número. */
@@ -144,8 +151,18 @@ export interface WatchProgress {
   positionSeconds: number;
   /** Duración del vídeo que se reprodujo, en segundos (entero, 1 a 86 400). */
   durationSeconds: number;
-  /** `true` si lo ha visto casi entero (≥ 95 %, regla del servidor): no se reanuda ni sale en «Seguir viendo». */
+  /**
+   * `true` si la posición ACTUAL llega casi al final (≥ 95 %, regla del servidor):
+   * no se reanuda, no sale en «Seguir viendo» y el botón dice «Volver a ver».
+   * Se vuelve `false` al empezar a verlo otra vez (la posición baja).
+   */
   finished: boolean;
+  /**
+   * `true` si lo ha terminado ALGUNA VEZ: no se pierde al volver a verlo (solo
+   * al quitarlo de «Seguir viendo», que borra el progreso). Decide la marca
+   * «Visto»; nunca desde dónde se empieza (eso es {@link WatchProgress.finished}).
+   */
+  watched: boolean;
   /** Instante del último guardado (ISO-8601, UTC). */
   updatedAt: string;
 }
@@ -232,8 +249,10 @@ export interface WatchHistoryItem {
   positionSeconds: number;
   /** Duración del vídeo de ese progreso (segundos enteros). */
   durationSeconds: number;
-  /** `true` si lo vio casi entero (≥ 95 %, regla del servidor). */
+  /** `true` si la posición actual llega casi al final (≥ 95 %); ver {@link WatchProgress.finished}. */
   finished: boolean;
+  /** `true` si lo ha terminado alguna vez, aunque lo esté viendo otra vez; ver {@link WatchProgress.watched}. */
+  watched: boolean;
   /** Último guardado (ISO-8601, UTC): ordena el historial. */
   updatedAt: string;
 }
@@ -241,15 +260,16 @@ export interface WatchHistoryItem {
 /**
  * Cifras de lo visto (`GET /api/users/me/watch-stats`).
  *
- * `watchedSeconds` es una **estimación**: por cada título suma la duración si lo
- * terminó y la posición a la que llegó si no. Como solo se guarda el último
+ * Cuenta lo terminado ALGUNA VEZ (`watched`), no la posición actual: volver a
+ * ver algo no lo resta. `watchedSeconds` es una **estimación**: por cada título
+ * suma la duración si lo terminó alguna vez y la posición a la que llegó si no. Como solo se guarda el último
  * punto de cada título, no cuenta las veces que se vuelve a ver ni lo que se
  * rebobina: la interfaz lo presenta como aproximado.
  */
 export interface WatchStats {
-  /** Películas terminadas (≥ 95 %). */
+  /** Películas terminadas alguna vez (≥ 95 %). */
   finishedMovies: number;
-  /** Episodios terminados (≥ 95 %). */
+  /** Episodios terminados alguna vez (≥ 95 %). */
   finishedEpisodes: number;
   /** Tiempo visto aproximado, en segundos. */
   watchedSeconds: number;
@@ -385,6 +405,11 @@ export interface MovieRequest {
    * sin tráiler. Se valida con `validateTrailerUrl` (`lib/youtube.ts`).
    */
   trailerUrl: string | null;
+  /**
+   * Opcional: subtítulos WebVTT (`https://…/archivo.vtt`), o `null` = sin
+   * subtítulos (en un `PUT`, omitirlo también los borra). Exigen vídeo.
+   */
+  subtitlesUrl: string | null;
   /** Al menos un género. */
   genreIds: number[];
 }
@@ -424,6 +449,8 @@ export interface EpisodeRequest {
   duration: number;
   /** Opcional: solo `https://...`, o `null` = sin vídeo. */
   videoUrl: string | null;
+  /** Opcional: subtítulos WebVTT (`https://…/archivo.vtt`) o `null`; exigen vídeo. */
+  subtitlesUrl: string | null;
 }
 
 /**

@@ -19,6 +19,7 @@ import {
   validateEpisodeForm,
 } from '../../lib/episodeValidation';
 import type { EpisodeFormErrors, EpisodeFormValues } from '../../lib/episodeValidation';
+import { SUBTITLES_HINT, withoutStaleSubtitlesError } from '../../lib/movieValidation';
 import { episodeCode } from '../../lib/series';
 import type { Episode, Season } from '../../lib/types';
 import { focusFirstInvalidField, hasFieldErrors, splitValidationErrors } from './formErrors';
@@ -31,6 +32,7 @@ const FIELD_ORDER: (keyof EpisodeFormValues)[] = [
   'duration',
   'description',
   'videoUrl',
+  'subtitlesUrl',
 ];
 
 /**
@@ -44,6 +46,7 @@ const FIELD_IDS: Record<keyof EpisodeFormValues, string> = {
   duration: 'episode-duration',
   description: 'episode-description',
   videoUrl: 'episode-video-url',
+  subtitlesUrl: 'episode-subtitles-url',
 };
 
 /** Propiedades de {@link EpisodeFormDialog}. */
@@ -93,7 +96,8 @@ interface EpisodeFormDialogProps {
  *   con los botones es pegajoso: el diálogo cabe en una pantalla de portátil y,
  *   si no cabe, los botones siguen a la vista.
  * - **Vídeo opcional** (vacío = `null`): sin él, el episodio se ve en la lista
- *   pero sin «Ver». Los tráileres no van aquí, sino en la serie.
+ *   pero sin «Ver». Los tráileres no van aquí, sino en la serie. Los
+ *   **subtítulos** (opcionales, `.vtt`) van justo debajo y exigen vídeo.
  * - **Validación** con los mensajes exactos del servidor (`episodeValidation.ts`),
  *   errores del servidor (`validationErrors`) junto a cada campo y foco al primero.
  * - **409 `EPISODE_ALREADY_EXISTS`** (ese número ya existe en esa temporada):
@@ -160,11 +164,15 @@ export function EpisodeFormDialog({
 
   /**
    * Actualiza un campo y borra su error: ya lo está corrigiendo. Si seguía a la
-   * vista la pregunta de descartar, se retira: ha vuelto a editar.
+   * vista la pregunta de descartar, se retira: ha vuelto a editar. Al tocar el
+   * vídeo se retira también «Los subtítulos necesitan un vídeo», que dependía de él.
    */
   const setField = (field: keyof EpisodeFormValues, value: string) => {
     setValues((previous) => ({ ...previous, [field]: value }));
-    setErrors((previous) => ({ ...previous, [field]: undefined }));
+    setErrors((previous) => {
+      const next = { ...previous, [field]: undefined };
+      return field === 'videoUrl' ? withoutStaleSubtitlesError(next) : next;
+    });
     setConfirmingDiscard(false);
   };
 
@@ -365,6 +373,18 @@ export function EpisodeFormDialog({
             error={errors.videoUrl}
             value={values.videoUrl}
             onChange={(event) => setField('videoUrl', event.target.value)}
+          />
+          <FormField
+            id={FIELD_IDS.subtitlesUrl}
+            label="URL de los subtítulos (opcional)"
+            type="url"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="https://…/subtitulos.vtt"
+            hint={SUBTITLES_HINT}
+            error={errors.subtitlesUrl}
+            value={values.subtitlesUrl}
+            onChange={(event) => setField('subtitlesUrl', event.target.value)}
           />
         </div>
 

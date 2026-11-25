@@ -2,6 +2,9 @@ package com.emilio.streambox.dto;
 
 import com.emilio.streambox.validation.ControlCharacters;
 import com.emilio.streambox.validation.HttpsUrl;
+import com.emilio.streambox.validation.SubtitlesRequireVideo;
+import com.emilio.streambox.validation.VideoWithSubtitles;
+import com.emilio.streambox.validation.WebVttUrl;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
@@ -38,6 +41,14 @@ import jakarta.validation.constraints.Size;
  * </p>
  *
  * <p>
+ * <b>Subtítulos</b> (migración {@code V15}): {@code subtitlesUrl}, opcional,
+ * con las mismas constantes, mensajes y reglas que en {@link MovieRequest}
+ * (longitud, archivo {@code .vtt} por {@code https://} y, si eso está bien,
+ * que el episodio tenga vídeo). Un {@code PUT} sin {@code subtitlesUrl} los
+ * borra.
+ * </p>
+ *
+ * <p>
  * <b>Caracteres de control.</b> Las mismas reglas que en {@link MovieRequest}:
  * ninguno en el título y solo tabulador y saltos de línea en la descripción
  * (ver {@link ControlCharacters}).
@@ -50,7 +61,12 @@ import jakarta.validation.constraints.Size;
  * @param duration      duración en minutos (obligatoria, 1 a 600)
  * @param videoUrl      URL del vídeo (opcional; si viene, máximo 500 caracteres y
  *                      {@code https://}; en blanco = sin vídeo)
+ * @param subtitlesUrl  URL de los subtítulos WebVTT (opcional; si viene, máximo
+ *                      500 caracteres, {@code https://}, archivo {@code .vtt} y
+ *                      con vídeo; en blanco = sin subtítulos)
  */
+@SubtitlesRequireVideo(maxLength = MovieRequest.URL_MAX_LENGTH,
+        message = MovieRequest.SUBTITLES_REQUIRE_VIDEO_MESSAGE)
 public record EpisodeRequest(
 
         @NotNull(message = "La temporada es obligatoria")
@@ -89,7 +105,13 @@ public record EpisodeRequest(
                 example = "https://videos.streambox.example/watch/serie-1x01")
         @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.VIDEO_URL_SIZE_MESSAGE)
         @HttpsUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.VIDEO_URL_FORMAT_MESSAGE)
-        String videoUrl) {
+        String videoUrl,
+
+        @Schema(description = MovieRequest.SUBTITLES_URL_DESCRIPTION,
+                example = "https://videos.streambox.example/subtitulos/serie-1x01.es.vtt")
+        @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.SUBTITLES_URL_SIZE_MESSAGE)
+        @WebVttUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.SUBTITLES_URL_FORMAT_MESSAGE)
+        String subtitlesUrl) implements VideoWithSubtitles {
 
     /** Error de rango de {@code seasonNumber}. */
     public static final String SEASON_RANGE_MESSAGE = "La temporada debe estar entre 1 y 100";

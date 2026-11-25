@@ -4,6 +4,9 @@ import java.util.Set;
 
 import com.emilio.streambox.validation.ControlCharacters;
 import com.emilio.streambox.validation.HttpsUrl;
+import com.emilio.streambox.validation.SubtitlesRequireVideo;
+import com.emilio.streambox.validation.VideoWithSubtitles;
+import com.emilio.streambox.validation.WebVttUrl;
 import com.emilio.streambox.validation.YouTubeUrl;
 
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -65,6 +68,18 @@ import jakarta.validation.constraints.Size;
  * </p>
  *
  * <p>
+ * <b>Subtítulos</b> (migración {@code V15}). {@code subtitlesUrl} es opcional
+ * y sigue las mismas reglas de "en blanco = no tiene" y de {@code PUT} que el
+ * vídeo. Se valida en este orden, con un único error en el campo: longitud
+ * ({@link #SUBTITLES_URL_SIZE_MESSAGE}), formato {@code https://} + archivo
+ * {@code .vtt} ({@link WebVttUrl}, {@link #SUBTITLES_URL_FORMAT_MESSAGE}) y,
+ * solo si lo anterior está bien, que haya vídeo ({@link SubtitlesRequireVideo},
+ * {@link #SUBTITLES_REQUIRE_VIDEO_MESSAGE}). La base de datos repite las dos
+ * reglas que puede comprobar ({@code https://} y "sin vídeo no hay
+ * subtítulos") con {@code CHECK}; la validación las para antes con un 400.
+ * </p>
+ *
+ * <p>
  * <b>Caracteres de control.</b> El título no admite ninguno y la sinopsis solo
  * el tabulador y los saltos de línea (ver {@link ControlCharacters}, donde se
  * explica por qué). Antes un {@code U+0000} llegaba a PostgreSQL, que lo
@@ -84,9 +99,14 @@ import jakarta.validation.constraints.Size;
  *                    {@code https://}; en blanco = sin vídeo)
  * @param trailerUrl  enlace del tráiler (opcional; si viene, máximo 500
  *                    caracteres y de YouTube; en blanco = sin tráiler)
+ * @param subtitlesUrl URL de los subtítulos WebVTT (opcional; si viene,
+ *                    máximo 500 caracteres, {@code https://}, archivo
+ *                    {@code .vtt} y con vídeo; en blanco = sin subtítulos)
  * @param genreIds    identificadores de los géneros de la película (entre 1 y
  *                    {@value #MAX_GENRES})
  */
+@SubtitlesRequireVideo(maxLength = MovieRequest.URL_MAX_LENGTH,
+        message = MovieRequest.SUBTITLES_REQUIRE_VIDEO_MESSAGE)
 public record MovieRequest(
 
         @Schema(description = MovieRequest.TITLE_DESCRIPTION)
@@ -139,9 +159,16 @@ public record MovieRequest(
         @YouTubeUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.TRAILER_URL_FORMAT_MESSAGE)
         String trailerUrl,
 
+        @Schema(description = MovieRequest.SUBTITLES_URL_DESCRIPTION,
+                example = "https://videos.streambox.example/subtitulos/dune.es.vtt")
+        @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.SUBTITLES_URL_SIZE_MESSAGE)
+        @WebVttUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.SUBTITLES_URL_FORMAT_MESSAGE)
+        String subtitlesUrl,
+
         @NotEmpty(message = MovieRequest.GENRES_REQUIRED_MESSAGE)
         @Size(max = MovieRequest.MAX_GENRES, message = MovieRequest.GENRES_SIZE_MESSAGE)
-        Set<@NotNull(message = MovieRequest.GENRE_ID_REQUIRED_MESSAGE) Long> genreIds) {
+        Set<@NotNull(message = MovieRequest.GENRE_ID_REQUIRED_MESSAGE) Long> genreIds)
+        implements VideoWithSubtitles {
 
     /*
      * Mensajes de "obligatorio" y de rango: son literalmente los que muestra el
@@ -248,9 +275,10 @@ public record MovieRequest(
             "Una película puede tener como máximo " + MAX_GENRES + " géneros";
 
     /**
-     * Longitud máxima de {@code imageUrl}, {@code videoUrl} y
-     * {@code trailerUrl}. Coincide con las columnas {@code image_url},
-     * {@code video_url} y {@code trailer_url} ({@code VARCHAR(500)}). El
+     * Longitud máxima de {@code imageUrl}, {@code videoUrl}, {@code trailerUrl}
+     * y {@code subtitlesUrl} (también en {@link EpisodeRequest}). Coincide con
+     * las columnas {@code image_url}, {@code video_url}, {@code trailer_url} y
+     * {@code subtitles_url} ({@code VARCHAR(500)}). El
      * tráiler normalizado mide siempre 43 caracteres, pero el enlace recibido
      * puede ser más largo (parámetros como {@code &list=...}), y sin tope un
      * texto enorme se analizaría entero antes de rechazarse.
@@ -293,4 +321,42 @@ public record MovieRequest(
             + "números, guion o guion bajo. Se guarda y se devuelve normalizado como "
             + "https://www.youtube.com/watch?v=<id>. Máximo 500 caracteres. En un PUT, omitirlo borra el "
             + "tráiler. Errores: «" + TRAILER_URL_FORMAT_MESSAGE + "» y «" + TRAILER_URL_SIZE_MESSAGE + "».";
+
+    /**
+     * Error de longitud de {@code subtitlesUrl} (contrato con el frontend;
+     * compartido con {@link EpisodeRequest}).
+     */
+    public static final String SUBTITLES_URL_SIZE_MESSAGE =
+            "La URL de los subtítulos no puede superar los " + URL_MAX_LENGTH + " caracteres";
+
+    /**
+     * Error de formato de {@code subtitlesUrl}: no es una URL {@code https://}
+     * válida o no termina en {@code .vtt} (contrato con el frontend; compartido
+     * con {@link EpisodeRequest}). Un solo texto para las dos condiciones, ver
+     * {@link WebVttUrl}.
+     */
+    public static final String SUBTITLES_URL_FORMAT_MESSAGE =
+            "Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://";
+
+    /**
+     * Error de unos subtítulos válidos sin vídeo, en el campo
+     * {@code subtitlesUrl} (contrato con el frontend; compartido con
+     * {@link EpisodeRequest}). Ver {@link SubtitlesRequireVideo}.
+     */
+    public static final String SUBTITLES_REQUIRE_VIDEO_MESSAGE =
+            "Los subtítulos necesitan un vídeo: indica también la URL del vídeo";
+
+    /**
+     * Texto OpenAPI de {@code subtitlesUrl}, compartido con
+     * {@link EpisodeRequest} (las dos siguen las mismas reglas).
+     */
+    public static final String SUBTITLES_URL_DESCRIPTION = "URL de los subtítulos en español: un archivo "
+            + "WebVTT (.vtt). Opcional: si se omite, es null o va en blanco, el título queda sin subtítulos "
+            + "(null en la respuesta). Si se indica, debe ser una URL https:// absoluta, con host y sin "
+            + "credenciales (las mismas reglas que videoUrl), y el texto anterior al primer ? o # debe "
+            + "terminar en .vtt (sin distinguir mayúsculas; se admiten parámetros y fragmento detrás). "
+            + "Máximo 500 caracteres. Exige vídeo: no se admiten subtítulos si videoUrl falta o va en "
+            + "blanco. En un PUT, omitirlo borra los subtítulos. Errores, uno solo y por este orden: «"
+            + SUBTITLES_URL_SIZE_MESSAGE + "», «" + SUBTITLES_URL_FORMAT_MESSAGE + "» y «"
+            + SUBTITLES_REQUIRE_VIDEO_MESSAGE + "» (este último en validationErrors.subtitlesUrl).";
 }

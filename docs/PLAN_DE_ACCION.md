@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **4390** con Docker (2026-11-22) | Sin omitidos ni fallos (tras QA-4). Tras el historial (2026-11-24): **4226 sin Docker** (386 de PostgreSQL omitidos), 0 fallos; **falta la pasada con Docker** |
-| Frontend (Vitest) | **2045** | |
-| E2E (Playwright) | **265** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
+| Backend (JUnit) | **4575** con Docker (2026-11-24, tras la V15) | Sin omitidos ni fallos. Tras la revisión de `qa` (+89 de paridad, sin SQL nuevo): **4446 sin Docker** (397 de PostgreSQL omitidos), 0 fallos (2026-11-25) |
+| Frontend (Vitest) | **2258** | |
+| E2E (Playwright) | **272** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -66,7 +66,7 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 | :--- | :--- | :--- |
 | Revisión visual humana | Media | [2.3](#23-revisión-visual-humana-del-frontend) |
 | CORS y cabeceras por perfil (S12) | Media | [2.5](#25-seguridad) |
-| Decisión QA-4 y subtítulos del reproductor; siguientes pasos de series | Media | [2.9](#29-funcionalidades-nuevas) |
+| Siguientes pasos de series (`backdropUrl`, imagen por episodio) | Media | [2.9](#29-funcionalidades-nuevas) |
 
 ### 2.2 Tarea 29: lo que queda (solo HSTS)
 
@@ -314,7 +314,10 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - **Decisiones del autor (2026-10-18):** (1) el **ADMIN no ve la pregunta**, pero **sí tiene la sección «Tus gustos»** en su perfil; (2) **mínimo 3 y máximo 5** géneros; (3) los usuarios que ya existen **solo ven la tarjeta del inicio**, nunca la pregunta. (4) **cada género elegido pesa como 2 «me gusta»** (decidido el 2026-10-25). **En curso desde el 2026-10-25** (seguimiento en `docs/TRABAJO_EN_CURSO.md`).
 - ✅ ~~**Reproductor integrado y «Seguir viendo»**~~ — **hecho el 2026-11-22** (opción A; ver el [historial](#4-historial-de-trabajos) y el cap. 15 ter del manual). Solo archivos de vídeo directos por `https:` (`.mp4`, `.webm`, `.ogg`); el resto se sigue abriendo en otra pestaña. Pendiente:
   - ✅ ~~**Decisión del autor (QA-4)**~~ — **hecho el 2026-11-22** con el criterio de las plataformas grandes: la tarjeta de una serie y su página proponen el **último episodio tocado** o, si lo terminó, **el siguiente** (ver el [historial](#4-historial-de-trabajos)). Opcional (`database`): comprobar con `EXPLAIN ANALYZE` en PostgreSQL si el planificador aplana la subconsulta `lt` de `findContinueWatching` y repite la búsqueda del siguiente; si es así, `OFFSET 0` en `lt` lo impide (hoy el coste es despreciable).
-  - **Subtítulos** (WCAG 1.2.2): un campo opcional `subtitlesUrl` (WebVTT, https) en películas y episodios para añadir `<track kind="captions">` (`database` + `backend` + `frontend`).
+  - ✅ ~~**Subtítulos**~~ — **hecho el 2026-11-25** (V15; ver el [historial](#4-historial-de-trabajos) y el cap. 15 ter.5 del manual). Pendiente:
+    - **Decisión del autor:** la pista es `kind="subtitles"`. WCAG 1.2.2 habla de `captions` (subtítulos para personas sordas, con los sonidos: «[música]», «[llaman a la puerta]»), y `subtitles` es lo correcto si son una transcripción o traducción de los diálogos. Como no sabemos qué tipo de archivo pondrá el administrador, se dejó `subtitles`; se podría añadir un selector «tipo» si hiciera falta.
+    - Opcional (`frontend`, BAJA-1 de `qa`, ya existía y afecta también a portada y vídeo): hay URLs que el `URL` del navegador acepta y `java.net.URI` rechaza (`%zz`, `|`, `^`, `{}`, `[]`, `\`, hosts con `-` o `_` al principio…). El panel las da por buenas y el servidor responde 400 (el error sale en el campo). Arreglo: un catálogo de casos https común, como el de `.vtt`.
+    - **A mano:** probar con un `.vtt` real y un vídeo de un CDN con CORS, y el menú de subtítulos de los controles nativos en Safari de iPhone y en Firefox.
   - **HLS** (`.m3u8`): exigiría `hls.js` (dependencia nueva). Transcodificar con FFmpeg y servir por CDN es otro proyecto: hoy no hay vídeos propios.
   - **A mano:** probar con vídeos reales en `.mp4` (su servidor debe admitir `Range`; si no, el vídeo empieza en 0 y no aparece «Sigues por»), los controles nativos en Safari de iPhone y el aviso largo del pie («…esta vez no se guardará por dónde vas») a 375 px.
   - Opcional (`security`): un `limit_req` genérico en nginx para las rutas autenticadas (el guardado del progreso no tiene límite propio, como los «me gusta»; punto 11 de seguridad).
@@ -330,8 +333,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   2. **Más adelante, subir una imagen propia:** exige reactivar multipart **solo** para esa ruta y con límite bajo (cap. 13 del manual), validar el contenido de verdad (tipo real por los primeros bytes, no por la extensión; dimensiones; reescribir la imagen para quitar EXIF con la ubicación y cualquier contenido incrustado), guardarla fuera de la BD (Supabase Storage o similar, con URLs firmadas o un bucket público solo de avatares), un límite por usuario y la CSP de `img-src` para ese origen. Es bastante más superficie de ataque: mejor cuando haya despliegue real.
   - En los dos casos: el avatar se ve en `/perfil`, en el menú de usuario de la barra y (si se añade) en cualquier lista de usuarios del panel; respaldo con la inicial si falta; texto alternativo correcto; la caché de TanStack se invalida al cambiarlo.
 - ✅ ~~**Perfil: historial**~~ — **hecho el 2026-11-24** (ver el [historial](#4-historial-de-trabajos)): «Vistos recientemente» y cifras de lo visto, a partir del progreso del reproductor. La **suscripción** sigue sin sentido (no hay planes). Pendiente:
-  - **Ejecutar con Docker** `.\mvnw.cmd test "-Dtest=Postgres*"`: los 10 casos nuevos de `WatchProgressQueryContract` (historial y cifras) solo se han probado en H2 (Docker Desktop no arrancaba el 2026-11-24). El CI los ejecuta en cada push.
-  - **Decisión del autor:** volver a ver algo terminado lo «desmarca» (solo se guarda el último punto: si reabres una película vista y paras en el minuto 2, deja de contar como vista y el tiempo baja). Arreglarlo exige guardar aparte que se terminó (columna nueva, migración; `database` + `backend`). Hoy está documentado (cap. 15 ter.2 del manual).
+  - ✅ ~~**Volver a ver algo terminado lo «desmarcaba»**~~ — **arreglado el 2026-11-25** con `finished_at` (V15) y el campo `watched` (cap. 15 ter.6 del manual).
   - Opcional (`backend` + `frontend`): dos títulos con el mismo nombre darían dos enlaces con el mismo nombre accesible en «Vistos recientemente»; añadir el año a la respuesta y al nombre.
   - Opcional (`frontend`): a 375 px «Quedan 1 h 40 min» se parte en dos líneas y los títulos largos se cortan sin forma de leerlos enteros a la vista.
 
@@ -489,6 +491,17 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-25 · Subtítulos en el reproductor y «volver a ver» ya no desmarca (V15)
+
+- **Qué:** (1) subtítulos WebVTT opcionales por película y episodio (`subtitlesUrl`), editables en el panel y cargados con `<track>` en el reproductor; (2) lo terminado sigue contando como visto aunque se vuelva a ver (`finished_at` + campo `watched`). Manual: §5.4 «V15», cap. 15 ter.5 y 15 ter.6.
+- **`database`:** `V15__subtitles_and_finished_at.sql` (columnas, `CHECK` `https://`, «sin vídeo no hay subtítulos», `finished_at <= updated_at` y, propuesto por el agente, «terminado ⇒ `finished_at`»; relleno de las filas ya terminadas), entidades, *upsert* con `finished_at` (nunca se borra; se recorta a `updated_at` en una carrera) y cifras por `finished_at`. Después (BAJA-2 de `qa`) documentó en `WatchProgress.FINISHED_PERCENT` que cambiar el 95 % exige una migración.
+- **`backend`:** `@WebVttUrl` (https + texto antes del primer `?`/`#` acabado en `.vtt`, no `URI.getPath()`), `@SubtitlesRequireVideo` (restricción de clase, error en `subtitlesUrl`), `watched` en las tres respuestas de progreso, OpenAPI regenerado y Postman (Newman 170/170, 355 aserciones).
+- **`frontend`:** campo del panel con su ayuda y validación idéntica; reproductor con `crossOrigin` solo si hay pista, montaje sin CORS si el vídeo falla antes de `loadedmetadata` y aviso «No se han podido cargar los subtítulos: el vídeo sigue sin ellos.» (con pista extra para el ADMIN); «Visto · Quedan N min» al volver a ver.
+- **`security`** (solo lectura): sin hallazgos medios o mayores; la CSP no cambia (`<track>` va por `media-src`); nota futura sobre COEP en el manual.
+- **`qa`:** sin incidencias medias o mayores. Catálogo común de 44 casos `.vtt` (JUnit + Vitest), 7 E2E nuevos (`player-subtitles`, `rewatch`, panel) y revisión en el navegador a 375/768/1280/1920 por rol (capturas en `Pruebas/streambox-capturas/subtitulos-2026-11-qa/`). Bajas: BAJA-3 (un corte de red a mitad se anunciaba como fallo de subtítulos) y BAJA-4 (`.ogv` en la ayuda, ayuda más corta, nombre de variable) **arregladas por `frontend`**; BAJA-2 documentada; BAJA-1 queda en 2.9.
+- **Tests (verificado por el orquestador):** backend **4575/0/0 con Docker** tras la V15 y **4446 sin Docker** (397 omitidos) al final (Docker Desktop volvió a caerse; desde la pasada con Docker solo cambiaron un Javadoc y tests de validación sin SQL); Vitest **2258/2258**; E2E **272/0** + 24 omitidos; build y lint 0.
+- **Al arrancar la app del autor**, Flyway aplicará la V15 a Supabase (añade columnas y rellena `finished_at` de lo ya terminado; no borra nada).
 
 ### 2026-11-24 · Historial en el perfil y revisión de las PR de Dependabot
 

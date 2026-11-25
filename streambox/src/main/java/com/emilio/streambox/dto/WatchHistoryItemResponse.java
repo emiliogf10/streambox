@@ -24,8 +24,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * el mismo:
  * </p>
  * <ul>
- *   <li>Lleva {@code finished}: aquí salen también los títulos terminados
- *       (≥ 95 %), y el cliente los pinta distinto.</li>
+ *   <li>Lleva {@code finished} y {@code watched}: aquí salen también los
+ *       títulos terminados, y el cliente los pinta distinto. La etiqueta
+ *       «Vista» sale de {@code watched} (terminada alguna vez, migración
+ *       {@code V15}), no de {@code finished} (posición actual).</li>
  *   <li>No lleva {@code upNext}: el historial cuenta lo que se vio, nunca
  *       propone el siguiente episodio.</li>
  *   <li>{@code positionSeconds} y {@code durationSeconds} son {@code int} (nunca
@@ -43,7 +45,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param seriesTitle     título de la serie del episodio ({@code null} en películas)
  * @param positionSeconds segundo hasta el que llegó el usuario
  * @param durationSeconds duración del vídeo reproducido, en segundos
- * @param finished        si cuenta como visto entero (≥ 95 %)
+ * @param finished        si la posición actual llega al 95 % de la duración
+ * @param watched         si lo ha terminado alguna vez (no se pierde al volver a verlo)
  * @param updatedAt       instante del último guardado de la entrada: ordena el historial
  */
 public record WatchHistoryItemResponse(
@@ -73,9 +76,14 @@ public record WatchHistoryItemResponse(
         int positionSeconds,
         @Schema(description = "Duración del vídeo reproducido, en segundos", example = "2700")
         int durationSeconds,
-        @Schema(description = "true si la posición alcanza el 95 % de la duración (visto entero)",
-                example = "true")
+        @Schema(description = "true si la posición ACTUAL alcanza el 95 % de la duración. Se pierde si se "
+                + "vuelve a ver y se para antes; para mostrar «Vista», usa watched", example = "true")
         boolean finished,
+        @Schema(description = "true si lo ha terminado alguna vez (llegó al 95 % de la duración), aunque ahora lo esté "
+                + "volviendo a ver y la posición actual esté por debajo: volver a verlo no lo pierde. Solo "
+                + "desaparece si se quita de «Seguir viendo» (se borra su progreso)",
+                example = "true")
+        boolean watched,
         @Schema(description = "Instante del último guardado de la película o del episodio (UTC, ISO-8601): "
                 + "ordena el historial", example = "2026-11-21T18:30:00Z")
         Instant updatedAt) {

@@ -62,18 +62,23 @@ public final class EpisodeMapper {
                 episode.getTitle(),
                 episode.getDescription(),
                 episode.getDuration(),
-                episode.getVideoUrl());
+                episode.getVideoUrl(),
+                episode.getSubtitlesUrl());
     }
 
     /**
      * Copia los campos editables.
      *
      * <p>
-     * La sinopsis y el vídeo son opcionales: una cadena en blanco se guarda
+     * La sinopsis, el vídeo y los subtítulos son opcionales: una cadena en blanco se guarda
      * como {@code null}, para que "no tiene" tenga una sola representación y
      * el cliente solo tenga que comprobar {@code null} (el contrato dice
      * "{@code description} null si no hay"; lo mismo para {@code videoUrl}
-     * desde la migración {@code V6}).
+     * desde la migración {@code V6} y para {@code subtitlesUrl} desde la
+     * {@code V15}). Guardar los subtítulos en blanco como {@code null} es lo
+     * que permite que el {@code CHECK}
+     * {@code ck_episodes_subtitles_require_video} se cumpla siempre que la
+     * petición pase la validación.
      * </p>
      */
     private static void copyFields(EpisodeRequest request, Episode episode) {
@@ -84,6 +89,7 @@ public final class EpisodeMapper {
         episode.setDescription(blankToNull(request.description()));
         episode.setDuration(request.duration());
         episode.setVideoUrl(blankToNull(request.videoUrl()));
+        episode.setSubtitlesUrl(blankToNull(request.subtitlesUrl()));
     }
 
     /**

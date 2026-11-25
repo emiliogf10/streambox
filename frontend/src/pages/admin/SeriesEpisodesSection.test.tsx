@@ -207,6 +207,7 @@ describe('SeriesEpisodesSection: añadir', () => {
       description: null,
       duration: 48,
       videoUrl: 'https://v.example.com/t2e3',
+      subtitlesUrl: null,
     });
 
     resolvePost(jsonResponse(created, 201));
@@ -237,6 +238,69 @@ describe('SeriesEpisodesSection: añadir', () => {
 
     expect(await screen.findByText('Se ha añadido el episodio T2:E3 «Sin vídeo».')).toBeInTheDocument();
     expect(sentBody('POST', EPISODES_ROUTE)).toMatchObject({ videoUrl: null });
+  });
+
+  it('subtítulos: con su ayuda (CORS), se envían recortados y, sin vídeo, el error va en su campo con el foco', async () => {
+    const created = makeEpisode({ id: 99, seasonNumber: 2, episodeNumber: 3, title: 'Con subtítulos' });
+    routeFetch(fetchMock, {
+      [`POST ${EPISODES_ROUTE}`]: () => jsonResponse(created, 201),
+      [DETAIL_ROUTE]: () => jsonResponse(detail([season(1, [1, 2, 3]), { ...season(2, [1, 2]), episodes: [...season(2, [1, 2]).episodes, created] }])),
+    });
+    const user = setupUser();
+    renderSection(detail());
+
+    await user.click(addButton());
+    const form = dialog('Añadir episodio');
+    const subtitles = field(form, 'URL de los subtítulos (opcional)');
+    expect(subtitles).toHaveAccessibleDescription(/WebVTT \(\.vtt\).*deben permitir CORS; si no, el vídeo irá sin ellos/);
+    await user.type(field(form, 'Título'), 'Con subtítulos');
+    await user.type(field(form, 'Duración (minutos)'), '40');
+    await user.type(subtitles, ' https://subs.example/t2e3.vtt ');
+    await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
+
+    // Sin vídeo: el error es de los subtítulos (el vídeo vacío es válido) y no se envía nada.
+    expect(subtitles).toHaveFocus();
+    expect(subtitles).toHaveAccessibleDescription('Los subtítulos necesitan un vídeo: indica también la URL del vídeo');
+    expect(field(form, 'URL del vídeo (opcional)')).toHaveAttribute('aria-invalid', 'false');
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+
+    // Al escribir el vídeo, ese aviso (que dependía de él) desaparece.
+    await user.type(field(form, 'URL del vídeo (opcional)'), 'https://v.example.com/t2e3.mp4');
+    expect(subtitles).toHaveAttribute('aria-invalid', 'false');
+    await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
+
+    expect(await screen.findByText('Se ha añadido el episodio T2:E3 «Con subtítulos».')).toBeInTheDocument();
+    expect(sentBody('POST', EPISODES_ROUTE)).toMatchObject({
+      videoUrl: 'https://v.example.com/t2e3.mp4',
+      subtitlesUrl: 'https://subs.example/t2e3.vtt',
+    });
+  });
+
+  it('400 del servidor en los subtítulos: el mensaje junto a su campo y el foco en él', async () => {
+    routeFetch(fetchMock, {
+      [`POST ${EPISODES_ROUTE}`]: () =>
+        errorResponse(400, 'VALIDATION_ERROR', 'Datos no válidos', {
+          validationErrors: {
+            subtitlesUrl: 'Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://',
+          },
+        }),
+    });
+    const user = setupUser();
+    renderSection(detail());
+
+    await user.click(addButton());
+    const form = dialog('Añadir episodio');
+    await user.type(field(form, 'Título'), 'Algo');
+    await user.type(field(form, 'Duración (minutos)'), '40');
+    await user.type(field(form, 'URL del vídeo (opcional)'), 'https://v.example.com/a.mp4');
+    await user.type(field(form, 'URL de los subtítulos (opcional)'), 'https://subs.example/a.vtt');
+    await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
+
+    const subtitles = field(form, 'URL de los subtítulos (opcional)');
+    await waitFor(() => expect(subtitles).toHaveFocus());
+    expect(subtitles).toHaveAccessibleDescription(
+      'Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://',
+    );
   });
 
   it('valida en el cliente con los mensajes del servidor, enfoca el primer error y no envía', async () => {
@@ -495,6 +559,7 @@ describe('SeriesEpisodesSection: editar', () => {
       description: 'Ahora en la 3.',
       duration: 45,
       videoUrl: 'https://video.example/s1e2',
+      subtitlesUrl: null,
     });
     expect(within(section()).getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual([
       'Temporada 1 · 2 episodios',

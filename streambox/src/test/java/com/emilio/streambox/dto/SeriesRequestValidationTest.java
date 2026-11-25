@@ -123,7 +123,7 @@ class SeriesRequestValidationTest {
 
     @Test
     void unEpisodioConDescripcionNulaEsValido() {
-        EpisodeRequest request = new EpisodeRequest(1, 1, "Piloto", null, 45, "https://e.com/v.mp4");
+        EpisodeRequest request = new EpisodeRequest(1, 1, "Piloto", null, 45, "https://e.com/v.mp4", null);
 
         assertTrue(validator.validate(request).isEmpty());
     }
@@ -131,7 +131,7 @@ class SeriesRequestValidationTest {
     @ParameterizedTest(name = "temporada {0}, episodio {1}, duración {2}")
     @CsvSource({ "1, 1, 1", "100, 1000, 600" })
     void losLimitesDelEpisodioSonInclusivos(int season, int number, int duration) {
-        EpisodeRequest request = new EpisodeRequest(season, number, "Piloto", null, duration, "https://e.com/v.mp4");
+        EpisodeRequest request = new EpisodeRequest(season, number, "Piloto", null, duration, "https://e.com/v.mp4", null);
 
         assertTrue(validator.validate(request).isEmpty());
     }

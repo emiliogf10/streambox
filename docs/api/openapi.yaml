@@ -16,8 +16,9 @@ paths:
       tags:
       - watch-progress-controller
       summary: Obtiene mi progreso en una película
-      description: Devuelve el segundo por el que va el usuario autenticado en la película, la duración del vídeo, si ya la
-        terminó (95 % o más) y cuándo se guardó. Si nunca la empezó (o la quitó de «Seguir viendo»), 204 sin cuerpo.
+      description: Devuelve el segundo por el que va el usuario autenticado en la película, la duración del vídeo, si la posición
+        actual llega al final (finished, 95 % o más), si la ha terminado alguna vez (watched) y cuándo se guardó. Si nunca
+        la empezó (o la quitó de «Seguir viendo»), 204 sin cuerpo.
       operationId: getMovieProgress
       parameters:
       - name: movieId
@@ -62,7 +63,8 @@ paths:
       summary: Guarda mi progreso en una película
       description: Guarda el segundo por el que va el usuario autenticado en la película y la duración del vídeo, sustituyendo
         lo anterior. El reproductor lo envía periódicamente y al pausar o salir; repetirlo es idempotente. Si la posición
-        alcanza el 95 % de la duración, la película cuenta como vista y deja de salir en «Seguir viendo».
+        alcanza el 95 % de la duración, la película cuenta como vista (watched, que ya no se pierde aunque se vuelva a ver)
+        y deja de salir en «Seguir viendo».
       operationId: saveMovieProgress
       parameters:
       - name: movieId
@@ -120,8 +122,9 @@ paths:
       tags:
       - watch-progress-controller
       summary: Obtiene mi progreso en un episodio
-      description: Devuelve el segundo por el que va el usuario autenticado en el episodio, la duración del vídeo, si ya lo
-        terminó (95 % o más) y cuándo se guardó. Si nunca lo empezó, 204 sin cuerpo.
+      description: Devuelve el segundo por el que va el usuario autenticado en el episodio, la duración del vídeo, si la posición
+        actual llega al final (finished, 95 % o más), si lo ha terminado alguna vez (watched) y cuándo se guardó. Si nunca
+        lo empezó, 204 sin cuerpo.
       operationId: getEpisodeProgress
       parameters:
       - name: episodeId
@@ -165,8 +168,8 @@ paths:
       - watch-progress-controller
       summary: Guarda mi progreso en un episodio
       description: Guarda el segundo por el que va el usuario autenticado en el episodio y la duración del vídeo, sustituyendo
-        lo anterior. Idempotente. Si la posición alcanza el 95 % de la duración, el episodio cuenta como visto y deja de salir
-        en «Seguir viendo».
+        lo anterior. Idempotente. Si la posición alcanza el 95 % de la duración, el episodio cuenta como visto (watched, que
+        ya no se pierde aunque se vuelva a ver) y deja de salir en «Seguir viendo».
       operationId: saveEpisodeProgress
       parameters:
       - name: episodeId
@@ -572,7 +575,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/EpisodeResponse'
         '400':
-          description: Los datos proporcionados no son válidos
+          description: 'Los datos proporcionados no son válidos. VALIDATION_ERROR: un mensaje en español por campo en validationErrors
+            (los mismos textos que el formulario del panel), también si subtitlesUrl no es un archivo .vtt por https:// («Los
+            subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://») o llega sin vídeo («Los subtítulos
+            necesitan un vídeo: indica también la URL del vídeo», en validationErrors.subtitlesUrl). description, videoUrl
+            y subtitlesUrl son opcionales. MALFORMED_REQUEST: JSON mal formado o un valor de otro tipo'
           content:
             application/json:
               schema:
@@ -850,9 +857,11 @@ paths:
         '400':
           description: 'Los datos proporcionados no son válidos. VALIDATION_ERROR: un mensaje en español por campo en validationErrors
             (los mismos textos que el formulario del panel), también si genreIds contiene un null o si trailerUrl no es un
-            enlace de YouTube aceptado («El tráiler debe ser un enlace de un vídeo de YouTube»). videoUrl y trailerUrl son
-            opcionales. MALFORMED_REQUEST: JSON mal formado o un valor de otro tipo (un número en un texto, un texto o un
-            decimal en un número): no se convierte'
+            enlace de YouTube aceptado («El tráiler debe ser un enlace de un vídeo de YouTube») o si subtitlesUrl no es un
+            archivo .vtt por https:// («Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://»)
+            o llega sin vídeo («Los subtítulos necesitan un vídeo: indica también la URL del vídeo», en validationErrors.subtitlesUrl).
+            videoUrl, trailerUrl y subtitlesUrl son opcionales. MALFORMED_REQUEST: JSON mal formado o un valor de otro tipo
+            (un número en un texto, un texto o un decimal en un número): no se convierte'
           content:
             application/json:
               schema:
@@ -1547,7 +1556,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/EpisodeResponse'
         '400':
-          description: Los datos proporcionados no son válidos
+          description: 'Los datos proporcionados no son válidos. VALIDATION_ERROR: un mensaje en español por campo en validationErrors
+            (los mismos textos que el formulario del panel), también si subtitlesUrl no es un archivo .vtt por https:// («Los
+            subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://») o llega sin vídeo («Los subtítulos
+            necesitan un vídeo: indica también la URL del vídeo», en validationErrors.subtitlesUrl). description, videoUrl
+            y subtitlesUrl son opcionales. MALFORMED_REQUEST: JSON mal formado o un valor de otro tipo'
           content:
             application/json:
               schema:
@@ -1667,9 +1680,11 @@ paths:
         '400':
           description: 'Los datos proporcionados no son válidos. VALIDATION_ERROR: un mensaje en español por campo en validationErrors
             (los mismos textos que el formulario del panel), también si genreIds contiene un null o si trailerUrl no es un
-            enlace de YouTube aceptado («El tráiler debe ser un enlace de un vídeo de YouTube»). videoUrl y trailerUrl son
-            opcionales. MALFORMED_REQUEST: JSON mal formado o un valor de otro tipo (un número en un texto, un texto o un
-            decimal en un número): no se convierte'
+            enlace de YouTube aceptado («El tráiler debe ser un enlace de un vídeo de YouTube») o si subtitlesUrl no es un
+            archivo .vtt por https:// («Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://»)
+            o llega sin vídeo («Los subtítulos necesitan un vídeo: indica también la URL del vídeo», en validationErrors.subtitlesUrl).
+            videoUrl, trailerUrl y subtitlesUrl son opcionales. MALFORMED_REQUEST: JSON mal formado o un valor de otro tipo
+            (un número en un texto, un texto o un decimal en un número): no se convierte'
           content:
             application/json:
               schema:
@@ -2270,11 +2285,12 @@ paths:
       tags:
       - watch-history-controller
       summary: Obtiene mis cifras de visionado
-      description: 'Devuelve cuántas películas (finishedMovies) y cuántos episodios (finishedEpisodes) ha terminado el usuario
-        autenticado (95 % o más de la duración; cada episodio cuenta por separado) y el tiempo visto en segundos (watchedSeconds).
-        Ese tiempo es una estimación: solo se guarda el último punto de cada título, así que suma la duración de lo terminado
-        y la posición de lo que está a medias, sin contar lo vuelto a ver. Cuenta todo el progreso, tenga hoy vídeo el título
-        o no; lo quitado de «Seguir viendo» o borrado del catálogo deja de contar. Sin progreso, las tres cifras son 0.'
+      description: 'Devuelve cuántas películas (finishedMovies) y cuántos episodios (finishedEpisodes) ha terminado alguna
+        vez el usuario autenticado (llegó al 95 % o más de la duración al menos una vez, watched; volver a verlos no los resta;
+        cada episodio cuenta por separado) y el tiempo visto en segundos (watchedSeconds). Ese tiempo es una estimación: solo
+        se guarda el último punto de cada título, así que suma la duración de lo visto alguna vez y la posición de lo que
+        nunca se ha terminado, sin contar lo vuelto a ver. Cuenta todo el progreso, tenga hoy vídeo el título o no; lo quitado
+        de «Seguir viendo» o borrado del catálogo deja de contar. Sin progreso, las tres cifras son 0.'
       operationId: getWatchStats
       responses:
         '200':
@@ -2300,9 +2316,10 @@ paths:
       description: 'Devuelve, del guardado más reciente al más antiguo (a igual fecha, primero las películas y después el
         id mayor), lo que el usuario autenticado ha empezado a ver: una entrada por película y una sola por serie, la de su
         último episodio tocado, con el progreso de ese episodio (nunca propone el siguiente). A diferencia de «Seguir viendo»,
-        incluye lo terminado (finished true, 95 % o más de la duración) y los títulos que ya no tienen vídeo. Cada entrada
-        lleva type (MOVIE o EPISODE): en EPISODE, id y title son los del episodio e imageUrl, seriesId y seriesTitle los de
-        la serie; en MOVIE, seasonNumber, episodeNumber, seriesId y seriesTitle van a null. No hay una tabla de historial
+        incluye lo terminado (finished true: la posición actual llega al 95 % de la duración), lo visto alguna vez aunque
+        se esté volviendo a ver (watched true; es lo que se muestra como «Vista») y los títulos que ya no tienen vídeo. Cada
+        entrada lleva type (MOVIE o EPISODE): en EPISODE, id y title son los del episodio e imageUrl, seriesId y seriesTitle
+        los de la serie; en MOVIE, seasonNumber, episodeNumber, seriesId y seriesTitle van a null. No hay una tabla de historial
         aparte: sale del progreso guardado, así que quitar un título de «Seguir viendo» (DELETE /api/users/me/continue-watching/...)
         o borrarlo del catálogo también lo quita de aquí.'
       operationId: getWatchHistory
@@ -3258,6 +3275,19 @@ components:
           example: https://videos.streambox.example/watch/serie-1x01
           maxLength: 500
           minLength: 0
+        subtitlesUrl:
+          type: string
+          description: 'URL de los subtítulos en español: un archivo WebVTT (.vtt). Opcional: si se omite, es null o va en
+            blanco, el título queda sin subtítulos (null en la respuesta). Si se indica, debe ser una URL https:// absoluta,
+            con host y sin credenciales (las mismas reglas que videoUrl), y el texto anterior al primer ? o # debe terminar
+            en .vtt (sin distinguir mayúsculas; se admiten parámetros y fragmento detrás). Máximo 500 caracteres. Exige vídeo:
+            no se admiten subtítulos si videoUrl falta o va en blanco. En un PUT, omitirlo borra los subtítulos. Errores,
+            uno solo y por este orden: «La URL de los subtítulos no puede superar los 500 caracteres», «Los subtítulos deben
+            ser un archivo .vtt (WebVTT) con una URL que empiece por https://» y «Los subtítulos necesitan un vídeo: indica
+            también la URL del vídeo» (este último en validationErrors.subtitlesUrl).'
+          example: https://videos.streambox.example/subtitulos/serie-1x01.es.vtt
+          maxLength: 500
+          minLength: 0
       required:
       - duration
       - episodeNumber
@@ -3287,6 +3317,13 @@ components:
           - string
           - 'null'
           description: URL del vídeo del episodio, o null si no tiene (el tráiler va en la serie).
+        subtitlesUrl:
+          type:
+          - string
+          - 'null'
+          description: URL de los subtítulos en español (archivo WebVTT, https://…/archivo.vtt), o null si no tiene. Solo
+            hay subtítulos si hay videoUrl. El reproductor los carga como pista de subtítulos; su servidor debe permitir CORS.
+          example: https://videos.streambox.example/subtitulos/serie-1x01.es.vtt
     SeriesRequest:
       type: object
       properties:
@@ -3460,6 +3497,19 @@ components:
           example: https://youtu.be/aBcDeFgHiJk
           maxLength: 500
           minLength: 0
+        subtitlesUrl:
+          type: string
+          description: 'URL de los subtítulos en español: un archivo WebVTT (.vtt). Opcional: si se omite, es null o va en
+            blanco, el título queda sin subtítulos (null en la respuesta). Si se indica, debe ser una URL https:// absoluta,
+            con host y sin credenciales (las mismas reglas que videoUrl), y el texto anterior al primer ? o # debe terminar
+            en .vtt (sin distinguir mayúsculas; se admiten parámetros y fragmento detrás). Máximo 500 caracteres. Exige vídeo:
+            no se admiten subtítulos si videoUrl falta o va en blanco. En un PUT, omitirlo borra los subtítulos. Errores,
+            uno solo y por este orden: «La URL de los subtítulos no puede superar los 500 caracteres», «Los subtítulos deben
+            ser un archivo .vtt (WebVTT) con una URL que empiece por https://» y «Los subtítulos necesitan un vídeo: indica
+            también la URL del vídeo» (este último en validationErrors.subtitlesUrl).'
+          example: https://videos.streambox.example/subtitulos/dune.es.vtt
+          maxLength: 500
+          minLength: 0
         genreIds:
           type: array
           items:
@@ -3505,6 +3555,13 @@ components:
           description: Tráiler en YouTube, siempre en la forma normalizada https://www.youtube.com/watch?v=<id> (id de 11
             caracteres de letras, números, guion o guion bajo), o null si no tiene.
           example: https://www.youtube.com/watch?v=aBcDeFgHiJk
+        subtitlesUrl:
+          type:
+          - string
+          - 'null'
+          description: URL de los subtítulos en español (archivo WebVTT, https://…/archivo.vtt), o null si no tiene. Solo
+            hay subtítulos si hay videoUrl. El reproductor los carga como pista de subtítulos; su servidor debe permitir CORS.
+          example: https://videos.streambox.example/subtitulos/dune.es.vtt
         createdAt:
           type: string
           format: date-time
@@ -3725,19 +3782,20 @@ components:
         finishedMovies:
           type: integer
           format: int64
-          description: Películas que el usuario ha visto enteras (95 % o más de la duración)
+          description: Películas que el usuario ha visto enteras alguna vez (llegó al 95 % o más de la duración al menos una
+            vez); volver a verlas no las resta
           example: 7
         finishedEpisodes:
           type: integer
           format: int64
-          description: Episodios que el usuario ha visto enteros (95 % o más); cada episodio cuenta por separado, aunque sean
-            de la misma serie
+          description: Episodios que el usuario ha visto enteros alguna vez (95 % o más al menos una vez); cada episodio cuenta
+            por separado, aunque sean de la misma serie, y volver a verlos no los resta
           example: 23
         watchedSeconds:
           type: integer
           format: int64
-          description: 'Tiempo visto aproximado, en segundos: la duración de cada título terminado más la posición de cada
-            uno a medias. No cuenta lo vuelto a ver ni descuenta lo saltado'
+          description: 'Tiempo visto aproximado, en segundos: la duración de cada título visto alguna vez más la posición
+            de cada uno que nunca se ha terminado. No cuenta lo vuelto a ver ni descuenta lo saltado'
           example: 98400
     WatchHistoryItemResponse:
       type: object
@@ -3801,7 +3859,14 @@ components:
           example: 2700
         finished:
           type: boolean
-          description: true si la posición alcanza el 95 % de la duración (visto entero)
+          description: true si la posición ACTUAL alcanza el 95 % de la duración. Se pierde si se vuelve a ver y se para antes;
+            para mostrar «Vista», usa watched
+          example: true
+        watched:
+          type: boolean
+          description: 'true si lo ha terminado alguna vez (llegó al 95 % de la duración), aunque ahora lo esté volviendo
+            a ver y la posición actual esté por debajo: volver a verlo no lo pierde. Solo desaparece si se quita de «Seguir
+            viendo» (se borra su progreso)'
           example: true
         updatedAt:
           type: string
@@ -3891,8 +3956,15 @@ components:
           example: 2700
         finished:
           type: boolean
-          description: true si la posición alcanza el 95 % de la duración (visto entero)
+          description: true si la posición ACTUAL alcanza el 95 % de la duración (decide desde dónde se empieza y el siguiente
+            episodio). Se pierde si se vuelve a ver y se para antes; para «lo ha visto alguna vez», ver watched
           example: false
+        watched:
+          type: boolean
+          description: 'true si lo ha terminado alguna vez (llegó al 95 % de la duración), aunque ahora lo esté volviendo
+            a ver y la posición actual esté por debajo: volver a verlo no lo pierde. Solo desaparece si se quita de «Seguir
+            viendo» (se borra su progreso)'
+          example: true
         updatedAt:
           type: string
           format: date-time
@@ -3913,8 +3985,16 @@ components:
           example: 8160
         finished:
           type: boolean
-          description: 'true si la posición alcanza el 95 % de la duración (visto entero: ya no sale en «Seguir viendo»)'
+          description: 'true si la posición ACTUAL alcanza el 95 % de la duración: ya no sale en «Seguir viendo» y el reproductor
+            lo empieza desde el principio. Se pierde si se vuelve a ver y se para antes; para «lo ha visto alguna vez», ver
+            watched'
           example: false
+        watched:
+          type: boolean
+          description: 'true si lo ha terminado alguna vez (llegó al 95 % de la duración), aunque ahora lo esté volviendo
+            a ver y la posición actual esté por debajo: volver a verlo no lo pierde. Solo desaparece si se quita de «Seguir
+            viendo» (se borra su progreso)'
+          example: true
         updatedAt:
           type: string
           format: date-time

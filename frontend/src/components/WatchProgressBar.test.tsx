@@ -24,6 +24,19 @@ describe('WatchProgressBar', () => {
     expect(screen.getByRole('progressbar', { name: 'Visto' })).toHaveAttribute('value', '2700');
   });
 
+  it('visto y vuelto a empezar (`watched` sin `finished`): la barra en la posición actual y «Visto · Quedan…»', () => {
+    render(<WatchProgressBar positionSeconds={600} durationSeconds={2700} watched />);
+
+    const bar = screen.getByRole('progressbar', { name: 'Visto · Quedan 35 min' });
+    expect(bar).toHaveAttribute('value', '600');
+  });
+
+  it('`finished` manda sobre `watched`: al final, «Visto» sin más y la barra llena', () => {
+    render(<WatchProgressBar positionSeconds={2600} durationSeconds={2700} finished watched />);
+
+    expect(screen.getByRole('progressbar', { name: 'Visto' })).toHaveAttribute('value', '2700');
+  });
+
   it('sin texto (el texto ya está al lado, o va dentro de un enlace): oculta a los lectores de pantalla', () => {
     const { container } = render(<WatchProgressBar positionSeconds={600} durationSeconds={2700} withText={false} />);
 

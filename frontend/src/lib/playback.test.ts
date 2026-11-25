@@ -14,6 +14,7 @@ import {
   formatRemaining,
   formatTimestamp,
   getDirectVideoUrl,
+  getSubtitlesUrl,
   isFinishedAt,
   moviePlayerPath,
   playbackStep,
@@ -23,6 +24,45 @@ import {
   toProgressPayload,
 } from './playback';
 import type { EpisodeProgress, WatchProgress } from './types';
+
+describe('getSubtitlesUrl', () => {
+  it.each(['https://subs.example/peli.vtt', 'https://subs.example/peli.vtt?token=a', 'https://subs.example/PELI.VTT'])(
+    'acepta %j (https)',
+    (url) => {
+      expect(getSubtitlesUrl(url)).toBe(new URL(url).href);
+    },
+  );
+
+  it.each([
+    ['vacía', ''],
+    ['null', null],
+    ['http:', 'http://subs.example/peli.vtt'],
+    ['credenciales', 'https://user:pass@subs.example/peli.vtt'],
+    ['javascript:', 'javascript:alert(1)'],
+    ['data:', 'data:text/vtt,WEBVTT'],
+    ['relativa', '/subs/peli.vtt'],
+  ])('rechaza %s: el vídeo se ve sin pista', (_caso, url) => {
+    expect(getSubtitlesUrl(url)).toBeNull();
+  });
+});
+
+describe('seriesWatchTarget: `watched` no cambia el destino (lo decide `finished`)', () => {
+  it('un episodio visto que se está volviendo a ver se reanuda; no salta al siguiente', () => {
+    const e1 = makeEpisode({ id: 1, episodeNumber: 1, videoUrl: 'https://cdn.example/1.mp4' });
+    const e2 = makeEpisode({ id: 2, episodeNumber: 2, videoUrl: 'https://cdn.example/2.mp4' });
+    const series = makeSeriesDetail({ seasons: [{ seasonNumber: 1, episodes: [e1, e2] }] });
+    const rewatching: EpisodeProgress = {
+      episodeId: 1,
+      positionSeconds: 600,
+      durationSeconds: 2700,
+      finished: false,
+      watched: true,
+      updatedAt: '2026-11-21T10:00:00Z',
+    };
+
+    expect(seriesWatchTarget(series, [rewatching])).toEqual({ episode: e1, mode: 'resume' });
+  });
+});
 
 describe('getDirectVideoUrl', () => {
   it.each([
@@ -130,7 +170,7 @@ describe('isFinishedAt (copia de la regla del servidor: 95 %)', () => {
 });
 
 function progress(overrides: Partial<WatchProgress> = {}): WatchProgress {
-  return { positionSeconds: 754, durationSeconds: 8160, finished: false, updatedAt: '2026-11-21T10:00:00Z', ...overrides };
+  return { positionSeconds: 754, durationSeconds: 8160, finished: false, watched: overrides.finished ?? false, updatedAt: '2026-11-21T10:00:00Z', ...overrides };
 }
 
 describe('resumePositionOf', () => {

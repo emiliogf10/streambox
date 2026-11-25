@@ -724,6 +724,28 @@ describe('SeriesDetailPage: reproductor integrado y progreso', () => {
     expect(within(list).getByRole('link', { name: 'Ver T1:E1 Episodio 1' })).toBeInTheDocument();
   });
 
+  it('un episodio visto que se está volviendo a ver: «Visto · Quedan…» con la barra donde va y «Reanudar» (no «a medias» sin más)', async () => {
+    renderDetail('/series/7', () => jsonResponse(direct), {
+      [PROGRESS]: () =>
+        jsonResponse([
+          {
+            episodeId: e1.id,
+            positionSeconds: 600,
+            durationSeconds: 2700,
+            finished: false,
+            watched: true,
+            updatedAt: '2026-11-21T10:00:00Z',
+          },
+        ]),
+    });
+
+    // El botón lo decide la posición (`finished`), no `watched`: se reanuda donde va.
+    expect(await screen.findByRole('link', { name: 'Reanudar T1:E1 de Serie: Episodio 1' })).toBeInTheDocument();
+    const list = episodeList();
+    expect(within(list).getByRole('progressbar', { name: 'Visto · Quedan 35 min' })).toHaveAttribute('value', '600');
+    expect(within(list).getByRole('link', { name: 'Reanudar T1:E1 Episodio 1' })).toBeInTheDocument();
+  });
+
   it('con el último visto terminado: la cabecera lleva al siguiente («Ver T1:E2»)', async () => {
     renderDetail('/series/7', () => jsonResponse(direct), {
       [PROGRESS]: () =>

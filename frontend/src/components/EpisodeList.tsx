@@ -27,8 +27,11 @@ interface EpisodeListProps {
  *
  * **Progreso.** Un episodio empezado lleva debajo de su sinopsis la barra de lo
  * visto y lo que queda («Quedan 12 min», {@link WatchProgressBar}); uno
- * terminado, la barra llena y «Visto». El botón de uno a medias dice
- * «Reanudar» (el reproductor empieza donde se quedó); el de los demás, «Ver».
+ * terminado, la barra llena y «Visto». Uno que ya se vio y se está volviendo a
+ * ver (`watched` sin `finished`) no aparece como «a medias» sin más: la barra
+ * en la posición actual y «Visto · Quedan 12 min». El botón de uno a medias
+ * dice «Reanudar» (el reproductor empieza donde se quedó); el de los demás,
+ * «Ver». El botón lo decide la posición (`finished`), nunca `watched`.
  * Solo hay progreso de los episodios que se ven en StreamBox (archivo de vídeo
  * directo): los demás se abren en otra pestaña y la aplicación no sabe cuánto
  * se vio de ellos.
@@ -59,8 +62,8 @@ export function EpisodeList({ season, seriesId, progress }: EpisodeListProps) {
       {season.episodes.map((episode) => {
         const code = episodeCode(episode.seasonNumber, episode.episodeNumber);
         // Un progreso de un episodio que ya no se ve aquí (le han cambiado el vídeo) no se enseña: no se puede reanudar.
-        const watched = getDirectVideoUrl(episode.videoUrl) ? progressById.get(episode.id) : undefined;
-        const label = watched && resumePositionOf(watched) > 0 ? 'Reanudar' : 'Ver';
+        const episodeProgress = getDirectVideoUrl(episode.videoUrl) ? progressById.get(episode.id) : undefined;
+        const label = episodeProgress && resumePositionOf(episodeProgress) > 0 ? 'Reanudar' : 'Ver';
         return (
           <li
             key={episode.id}
@@ -78,11 +81,12 @@ export function EpisodeList({ season, seriesId, progress }: EpisodeListProps) {
                   {episode.description}
                 </p>
               )}
-              {watched && (
+              {episodeProgress && (
                 <WatchProgressBar
-                  positionSeconds={watched.positionSeconds}
-                  durationSeconds={watched.durationSeconds}
-                  finished={watched.finished}
+                  positionSeconds={episodeProgress.positionSeconds}
+                  durationSeconds={episodeProgress.durationSeconds}
+                  finished={episodeProgress.finished}
+                  watched={episodeProgress.watched}
                   className="mt-3 w-48 max-w-full"
                 />
               )}

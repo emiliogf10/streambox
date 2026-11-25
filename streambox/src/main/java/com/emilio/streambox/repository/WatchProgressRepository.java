@@ -2,6 +2,7 @@ package com.emilio.streambox.repository;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -34,6 +35,13 @@ import org.springframework.transaction.annotation.Transactional;
  *       {@code 0 <= posición <= duración <= 86400} y {@code duración >= 1}.</li>
  *   <li>Borrar el usuario, la película, el episodio o la serie borra su
  *       progreso (cascadas de la {@code V14}).</li>
+ *   <li>{@code finished_at} ({@code V15}): instante en que el título se
+ *       terminó <b>por primera vez</b>. El <i>upsert</i> lo pone al guardar
+ *       una posición terminada si era nulo y no lo toca al guardar una menor,
+ *       así que volver a ver algo no lo «desmarca» del historial ni de las
+ *       cifras ({@link WatchProgress#watched()}). «Seguir viendo» no lo usa:
+ *       sigue decidiendo por la posición actual
+ *       ({@link WatchProgress#finished()}).</li>
  * </ul>
  *
  * <h2>Por qué SQL con {@link JdbcClient} y no una entidad JPA</h2>
@@ -140,19 +148,23 @@ public class WatchProgressRepository {
      *   <li>Fuera: los terminados sin siguiente. La tarjeta es el siguiente
      *       ({@code COALESCE}) o el propio episodio; el progreso del siguiente
      *       ({@code np}) solo se usa si está a medias.</li>
+     *   <li>{@code progress_finished_at}: el {@code finished_at} del progreso
+     *       de la tarjeta, solo para que el {@link WatchProgress} sea fiel a la
+     *       fila (una tarjeta puede estar vista y a medias: se está volviendo a
+     *       ver). No filtra ni ordena nada.</li>
      * </ul>
      */
     private static final String CONTINUE_WATCHING_SQL = """
             SELECT kind, item_id, title, image_url, season_number, episode_number,
                    series_id, series_title, position_seconds, duration_seconds, progress_updated_at,
-                   up_next, updated_at
+                   progress_finished_at, up_next, updated_at
               FROM (
                     SELECT CAST('MOVIE' AS VARCHAR(7)) AS kind,
                            m.id AS item_id, m.title AS title, m.image_url AS image_url,
                            CAST(NULL AS INTEGER) AS season_number, CAST(NULL AS INTEGER) AS episode_number,
                            CAST(NULL AS BIGINT) AS series_id, CAST(NULL AS VARCHAR(150)) AS series_title,
                            p.position_seconds AS position_seconds, p.duration_seconds AS duration_seconds,
-                           p.updated_at AS progress_updated_at,
+                           p.updated_at AS progress_updated_at, p.finished_at AS progress_finished_at,
                            FALSE AS up_next, p.updated_at AS updated_at
                       FROM user_movie_progress p
                       JOIN movies m ON m.id = p.movie_id
@@ -169,10 +181,12 @@ public class WatchProgressRepository {
                                 WHEN %2$s THEN np.duration_seconds END,
                            CASE WHEN lt.next_id IS NULL THEN lt.updated_at
                                 WHEN %2$s THEN np.updated_at END,
+                           CASE WHEN lt.next_id IS NULL THEN lt.finished_at
+                                WHEN %2$s THEN np.finished_at END,
                            lt.next_id IS NOT NULL, lt.updated_at
                       FROM (
                             SELECT t.episode_id, t.series_id, t.position_seconds, t.duration_seconds,
-                                   t.updated_at,
+                                   t.updated_at, t.finished_at,
                                    CASE WHEN NOT (%4$s) THEN (
                                         SELECT n.id
                                           FROM episodes n
@@ -186,7 +200,7 @@ public class WatchProgressRepository {
                                    ) END AS next_id
                               FROM (
                                     SELECT p.episode_id, p.position_seconds, p.duration_seconds, p.updated_at,
-                                           e.series_id, e.season_number, e.episode_number,
+                                           p.finished_at, e.series_id, e.season_number, e.episode_number,
                                            ROW_NUMBER() OVER (PARTITION BY e.series_id
                                                               ORDER BY p.updated_at DESC, p.episode_id DESC) AS rn
                                       FROM user_episode_progress p
@@ -223,14 +237,14 @@ public class WatchProgressRepository {
      */
     private static final String WATCH_HISTORY_SQL = """
             SELECT kind, item_id, title, image_url, season_number, episode_number,
-                   series_id, series_title, position_seconds, duration_seconds, updated_at
+                   series_id, series_title, position_seconds, duration_seconds, updated_at, finished_at
               FROM (
                     SELECT CAST('MOVIE' AS VARCHAR(7)) AS kind,
                            m.id AS item_id, m.title AS title, m.image_url AS image_url,
                            CAST(NULL AS INTEGER) AS season_number, CAST(NULL AS INTEGER) AS episode_number,
                            CAST(NULL AS BIGINT) AS series_id, CAST(NULL AS VARCHAR(150)) AS series_title,
                            p.position_seconds AS position_seconds, p.duration_seconds AS duration_seconds,
-                           p.updated_at AS updated_at
+                           p.updated_at AS updated_at, p.finished_at AS finished_at
                       FROM user_movie_progress p
                       JOIN movies m ON m.id = p.movie_id
                      WHERE p.user_id = :userId
@@ -238,9 +252,10 @@ public class WatchProgressRepository {
                     SELECT CAST('EPISODE' AS VARCHAR(7)),
                            t.episode_id, t.episode_title, s.image_url, t.season_number, t.episode_number,
                            s.id, s.title,
-                           t.position_seconds, t.duration_seconds, t.updated_at
+                           t.position_seconds, t.duration_seconds, t.updated_at, t.finished_at
                       FROM (
                             SELECT p.episode_id, p.position_seconds, p.duration_seconds, p.updated_at,
+                                   p.finished_at,
                                    e.series_id, e.season_number, e.episode_number, e.title AS episode_title,
                                    ROW_NUMBER() OVER (PARTITION BY e.series_id
                                                       ORDER BY p.updated_at DESC, p.episode_id DESC) AS rn
@@ -261,32 +276,33 @@ public class WatchProgressRepository {
      * {@code CROSS JOIN}.
      *
      * <ul>
-     *   <li>Terminados: {@code COUNT} de las filas que <b>no</b> cumplen
-     *       {@code NOT_FINISHED} (la misma aritmética entera, negada).</li>
-     *   <li>Segundos: duración si está terminado, posición si no. La suma de
-     *       una columna {@code INTEGER} ya es {@code BIGINT} en PostgreSQL y en
-     *       H2; el {@code CAST} lo deja escrito y fija el tipo del
-     *       {@code COALESCE} (sin filas, {@code SUM} es nulo).</li>
+     *   <li>Vistos: {@code COUNT(p.finished_at)}, que solo cuenta los no
+     *       nulos: lo terminado <b>alguna vez</b> ({@code V15}), aunque ahora
+     *       se esté volviendo a ver.</li>
+     *   <li>Segundos: duración si se ha visto alguna vez, posición si no. La
+     *       suma de una columna {@code INTEGER} ya es {@code BIGINT} en
+     *       PostgreSQL y en H2; el {@code CAST} lo deja escrito y fija el tipo
+     *       del {@code COALESCE} (sin filas, {@code SUM} es nulo).</li>
      * </ul>
      */
     private static final String WATCH_STATS_SQL = """
             SELECT mv.finished AS finished_movies, ep.finished AS finished_episodes,
                    mv.watched + ep.watched AS watched_seconds
               FROM (
-                    SELECT COUNT(CASE WHEN NOT (%1$s) THEN 1 END) AS finished,
-                           CAST(COALESCE(SUM(CASE WHEN %1$s THEN p.position_seconds
+                    SELECT COUNT(p.finished_at) AS finished,
+                           CAST(COALESCE(SUM(CASE WHEN p.finished_at IS NULL THEN p.position_seconds
                                                   ELSE p.duration_seconds END), 0) AS BIGINT) AS watched
                       FROM user_movie_progress p
                      WHERE p.user_id = :userId
                    ) mv
              CROSS JOIN (
-                    SELECT COUNT(CASE WHEN NOT (%1$s) THEN 1 END) AS finished,
-                           CAST(COALESCE(SUM(CASE WHEN %1$s THEN p.position_seconds
+                    SELECT COUNT(p.finished_at) AS finished,
+                           CAST(COALESCE(SUM(CASE WHEN p.finished_at IS NULL THEN p.position_seconds
                                                   ELSE p.duration_seconds END), 0) AS BIGINT) AS watched
                       FROM user_episode_progress p
                      WHERE p.user_id = :userId
                    ) ep
-            """.formatted(NOT_FINISHED);
+            """;
 
     private final JdbcClient jdbc;
 
@@ -353,6 +369,31 @@ public class WatchProgressRepository {
      * {@code UPDATE} y, si no había fila, {@code INSERT ... ON CONFLICT DO
      * NOTHING}, repetido si se pierde la carrera (ver la clase).
      *
+     * <p><b>{@code finished_at} («visto alguna vez», {@code V15})</b></p>
+     * <ul>
+     *   <li>{@code :finishedAt} es {@code updatedAt} si la posición que llega
+     *       está terminada ({@link WatchProgress#isFinished(int, int)}) y
+     *       {@code NULL} si no.</li>
+     *   <li>{@code INSERT}: se guarda tal cual.</li>
+     *   <li>{@code UPDATE}: si la fila no tenía {@code finished_at}, recibe
+     *       {@code :finishedAt} (es decir, {@code COALESCE(finished_at,
+     *       :finishedAt)}): se marca al terminar y una posición a medias no lo
+     *       cambia. Si ya lo tenía, <b>no se mueve</b>: es el instante de la
+     *       primera vez, aunque se vuelva a terminar.</li>
+     *   <li>Única excepción: si el {@code finished_at} guardado es
+     *       <b>posterior</b> al nuevo {@code updated_at}, se recorta a él. Pasa
+     *       cuando dos guardados se cruzan (dos pestañas: cada uno toma su
+     *       instante antes de su transacción y puede confirmar último el de
+     *       instante más antiguo) o si el reloj del servidor retrocede. Sin el
+     *       recorte, el guardado fallaría con
+     *       {@code ck_*_progress_finished_at_not_after_updated_at}; con él, el
+     *       título sigue visto y la fecha es la más temprana que conserva la
+     *       fila.</li>
+     *   <li>La carrera del <i>upsert</i> sigue siendo correcta: quien pierde el
+     *       {@code INSERT} vuelve al {@code UPDATE}, que aplica las reglas de
+     *       arriba sobre la fila que confirmó el otro.</li>
+     * </ul>
+     *
      * @param table       tabla de progreso (constante de esta clase, nunca un
      *                    dato del usuario: se concatena en el SQL)
      * @param titleColumn columna del título en esa tabla (ídem)
@@ -361,13 +402,20 @@ public class WatchProgressRepository {
     private boolean upsert(String table, String titleColumn, long userId, long titleId, int positionSeconds,
             int durationSeconds, Instant updatedAt) {
         OffsetDateTime at = utc(updatedAt);
+        // Se pasa con tipo explícito (Types.TIMESTAMP_WITH_TIMEZONE): un NULL sin tipo obligaría a Spring a
+        // preguntárselo al driver, que en PostgreSQL es un viaje más a la base de datos en cada guardado
+        OffsetDateTime finishedAt = WatchProgress.isFinished(positionSeconds, durationSeconds) ? at : null;
         for (int attempt = 1; attempt <= MAX_UPSERT_ATTEMPTS; attempt++) {
             int updated = jdbc.sql("UPDATE " + table
-                    + " SET position_seconds = :position, duration_seconds = :duration, updated_at = :updatedAt"
+                    + " SET position_seconds = :position, duration_seconds = :duration, updated_at = :updatedAt,"
+                    + " finished_at = CASE WHEN finished_at IS NULL THEN :finishedAt"
+                    + " WHEN finished_at > :updatedAt THEN :updatedAt"
+                    + " ELSE finished_at END"
                     + " WHERE user_id = :userId AND " + titleColumn + " = :titleId")
                     .param("position", positionSeconds)
                     .param("duration", durationSeconds)
                     .param("updatedAt", at)
+                    .param("finishedAt", finishedAt, Types.TIMESTAMP_WITH_TIMEZONE)
                     .param("userId", userId)
                     .param("titleId", titleId)
                     .update();
@@ -376,13 +424,15 @@ public class WatchProgressRepository {
             }
 
             int inserted = jdbc.sql("INSERT INTO " + table
-                    + " (user_id, " + titleColumn + ", position_seconds, duration_seconds, updated_at)"
-                    + " VALUES (:userId, :titleId, :position, :duration, :updatedAt) ON CONFLICT DO NOTHING")
+                    + " (user_id, " + titleColumn + ", position_seconds, duration_seconds, updated_at, finished_at)"
+                    + " VALUES (:userId, :titleId, :position, :duration, :updatedAt, :finishedAt)"
+                    + " ON CONFLICT DO NOTHING")
                     .param("userId", userId)
                     .param("titleId", titleId)
                     .param("position", positionSeconds)
                     .param("duration", durationSeconds)
                     .param("updatedAt", at)
+                    .param("finishedAt", finishedAt, Types.TIMESTAMP_WITH_TIMEZONE)
                     .update();
             if (inserted == 1) {
                 return true;
@@ -402,11 +452,12 @@ public class WatchProgressRepository {
      * @param userId  identificador del usuario
      * @param movieId identificador de la película
      * @return el progreso guardado, o vacío si nunca la empezó (o la quitó de
-     *         «Seguir viendo»). Puede estar terminado: compruébalo con
-     *         {@link WatchProgress#finished()}
+     *         «Seguir viendo»). Puede estar terminado
+     *         ({@link WatchProgress#finished()}) y, aunque no lo esté, haberse
+     *         visto alguna vez ({@link WatchProgress#watched()})
      */
     public Optional<WatchProgress> findMovieProgress(long userId, long movieId) {
-        return jdbc.sql("SELECT position_seconds, duration_seconds, updated_at FROM user_movie_progress"
+        return jdbc.sql("SELECT position_seconds, duration_seconds, updated_at, finished_at FROM user_movie_progress"
                 + " WHERE user_id = :userId AND movie_id = :movieId")
                 .param("userId", userId)
                 .param("movieId", movieId)
@@ -420,10 +471,11 @@ public class WatchProgressRepository {
      * @param userId    identificador del usuario
      * @param episodeId identificador del episodio
      * @return el progreso guardado, o vacío si nunca lo empezó. Puede estar
-     *         terminado: compruébalo con {@link WatchProgress#finished()}
+     *         terminado ({@link WatchProgress#finished()}) y, aunque no lo
+     *         esté, haberse visto alguna vez ({@link WatchProgress#watched()})
      */
     public Optional<WatchProgress> findEpisodeProgress(long userId, long episodeId) {
-        return jdbc.sql("SELECT position_seconds, duration_seconds, updated_at FROM user_episode_progress"
+        return jdbc.sql("SELECT position_seconds, duration_seconds, updated_at, finished_at FROM user_episode_progress"
                 + " WHERE user_id = :userId AND episode_id = :episodeId")
                 .param("userId", userId)
                 .param("episodeId", episodeId)
@@ -439,11 +491,13 @@ public class WatchProgressRepository {
      * @param userId   identificador del usuario
      * @param seriesId identificador de la serie
      * @return id del episodio → progreso, en orden de temporada y número; solo
-     *         los episodios con progreso guardado (terminados incluidos)
+     *         los episodios con progreso guardado (terminados incluidos; cada
+     *         uno dice también si se ha visto alguna vez,
+     *         {@link WatchProgress#watched()})
      */
     public Map<Long, WatchProgress> findEpisodeProgressBySeries(long userId, long seriesId) {
         Map<Long, WatchProgress> result = new LinkedHashMap<>();
-        jdbc.sql("SELECT p.episode_id, p.position_seconds, p.duration_seconds, p.updated_at"
+        jdbc.sql("SELECT p.episode_id, p.position_seconds, p.duration_seconds, p.updated_at, p.finished_at"
                 + " FROM user_episode_progress p"
                 + " JOIN episodes e ON e.id = p.episode_id"
                 + " WHERE p.user_id = :userId AND e.series_id = :seriesId"
@@ -559,9 +613,10 @@ public class WatchProgressRepository {
      *       su propio progreso y sin «siguiente episodio»: el historial cuenta
      *       lo que se vio, no lo que toca ver. Una serie con diez episodios
      *       vistos ocupa un solo hueco y no tapa al resto.</li>
-     *   <li><b>Terminados o no</b>: cada entrada dice si lo está
-     *       ({@link WatchHistoryItem#finished()}, regla del
-     *       {@value WatchProgress#FINISHED_PERCENT} %).</li>
+     *   <li><b>Terminados o no</b>: cada entrada dice si se ha visto alguna vez
+     *       ({@link WatchHistoryItem#watched()}, {@code finished_at}) y si la
+     *       posición actual está al final ({@link WatchHistoryItem#finished()},
+     *       regla del {@value WatchProgress#FINISHED_PERCENT} %).</li>
      *   <li><b>Con o sin vídeo</b>: a diferencia de «Seguir viendo» (que no
      *       puede prometer un «Reanudar» imposible), lo visto sigue siendo
      *       verdad aunque el administrador quite el vídeo. Por la misma razón,
@@ -607,19 +662,20 @@ public class WatchProgressRepository {
      * Las cifras de visionado del perfil, en una sola consulta.
      *
      * <ul>
-     *   <li><b>Terminados</b>: películas y episodios cuyo progreso alcanza el
-     *       {@value WatchProgress#FINISHED_PERCENT} % (la negación exacta de la
-     *       condición de «Seguir viendo», en aritmética entera:
-     *       {@code posición * 100 >= duración * 95}). Cada episodio cuenta por
-     *       separado, aunque sean de la misma serie.</li>
+     *   <li><b>Terminados</b>: películas y episodios <b>vistos alguna vez</b>
+     *       ({@code finished_at} no nulo, {@code V15}): los que llegaron al
+     *       {@value WatchProgress#FINISHED_PERCENT} % al menos una vez, aunque
+     *       ahora se estén volviendo a ver. Cada episodio cuenta por separado,
+     *       aunque sean de la misma serie.</li>
      *   <li><b>Tiempo visto</b> (estimación): la suma, en películas y
-     *       episodios, de la <b>duración</b> si el título está terminado y de la
-     *       <b>posición</b> si no. Solo se guarda el último punto de cada
-     *       título, así que no cuenta lo vuelto a ver ni descuenta lo saltado:
-     *       es «hasta dónde llegó», no «cuánto rato estuvo». Terminado suma la
-     *       duración entera (y no la posición) porque quien llega a los créditos
-     *       y cierra lo ha visto entero. Se suma en {@code BIGINT}: no se
-     *       desborda aunque el usuario tenga miles de títulos de 24 h.</li>
+     *       episodios, de la <b>duración</b> si el título se ha visto alguna vez
+     *       y de la <b>posición</b> si no. Solo se guarda el último punto de
+     *       cada título, así que no cuenta lo vuelto a ver ni descuenta lo
+     *       saltado: es «hasta dónde llegó», no «cuánto rato estuvo». Visto suma
+     *       la duración entera (y no la posición) porque quien llega a los
+     *       créditos y cierra lo ha visto entero, y volver a empezarlo no le
+     *       quita lo que ya vio. Se suma en {@code BIGINT}: no se desborda
+     *       aunque el usuario tenga miles de títulos de 24 h.</li>
      *   <li>Cuenta <b>todo</b> el progreso, con o sin vídeo (igual que
      *       {@link #findWatchHistory}).</li>
      * </ul>
@@ -704,7 +760,13 @@ public class WatchProgressRepository {
     /** Lee posición, duración y fecha de la fila actual. */
     private static WatchProgress progress(ResultSet rs) throws SQLException {
         return new WatchProgress(rs.getInt("position_seconds"), rs.getInt("duration_seconds"),
-                rs.getObject("updated_at", OffsetDateTime.class).toInstant());
+                rs.getObject("updated_at", OffsetDateTime.class).toInstant(), instantOrNull(rs, "finished_at"));
+    }
+
+    /** Lee una columna {@code TIMESTAMP WITH TIME ZONE} que puede ser nula. */
+    private static Instant instantOrNull(ResultSet rs, String column) throws SQLException {
+        OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
+        return value == null ? null : value.toInstant();
     }
 
     /**
@@ -718,7 +780,7 @@ public class WatchProgressRepository {
         OffsetDateTime progressUpdatedAt = rs.getObject("progress_updated_at", OffsetDateTime.class);
         WatchProgress progress = progressUpdatedAt == null ? null
                 : new WatchProgress(rs.getInt("position_seconds"), rs.getInt("duration_seconds"),
-                        progressUpdatedAt.toInstant());
+                        progressUpdatedAt.toInstant(), instantOrNull(rs, "progress_finished_at"));
         Instant updatedAt = rs.getObject("updated_at", OffsetDateTime.class).toInstant();
         String kind = rs.getString("kind");
         return switch (kind) {

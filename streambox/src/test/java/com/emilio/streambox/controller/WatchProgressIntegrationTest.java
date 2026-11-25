@@ -631,6 +631,74 @@ class WatchProgressIntegrationTest {
     }
 
     // ------------------------------------------------------------------
+    // «Visto alguna vez» (watched, V15)
+    // ------------------------------------------------------------------
+
+    /**
+     * Terminar una película y volver a verla: {@code finished} sigue a la
+     * posición actual (vuelve a {@code false}), pero {@code watched} se queda
+     * en {@code true}. Antes de la {@code V15} el campo no existía y la API no
+     * podía distinguir «visto y vuelto a empezar» de «nunca terminado».
+     */
+    @Test
+    void volverAVerUnaPeliculaNoPierdeWatched() throws Exception {
+        save(aliceToken, MOVIE_PROGRESS, dune.getId(), 94, 100);
+        mockMvc.perform(get(MOVIE_PROGRESS + "/" + dune.getId()).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.finished").value(false))
+                .andExpect(jsonPath("$.watched").value(false));
+
+        save(aliceToken, MOVIE_PROGRESS, dune.getId(), 95, 100);
+        mockMvc.perform(get(MOVIE_PROGRESS + "/" + dune.getId()).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.finished").value(true))
+                .andExpect(jsonPath("$.watched").value(true));
+
+        save(aliceToken, MOVIE_PROGRESS, dune.getId(), 120, 8160);
+        mockMvc.perform(get(MOVIE_PROGRESS + "/" + dune.getId()).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.positionSeconds").value(120))
+                .andExpect(jsonPath("$.finished").value(false))
+                .andExpect(jsonPath("$.watched").value(true));
+    }
+
+    /** Lo mismo en un episodio, leído suelto y en el progreso de su serie. */
+    @Test
+    void volverAVerUnEpisodioNoPierdeWatchedNiEnElProgresoDeLaSerie() throws Exception {
+        save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 100, 100);
+        save(aliceToken, EPISODE_PROGRESS, dark11.getId(), 5, 100);
+        save(aliceToken, EPISODE_PROGRESS, dark12.getId(), 50, 100);
+
+        mockMvc.perform(get(EPISODE_PROGRESS + "/" + dark11.getId()).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.finished").value(false))
+                .andExpect(jsonPath("$.watched").value(true));
+        mockMvc.perform(get(SERIES_PROGRESS + "/" + dark.getId()).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].episodeId").value(dark11.getId()))
+                .andExpect(jsonPath("$[0].finished").value(false))
+                .andExpect(jsonPath("$[0].watched").value(true))
+                .andExpect(jsonPath("$[1].episodeId").value(dark12.getId()))
+                .andExpect(jsonPath("$[1].watched").value(false));
+    }
+
+    /**
+     * Una película vista y vuelta a empezar vuelve a «Seguir viendo» (eso no
+     * cambia: va por la posición) y solo pierde {@code watched} al quitarla de
+     * ahí, que borra su progreso.
+     */
+    @Test
+    void soloQuitarDeSeguirViendoBorraWatched() throws Exception {
+        save(aliceToken, MOVIE_PROGRESS, dune.getId(), 100, 100);
+        save(aliceToken, MOVIE_PROGRESS, dune.getId(), 10, 100);
+        mockMvc.perform(get(CONTINUE).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(dune.getId()));
+
+        remove(aliceToken, CONTINUE + "/movies/" + dune.getId());
+        save(aliceToken, MOVIE_PROGRESS, dune.getId(), 10, 100);
+
+        mockMvc.perform(get(MOVIE_PROGRESS + "/" + dune.getId()).header("Authorization", aliceToken))
+                .andExpect(jsonPath("$.watched").value(false));
+    }
+
+    // ------------------------------------------------------------------
     // Quitar de «Seguir viendo»
     // ------------------------------------------------------------------
 
@@ -916,9 +984,16 @@ class WatchProgressIntegrationTest {
                 user.getId());
     }
 
+    /**
+     * Fija la fecha del último guardado. Si el título está visto, su
+     * {@code finished_at} se lleva a la misma fecha: la {@code V15} exige
+     * {@code finished_at <= updated_at} y aquí se mueve la fecha hacia atrás.
+     */
     private void setUpdatedAt(String table, String column, long id, Instant at) {
-        jdbc.update("UPDATE " + table + " SET updated_at = ? WHERE user_id = ? AND " + column + " = ?",
-                OffsetDateTime.ofInstant(at, ZoneOffset.UTC), alice.getId(), id);
+        OffsetDateTime when = OffsetDateTime.ofInstant(at, ZoneOffset.UTC);
+        jdbc.update("UPDATE " + table + " SET updated_at = ?, finished_at = CASE WHEN finished_at IS NOT NULL"
+                + " THEN CAST(? AS TIMESTAMP WITH TIME ZONE) END WHERE user_id = ? AND " + column + " = ?",
+                when, when, alice.getId(), id);
     }
 
     private User saveUser(String name) {

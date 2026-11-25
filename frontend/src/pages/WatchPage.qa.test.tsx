@@ -38,7 +38,7 @@ beforeEach(() => {
 const movie = makeMovie({ id: 7, title: 'Interstellar', videoUrl: 'https://cdn.example/interstellar.mp4' });
 
 function progress(overrides: Partial<WatchProgress> = {}): WatchProgress {
-  return { positionSeconds: 754, durationSeconds: 8160, finished: false, updatedAt: '2026-11-21T10:00:00Z', ...overrides };
+  return { positionSeconds: 754, durationSeconds: 8160, finished: false, watched: overrides.finished ?? false, updatedAt: '2026-11-21T10:00:00Z', ...overrides };
 }
 
 function renderMoviePlayer(routes: Parameters<typeof routeFetch>[1] = {}) {

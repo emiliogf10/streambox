@@ -36,6 +36,7 @@ import {
   listGenres,
   loginAdmin,
   publicSeriesSearchCount,
+  seriesEpisodesApi,
 } from './support/api';
 import type { NewEpisode } from './support/api';
 import { EMPTY_SERIES, SERIES_HERO } from './support/catalog';
@@ -416,4 +417,74 @@ test('episodios: borrar desde el listado una serie con episodios avisa de que se
   await deleteSeries.getByRole('button', { name: 'Sí, borrar serie' }).click();
   await expect(page.getByText(`«${title}» se ha borrado del catálogo.`)).toBeVisible();
   expect(await publicSeriesSearchCount(request, adminToken, SUFFIX)).toBe(0);
+});
+
+/**
+ * Subtítulos de un episodio desde su diálogo (V15), con las mismas reglas que
+ * los de una película: errores del cliente con el foco en el campo (`.srt` y
+ * sin vídeo), alta de un episodio con un `.vtt` con consulta, fragmento y en
+ * mayúsculas (el servidor lo guarda tal cual), editarlo sin perderlos y
+ * borrarlos vaciando el campo. Lo guardado se comprueba en la API.
+ */
+test('episodios: subtítulos con el foco en el campo al fallar, alta con .VTT y consulta, se conservan al editar y se borran vaciando el campo', async ({
+  page,
+  request,
+  signIn,
+}) => {
+  const subtitlesUrl = 'https://cdn.streambox.example/subs/T1E2.ES.VTT?sig=Xy9#t=1';
+  const hint =
+    'Archivo WebVTT (.vtt) en español por https://. Solo en el reproductor de StreamBox (vídeo .mp4, .webm, .ogg u .ogv). Ambos servidores deben permitir CORS; si no, el vídeo irá sin ellos.';
+  const adminToken = await loginAdmin(request);
+  const id = await seedSeries(request, adminToken, `Serie con subtítulos ${SUFFIX}`, [SEEDED_EPISODES.t1e1]);
+  const episodes = await openSeriesEditor(page, signIn, adminToken, id);
+  const savedEpisode = async () =>
+    (await seriesEpisodesApi(request, adminToken, id)).find((item) => item.seasonNumber === 1 && item.episodeNumber === 2);
+
+  await episodes.getByRole('button', { name: 'Añadir episodio' }).click();
+  let dialog = page.getByRole('dialog', { name: 'Añadir episodio' });
+  const subtitles = () => dialog.getByLabel('URL de los subtítulos (opcional)');
+  await expect(dialog.getByLabel('Número', { exact: true })).toHaveValue('2');
+  await expect(subtitles()).toHaveAccessibleDescription(hint);
+  await fillEpisode(dialog, { title: 'Con subtítulos', duration: '48', videoUrl: '' });
+
+  // Sin vídeo: el error va en los subtítulos y el foco, a ellos.
+  await subtitles().fill(subtitlesUrl);
+  await dialog.getByRole('button', { name: 'Añadir episodio' }).click();
+  await expect(subtitles()).toBeFocused();
+  await expect(subtitles()).toHaveAccessibleDescription('Los subtítulos necesitan un vídeo: indica también la URL del vídeo');
+
+  // Con vídeo pero en .srt: error de formato, foco en el campo.
+  await dialog.getByLabel('URL del vídeo (opcional)').fill('https://videos.streambox.example/e2e/t1e2.mp4');
+  await subtitles().fill('https://cdn.streambox.example/subs/t1e2.srt');
+  await dialog.getByRole('button', { name: 'Añadir episodio' }).click();
+  await expect(subtitles()).toBeFocused();
+  await expect(subtitles()).toHaveAccessibleDescription(
+    'Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://',
+  );
+
+  // Válidos: se añade el episodio y el servidor guarda la URL tal cual.
+  await subtitles().fill(subtitlesUrl);
+  await dialog.getByRole('button', { name: 'Añadir episodio' }).click();
+  await expect(page.getByText('Se ha añadido el episodio T1:E2 «Con subtítulos».')).toBeVisible();
+  await expect(dialog).toHaveCount(0);
+  expect((await savedEpisode())?.subtitlesUrl).toBe(subtitlesUrl);
+
+  // Editar el título los conserva (el diálogo los carga y los vuelve a mandar).
+  await episodes.getByRole('button', { name: 'Editar episodio T1:E2 Con subtítulos' }).click();
+  dialog = page.getByRole('dialog', { name: 'Editar episodio T1:E2' });
+  await expect(subtitles()).toHaveValue(subtitlesUrl);
+  await dialog.getByLabel('Título', { exact: true }).fill('Con subtítulos (editado)');
+  await dialog.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Se han guardado los cambios del episodio T1:E2 «Con subtítulos (editado)».')).toBeVisible();
+  expect((await savedEpisode())?.subtitlesUrl).toBe(subtitlesUrl);
+
+  // Vaciar el campo los borra.
+  await episodes.getByRole('button', { name: 'Editar episodio T1:E2 Con subtítulos (editado)' }).click();
+  dialog = page.getByRole('dialog', { name: 'Editar episodio T1:E2' });
+  await subtitles().fill('');
+  await dialog.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByText('Se han guardado los cambios del episodio T1:E2 «Con subtítulos (editado)».')).toBeVisible();
+  const cleared = await savedEpisode();
+  expect(cleared?.subtitlesUrl).toBeNull();
+  expect(cleared?.videoUrl).toBe('https://videos.streambox.example/e2e/t1e2.mp4');
 });

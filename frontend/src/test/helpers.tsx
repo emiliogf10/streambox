@@ -117,6 +117,9 @@ export function makeWatchHistoryItem(overrides: Partial<WatchHistoryItem> = {}):
     positionSeconds: 600,
     durationSeconds: 3000,
     finished: false,
+    // Como en el servidor: lo terminado por posición también está visto. Para «lo está volviendo a ver»,
+    // `{ watched: true, finished: false }`.
+    watched: overrides.finished ?? false,
     updatedAt: '2026-11-21T09:00:00Z',
     ...overrides,
   };
@@ -146,6 +149,7 @@ export function makeMovie(overrides: Partial<Movie> = {}): Movie {
     imageUrl: `https://img.example/${id}.webp`,
     videoUrl: `https://video.example/${id}`,
     trailerUrl: null,
+    subtitlesUrl: null,
     createdAt: '2026-01-01T10:00:00Z',
     genres: [],
     ...overrides,
@@ -183,6 +187,7 @@ export function makeEpisode(overrides: Partial<Episode> = {}): Episode {
     description: `Sinopsis del episodio ${episodeNumber}.`,
     duration: 45,
     videoUrl: `https://video.example/s${seasonNumber}e${episodeNumber}`,
+    subtitlesUrl: null,
     ...overrides,
   };
 }

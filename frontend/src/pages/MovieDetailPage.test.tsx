@@ -535,6 +535,23 @@ describe('MovieDetailPage: reproductor integrado y progreso', () => {
     expect(bar).toHaveAttribute('max', '5040');
   });
 
+  it('vista y vuelta a empezar: «Reanudar» (manda la posición) y la barra dice las dos cosas, «Visto · Quedan…»', async () => {
+    renderDetail('/peliculas/7', () => jsonResponse(direct), {
+      [PROGRESS]: () =>
+        jsonResponse({
+          positionSeconds: 3000,
+          durationSeconds: 5040,
+          finished: false,
+          watched: true,
+          updatedAt: '2026-11-21T10:00:00Z',
+        }),
+    });
+
+    expect(await screen.findByRole('link', { name: 'Reanudar Interstellar' })).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Visto · Quedan 34 min' })).toHaveAttribute('value', '3000');
+    expect(screen.queryByRole('link', { name: 'Volver a ver Interstellar' })).not.toBeInTheDocument();
+  });
+
   it('terminada: «Volver a ver» (empieza desde el principio), sin barra', async () => {
     renderDetail('/peliculas/7', () => jsonResponse(direct), {
       [PROGRESS]: () =>

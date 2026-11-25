@@ -5,8 +5,14 @@ import { formatRemaining } from '../lib/playback';
 interface WatchProgressBarProps {
   positionSeconds: number;
   durationSeconds: number;
-  /** `true` si ya lo vio entero (≥ 95 %): la barra va llena y el texto dice «Visto». */
+  /** `true` si la posición actual llega al final (≥ 95 %): la barra va llena y el texto dice «Visto». */
   finished?: boolean;
+  /**
+   * `true` si lo terminó alguna vez (`watched` de la API). Sin `finished`, es que
+   * lo está volviendo a ver: la barra marca la posición actual y el texto dice
+   * las dos cosas, «Visto · Quedan 12 min».
+   */
+  watched?: boolean;
   /**
    * `false` = sin texto: solo la barra, oculta a los lectores de pantalla. Para
    * cuando el texto ya está escrito al lado (la tarjeta de «Seguir viendo» lo
@@ -24,6 +30,12 @@ interface WatchProgressBarProps {
  * Cuánto se ha visto de un título: una barra fina y, debajo, lo que queda
  * («Quedan 34 min») o «Visto».
  *
+ * **Volver a ver.** Un título terminado alguna vez (`watched`) que se ha vuelto a
+ * empezar no es «a medias» sin más, ni «Visto» con la barra llena (el botón de
+ * al lado dice «Reanudar»: la barra llena lo contradiría). Muestra la verdad
+ * de las dos cosas: la barra en la posición actual y «Visto · Quedan 12 min».
+ * `finished` manda sobre `watched`: con la posición al final es «Visto» sin más.
+ *
  * **Accesible sin depender del dibujo.** Es un `<progress>` nativo (rol
  * `progressbar`, con su valor) que toma su nombre del texto de al lado
  * (`aria-labelledby`): un lector de pantalla dice «Quedan 34 min, barra de
@@ -38,6 +50,7 @@ export function WatchProgressBar({
   positionSeconds,
   durationSeconds,
   finished = false,
+  watched = false,
   withText = true,
   className = '',
   textClassName = 'text-muted',
@@ -45,7 +58,8 @@ export function WatchProgressBar({
   const textId = useId();
   const max = Math.max(durationSeconds, 1);
   const value = finished ? max : Math.min(Math.max(positionSeconds, 0), max);
-  const text = finished ? 'Visto' : formatRemaining(positionSeconds, durationSeconds);
+  const remaining = formatRemaining(positionSeconds, durationSeconds);
+  const text = finished ? 'Visto' : watched ? `Visto · ${remaining}` : remaining;
 
   if (!withText) {
     return <progress aria-hidden="true" max={max} value={value} className={`watch-progress h-1 w-full ${className}`} />;

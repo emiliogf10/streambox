@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.emilio.streambox.dto.EpisodeRequest;
 import com.emilio.streambox.dto.EpisodeResponse;
+import com.emilio.streambox.dto.MovieRequest;
 import com.emilio.streambox.service.EpisodeService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,6 +37,20 @@ import jakarta.validation.Valid;
 @RestController
 @RequestMapping("/api/series/{seriesId}/episodes")
 public class EpisodeController {
+
+    /**
+     * Texto OpenAPI del 400 del alta y la edición (lo comparten los dos
+     * endpoints que reciben un {@code EpisodeRequest}). Nombra las reglas de
+     * los subtítulos porque son las únicas que dependen de otro campo: sin
+     * vídeo no hay subtítulos.
+     */
+    private static final String WRITE_BAD_REQUEST_DESCRIPTION = "Los datos proporcionados no son válidos. "
+            + "VALIDATION_ERROR: un mensaje en español por campo en validationErrors (los mismos textos que el "
+            + "formulario del panel), también si subtitlesUrl no es un archivo .vtt por https:// («"
+            + MovieRequest.SUBTITLES_URL_FORMAT_MESSAGE + "») o llega sin vídeo («"
+            + MovieRequest.SUBTITLES_REQUIRE_VIDEO_MESSAGE + "», en validationErrors.subtitlesUrl). "
+            + "description, videoUrl y subtitlesUrl son opcionales. MALFORMED_REQUEST: JSON mal formado o un "
+            + "valor de otro tipo";
 
     private final EpisodeService episodeService;
 
@@ -62,7 +77,7 @@ public class EpisodeController {
             + "usuarios. Requiere rol ADMIN.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Episodio creado correctamente"),
-            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
+            @ApiResponse(responseCode = "400", description = WRITE_BAD_REQUEST_DESCRIPTION),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
             @ApiResponse(responseCode = "404", description = "Serie no encontrada"),
@@ -89,7 +104,7 @@ public class EpisodeController {
             + "incluida su temporada y número. Requiere rol ADMIN.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Episodio modificado correctamente"),
-            @ApiResponse(responseCode = "400", description = "Los datos proporcionados no son válidos"),
+            @ApiResponse(responseCode = "400", description = WRITE_BAD_REQUEST_DESCRIPTION),
             @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
             @ApiResponse(responseCode = "403", description = "El usuario no tiene permisos de administrador"),
             @ApiResponse(responseCode = "404", description = "La serie no existe, o el episodio no existe o es "

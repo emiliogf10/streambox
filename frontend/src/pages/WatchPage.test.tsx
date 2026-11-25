@@ -42,7 +42,7 @@ const MOVIE_PROGRESS = 'GET /api/users/me/progress/movies/7';
 const AS_ADMIN = { [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })) };
 
 function progress(overrides: Partial<WatchProgress> = {}): WatchProgress {
-  return { positionSeconds: 754, durationSeconds: 8160, finished: false, updatedAt: '2026-11-21T10:00:00Z', ...overrides };
+  return { positionSeconds: 754, durationSeconds: 8160, finished: false, watched: overrides.finished ?? false, updatedAt: '2026-11-21T10:00:00Z', ...overrides };
 }
 
 /** Pantallas montadas: el reproductor y, para comprobar adónde se vuelve, la ruta de la película (solo su nombre). */

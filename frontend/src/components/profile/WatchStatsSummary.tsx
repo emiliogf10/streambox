@@ -72,8 +72,9 @@ function StatsError({ message, onRetry }: StatsErrorProps) {
  * el resumen de «Mi lista» ({@link Stat}).
  *
  * **Que las cifras no mientan:**
- * - «Vistas»/«vistos» = terminadas (≥ 95 %), la misma regla que la marca
- *   «Visto» de las tarjetas de «Vistos recientemente».
+ * - «Vistas»/«vistos» = terminadas ALGUNA VEZ (≥ 95 %; `watched`), la misma
+ *   regla que la marca «Visto» de «Vistos recientemente»: volver a ver algo no
+ *   lo resta (solo «Quitar de Seguir viendo», que borra su progreso).
  * - El tiempo es una estimación del servidor (solo guarda el último punto de cada
  *   título): la etiqueta dice «aprox.» y {@link formatWatchedTime} redondea hacia
  *   abajo («1,5 h», nunca los minutos exactos de 30 h).

@@ -15,6 +15,10 @@ import {
   IMAGE_URL_FORMAT_MESSAGE,
   IMAGE_URL_SIZE_MESSAGE,
   MOVIE_DESCRIPTION_CONTROL_CHARACTERS_MESSAGE,
+  SUBTITLES_HINT,
+  SUBTITLES_REQUIRE_VIDEO_MESSAGE,
+  SUBTITLES_URL_FORMAT_MESSAGE,
+  SUBTITLES_URL_SIZE_MESSAGE,
   TITLE_CONTROL_CHARACTERS_MESSAGE,
   VIDEO_URL_FORMAT_MESSAGE,
   VIDEO_URL_SIZE_MESSAGE,
@@ -25,9 +29,12 @@ import {
   validateGenreName,
   validateImageUrl,
   validateMovieForm,
+  validateSubtitlesUrl,
   validateVideoUrl,
+  withoutStaleSubtitlesError,
 } from './movieValidation';
 import type { MovieFormValues } from './movieValidation';
+import { DIRECT_VIDEO_EXTENSIONS } from './playback';
 
 /** Formulario válido de partida; cada test cambia solo lo que le importa. */
 const valid: MovieFormValues = {
@@ -38,6 +45,7 @@ const valid: MovieFormValues = {
   imageUrl: '/covers/interstellar.webp',
   videoUrl: 'https://videos.example.com/interstellar',
   trailerUrl: 'https://youtu.be/zSWdZVtXT7E',
+  subtitlesUrl: 'https://videos.example.com/interstellar.es.vtt',
   genreIds: [1],
 };
 
@@ -139,6 +147,103 @@ describe('getPreviewImageUrl', () => {
   });
 });
 
+describe('SUBTITLES_HINT', () => {
+  // La ayuda enumera los vídeos con los que funcionan los subtítulos: si el
+  // reproductor admite uno más (o uno menos), la lista dejaría de ser verdad
+  // (revisión QA, BAJA-4: faltaba `.ogv`).
+  it.each(DIRECT_VIDEO_EXTENSIONS)('nombra la terminación %s que admite el reproductor', (extension) => {
+    expect(SUBTITLES_HINT).toMatch(new RegExp(`${extension.replace('.', '\\.')}\\b`));
+  });
+
+  it('no nombra terminaciones de vídeo que el reproductor no admite', () => {
+    const named = SUBTITLES_HINT.match(/\.(mp4|webm|ogg|ogv|m3u8|mov|mkv|avi)\b/g) ?? [];
+    expect([...new Set(named)].sort()).toEqual([...DIRECT_VIDEO_EXTENSIONS].sort());
+  });
+});
+
+describe('validateSubtitlesUrl', () => {
+  const VIDEO = 'https://cdn.example/peli.mp4';
+
+  it.each([
+    'https://cdn.example/subs/peli.vtt',
+    'https://cdn.example/subs/peli.es.vtt',
+    // Sin distinguir mayúsculas en la terminación.
+    'https://cdn.example/subs/PELI.VTT',
+    'https://cdn.example/subs/peli.Vtt',
+    // La consulta y el fragmento no cuentan: la ruta termina en .vtt.
+    'https://cdn.example/subs/peli.vtt?token=abc&exp=1',
+    'https://cdn.example/subs/peli.vtt#t=10',
+    'https://cdn.example/subs/peli.vtt?x=1#y',
+    'https://cdn.example:8443/peli.vtt',
+  ])('acepta %j (con vídeo)', (url) => {
+    expect(validateSubtitlesUrl(url, VIDEO)).toBeUndefined();
+  });
+
+  it('vacía = sin subtítulos (opcional), haya o no vídeo', () => {
+    expect(validateSubtitlesUrl('', VIDEO)).toBeUndefined();
+    expect(validateSubtitlesUrl('', '')).toBeUndefined();
+  });
+
+  it.each([
+    ['otro formato (.srt)', 'https://cdn.example/subs/peli.srt'],
+    ['sin extensión', 'https://cdn.example/subs/peli'],
+    ['.vtt que no es el final de la ruta', 'https://cdn.example/subs/peli.vtt.html'],
+    ['.vtt solo en la consulta', 'https://cdn.example/descargar?f=peli.vtt'],
+    ['.vtt solo en el fragmento', 'https://cdn.example/subs/peli#peli.vtt'],
+    ['http://', 'http://cdn.example/subs/peli.vtt'],
+    ['HTTPS:// en mayúsculas (como el vídeo)', 'HTTPS://cdn.example/subs/peli.vtt'],
+    ['credenciales', 'https://user:pass@cdn.example/peli.vtt'],
+    ['host engañoso con @', 'https://cdn.example@malo.example/peli.vtt'],
+    ['sin host', 'https:///peli.vtt'],
+    ['javascript:', 'javascript:alert(1)//.vtt'],
+    ['data:', 'data:text/vtt,WEBVTT.vtt'],
+    ['relativa', '/subs/peli.vtt'],
+    ['espacio interior', 'https://cdn.example/mis subs.vtt'],
+    ['carácter no ASCII', 'https://cdn.example/subtítulos.vtt'],
+  ])('rechaza %s con el mensaje de formato', (_caso, url) => {
+    expect(validateSubtitlesUrl(url, VIDEO)).toBe(SUBTITLES_URL_FORMAT_MESSAGE);
+  });
+
+  it('el mensaje de formato es el literal del contrato con el backend', () => {
+    expect(SUBTITLES_URL_FORMAT_MESSAGE).toBe(
+      'Los subtítulos deben ser un archivo .vtt (WebVTT) con una URL que empiece por https://',
+    );
+    expect(SUBTITLES_URL_SIZE_MESSAGE).toBe('La URL de los subtítulos no puede superar los 500 caracteres');
+    expect(SUBTITLES_REQUIRE_VIDEO_MESSAGE).toBe('Los subtítulos necesitan un vídeo: indica también la URL del vídeo');
+  });
+
+  it('500 caracteres valen; 501, mensaje de tamaño', () => {
+    const prefix = 'https://cdn.example/';
+    const exactly500 = `${prefix}${'a'.repeat(500 - prefix.length - 4)}.vtt`;
+    expect(exactly500).toHaveLength(500);
+    expect(validateSubtitlesUrl(exactly500, VIDEO)).toBeUndefined();
+    expect(validateSubtitlesUrl(`${prefix}${'a'.repeat(501 - prefix.length - 4)}.vtt`, VIDEO)).toBe(
+      SUBTITLES_URL_SIZE_MESSAGE,
+    );
+  });
+
+  it('válida sin vídeo: «necesitan un vídeo»', () => {
+    expect(validateSubtitlesUrl('https://cdn.example/peli.vtt', '')).toBe(SUBTITLES_REQUIRE_VIDEO_MESSAGE);
+  });
+
+  it('prioridad: tamaño > formato > falta de vídeo (un solo mensaje por caso)', () => {
+    // Demasiado larga, sin .vtt y sin vídeo: solo el tamaño.
+    expect(validateSubtitlesUrl(`http://${'a'.repeat(600)}.srt`, '')).toBe(SUBTITLES_URL_SIZE_MESSAGE);
+    // Mal formada y sin vídeo: solo el formato (el de «necesitan un vídeo» es para unos subtítulos válidos).
+    expect(validateSubtitlesUrl('https://cdn.example/peli.srt', '')).toBe(SUBTITLES_URL_FORMAT_MESSAGE);
+    expect(validateSubtitlesUrl('http://cdn.example/peli.vtt', '')).toBe(SUBTITLES_URL_FORMAT_MESSAGE);
+  });
+
+  it('withoutStaleSubtitlesError: al tocar el vídeo solo se retira «necesitan un vídeo»', () => {
+    expect(withoutStaleSubtitlesError({ subtitlesUrl: SUBTITLES_REQUIRE_VIDEO_MESSAGE })).toEqual({
+      subtitlesUrl: undefined,
+    });
+    expect(withoutStaleSubtitlesError({ subtitlesUrl: SUBTITLES_URL_FORMAT_MESSAGE })).toEqual({
+      subtitlesUrl: SUBTITLES_URL_FORMAT_MESSAGE,
+    });
+  });
+});
+
 describe('validateMovieForm', () => {
   it('un formulario correcto no produce errores', () => {
     expect(validateMovieForm(valid)).toEqual({});
@@ -150,9 +255,19 @@ describe('validateMovieForm', () => {
     );
   });
 
-  it('sin vídeo ni tráiler (vacíos o solo espacios) la película es válida', () => {
-    expect(validateMovieForm({ ...valid, videoUrl: '', trailerUrl: '' })).toEqual({});
-    expect(validateMovieForm({ ...valid, videoUrl: '   ', trailerUrl: '  ' })).toEqual({});
+  it('sin vídeo, tráiler ni subtítulos (vacíos o solo espacios) la película es válida', () => {
+    expect(validateMovieForm({ ...valid, videoUrl: '', trailerUrl: '', subtitlesUrl: '' })).toEqual({});
+    expect(validateMovieForm({ ...valid, videoUrl: '   ', trailerUrl: '  ', subtitlesUrl: '\t' })).toEqual({});
+  });
+
+  it('subtítulos sin vídeo: el error va en el campo de los subtítulos, no en el del vídeo', () => {
+    expect(validateMovieForm({ ...valid, videoUrl: '  ' })).toEqual({ subtitlesUrl: SUBTITLES_REQUIRE_VIDEO_MESSAGE });
+  });
+
+  it('subtítulos con un vídeo que tiene su propio error: solo el del vídeo (hay vídeo, aunque esté mal)', () => {
+    expect(validateMovieForm({ ...valid, videoUrl: 'http://v.example/x.mp4' })).toEqual({
+      videoUrl: VIDEO_URL_FORMAT_MESSAGE,
+    });
   });
 
   it('el tráiler solo admite YouTube, con el mensaje del contrato', () => {
@@ -308,14 +423,22 @@ describe('toMovieRequest', () => {
       imageUrl: '/covers/interstellar.webp',
       videoUrl: valid.videoUrl,
       trailerUrl: valid.trailerUrl,
+      subtitlesUrl: valid.subtitlesUrl,
       genreIds: [3, 1],
     });
   });
 
-  it('vídeo y tráiler vacíos (o solo espacios) se envían como null: «no tiene»', () => {
-    const body = toMovieRequest({ ...valid, videoUrl: '  ', trailerUrl: '' });
+  it('vídeo, tráiler y subtítulos vacíos (o solo espacios) se envían como null: «no tiene»', () => {
+    const body = toMovieRequest({ ...valid, videoUrl: '  ', trailerUrl: '', subtitlesUrl: ' ' });
     expect(body.videoUrl).toBeNull();
     expect(body.trailerUrl).toBeNull();
+    expect(body.subtitlesUrl).toBeNull();
+  });
+
+  it('los subtítulos se envían recortados', () => {
+    expect(toMovieRequest({ ...valid, subtitlesUrl: ' https://cdn.example/a.vtt ' }).subtitlesUrl).toBe(
+      'https://cdn.example/a.vtt',
+    );
   });
 
   it('el tráiler se envía recortado, tal como se escribió (lo normaliza el servidor)', () => {

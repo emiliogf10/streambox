@@ -43,7 +43,9 @@ function isPermanentFailure(error: unknown): boolean {
 /**
  * Pone la caché al día tras un guardado correcto:
  * - el progreso del título se ESCRIBE con lo enviado (sin volver a pedirlo: el
- *   reproductor lo tiene en pantalla y pedirlo cada 15 s no aportaría nada);
+ *   reproductor lo tiene en pantalla y pedirlo cada 15 s no aportaría nada),
+ *   con `finished` calculado de la posición y `watched` que nunca pasa de
+ *   `true` a `false` (las mismas reglas que el servidor);
  * - «Seguir viendo», el historial y las cifras de lo visto (el perfil) y, en un
  *   episodio, el progreso de su serie se DESCARTAN: los vuelve a pedir quien los
  *   enseñe (la portada, el perfil, la página de la serie). Si nadie los enseña en
@@ -64,9 +66,15 @@ async function applySaved(queryClient: QueryClient, target: ProgressTarget, save
     ...(target.kind === 'episode' ? [queryKeys.progress.series(target.seriesId)] : []),
   ];
   await Promise.all([titleKey, ...staleKeys].map((queryKey) => queryClient.cancelQueries({ queryKey })));
+  const finished = isFinishedAt(saved.positionSeconds, saved.durationSeconds);
+  const previous = queryClient.getQueryData<WatchProgress | null>(titleKey);
   const progress: WatchProgress = {
     ...saved,
-    finished: isFinishedAt(saved.positionSeconds, saved.durationSeconds),
+    finished,
+    // «Visto» no se pierde al volver a verlo (como en el servidor): si ya lo estaba, lo sigue estando aunque la
+    // posición nueva sea menor. Sin dato previo en la caché, solo se sabe lo que dice esta posición; la siguiente
+    // lectura del servidor lo corrige si ya estaba visto.
+    watched: finished || previous?.watched === true,
     updatedAt: new Date().toISOString(),
   };
   queryClient.setQueryData<WatchProgress | null>(titleKey, progress);

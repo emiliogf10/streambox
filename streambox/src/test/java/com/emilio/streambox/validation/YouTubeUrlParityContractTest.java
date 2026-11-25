@@ -148,7 +148,7 @@ class YouTubeUrlParityContractTest {
     }
 
     private static MovieRequest movie(String trailerUrl) {
-        return new MovieRequest("Dune", "Sinopsis", 155, 2021, "https://e.com/i.jpg", null, trailerUrl, Set.of(1L));
+        return new MovieRequest("Dune", "Sinopsis", 155, 2021, "https://e.com/i.jpg", null, trailerUrl, null, Set.of(1L));
     }
 
     private static SeriesRequest series(String trailerUrl) {

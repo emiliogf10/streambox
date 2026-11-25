@@ -34,7 +34,7 @@ import jakarta.persistence.EntityManagerFactory;
  *
  * <p>
  * Que el contexto de Spring arranque ya demuestra dos cosas: que todas las
- * migraciones ({@code V1}..{@code V14}) se aplican en PostgreSQL desde cero y que Hibernate
+ * migraciones ({@code V1}..{@code V15}) se aplican en PostgreSQL desde cero y que Hibernate
  * ({@code ddl-auto=validate}) acepta las entidades contra ese esquema. Aquí se
  * comprueba además lo que H2 no puede garantizar: los tipos reales del catálogo
  * del sistema ({@code information_schema}, {@code pg_catalog}), las políticas de
@@ -80,7 +80,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10, V11, V12, V13 y V14 (sin
+     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10, V11, V12, V13, V14 y V15 (sin
      * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
      * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
@@ -90,7 +90,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -133,7 +133,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     /**
      * Longitudes de los {@code VARCHAR} y obligatoriedad de cada columna: solo
      * admiten {@code NULL} el vídeo y el tráiler de la película (opcionales
-     * desde la {@code V6}), el avatar del usuario ({@code V7}; {@code NULL} =
+     * desde la {@code V6}), sus subtítulos ({@code V15}), el avatar del usuario ({@code V7}; {@code NULL} =
      * se muestra la inicial), {@code users.email_verified_at} ({@code V9};
      * {@code NULL} = cuenta pendiente de verificar el correo) y
      * {@code users.genres_onboarded_at} ({@code V11}; {@code NULL} = aún no se
@@ -147,7 +147,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                 Map.entry("genres.name", 50),
                 Map.entry("movies.title", 150), Map.entry("movies.description", 1000),
                 Map.entry("movies.image_url", 500), Map.entry("movies.video_url", 500),
-                Map.entry("movies.trailer_url", 500));
+                Map.entry("movies.trailer_url", 500), Map.entry("movies.subtitles_url", 500));
 
         List<Map<String, Object>> columns = jdbc.queryForList(
                 "SELECT table_name, column_name, character_maximum_length, is_nullable"
@@ -160,10 +160,10 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                     .findFirst().orElseThrow(() -> new AssertionError("falta la columna " + expected.getKey()));
             assertEquals(expected.getValue(), column.get("character_maximum_length"), expected.getKey());
         }
-        // Solo el vídeo y el tráiler de la película, el avatar del usuario, su
+        // Solo el vídeo, el tráiler y los subtítulos de la película, el avatar del usuario, su
         // fecha de verificación del correo (V9: NULL = cuenta pendiente) y la de
         // la pregunta de bienvenida (V11: NULL = aún no se le ha hecho) admiten NULL
-        assertEquals(java.util.Set.of("movies.video_url", "movies.trailer_url", "users.avatar",
+        assertEquals(java.util.Set.of("movies.video_url", "movies.trailer_url", "movies.subtitles_url", "users.avatar",
                 "users.email_verified_at", "users.genres_onboarded_at"), java.util.Set.copyOf(columns.stream()
                 .filter(c -> !"NO".equals(c.get("is_nullable")))
                 .map(c -> c.get("table_name") + "." + c.get("column_name"))
@@ -807,6 +807,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
             expected.put(table[0] + ".position_seconds", "integer NOT NULL");
             expected.put(table[0] + ".duration_seconds", "integer NOT NULL");
             expected.put(table[0] + ".updated_at", "timestamp with time zone NOT NULL");
+            expected.put(table[0] + ".finished_at", "timestamp with time zone NULL");
         }
         assertEquals(expected, columns);
         assertEquals(List.of("user_id", "movie_id"), primaryKeyColumns("user_movie_progress"));
@@ -842,6 +843,74 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                 "ck_movie_progress_position_within_duration",
                 "ck_episode_progress_position", "ck_episode_progress_duration",
                 "ck_episode_progress_position_within_duration")), "checks: " + checks);
+    }
+
+    // ------------------------------------------------------------------
+    // V15: subtítulos (subtitles_url) y «visto alguna vez» (finished_at)
+    // ------------------------------------------------------------------
+
+    /**
+     * Los seis {@code CHECK} de la V15 existen en PostgreSQL y cada uno
+     * rechaza lo suyo con {@code 23514}: subtítulos que no son {@code https://},
+     * subtítulos sin vídeo (también al quitar el vídeo después), una fecha de
+     * «visto» posterior al guardado y una posición terminada sin fecha de
+     * «visto». Lo válido (visto y ahora a medias) se acepta.
+     */
+    @Test
+    void laV15RechazaSubtitulosYFechasDeVistoIncoherentes() {
+        Set<String> checks = Set.copyOf(jdbc.queryForList(
+                "SELECT conname FROM pg_constraint WHERE contype = 'c' AND connamespace = 'public'::regnamespace",
+                String.class));
+        assertTrue(checks.containsAll(Set.of(
+                "ck_movies_subtitles_url", "ck_movies_subtitles_require_video",
+                "ck_episodes_subtitles_url", "ck_episodes_subtitles_require_video",
+                "ck_movie_progress_finished_at_not_after_updated_at", "ck_movie_progress_finished_has_finished_at",
+                "ck_episode_progress_finished_at_not_after_updated_at",
+                "ck_episode_progress_finished_has_finished_at")), "checks: " + checks);
+
+        long movieId = insertMovie("Subtitulada", 2000);
+        long seriesId = jdbc.queryForObject("INSERT INTO series (title, description, release_year, image_url,"
+                + " created_at) VALUES ('Serie', 'd', 2010, 'u', now()) RETURNING id", Long.class);
+        long episodeId = jdbc.queryForObject("INSERT INTO episodes (series_id, season_number, episode_number, title,"
+                + " duration, video_url, created_at) VALUES (?, 1, 1, 't', 40, 'v', now()) RETURNING id",
+                Long.class, seriesId);
+        String subtitles = "https://example.com/es.vtt";
+        jdbc.update("UPDATE movies SET subtitles_url = ? WHERE id = ?", subtitles, movieId);
+        jdbc.update("UPDATE episodes SET subtitles_url = ? WHERE id = ?", subtitles, episodeId);
+
+        assertCheck("ck_movies_subtitles_url",
+                () -> jdbc.update("UPDATE movies SET subtitles_url = 'http://example.com/es.vtt' WHERE id = ?", movieId));
+        assertCheck("ck_episodes_subtitles_url",
+                () -> jdbc.update("UPDATE episodes SET subtitles_url = 'https://' WHERE id = ?", episodeId));
+        assertCheck("ck_movies_subtitles_require_video",
+                () -> jdbc.update("UPDATE movies SET video_url = NULL WHERE id = ?", movieId));
+        assertCheck("ck_episodes_subtitles_require_video",
+                () -> jdbc.update("UPDATE episodes SET video_url = NULL WHERE id = ?", episodeId));
+
+        long userId = insertUser("visto", "visto@test.com");
+        Instant t0 = Instant.parse("2026-11-01T20:00:00Z");
+        String insert = "INSERT INTO user_movie_progress (user_id, movie_id, position_seconds, duration_seconds,"
+                + " updated_at, finished_at) VALUES (?, ?, ?, 100, ?, ?)";
+        assertCheck("ck_movie_progress_finished_at_not_after_updated_at",
+                () -> jdbc.update(insert, userId, movieId, 2, utc(t0), utc(t0.plusNanos(1_000))));
+        assertCheck("ck_movie_progress_finished_has_finished_at",
+                () -> jdbc.update(insert, userId, movieId, 95, utc(t0), null));
+        jdbc.update(insert, userId, movieId, 2, utc(t0), utc(t0.minusSeconds(60)));
+        assertCheck("ck_episode_progress_finished_has_finished_at",
+                () -> jdbc.update("INSERT INTO user_episode_progress (user_id, episode_id, position_seconds,"
+                        + " duration_seconds, updated_at) VALUES (?, ?, 100, 100, now())", userId, episodeId));
+        assertEquals(1, count("user_movie_progress"), "visto y ahora a medias sí se admite");
+    }
+
+    private void assertCheck(String constraint, Runnable statement) {
+        DataIntegrityViolationException error = assertThrows(DataIntegrityViolationException.class, statement::run,
+                constraint);
+        assertEquals(CHECK_VIOLATION, sqlState(error), constraint);
+        assertTrue(error.getMessage().contains(constraint), error.getMessage());
+    }
+
+    private static java.time.OffsetDateTime utc(Instant instant) {
+        return java.time.OffsetDateTime.ofInstant(instant, java.time.ZoneOffset.UTC);
     }
 
     // ------------------------------------------------------------------
