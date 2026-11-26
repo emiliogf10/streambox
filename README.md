@@ -353,7 +353,7 @@ npm run dev
 ```
 La aplicación web estará disponible en `http://localhost:5173`; Vite reenvía `/api` al backend en `localhost:8080`, por eso no hace falta configurar CORS. Otros comandos: `npm run build` (comprobación de tipos + empaquetado), `npm run lint` (oxlint), `npm run test` (Vitest) y `npm run test:e2e` (Playwright).
 
-Estructura de `frontend/src/`: `pages/` (Home, Películas, Series, Mi lista, Perfil, Login, Registro y `admin/`), `components/`, `context/` (sesión, avisos, favoritos), `hooks/`, `lib/` (cliente de API, tipos, utilidades). Las portadas de ejemplo están en `public/covers/`; para que las películas de tu base de datos las usen, ejecuta a mano el script opcional `docs/portadas-locales.sql` (explicado en su cabecera).
+Estructura de `frontend/src/`: `pages/` (Home, Películas, Series, Mi lista, Perfil, Login, Registro y `admin/`), `components/`, `context/` (sesión, avisos, favoritos), `hooks/`, `lib/` (cliente de API, tipos, utilidades). Las portadas de ejemplo están en `public/covers/`; para que las películas de tu base de datos las usen, ejecuta a mano el script opcional `docs/portadas-locales.sql` (explicado en su cabecera). Para ver el reproductor con vídeos y subtítulos reales, el script opcional `docs/catalogo-demostracion.sql` añade tres películas libres de la Blender Foundation (Big Buck Bunny, Sintel y Tears of Steel, CC BY 3.0, alojadas en Wikimedia Commons): instrucciones y créditos en [`docs/demo/README.md`](docs/demo/README.md).
 
 
 ### Documentación Interactiva (Swagger UI)

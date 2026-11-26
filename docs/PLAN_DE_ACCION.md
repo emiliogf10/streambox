@@ -37,7 +37,7 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **4575** con Docker (2026-11-24, tras la V15) | Sin omitidos ni fallos. Tras la revisión de `qa` (+89 de paridad, sin SQL nuevo): **4446 sin Docker** (397 de PostgreSQL omitidos), 0 fallos (2026-11-25) |
+| Backend (JUnit) | **4575** con Docker (2026-11-24, tras la V15) | Sin omitidos ni fallos. Tras la revisión de `qa` (+89 de paridad, sin SQL nuevo): **4446 sin Docker** (397 de PostgreSQL omitidos), 0 fallos (2026-11-25). Tras el catálogo de demostración: **4460 sin Docker** (404 omitidos), 0 fallos |
 | Frontend (Vitest) | **2258** | |
 | E2E (Playwright) | **272** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
@@ -89,6 +89,12 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 - [ ] Las pantallas más nuevas: panel de administración, series, películas, perfil y «Comprobando tu sesión...».
 
 ### 2.4 Acciones tuyas (datos y decisiones)
+
+- **Catálogo de demostración (2026-11-25)** — *Media · BAJA*. Para que el reproductor, los subtítulos, «Seguir viendo» y el historial se vean en tu app (ver [`docs/demo/README.md`](demo/README.md)):
+  1. Commit y **push** de `docs/demo/subtitulos/` (jsDelivr solo sirve los `.vtt` cuando están en GitHub).
+  2. Ejecuta `docs/catalogo-demostracion.sql` en Supabase (editor SQL): añade Big Buck Bunny, Sintel y Tears of Steel (y los géneros que falten); idempotente, no toca nada existente.
+  3. Opcional: fija jsDelivr a un commit o etiqueta en lugar de `@main` (explicado en la cabecera del script).
+  4. A mano: verlas en Safari de iPhone (solo hay WebM VP9).
 
 - ✅ ~~**Auditoría: comprobar Supabase**~~ — **hecho por el autor el 2026-10-08**: todas las tablas con RLS, ningún permiso para `anon`/`authenticated`, privilegios por defecto cerrados para el rol de la app y **Data API desactivada** (ver el [historial](#4-historial-de-trabajos)).
 - ✅ ~~**Ajustes de seguridad en GitHub**~~ — **hecho por el autor el 2026-10-15** (se conservan los pasos como referencia)
@@ -317,7 +323,8 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - ✅ ~~**Subtítulos**~~ — **hecho el 2026-11-25** (V15; ver el [historial](#4-historial-de-trabajos) y el cap. 15 ter.5 del manual). Pendiente:
     - **Decisión del autor:** la pista es `kind="subtitles"`. WCAG 1.2.2 habla de `captions` (subtítulos para personas sordas, con los sonidos: «[música]», «[llaman a la puerta]»), y `subtitles` es lo correcto si son una transcripción o traducción de los diálogos. Como no sabemos qué tipo de archivo pondrá el administrador, se dejó `subtitles`; se podría añadir un selector «tipo» si hiciera falta.
     - Opcional (`frontend`, BAJA-1 de `qa`, ya existía y afecta también a portada y vídeo): hay URLs que el `URL` del navegador acepta y `java.net.URI` rechaza (`%zz`, `|`, `^`, `{}`, `[]`, `\`, hosts con `-` o `_` al principio…). El panel las da por buenas y el servidor responde 400 (el error sale en el campo). Arreglo: un catálogo de casos https común, como el de `.vtt`.
-    - **A mano:** probar con un `.vtt` real y un vídeo de un CDN con CORS, y el menú de subtítulos de los controles nativos en Safari de iPhone y en Firefox.
+    - **A mano:** el menú de subtítulos de los controles nativos en Safari de iPhone y en Firefox (en Chromium, comprobado con el catálogo de demostración).
+    - Opcional (`frontend`, BAJA-2 de `qa`, 2026-11-25): a 375 px Chromium pinta los subtítulos a 9–10 px (proporcional al alto del vídeo; en pantalla completa crecen). Valorar un tamaño mínimo con `video::cue` y probarlo en un móvil real.
   - **HLS** (`.m3u8`): exigiría `hls.js` (dependencia nueva). Transcodificar con FFmpeg y servir por CDN es otro proyecto: hoy no hay vídeos propios.
   - **A mano:** probar con vídeos reales en `.mp4` (su servidor debe admitir `Range`; si no, el vídeo empieza en 0 y no aparece «Sigues por»), los controles nativos en Safari de iPhone y el aviso largo del pie («…esta vez no se guardará por dónde vas») a 375 px.
   - Opcional (`security`): un `limit_req` genérico en nginx para las rutas autenticadas (el guardado del progreso no tiene límite propio, como los «me gusta»; punto 11 de seguridad).
@@ -491,6 +498,17 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-25 · Catálogo de demostración con películas libres de Blender
+
+- **Por qué:** el reproductor, los subtítulos, «Seguir viendo» y el historial estaban hechos, pero ningún título de la base del autor tenía un vídeo directo: en el portfolio solo se veían tráileres de YouTube.
+- **Investigación (orquestador):** de las fuentes de Big Buck Bunny, Sintel y Tears of Steel, solo **Wikimedia Commons** da `Range` **y** CORS (el servidor oficial de Blender y archive.org no envían CORS; el bucket de Google responde 403). Comparativa en `docs/demo/README.md`.
+- **Subtítulos:** Sintel (Commons, CC BY-SA) y Tears of Steel (`TOS-es.srt` de Blender) convertidos a WebVTT en `docs/demo/subtitulos/` (26 y 76 subtítulos, con un `NOTE` de créditos), servidos por **jsDelivr** desde el repositorio público (`text/vtt` + CORS). Big Buck Bunny no tiene diálogos.
+- **Carteles:** convertidos a WebP con el Chromium de Playwright (sin dependencias) en `frontend/public/covers/` (`big-buck-bunny`, `sintel`, `tears-of-steel`; 44, 79 y 74 KB). El PNG de Tears of Steel pesaba 674 KB y acabaría en el banner del inicio (BAJA-1 de `qa`).
+- **`database`:** `docs/catalogo-demostracion.sql` (opcional, en una transacción, idempotente, no toca nada existente; crea los géneros que falten buscándolos sin distinguir mayúsculas ni acentos; sinopsis propias con la atribución CC BY) y `DemoCatalogScriptContract` (H2 y PostgreSQL, 7 casos: datos, validación de la API, vídeo directo, idempotencia, datos previos intactos, fallo a mitad sin restos y que cada cartel exista en `public/covers/`).
+- **`qa` (navegador, pila aislada):** las tres se reproducen desde Wikimedia (480p VP9), saltan con `Range`, reanudan («Sigues por 0:47»), salen en «Seguir viendo» y en el perfil; la pista «Español» carga y está **sincronizada con el audio** (desfase ≤ 0,25 s, medido con la envolvente de la voz); con jsDelivr aún en 404, el vídeo sigue y sale el aviso. 45 peticiones a Wikimedia sin ningún 429. Capturas en `Pruebas/streambox-capturas/demo-blender-2026-11-qa/`.
+- **Pendiente (en 2.4 y 2.9):** push de `docs/demo/` y de los `.webp` y ejecutar el script en Supabase (autor); Safari de iPhone; opcional (`frontend`, BAJA-2 de `qa`): a 375 px los subtítulos nativos se ven a 9–10 px (lo hace Chromium; se podría fijar un mínimo con `video::cue`); el banner dice «Ver ahora» aunque haya progreso (decisión documentada en el código).
+- **Tests:** backend **4460 sin Docker** (404 omitidos), 0 fallos.
 
 ### 2026-11-25 · Subtítulos en el reproductor y «volver a ver» ya no desmarca (V15)
 

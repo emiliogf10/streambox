@@ -2114,6 +2114,8 @@ WCAG 1.2.2 pide subtítulos en los vídeos con sonido. Cada película y cada epi
 - **Seguridad** (revisión de `security`): la CSP no cambia, porque `<track>` lo gobierna `media-src 'self' https:` y no `connect-src` (que sigue en `'self'`). `crossorigin="anonymous"` no manda cookies ni credenciales a terceros (manda menos que el modo por defecto). El contenido de un VTT se pinta como texto en el *shadow tree* del navegador: no crea HTML ni ejecuta scripts. **Para el futuro:** si se añadiera `Cross-Origin-Embedder-Policy: require-corp`, la recarga sin CORS solo funcionaría si el servidor del vídeo envía `Cross-Origin-Resource-Policy`.
 - **Panel:** campo «URL de los subtítulos (opcional)» debajo del vídeo, en la película y en el episodio, con la ayuda «Archivo WebVTT (.vtt) en español por https://. Solo en el reproductor de StreamBox (vídeo .mp4, .webm, .ogg u .ogv). Ambos servidores deben permitir CORS; si no, el vídeo irá sin ellos.» (un test comprueba que nombra exactamente las extensiones de `DIRECT_VIDEO_EXTENSIONS`)
 
+**Catálogo de demostración** (`docs/catalogo-demostracion.sql`, opcional; ver `docs/demo/README.md`): tres películas libres de la Blender Foundation con vídeo de Wikimedia Commons (la única fuente comprobada que da `Range` **y** CORS: el servidor oficial de Blender y archive.org no envían CORS y el bucket de Google ya no es público) y subtítulos convertidos a WebVTT en `docs/demo/subtitulos/`, servidos por jsDelivr desde el repositorio público. Los carteles son portadas locales en WebP (`public/covers/`): el PNG de Wikimedia de Tears of Steel pesaba 674 KB y acabaría en el banner del inicio. El script es idempotente, crea los géneros que falten y no toca nada existente; `DemoCatalogScriptContract` lo ejecuta contra el esquema real en H2 y en PostgreSQL y comprueba que cada fila pasa la validación de la API, así que una migración que lo rompa hace fallar la suite.
+
 ### 15 ter.6 «Visto» no se pierde al volver a verlo
 
 Antes de la V15, la fila de progreso solo guardaba el último punto: reabrir una película vista y parar en el minuto 2 la dejaba «a medias», fuera de «Películas vistas» y con el tiempo visto rebajado. Ahora hay **dos conceptos y dos campos**:
@@ -2901,7 +2903,7 @@ Cada token genera sus clases (`bg-canvas`, `text-accent`…). Regla del proyecto
 
 | Suite | Herramienta | Nº | Comando |
 | :--- | :--- | :--- | :--- |
-| Backend (H2 + PostgreSQL real) | JUnit 5, Spring Boot Test, MockMvc, Mockito, Testcontainers | 4575 con Docker (2026-11-24, tras la V15); 4446 sin Docker (397 omitidos) tras la revisión de `qa` (2026-11-25), que añade 89 de paridad | `.\mvnw.cmd test` (desde `streambox/`) |
+| Backend (H2 + PostgreSQL real) | JUnit 5, Spring Boot Test, MockMvc, Mockito, Testcontainers | 4575 con Docker (2026-11-24, tras la V15); 4460 sin Docker (404 omitidos) el 2026-11-25, con los 89 de paridad de `qa` y el script del catálogo de demostración | `.\mvnw.cmd test` (desde `streambox/`) |
 | Backend (solo PostgreSQL real) | Testcontainers | Incluidos en el total anterior | Paquete `postgres`; se omiten si Docker no está en marcha (sin Docker, Maven cuenta cada test parametrizado omitido como uno). Solo ellos: `.\mvnw.cmd test "-Dtest=Postgres*"` |
 | Frontend (lógica y componentes) | Vitest, Testing Library | 2258 | `npm run test` (desde `frontend/`) |
 | Frontend (flujos completos) | Playwright (Chromium) | 272 (+24 de capturas, que se omiten) | `npm run test:e2e` |
