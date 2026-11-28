@@ -63,7 +63,8 @@ public final class EpisodeMapper {
                 episode.getDescription(),
                 episode.getDuration(),
                 episode.getVideoUrl(),
-                episode.getSubtitlesUrl());
+                episode.getSubtitlesUrl(),
+                episode.getImageUrl());
     }
 
     /**
@@ -78,7 +79,8 @@ public final class EpisodeMapper {
      * {@code V15}). Guardar los subtítulos en blanco como {@code null} es lo
      * que permite que el {@code CHECK}
      * {@code ck_episodes_subtitles_require_video} se cumpla siempre que la
-     * petición pase la validación.
+     * petición pase la validación. Lo mismo con la imagen propia
+     * ({@code V16}): en blanco violaría {@code ck_episodes_image_url}.
      * </p>
      */
     private static void copyFields(EpisodeRequest request, Episode episode) {
@@ -90,6 +92,7 @@ public final class EpisodeMapper {
         episode.setDuration(request.duration());
         episode.setVideoUrl(blankToNull(request.videoUrl()));
         episode.setSubtitlesUrl(blankToNull(request.subtitlesUrl()));
+        episode.setImageUrl(blankToNull(request.imageUrl()));
     }
 
     /**

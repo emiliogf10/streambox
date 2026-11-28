@@ -44,7 +44,8 @@ import com.emilio.streambox.migration.UserAvatarSchemaCases;
  * prueban en {@code repository.WatchProgressRepositoryIntegrationTest}; los
  * subtítulos y la fecha de «visto» ({@code finished_at}) en {@code V15}, cuyo
  * relleno de los progresos existentes se prueba en
- * {@code migration.WatchedAtMigrationH2Test}).
+ * {@code migration.WatchedAtMigrationH2Test}; la imagen de cabecera
+ * ({@code backdrop_url}) y la imagen del episodio en {@code V16}).
  * El movimiento de datos de la {@code V6} se prueba aparte, partiendo de una
  * base en {@code V5}: {@code migration.TrailerUrlMigrationH2Test} y su gemelo
  * de PostgreSQL.
@@ -1436,6 +1437,76 @@ class FlywaySchemaIntegrationTest {
         insertEpisode(seriesId, 1, next, 45);
         return jdbc.queryForObject("SELECT id FROM episodes WHERE series_id = ? AND episode_number = ?",
                 Long.class, seriesId, next);
+    }
+
+    // --- V16: imagen de cabecera (backdrop_url) e imagen del episodio (episodes.image_url) ---
+
+    @Test
+    void v16EstaAplicadaEnLaTablaDeHistorial() {
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM \"flyway_schema_history\" WHERE \"version\" = '16' AND \"success\" = TRUE",
+                Integer.class);
+
+        assertEquals(1, applied);
+    }
+
+    /**
+     * {@code movies.backdrop_url}, {@code series.backdrop_url} y
+     * {@code episodes.image_url} existen, son opcionales y tienen el tamaño de
+     * la entidad (500). Los títulos nacen sin ellas: sin imagen nueva todo se
+     * ve como antes de la V16. Los episodios no tienen {@code backdrop_url}
+     * (su imagen es {@code image_url}).
+     */
+    @Test
+    void lasImagenesDeLaV16SonOpcionalesYTienenElTamanoDeLaEntidad() {
+        assertEquals("CHARACTER VARYING(500) NULL", columnsOf("movies").get("backdrop_url"));
+        assertEquals("CHARACTER VARYING(500) NULL", columnsOf("series").get("backdrop_url"));
+        assertEquals("CHARACTER VARYING(500) NULL", columnsOf("episodes").get("image_url"));
+        assertEquals(null, columnsOf("episodes").get("backdrop_url"), "el episodio solo tiene image_url");
+
+        long movieId = insertMovie("Sin fondo", 2000);
+        long seriesId = insertSeries("Sin fondo", 2010, null);
+        long episodeId = insertEpisodeFor(seriesId);
+        assertEquals(null, jdbc.queryForObject("SELECT backdrop_url FROM movies WHERE id = ?", String.class, movieId));
+        assertEquals(null, jdbc.queryForObject("SELECT backdrop_url FROM series WHERE id = ?", String.class, seriesId));
+        assertEquals(null, jdbc.queryForObject("SELECT image_url FROM episodes WHERE id = ?", String.class, episodeId));
+    }
+
+    /**
+     * {@code ck_movies_backdrop_url}, {@code ck_series_backdrop_url} y
+     * {@code ck_episodes_image_url}: la imagen es {@code NULL}, una URL
+     * {@code https://} o una portada propia {@code /covers/...}, siempre con
+     * algo detrás del prefijo y en minúsculas (como la API). Se rechazan
+     * {@code http:}, cualquier otro esquema ({@code javascript:}, {@code data:}),
+     * los prefijos a secas, las mayúsculas y las rutas que no son de
+     * {@code /covers/}: el valor acaba en un {@code src} o un
+     * {@code background-image} del cliente.
+     */
+    @Test
+    void lasImagenesDeLaV16SoloAdmitenNuloHttpsOUnaPortadaPropia() {
+        long movieId = insertMovie("Con fondo", 2000);
+        long seriesId = insertSeries("Con fondo", 2010, null);
+        long episodeId = insertEpisodeFor(seriesId);
+        // { tabla, columna, restricción, id }
+        List<Object[]> targets = List.of(
+                new Object[] { "movies", "backdrop_url", "ck_movies_backdrop_url", movieId },
+                new Object[] { "series", "backdrop_url", "ck_series_backdrop_url", seriesId },
+                new Object[] { "episodes", "image_url", "ck_episodes_image_url", episodeId });
+
+        for (Object[] target : targets) {
+            String update = "UPDATE " + target[0] + " SET " + target[1] + " = ? WHERE id = ?";
+            String select = "SELECT " + target[1] + " FROM " + target[0] + " WHERE id = ?";
+            for (String valid : java.util.Arrays.asList("https://ejemplo.com/fondo.webp", "/covers/fondo.webp",
+                    "https://x", "/covers/x", null)) {
+                jdbc.update(update, valid, target[3]);
+                assertEquals(valid, jdbc.queryForObject(select, String.class, target[3]), target[2] + ": " + valid);
+            }
+            for (String invalid : List.of("http://ejemplo.com/a.webp", "javascript:alert(1)",
+                    "data:image/png;base64,AAAA", "HTTPS://ejemplo.com/a.webp", "/COVERS/a.webp", "https://",
+                    "/covers/", "//ejemplo.com/a.webp", "covers/a.webp", "/img/a.webp", "")) {
+                assertRejectedBy((String) target[2], () -> jdbc.update(update, invalid, target[3]));
+            }
+        }
     }
 
     // --- Utilidades ---

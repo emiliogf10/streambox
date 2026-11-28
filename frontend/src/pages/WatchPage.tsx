@@ -17,6 +17,7 @@ import { useEpisodeProgress, useMovieProgress } from '../hooks/useWatchProgress'
 import type { TitleProgressValue } from '../hooks/useWatchProgress';
 import { moviePath, seriesPath } from '../lib/catalog';
 import { episodeLabel, episodePlayerPath, getDirectVideoUrl, getSubtitlesUrl, resumePositionOf } from '../lib/playback';
+import { episodePlayerPosterCandidates, moviePlayerPosterCandidates } from '../lib/titleImages';
 import type { Episode, SeriesDetail } from '../lib/types';
 import { getSafeVideoUrl, parseRouteId } from '../lib/utils';
 import { adminEditMoviePath, adminEditSeriesPath } from './admin/adminPaths';
@@ -172,7 +173,7 @@ export function WatchMoviePage() {
         title={movie.title}
         videoUrl={directUrl}
         subtitlesUrl={getSubtitlesUrl(movie.subtitlesUrl)}
-        posterUrl={movie.imageUrl}
+        posterCandidates={moviePlayerPosterCandidates(movie)}
         resumeAt={start.resumeAt}
         progressUnavailable={start.progressUnavailable}
         target={{ kind: 'movie', id: movie.id }}
@@ -293,7 +294,7 @@ export function WatchEpisodePage() {
         subtitle={episodeLabel(episode)}
         videoUrl={directUrl}
         subtitlesUrl={getSubtitlesUrl(episode.subtitlesUrl)}
-        posterUrl={series.imageUrl}
+        posterCandidates={episodePlayerPosterCandidates(episode, series)}
         resumeAt={start.resumeAt}
         progressUnavailable={start.progressUnavailable}
         target={{ kind: 'episode', id: episode.id, seriesId: series.id }}

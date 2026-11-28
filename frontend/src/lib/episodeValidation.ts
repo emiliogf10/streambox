@@ -9,7 +9,8 @@
  * (`validateVideoUrl`), que es lo que hace también el servidor; como allí, es
  * **opcional** (vacío = el episodio no tiene vídeo y no muestra «Ver»). Los
  * subtítulos, también opcionales, usan `validateSubtitlesUrl`, la misma regla
- * que en las películas (y exigen vídeo).
+ * que en las películas (y exigen vídeo). La imagen del episodio, opcional, sigue
+ * la regla de la portada (`validateCoverLikeUrl`) con sus propios mensajes.
  *
  * Es solo comodidad: **manda la validación del servidor**. Sus
  * `validationErrors` se pintan igualmente junto a cada campo, y lo que el
@@ -24,7 +25,9 @@ import {
   hasControlCharacters,
   hasDisallowedMultilineControlCharacters,
   optionalUrl,
+  URL_MAX,
   parseWholeNumber,
+  validateCoverLikeUrl,
   validateSubtitlesUrl,
   validateVideoUrl,
 } from './movieValidation';
@@ -56,7 +59,34 @@ export const EPISODE_MESSAGES = {
   descriptionControlCharacters: SERIES_MESSAGES.descriptionControlCharacters,
   durationRequired: 'La duración es obligatoria',
   durationRange: `La duración debe estar entre ${EPISODE_DURATION_MIN} y ${EPISODE_DURATION_MAX} minutos`,
+  /** Imagen del episodio que no es `https://` ni una portada propia (la regla de la portada, con su texto). */
+  imageUrlFormat:
+    'La URL de la imagen del episodio debe empezar por https:// o ser una portada propia (/covers/archivo)',
+  imageUrlSize: `La URL de la imagen del episodio no puede superar los ${URL_MAX} caracteres`,
 } as const;
+
+/**
+ * Ayuda del campo «Imagen del episodio»: proporción y lo que pasa si se deja
+ * vacío, en los dos sitios y con y sin imagen de fondo de la serie (el orden de
+ * `episodeThumbnailUrl` y `episodePlayerPosterCandidates`, en
+ * `lib/titleImages.ts`). Sin fondo, la lista NO usa la portada (es vertical)
+ * sino el recuadro de color de `MoviePoster`, y eso hay que decirlo (incidencia
+ * QA-V16-2): antes el texto solo contaba el caso con fondo.
+ */
+export const EPISODE_IMAGE_HINT =
+  'Opcional. Un fotograma apaisado (16:9) para el reproductor y la lista de episodios, que solo lleva miniaturas si algún episodio de la temporada tiene imagen. Si lo dejas vacío, se usa la imagen de fondo de la serie; si la serie no la tiene, la lista muestra un recuadro de color y el reproductor, la portada.';
+
+/**
+ * Valida la imagen propia de un episodio: opcional (vacía = usa las de la
+ * serie) y, si la hay, con la regla de la portada y sus propios mensajes.
+ *
+ * @param value URL ya recortada (`trim`)
+ * @returns el mensaje de error, o `undefined` si es válida o está vacía
+ */
+export function validateEpisodeImageUrl(value: string): string | undefined {
+  if (!value) return undefined;
+  return validateCoverLikeUrl(value, EPISODE_MESSAGES.imageUrlSize, EPISODE_MESSAGES.imageUrlFormat);
+}
 
 /** Campos del formulario de episodio tal como se escriben (los números, como texto). */
 export interface EpisodeFormValues {
@@ -70,6 +100,8 @@ export interface EpisodeFormValues {
   videoUrl: string;
   /** Opcional: subtítulos WebVTT; vacío = sin subtítulos (`null`). Exigen vídeo. */
   subtitlesUrl: string;
+  /** Opcional: imagen del episodio; vacío = usa las de la serie (`null`). */
+  imageUrl: string;
 }
 
 /** Errores por campo del formulario de episodio; un campo sin error no aparece. */
@@ -156,6 +188,9 @@ export function validateEpisodeForm(values: EpisodeFormValues): EpisodeFormError
   const subtitles = validateSubtitlesUrl(values.subtitlesUrl.trim(), values.videoUrl.trim());
   if (subtitles) errors.subtitlesUrl = subtitles;
 
+  const image = validateEpisodeImageUrl(values.imageUrl.trim());
+  if (image) errors.imageUrl = image;
+
   return errors;
 }
 
@@ -175,10 +210,12 @@ export function toEpisodeRequest(values: EpisodeFormValues): EpisodeRequest {
     duration: Number(values.duration.trim()),
     videoUrl: optionalUrl(values.videoUrl),
     subtitlesUrl: optionalUrl(values.subtitlesUrl),
+    // Siempre presente, también vacía (`null`): en un `PUT`, omitirla borraría la que hubiera.
+    imageUrl: optionalUrl(values.imageUrl),
   };
 }
 
-/** Pasa un episodio de la API a los valores del formulario (edición). Sin sinopsis, vídeo o subtítulos = campo vacío. */
+/** Pasa un episodio de la API a los valores del formulario (edición). Sin sinopsis, vídeo, subtítulos o imagen = campo vacío. */
 export function toEpisodeFormValues(episode: Episode): EpisodeFormValues {
   return {
     seasonNumber: String(episode.seasonNumber),
@@ -188,6 +225,8 @@ export function toEpisodeFormValues(episode: Episode): EpisodeFormValues {
     duration: String(episode.duration),
     videoUrl: episode.videoUrl ?? '',
     subtitlesUrl: episode.subtitlesUrl ?? '',
+    // `??` y no solo el campo: un servidor anterior a la V16 no lo envía (llegaría `undefined`).
+    imageUrl: episode.imageUrl ?? '',
   };
 }
 
@@ -236,5 +275,6 @@ export function newEpisodeFormValues(seasons: readonly Season[]): EpisodeFormVal
     duration: '',
     videoUrl: '',
     subtitlesUrl: '',
+    imageUrl: '',
   };
 }

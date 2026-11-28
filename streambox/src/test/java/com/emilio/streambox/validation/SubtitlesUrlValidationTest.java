@@ -80,9 +80,9 @@ class SubtitlesUrlValidationTest {
      */
     static Stream<Arguments> requests() {
         BiFunction<String, String, Object> movie = (video, subtitles) -> new MovieRequest("Dune", "Sinopsis", 155,
-                2021, "https://cdn.example.com/dune.jpg", video, null, subtitles, Set.of(1L));
+                2021, "https://cdn.example.com/dune.jpg", video, null, subtitles, null, Set.of(1L));
         BiFunction<String, String, Object> episode = (video, subtitles) -> new EpisodeRequest(1, 1, "Piloto", null,
-                45, video, subtitles);
+                45, video, subtitles, null);
         return Stream.of(Arguments.of("película", movie), Arguments.of("episodio", episode));
     }
 

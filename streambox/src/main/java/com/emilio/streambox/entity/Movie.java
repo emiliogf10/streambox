@@ -32,7 +32,9 @@ import lombok.Setter;
  * Las propiedades {@code imageUrl}, {@code videoUrl} y {@code trailerUrl}
  * almacenan las direcciones de, respectivamente, la imagen asociada a la
  * película, el contenido de vídeo (opcional: StreamBox no aloja vídeos) y su
- * tráiler de YouTube (también opcional; migración {@code V6}).
+ * tráiler de YouTube (también opcional; migración {@code V6}). La imagen
+ * horizontal de cabecera ({@code backdropUrl}, opcional) llegó con la
+ * {@code V16}.
  * </p>
  */
 @Entity
@@ -126,6 +128,24 @@ public class Movie {
      */
     @Column(name = "subtitles_url", length = 500)
     private String subtitlesUrl;
+
+    /**
+     * URL de la imagen horizontal de cabecera (el banner del inicio y de la
+     * página de la película), o {@code null} si no tiene.
+     *
+     * <p>
+     * Opcional desde la migración {@code V16}. Existe porque el póster
+     * ({@link #imageUrl}) es vertical y pequeño: ampliado como banner a
+     * 1280 px o más se ve borroso. Sin ella, el frontend sigue usando el
+     * póster. La base de datos solo exige con un {@code CHECK}
+     * ({@code ck_movies_backdrop_url}) que empiece por {@code https://} o
+     * {@code /covers/} y tenga algo detrás; el formato completo (incluido el
+     * nombre del archivo de {@code /covers/}) lo valida la API con
+     * {@code @HttpsUrl(allowLocalCovers = true)}.
+     * </p>
+     */
+    @Column(name = "backdrop_url", length = 500)
+    private String backdropUrl;
 
     /**
      * Instante en el que se creó el registro.

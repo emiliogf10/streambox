@@ -89,6 +89,7 @@ public final class SeriesMapper {
                 series.getReleaseYear(),
                 series.getEndYear(),
                 series.getImageUrl(),
+                series.getBackdropUrl(),
                 series.getTrailerUrl(),
                 series.getCreatedAt(),
                 sortedGenres(series),
@@ -132,6 +133,7 @@ public final class SeriesMapper {
                 series.getReleaseYear(),
                 series.getEndYear(),
                 series.getImageUrl(),
+                series.getBackdropUrl(),
                 series.getTrailerUrl(),
                 series.getCreatedAt(),
                 sortedGenres(series),
@@ -156,7 +158,10 @@ public final class SeriesMapper {
      * Copia los campos editables. El tráiler se guarda normalizado
      * ({@code null} si viene en blanco), por el mismo motivo que en
      * {@link MovieMapper}: el {@code CHECK} {@code ck_series_trailer_url} solo
-     * admite la forma {@code https://www.youtube.com/watch?v=<id>}.
+     * admite la forma {@code https://www.youtube.com/watch?v=<id>}. La imagen
+     * de fondo en blanco se guarda como {@code null}: es la única forma de
+     * "no tiene" y la que admite {@code ck_series_backdrop_url} (un texto en
+     * blanco lo violaría).
      */
     private static void copyFields(SeriesRequest request, Series series) {
 
@@ -166,5 +171,15 @@ public final class SeriesMapper {
         series.setEndYear(request.endYear());
         series.setImageUrl(request.imageUrl());
         series.setTrailerUrl(YouTubeUrls.normalize(request.trailerUrl()));
+        series.setBackdropUrl(blankToNull(request.backdropUrl()));
+    }
+
+    /**
+     * Devuelve {@code null} si el texto es {@code null} o está en blanco
+     * ({@link String#isBlank()}, el mismo criterio que los validadores), o el
+     * texto sin cambios en otro caso.
+     */
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 }

@@ -10,6 +10,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  BACKDROP_URL_FORMAT_MESSAGE,
+  BACKDROP_URL_SIZE_MESSAGE,
   EMPTY_MOVIE_FORM,
   GENRE_NAME_SIZE_MESSAGE,
   IMAGE_URL_FORMAT_MESSAGE,
@@ -23,9 +25,11 @@ import {
   VIDEO_URL_FORMAT_MESSAGE,
   VIDEO_URL_SIZE_MESSAGE,
   getPreviewImageUrl,
+  getPreviewOptionalImageUrl,
   hasControlCharacters,
   hasDisallowedMultilineControlCharacters,
   toMovieRequest,
+  validateBackdropUrl,
   validateGenreName,
   validateImageUrl,
   validateMovieForm,
@@ -43,6 +47,7 @@ const valid: MovieFormValues = {
   duration: '169',
   releaseYear: '2014',
   imageUrl: '/covers/interstellar.webp',
+  backdropUrl: '/covers/interstellar-fondo.webp',
   videoUrl: 'https://videos.example.com/interstellar',
   trailerUrl: 'https://youtu.be/zSWdZVtXT7E',
   subtitlesUrl: 'https://videos.example.com/interstellar.es.vtt',
@@ -134,6 +139,31 @@ describe('validateVideoUrl', () => {
     expect(validateVideoUrl(`https://example.com/${'v'.repeat(500)}`)).toBe(VIDEO_URL_SIZE_MESSAGE);
     expect(VIDEO_URL_FORMAT_MESSAGE).toBe('La URL del vídeo debe empezar por https://');
     expect(VIDEO_URL_SIZE_MESSAGE).toBe('La URL del vídeo no puede superar los 500 caracteres');
+  });
+});
+
+describe('validateBackdropUrl', () => {
+  it('es opcional: vacía no es un error (el banner usa la portada)', () => {
+    expect(validateBackdropUrl('')).toBeUndefined();
+    expect(validateMovieForm({ ...valid, backdropUrl: '   ' })).toEqual({});
+  });
+
+  it('con la regla de la portada pero con sus propios mensajes', () => {
+    expect(validateBackdropUrl('/covers/ok-fondo.webp')).toBeUndefined();
+    expect(validateBackdropUrl('http://img.example/a.jpg')).toBe(BACKDROP_URL_FORMAT_MESSAGE);
+    expect(validateBackdropUrl(`https://img.example/${'a'.repeat(500)}`)).toBe(BACKDROP_URL_SIZE_MESSAGE);
+    expect(validateMovieForm({ ...valid, backdropUrl: 'javascript:alert(1)' })).toEqual({
+      backdropUrl: BACKDROP_URL_FORMAT_MESSAGE,
+    });
+  });
+});
+
+describe('getPreviewOptionalImageUrl', () => {
+  it('devuelve la URL (recortada) solo si es válida, y null si está vacía', () => {
+    expect(getPreviewOptionalImageUrl(' /covers/ok-fondo.webp ')).toBe('/covers/ok-fondo.webp');
+    expect(getPreviewOptionalImageUrl('https://img.example/a.jpg')).toBe('https://img.example/a.jpg');
+    expect(getPreviewOptionalImageUrl('http://img.example/a.jpg')).toBeNull();
+    expect(getPreviewOptionalImageUrl('   ')).toBeNull();
   });
 });
 
@@ -421,6 +451,7 @@ describe('toMovieRequest', () => {
       duration: 169,
       releaseYear: 2014,
       imageUrl: '/covers/interstellar.webp',
+      backdropUrl: valid.backdropUrl,
       videoUrl: valid.videoUrl,
       trailerUrl: valid.trailerUrl,
       subtitlesUrl: valid.subtitlesUrl,
@@ -433,6 +464,12 @@ describe('toMovieRequest', () => {
     expect(body.videoUrl).toBeNull();
     expect(body.trailerUrl).toBeNull();
     expect(body.subtitlesUrl).toBeNull();
+  });
+
+  it('la imagen de fondo se envía recortada y, vacía, como null: siempre presente (el PUT la borraría si faltara)', () => {
+    expect(toMovieRequest({ ...valid, backdropUrl: ' /covers/a-fondo.webp ' }).backdropUrl).toBe('/covers/a-fondo.webp');
+    const body = toMovieRequest({ ...valid, backdropUrl: '   ' });
+    expect(body).toHaveProperty('backdropUrl', null);
   });
 
   it('los subtítulos se envían recortados', () => {

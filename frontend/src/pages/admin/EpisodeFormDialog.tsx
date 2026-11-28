@@ -9,6 +9,7 @@ import { TextAreaField } from '../../components/TextAreaField';
 import { ApiError, apiFetch, getErrorMessage } from '../../lib/api';
 import {
   EPISODE_DESCRIPTION_MAX,
+  EPISODE_IMAGE_HINT,
   EPISODE_SEASON_MAX,
   EPISODE_SEASON_MIN,
   newEpisodeFormValues,
@@ -23,6 +24,7 @@ import { SUBTITLES_HINT, withoutStaleSubtitlesError } from '../../lib/movieValid
 import { episodeCode } from '../../lib/series';
 import type { Episode, Season } from '../../lib/types';
 import { focusFirstInvalidField, hasFieldErrors, splitValidationErrors } from './formErrors';
+import { WideImagePreview } from './WideImagePreview';
 
 /** Orden de los campos en pantalla: el foco va al primero con error. */
 const FIELD_ORDER: (keyof EpisodeFormValues)[] = [
@@ -33,6 +35,7 @@ const FIELD_ORDER: (keyof EpisodeFormValues)[] = [
   'description',
   'videoUrl',
   'subtitlesUrl',
+  'imageUrl',
 ];
 
 /**
@@ -47,6 +50,7 @@ const FIELD_IDS: Record<keyof EpisodeFormValues, string> = {
   description: 'episode-description',
   videoUrl: 'episode-video-url',
   subtitlesUrl: 'episode-subtitles-url',
+  imageUrl: 'episode-image-url',
 };
 
 /** Propiedades de {@link EpisodeFormDialog}. */
@@ -81,7 +85,7 @@ interface EpisodeFormDialogProps {
  * hace falta), así que cada apertura empieza de cero, sin arrastrar lo escrito
  * ni los errores de la vez anterior.
  *
- * - **En un diálogo y no en otra página**: un episodio son seis campos y la
+ * - **En un diálogo y no en otra página**: un episodio son unos pocos campos y la
  *   lista de la que se parte (temporadas y números ya usados) es el contexto
  *   que hace falta al rellenarlo. El {@link Modal} aporta foco atrapado,
  *   Escape, devolución del foco a quien lo abrió y los avisos dentro del diálogo.
@@ -98,6 +102,9 @@ interface EpisodeFormDialogProps {
  * - **Vídeo opcional** (vacío = `null`): sin él, el episodio se ve en la lista
  *   pero sin «Ver». Los tráileres no van aquí, sino en la serie. Los
  *   **subtítulos** (opcionales, `.vtt`) van justo debajo y exigen vídeo.
+ * - **Imagen del episodio, opcional**, al final y con su vista previa
+ *   apaisada ({@link WideImagePreview}). Se envía siempre (`null` si está
+ *   vacía): el `PUT` sustituye el episodio entero y, si faltara, la borraría.
  * - **Validación** con los mensajes exactos del servidor (`episodeValidation.ts`),
  *   errores del servidor (`validationErrors`) junto a cada campo y foco al primero.
  * - **409 `EPISODE_ALREADY_EXISTS`** (ese número ya existe en esa temporada):
@@ -109,7 +116,7 @@ interface EpisodeFormDialogProps {
  *   ni permitir un doble envío) y el diálogo no se puede cerrar
  *   (`dismissible`), para no dejar una petición a medias sin respuesta visible.
  * - **Cambios sin guardar.** Un Escape o un clic despistado fuera del diálogo
- *   no deben tirar seis campos escritos. Si algo ha cambiado desde que se abrió,
+ *   no deben tirar lo escrito. Si algo ha cambiado desde que se abrió,
  *   esos gestos no cierran: el pie pasa a «Tienes cambios sin guardar» con
  *   «Descartar cambios» y «Seguir editando» (el foco va a esta, la acción
  *   segura; las dos tienen el mensaje como descripción, así que el lector de
@@ -385,6 +392,25 @@ export function EpisodeFormDialog({
             error={errors.subtitlesUrl}
             value={values.subtitlesUrl}
             onChange={(event) => setField('subtitlesUrl', event.target.value)}
+          />
+          <FormField
+            id={FIELD_IDS.imageUrl}
+            label="Imagen del episodio (opcional)"
+            type="url"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="https://… o /covers/archivo.webp"
+            hint={EPISODE_IMAGE_HINT}
+            error={errors.imageUrl}
+            value={values.imageUrl}
+            onChange={(event) => setField('imageUrl', event.target.value)}
+          />
+          <WideImagePreview
+            label="la imagen del episodio"
+            title={values.title.trim() || 'Nuevo episodio'}
+            imageUrl={values.imageUrl}
+            emptyMessage="Sin imagen propia: se usan las de la serie."
+            validMessage="Así se verá en la lista de episodios y en el reproductor mientras carga el vídeo."
           />
         </div>
 

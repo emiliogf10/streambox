@@ -49,6 +49,15 @@ import jakarta.validation.constraints.Size;
  * </p>
  *
  * <p>
+ * <b>Imagen propia</b> (migración {@code V16}): {@code imageUrl}, opcional,
+ * con la regla de la portada ({@link HttpsUrl} con {@code allowLocalCovers};
+ * primero la longitud y luego el formato) pero mensajes propios que nombran
+ * "la imagen del episodio". A diferencia de la portada de películas y series
+ * no es obligatoria: sin ella el cliente usa la portada de la serie. En blanco
+ * = no tiene, y un {@code PUT} sin ella la borra.
+ * </p>
+ *
+ * <p>
  * <b>Caracteres de control.</b> Las mismas reglas que en {@link MovieRequest}:
  * ninguno en el título y solo tabulador y saltos de línea en la descripción
  * (ver {@link ControlCharacters}).
@@ -64,6 +73,10 @@ import jakarta.validation.constraints.Size;
  * @param subtitlesUrl  URL de los subtítulos WebVTT (opcional; si viene, máximo
  *                      500 caracteres, {@code https://}, archivo {@code .vtt} y
  *                      con vídeo; en blanco = sin subtítulos)
+ * @param imageUrl      URL de la imagen propia del episodio (opcional; si viene,
+ *                      máximo 500 caracteres, {@code https://} o
+ *                      {@code /covers/<archivo>}; en blanco = sin imagen, y se
+ *                      usa la portada de la serie)
  */
 @SubtitlesRequireVideo(maxLength = MovieRequest.URL_MAX_LENGTH,
         message = MovieRequest.SUBTITLES_REQUIRE_VIDEO_MESSAGE)
@@ -111,7 +124,14 @@ public record EpisodeRequest(
                 example = "https://videos.streambox.example/subtitulos/serie-1x01.es.vtt")
         @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.SUBTITLES_URL_SIZE_MESSAGE)
         @WebVttUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.SUBTITLES_URL_FORMAT_MESSAGE)
-        String subtitlesUrl) implements VideoWithSubtitles {
+        String subtitlesUrl,
+
+        @Schema(description = EpisodeRequest.IMAGE_URL_DESCRIPTION,
+                example = "https://image.tmdb.org/t/p/w780/serie-1x01.jpg")
+        @Size(max = MovieRequest.URL_MAX_LENGTH, message = EpisodeRequest.IMAGE_URL_SIZE_MESSAGE)
+        @HttpsUrl(allowLocalCovers = true, maxLength = MovieRequest.URL_MAX_LENGTH,
+                message = EpisodeRequest.IMAGE_URL_FORMAT_MESSAGE)
+        String imageUrl) implements VideoWithSubtitles {
 
     /** Error de rango de {@code seasonNumber}. */
     public static final String SEASON_RANGE_MESSAGE = "La temporada debe estar entre 1 y 100";
@@ -121,4 +141,27 @@ public record EpisodeRequest(
 
     /** Error de rango de {@code duration}. */
     public static final String DURATION_RANGE_MESSAGE = "La duración debe estar entre 1 y 600 minutos";
+
+    /**
+     * Error de formato de {@code imageUrl} (contrato con el frontend). Misma
+     * regla que la portada de {@link MovieRequest}, pero el texto dice "la
+     * imagen del episodio" para que el administrador no la confunda con la
+     * portada de la serie, que es la que se ve cuando falta.
+     */
+    public static final String IMAGE_URL_FORMAT_MESSAGE = "La URL de la imagen del episodio debe empezar por "
+            + "https:// o ser una portada propia (/covers/archivo)";
+
+    /** Error de longitud de {@code imageUrl} (contrato con el frontend). */
+    public static final String IMAGE_URL_SIZE_MESSAGE =
+            "La URL de la imagen del episodio no puede superar los " + MovieRequest.URL_MAX_LENGTH + " caracteres";
+
+    /** Texto OpenAPI de {@code imageUrl} en la petición. */
+    public static final String IMAGE_URL_DESCRIPTION = "Imagen propia del episodio (miniatura de la lista de "
+            + "episodios y fotograma de espera del reproductor); proporción recomendada 16:9. Opcional: si se "
+            + "omite, es null o va en blanco, el episodio queda sin imagen propia (null en la respuesta) y se "
+            + "usa la portada de la serie. Si se indica, las mismas reglas que la portada de películas y "
+            + "series: URL https:// absoluta, con host y sin credenciales, o una portada propia "
+            + "/covers/<archivo>; solo caracteres ASCII visibles; máximo 500 caracteres. En un PUT, omitirlo "
+            + "la borra. Errores, uno solo y por este orden: «" + IMAGE_URL_SIZE_MESSAGE + "» y «"
+            + IMAGE_URL_FORMAT_MESSAGE + "».";
 }

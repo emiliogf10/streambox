@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Pencil, RotateCcw, TriangleAlert } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useFirstLoadableImage } from '../../hooks/useFirstLoadableImage';
 import { useProgressSaver } from '../../hooks/useProgressSaver';
 import type { ProgressTarget } from '../../hooks/useProgressSaver';
 import { formatTimestamp } from '../../lib/playback';
@@ -79,6 +80,9 @@ function mediaErrorMessage(code: number | null): string {
   }
 }
 
+/** Lista vacía compartida: sin candidatas, sin `poster` (y una referencia estable entre renderizados). */
+const NO_POSTER: readonly string[] = [];
+
 /** Propiedades de {@link PlayerScreen}. */
 export interface PlayerScreenProps {
   /** `<h1>` de la pantalla: la película o la serie. */
@@ -87,8 +91,14 @@ export interface PlayerScreenProps {
   subtitle?: string;
   /** URL del archivo de vídeo, ya validada con `getDirectVideoUrl`. */
   videoUrl: string;
-  /** Portada que se ve mientras carga el vídeo (`imageUrl` del título). */
-  posterUrl?: string;
+  /**
+   * Imágenes candidatas para lo que se ve mientras carga el vídeo, en orden de
+   * preferencia: horizontales primero y la portada del título al final (ver
+   * `moviePlayerPosterCandidates` y `episodePlayerPosterCandidates` en
+   * `lib/titleImages.ts`). Se usa la primera que cargue (ver «`poster`» en
+   * {@link PlayerScreen}).
+   */
+  posterCandidates?: readonly string[];
   /** Segundo desde el que empezar (0 = el principio), de `resumePositionOf`. */
   resumeAt: number;
   /** Qué título se está viendo, para guardar su progreso. */
@@ -128,7 +138,13 @@ export interface PlayerScreenProps {
  * mismo peor. Atributos:
  * - `controls`, `playsInline` (en iPhone, sin él el vídeo salta a pantalla
  *   completa al empezar) y `preload="auto"` (se va a reproducir ya).
- * - `poster`: la portada del título mientras llega el primer fotograma.
+ * - `poster`: lo que se ve mientras llega el primer fotograma. El hueco es
+ *   16:9, así que se prefiere una imagen horizontal (la de fondo del título o
+ *   la del episodio) y solo si no hay, la portada vertical (`object-contain`
+ *   la encaja con bandas a los lados). Como el atributo no avisa si la imagen
+ *   falla, {@link useFirstLoadableImage} usa la primera candidata desde el
+ *   principio y salta a la siguiente si no carga: una imagen de fondo rota no
+ *   deja el vídeo en negro.
  * - Tamaño: 16:9 (`aspect-video`) desde el primer momento, sin saltos al cargar,
  *   y nunca más alto que la ventana (el ancho se limita por el alto disponible);
  *   `object-contain` encaja vídeos de otras proporciones sin recortarlos.
@@ -207,7 +223,7 @@ export function PlayerScreen({
   subtitle,
   videoUrl,
   subtitlesUrl = null,
-  posterUrl,
+  posterCandidates = NO_POSTER,
   resumeAt,
   target,
   titlePath,
@@ -218,6 +234,7 @@ export function PlayerScreen({
   progressUnavailable = false,
 }: PlayerScreenProps) {
   const { isAdmin } = useAuth();
+  const posterUrl = useFirstLoadableImage(posterCandidates);
   // El elemento como estado (para engancharle el guardado en cuanto existe) y como `ref` (para moverlo: saltar a
   // un segundo o reproducir son cambios del elemento, no del estado de React).
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);

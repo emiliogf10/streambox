@@ -28,6 +28,13 @@ export interface CatalogItem {
   releaseYear: number;
   /** Portada vertical (2:3): `https://...` o una propia `/covers/<archivo>`. */
   imageUrl: string;
+  /**
+   * Imagen HORIZONTAL opcional (16:9 recomendado) para el banner del inicio y
+   * de la página del título: `https://...`, `/covers/<archivo>` o `null`. Sin
+   * ella, el banner usa el póster desenfocado de siempre. Las tarjetas, «Seguir
+   * viendo» y el historial siguen con el póster vertical ({@link CatalogItem.imageUrl}).
+   */
+  backdropUrl: string | null;
   /** Instante de alta en formato ISO-8601 (UTC). */
   createdAt: string;
   /** Géneros, ya ordenados por nombre por el servidor. */
@@ -55,7 +62,10 @@ export interface Movie extends CatalogItem {
   subtitlesUrl: string | null;
 }
 
-/** Episodio de una serie (`EpisodeResponse`). No tiene imagen propia: usa la de la serie. */
+/**
+ * Episodio de una serie (`EpisodeResponse`). Su imagen es opcional: sin ella,
+ * la lista de episodios y el reproductor usan las de la serie.
+ */
 export interface Episode {
   id: number;
   seasonNumber: number;
@@ -73,6 +83,12 @@ export interface Episode {
   videoUrl: string | null;
   /** Subtítulos del episodio (WebVTT) o `null`; como en {@link Movie.subtitlesUrl}. */
   subtitlesUrl: string | null;
+  /**
+   * Imagen propia del episodio (un fotograma, 16:9 recomendado): `https://...`,
+   * `/covers/<archivo>` o `null`. Miniatura de la lista de episodios y
+   * `poster` del reproductor; sin ella, se usan las imágenes de la serie.
+   */
+  imageUrl: string | null;
 }
 
 /** Temporada de una serie (`SeasonResponse`), con sus episodios ordenados por número. */
@@ -398,6 +414,11 @@ export interface MovieRequest {
   releaseYear: number;
   /** `https://...` o una portada propia `/covers/<archivo>`. */
   imageUrl: string;
+  /**
+   * Opcional: imagen horizontal del banner (`https://...` o `/covers/<archivo>`),
+   * o `null` = sin ella (en un `PUT`, omitirlo también la borra).
+   */
+  backdropUrl: string | null;
   /** Opcional: solo `https://...`, o `null` = sin vídeo. */
   videoUrl: string | null;
   /**
@@ -427,6 +448,8 @@ export interface SeriesRequest {
   endYear: number | null;
   /** `https://...` o una portada propia `/covers/<archivo>`. */
   imageUrl: string;
+  /** Opcional: imagen horizontal del banner, o `null` = sin ella; como en {@link MovieRequest.backdropUrl}. */
+  backdropUrl: string | null;
   /** Opcional: enlace de YouTube (el servidor lo guarda normalizado), o `null` = sin tráiler. */
   trailerUrl: string | null;
   /** Entre 1 y 20 géneros. */
@@ -451,6 +474,11 @@ export interface EpisodeRequest {
   videoUrl: string | null;
   /** Opcional: subtítulos WebVTT (`https://…/archivo.vtt`) o `null`; exigen vídeo. */
   subtitlesUrl: string | null;
+  /**
+   * Opcional: imagen propia del episodio (`https://...` o `/covers/<archivo>`),
+   * o `null` = usa las de la serie (en un `PUT`, omitirla también la borra).
+   */
+  imageUrl: string | null;
 }
 
 /**

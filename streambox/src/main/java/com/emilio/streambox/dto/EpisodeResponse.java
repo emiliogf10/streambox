@@ -8,8 +8,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * <p>
  * No incluye la serie: el episodio siempre se devuelve dentro de su serie
  * ({@link SeasonResponse}) o como respuesta a una operación sobre
- * {@code /api/series/{id}/episodes}, donde la serie ya es conocida. Tampoco
- * tiene imagen propia todavía: el cliente usa la de la serie.
+ * {@code /api/series/{id}/episodes}, donde la serie ya es conocida. Su imagen
+ * propia ({@code imageUrl}, migración {@code V16}) es opcional: si es
+ * {@code null}, el cliente usa la portada de la serie.
  * </p>
  *
  * @param id            identificador del episodio
@@ -22,6 +23,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  *                      (el tráiler está en la serie)
  * @param subtitlesUrl  URL de los subtítulos WebVTT en español, o {@code null}
  *                      si no tiene (nunca sin {@code videoUrl})
+ * @param imageUrl      URL de la imagen propia del episodio, o {@code null} si
+ *                      no tiene (se usa entonces la portada de la serie)
  */
 public record EpisodeResponse(
         Long id,
@@ -35,5 +38,11 @@ public record EpisodeResponse(
         String videoUrl,
         @Schema(types = { "string", "null" }, description = MovieResponse.SUBTITLES_URL_DESCRIPTION,
                 example = "https://videos.streambox.example/subtitulos/serie-1x01.es.vtt")
-        String subtitlesUrl) {
+        String subtitlesUrl,
+        @Schema(types = { "string", "null" }, description = "Imagen propia del episodio (proporción "
+                + "recomendada 16:9) para la miniatura de la lista y el fotograma de espera del reproductor: "
+                + "URL https:// o portada propia /covers/<archivo>. Es opcional: null si no tiene, y entonces "
+                + "se usa la portada de la serie.",
+                example = "https://image.tmdb.org/t/p/w780/serie-1x01.jpg")
+        String imageUrl) {
 }

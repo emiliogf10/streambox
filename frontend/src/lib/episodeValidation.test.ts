@@ -27,6 +27,7 @@ const VALID: EpisodeFormValues = {
   duration: '45',
   videoUrl: 'https://videos.example.com/t1e3',
   subtitlesUrl: '',
+  imageUrl: '',
 };
 
 /** Temporada `seasonNumber` con episodios de los números indicados. */
@@ -48,6 +49,7 @@ describe('validateEpisodeForm', () => {
       duration: '',
       videoUrl: '',
       subtitlesUrl: '',
+      imageUrl: '',
     };
     expect(validateEpisodeForm(empty)).toEqual({
       seasonNumber: 'La temporada es obligatoria',
@@ -138,6 +140,7 @@ describe('toEpisodeRequest / toEpisodeFormValues', () => {
         duration: ' 52',
         videoUrl: ' https://v.example.com/p ',
         subtitlesUrl: ' https://v.example.com/p.vtt ',
+        imageUrl: ' /covers/piloto.webp ',
       }),
     ).toEqual({
       seasonNumber: 2,
@@ -147,6 +150,7 @@ describe('toEpisodeRequest / toEpisodeFormValues', () => {
       duration: 52,
       videoUrl: 'https://v.example.com/p',
       subtitlesUrl: 'https://v.example.com/p.vtt',
+      imageUrl: '/covers/piloto.webp',
     });
     expect(toEpisodeRequest({ ...VALID, description: ' Algo pasa. ' }).description).toBe('Algo pasa.');
   });
@@ -154,6 +158,18 @@ describe('toEpisodeRequest / toEpisodeFormValues', () => {
   it('un episodio sin sinopsis se edita con el campo vacío', () => {
     const values = toEpisodeFormValues(makeEpisode({ seasonNumber: 2, episodeNumber: 7, description: null, duration: 50 }));
     expect(values).toMatchObject({ seasonNumber: '2', episodeNumber: '7', description: '', duration: '50' });
+  });
+
+  it('la imagen del episodio: opcional (en blanco, null y siempre en el cuerpo) y se edita como el vídeo', () => {
+    expect(validateEpisodeForm({ ...VALID, imageUrl: '  ' })).toEqual({});
+    expect(toEpisodeRequest({ ...VALID, imageUrl: '  ' })).toHaveProperty('imageUrl', null);
+    expect(validateEpisodeForm({ ...VALID, imageUrl: 'http://img.example/t1e3.jpg' })).toEqual({
+      imageUrl: 'La URL de la imagen del episodio debe empezar por https:// o ser una portada propia (/covers/archivo)',
+    });
+    expect(toEpisodeFormValues(makeEpisode({ imageUrl: 'https://img.example/t1e3.jpg' })).imageUrl).toBe(
+      'https://img.example/t1e3.jpg',
+    );
+    expect(toEpisodeFormValues(makeEpisode({ imageUrl: null })).imageUrl).toBe('');
   });
 
   it('el vídeo es opcional: en blanco se envía como null, y un episodio sin vídeo se edita con el campo vacío', () => {

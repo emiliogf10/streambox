@@ -98,9 +98,9 @@ class SubtitlesUrlParityContractTest {
         for (ContractCase item : contractCases()) {
             String name = item.nota() + " → " + item.esperado();
             arguments.add(Arguments.of("película: " + name, item, new MovieRequest("Dune", "Sinopsis", 155, 2021,
-                    "https://cdn.example.com/dune.jpg", item.video(), null, item.url(), Set.of(1L))));
+                    "https://cdn.example.com/dune.jpg", item.video(), null, item.url(), null, Set.of(1L))));
             arguments.add(Arguments.of("episodio: " + name, item,
-                    new EpisodeRequest(1, 1, "Piloto", null, 45, item.video(), item.url())));
+                    new EpisodeRequest(1, 1, "Piloto", null, 45, item.video(), item.url(), null)));
         }
         return arguments.stream();
     }

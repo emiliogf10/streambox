@@ -86,6 +86,7 @@ public final class MovieMapper {
                 movie.getDuration(),
                 movie.getReleaseYear(),
                 movie.getImageUrl(),
+                movie.getBackdropUrl(),
                 movie.getVideoUrl(),
                 movie.getTrailerUrl(),
                 movie.getSubtitlesUrl(),
@@ -110,9 +111,11 @@ public final class MovieMapper {
      * Copia los campos editables.
      *
      * <p>
-     * El vídeo, el tráiler y los subtítulos son opcionales: un texto en blanco se guarda como
+     * La imagen de fondo, el vídeo, el tráiler y los subtítulos son opcionales: un texto en blanco se guarda como
      * {@code null}, para que "no tiene" tenga una sola representación (los
-     * validadores dejan pasar el texto en blanco precisamente para eso). El
+     * validadores dejan pasar el texto en blanco precisamente para eso). En la
+     * imagen de fondo es además obligatorio: {@code ck_movies_backdrop_url}
+     * rechazaría un texto en blanco. El
      * tráiler se guarda además normalizado
      * ({@code https://www.youtube.com/watch?v=<id>}), la única forma que admite
      * el {@code CHECK} {@code ck_movies_trailer_url}; si se guardara tal cual,
@@ -130,6 +133,7 @@ public final class MovieMapper {
         movie.setVideoUrl(blankToNull(request.videoUrl()));
         movie.setTrailerUrl(YouTubeUrls.normalize(request.trailerUrl()));
         movie.setSubtitlesUrl(blankToNull(request.subtitlesUrl()));
+        movie.setBackdropUrl(blankToNull(request.backdropUrl()));
     }
 
     /**

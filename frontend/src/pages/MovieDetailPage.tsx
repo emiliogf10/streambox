@@ -173,6 +173,7 @@ function MovieDetailView({ movie, confirmed }: { movie: Movie; confirmed: boolea
       <FeaturedBanner
         title={movie.title}
         imageUrl={movie.imageUrl}
+        backdropUrl={movie.backdropUrl}
         headingLevel={1}
         meta={<MovieMetaTags movie={movie} />}
         description={movie.description || NO_DESCRIPTION}

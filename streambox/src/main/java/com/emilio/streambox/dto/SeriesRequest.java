@@ -49,6 +49,13 @@ import jakarta.validation.constraints.Size;
  * </p>
  *
  * <p>
+ * <b>Imagen de fondo</b> (migración {@code V16}). {@code backdropUrl} es
+ * opcional y usa las mismas constantes, mensajes y reglas que en
+ * {@link MovieRequest} (donde se explica para qué sirve): en blanco = no
+ * tiene y un {@code PUT} sin ella la borra.
+ * </p>
+ *
+ * <p>
  * <b>Caracteres de control.</b> Las mismas reglas que en {@link MovieRequest}:
  * ninguno en el título y solo tabulador y saltos de línea en la descripción
  * (ver {@link ControlCharacters}).
@@ -66,6 +73,9 @@ import jakarta.validation.constraints.Size;
  *                    {@code https://} o {@code /covers/<archivo>})
  * @param trailerUrl  enlace del tráiler (opcional; si viene, máximo 500
  *                    caracteres y de YouTube; en blanco = sin tráiler)
+ * @param backdropUrl URL de la imagen horizontal de cabecera (opcional; si
+ *                    viene, máximo 500 caracteres, {@code https://} o
+ *                    {@code /covers/<archivo>}; en blanco = sin imagen de fondo)
  * @param genreIds    identificadores de los géneros (entre 1 y
  *                    {@value MovieRequest#MAX_GENRES})
  */
@@ -114,6 +124,13 @@ public record SeriesRequest(
         @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.TRAILER_URL_SIZE_MESSAGE)
         @YouTubeUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.TRAILER_URL_FORMAT_MESSAGE)
         String trailerUrl,
+
+        @Schema(description = MovieRequest.BACKDROP_URL_DESCRIPTION,
+                example = "https://image.tmdb.org/t/p/w1280/fondo.jpg")
+        @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.BACKDROP_URL_SIZE_MESSAGE)
+        @HttpsUrl(allowLocalCovers = true, maxLength = MovieRequest.URL_MAX_LENGTH,
+                message = MovieRequest.BACKDROP_URL_FORMAT_MESSAGE)
+        String backdropUrl,
 
         @NotEmpty(message = "Indica al menos un género")
         @Size(max = MovieRequest.MAX_GENRES, message = SeriesRequest.GENRES_SIZE_MESSAGE)

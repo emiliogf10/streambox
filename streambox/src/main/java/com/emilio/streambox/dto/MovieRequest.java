@@ -80,6 +80,17 @@ import jakarta.validation.constraints.Size;
  * </p>
  *
  * <p>
+ * <b>Imagen de fondo</b> (migración {@code V16}). {@code backdropUrl} es una
+ * segunda imagen, horizontal (16:9), para el banner del inicio y de la página
+ * de la película: el póster ({@code imageUrl}) es vertical y pequeño, y
+ * ampliado a lo ancho de la pantalla se ve borroso. Es opcional y sigue las
+ * reglas de la portada ({@link HttpsUrl} con {@code allowLocalCovers}, primero
+ * la longitud y luego el formato, un solo error por campo) y las de
+ * "en blanco = no tiene" y de {@code PUT} del vídeo. Sus mensajes nombran "la
+ * imagen de fondo" para que el administrador sepa qué campo corregir.
+ * </p>
+ *
+ * <p>
  * <b>Caracteres de control.</b> El título no admite ninguno y la sinopsis solo
  * el tabulador y los saltos de línea (ver {@link ControlCharacters}, donde se
  * explica por qué). Antes un {@code U+0000} llegaba a PostgreSQL, que lo
@@ -102,6 +113,9 @@ import jakarta.validation.constraints.Size;
  * @param subtitlesUrl URL de los subtítulos WebVTT (opcional; si viene,
  *                    máximo 500 caracteres, {@code https://}, archivo
  *                    {@code .vtt} y con vídeo; en blanco = sin subtítulos)
+ * @param backdropUrl URL de la imagen horizontal de cabecera (opcional; si
+ *                    viene, máximo 500 caracteres, {@code https://} o
+ *                    {@code /covers/<archivo>}; en blanco = sin imagen de fondo)
  * @param genreIds    identificadores de los géneros de la película (entre 1 y
  *                    {@value #MAX_GENRES})
  */
@@ -164,6 +178,13 @@ public record MovieRequest(
         @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.SUBTITLES_URL_SIZE_MESSAGE)
         @WebVttUrl(maxLength = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.SUBTITLES_URL_FORMAT_MESSAGE)
         String subtitlesUrl,
+
+        @Schema(description = MovieRequest.BACKDROP_URL_DESCRIPTION,
+                example = "https://image.tmdb.org/t/p/w1280/fondo.jpg")
+        @Size(max = MovieRequest.URL_MAX_LENGTH, message = MovieRequest.BACKDROP_URL_SIZE_MESSAGE)
+        @HttpsUrl(allowLocalCovers = true, maxLength = MovieRequest.URL_MAX_LENGTH,
+                message = MovieRequest.BACKDROP_URL_FORMAT_MESSAGE)
+        String backdropUrl,
 
         @NotEmpty(message = MovieRequest.GENRES_REQUIRED_MESSAGE)
         @Size(max = MovieRequest.MAX_GENRES, message = MovieRequest.GENRES_SIZE_MESSAGE)
@@ -275,10 +296,11 @@ public record MovieRequest(
             "Una película puede tener como máximo " + MAX_GENRES + " géneros";
 
     /**
-     * Longitud máxima de {@code imageUrl}, {@code videoUrl}, {@code trailerUrl}
-     * y {@code subtitlesUrl} (también en {@link EpisodeRequest}). Coincide con
-     * las columnas {@code image_url}, {@code video_url}, {@code trailer_url} y
-     * {@code subtitles_url} ({@code VARCHAR(500)}). El
+     * Longitud máxima de {@code imageUrl}, {@code videoUrl}, {@code trailerUrl},
+     * {@code subtitlesUrl} y {@code backdropUrl} (también en
+     * {@link SeriesRequest} y {@link EpisodeRequest}). Coincide con las
+     * columnas {@code image_url}, {@code video_url}, {@code trailer_url},
+     * {@code subtitles_url} y {@code backdrop_url} ({@code VARCHAR(500)}). El
      * tráiler normalizado mide siempre 43 caracteres, pero el enlace recibido
      * puede ser más largo (parámetros como {@code &list=...}), y sin tope un
      * texto enorme se analizaría entero antes de rechazarse.
@@ -292,6 +314,34 @@ public record MovieRequest(
     /** Error de longitud de {@code imageUrl} (contrato con el frontend). */
     public static final String IMAGE_URL_SIZE_MESSAGE =
             "La URL de la imagen no puede superar los " + URL_MAX_LENGTH + " caracteres";
+
+    /**
+     * Error de formato de {@code backdropUrl} (contrato con el frontend;
+     * compartido con {@link SeriesRequest}). Misma regla que la portada, otro
+     * nombre de campo.
+     */
+    public static final String BACKDROP_URL_FORMAT_MESSAGE = "La URL de la imagen de fondo debe empezar por "
+            + "https:// o ser una portada propia (/covers/archivo)";
+
+    /**
+     * Error de longitud de {@code backdropUrl} (contrato con el frontend;
+     * compartido con {@link SeriesRequest}).
+     */
+    public static final String BACKDROP_URL_SIZE_MESSAGE =
+            "La URL de la imagen de fondo no puede superar los " + URL_MAX_LENGTH + " caracteres";
+
+    /**
+     * Texto OpenAPI de {@code backdropUrl} en las peticiones, compartido con
+     * {@link SeriesRequest} (las dos siguen las mismas reglas).
+     */
+    public static final String BACKDROP_URL_DESCRIPTION = "Imagen horizontal de cabecera (banner del inicio "
+            + "y de la página del título); proporción recomendada 16:9, por ejemplo 1280×720 o más. "
+            + "Opcional: si se omite, es null o va en blanco, el título queda sin imagen de fondo (null en la "
+            + "respuesta) y el banner usa el póster (imageUrl). Si se indica, las mismas reglas que imageUrl: "
+            + "URL https:// absoluta, con host y sin credenciales, o una portada propia /covers/<archivo>; "
+            + "solo caracteres ASCII visibles; máximo 500 caracteres. En un PUT, omitirlo la borra. Errores, "
+            + "uno solo y por este orden: «" + BACKDROP_URL_SIZE_MESSAGE + "» y «" + BACKDROP_URL_FORMAT_MESSAGE
+            + "».";
 
     /** Error de formato de {@code videoUrl} (contrato con el frontend). */
     public static final String VIDEO_URL_FORMAT_MESSAGE = "La URL del vídeo debe empezar por https://";

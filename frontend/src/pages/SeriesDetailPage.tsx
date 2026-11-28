@@ -176,6 +176,7 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
       <FeaturedBanner
         title={series.title}
         imageUrl={series.imageUrl}
+        backdropUrl={series.backdropUrl}
         headingLevel={1}
         meta={<SeriesMetaTags series={series} />}
         description={series.description}
@@ -224,7 +225,12 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
               <p role="status" className="mb-1 text-sm text-muted">
                 Temporada {season.seasonNumber} · {formatEpisodeCount(season.episodes.length)}
               </p>
-              <EpisodeList season={season} seriesId={series.id} progress={progress} />
+              <EpisodeList
+                season={season}
+                seriesId={series.id}
+                seriesBackdropUrl={series.backdropUrl}
+                progress={progress}
+              />
             </>
           ) : (
             // No debería ocurrir (la API da 404 a las series sin episodios), pero si pasa se dice, no se deja en blanco.

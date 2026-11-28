@@ -34,7 +34,7 @@ import jakarta.persistence.EntityManagerFactory;
  *
  * <p>
  * Que el contexto de Spring arranque ya demuestra dos cosas: que todas las
- * migraciones ({@code V1}..{@code V15}) se aplican en PostgreSQL desde cero y que Hibernate
+ * migraciones ({@code V1}..{@code V16}) se aplican en PostgreSQL desde cero y que Hibernate
  * ({@code ddl-auto=validate}) acepta las entidades contra ese esquema. Aquí se
  * comprueba además lo que H2 no puede garantizar: los tipos reales del catálogo
  * del sistema ({@code information_schema}, {@code pg_catalog}), las políticas de
@@ -80,7 +80,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     // ------------------------------------------------------------------
 
     /**
-     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10, V11, V12, V13, V14 y V15 (sin
+     * En una base de datos vacía Flyway aplica exactamente V1, V2, V3, V4, la V5 de PostgreSQL, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15 y V16 (sin
      * fila de baseline: esa solo aparece al adoptar una base existente) y todas
      * terminan bien. Protege contra una migración nueva que falle en PostgreSQL
      * pero no en H2. Al añadir una migración, hay que añadir su versión aquí.
@@ -90,7 +90,7 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, type, success FROM flyway_schema_history ORDER BY installed_rank");
 
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"), history.stream().map(r -> (String) r.get("version")).toList(),
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"), history.stream().map(r -> (String) r.get("version")).toList(),
                 "historial inesperado: " + history);
         assertTrue(history.stream().allMatch(r -> Boolean.TRUE.equals(r.get("success"))));
         assertTrue(history.stream().allMatch(r -> "SQL".equals(r.get("type"))));
@@ -133,7 +133,8 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
     /**
      * Longitudes de los {@code VARCHAR} y obligatoriedad de cada columna: solo
      * admiten {@code NULL} el vídeo y el tráiler de la película (opcionales
-     * desde la {@code V6}), sus subtítulos ({@code V15}), el avatar del usuario ({@code V7}; {@code NULL} =
+     * desde la {@code V6}), sus subtítulos ({@code V15}), su imagen de cabecera
+     * ({@code V16}), el avatar del usuario ({@code V7}; {@code NULL} =
      * se muestra la inicial), {@code users.email_verified_at} ({@code V9};
      * {@code NULL} = cuenta pendiente de verificar el correo) y
      * {@code users.genres_onboarded_at} ({@code V11}; {@code NULL} = aún no se
@@ -147,7 +148,8 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                 Map.entry("genres.name", 50),
                 Map.entry("movies.title", 150), Map.entry("movies.description", 1000),
                 Map.entry("movies.image_url", 500), Map.entry("movies.video_url", 500),
-                Map.entry("movies.trailer_url", 500), Map.entry("movies.subtitles_url", 500));
+                Map.entry("movies.trailer_url", 500), Map.entry("movies.subtitles_url", 500),
+                Map.entry("movies.backdrop_url", 500));
 
         List<Map<String, Object>> columns = jdbc.queryForList(
                 "SELECT table_name, column_name, character_maximum_length, is_nullable"
@@ -160,10 +162,11 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                     .findFirst().orElseThrow(() -> new AssertionError("falta la columna " + expected.getKey()));
             assertEquals(expected.getValue(), column.get("character_maximum_length"), expected.getKey());
         }
-        // Solo el vídeo, el tráiler y los subtítulos de la película, el avatar del usuario, su
+        // Solo el vídeo, el tráiler, los subtítulos y la imagen de cabecera de la película, el avatar del usuario, su
         // fecha de verificación del correo (V9: NULL = cuenta pendiente) y la de
         // la pregunta de bienvenida (V11: NULL = aún no se le ha hecho) admiten NULL
-        assertEquals(java.util.Set.of("movies.video_url", "movies.trailer_url", "movies.subtitles_url", "users.avatar",
+        assertEquals(java.util.Set.of("movies.video_url", "movies.trailer_url", "movies.subtitles_url",
+                "movies.backdrop_url", "users.avatar",
                 "users.email_verified_at", "users.genres_onboarded_at"), java.util.Set.copyOf(columns.stream()
                 .filter(c -> !"NO".equals(c.get("is_nullable")))
                 .map(c -> c.get("table_name") + "." + c.get("column_name"))
@@ -900,6 +903,52 @@ class PostgresSchemaIntegrationTest extends PostgresIntegrationTestSupport {
                 () -> jdbc.update("INSERT INTO user_episode_progress (user_id, episode_id, position_seconds,"
                         + " duration_seconds, updated_at) VALUES (?, ?, 100, 100, now())", userId, episodeId));
         assertEquals(1, count("user_movie_progress"), "visto y ahora a medias sí se admite");
+    }
+
+    // ------------------------------------------------------------------
+    // V16: imagen de cabecera (backdrop_url) e imagen del episodio (image_url)
+    // ------------------------------------------------------------------
+
+    /**
+     * Los tres {@code CHECK} de la V16 existen en PostgreSQL, aceptan
+     * {@code NULL}, {@code https://...} y {@code /covers/...}, y rechazan con
+     * {@code 23514} lo demás (otros esquemas, mayúsculas, prefijos a secas).
+     * Comprueba en el motor real que {@code SUBSTRING ... FROM 1 FOR 8} y
+     * {@code CHAR_LENGTH} se comportan como en H2.
+     */
+    @Test
+    void laV16SoloAdmiteImagenesHttpsOPortadasPropias() {
+        Set<String> checks = Set.copyOf(jdbc.queryForList(
+                "SELECT conname FROM pg_constraint WHERE contype = 'c' AND connamespace = 'public'::regnamespace",
+                String.class));
+        assertTrue(checks.containsAll(Set.of("ck_movies_backdrop_url", "ck_series_backdrop_url",
+                "ck_episodes_image_url")), "checks: " + checks);
+
+        long movieId = insertMovie("Con fondo", 2000);
+        long seriesId = jdbc.queryForObject("INSERT INTO series (title, description, release_year, image_url,"
+                + " created_at) VALUES ('Serie con fondo', 'd', 2010, 'u', now()) RETURNING id", Long.class);
+        long episodeId = jdbc.queryForObject("INSERT INTO episodes (series_id, season_number, episode_number, title,"
+                + " duration, video_url, created_at) VALUES (?, 1, 1, 't', 40, 'v', now()) RETURNING id",
+                Long.class, seriesId);
+        // { tabla, columna, restricción, id }
+        List<Object[]> targets = List.of(
+                new Object[] { "movies", "backdrop_url", "ck_movies_backdrop_url", movieId },
+                new Object[] { "series", "backdrop_url", "ck_series_backdrop_url", seriesId },
+                new Object[] { "episodes", "image_url", "ck_episodes_image_url", episodeId });
+
+        for (Object[] target : targets) {
+            String update = "UPDATE " + target[0] + " SET " + target[1] + " = ? WHERE id = ?";
+            String select = "SELECT " + target[1] + " FROM " + target[0] + " WHERE id = ?";
+            for (String valid : java.util.Arrays.asList("https://ejemplo.com/fondo.webp", "/covers/fondo.webp",
+                    null)) {
+                jdbc.update(update, valid, target[3]);
+                assertEquals(valid, jdbc.queryForObject(select, String.class, target[3]), target[2] + ": " + valid);
+            }
+            for (String invalid : List.of("http://ejemplo.com/a.webp", "javascript:alert(1)",
+                    "data:image/png;base64,AAAA", "HTTPS://ejemplo.com/a.webp", "https://", "/covers/", "")) {
+                assertCheck((String) target[2], () -> jdbc.update(update, invalid, target[3]));
+            }
+        }
     }
 
     private void assertCheck(String constraint, Runnable statement) {

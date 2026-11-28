@@ -91,11 +91,26 @@ public class Series {
     private Integer endYear;
 
     /**
-     * URL de la imagen de portada. Los episodios, de momento, no tienen
-     * imagen propia y usan esta.
+     * URL de la imagen de portada. Los episodios sin imagen propia
+     * ({@link Episode#getImageUrl()}, desde la {@code V16}) usan esta.
      */
     @Column(nullable = false, length = 500)
     private String imageUrl;
+
+    /**
+     * URL de la imagen horizontal de cabecera (el banner de la página de la
+     * serie y del inicio), o {@code null} si no tiene.
+     *
+     * <p>
+     * Opcional desde la migración {@code V16}, con las mismas reglas que
+     * {@link Movie#getBackdropUrl()}: la base de datos exige con
+     * {@code ck_series_backdrop_url} que empiece por {@code https://} o
+     * {@code /covers/} y tenga algo detrás; el formato completo lo valida la
+     * API. Sin ella, el banner usa la portada ({@link #imageUrl}).
+     * </p>
+     */
+    @Column(name = "backdrop_url", length = 500)
+    private String backdropUrl;
 
     /**
      * Tráiler de YouTube de la serie, o {@code null} si no tiene.

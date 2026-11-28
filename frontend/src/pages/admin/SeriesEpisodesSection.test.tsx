@@ -208,6 +208,7 @@ describe('SeriesEpisodesSection: añadir', () => {
       duration: 48,
       videoUrl: 'https://v.example.com/t2e3',
       subtitlesUrl: null,
+      imageUrl: null,
     });
 
     resolvePost(jsonResponse(created, 201));
@@ -274,6 +275,63 @@ describe('SeriesEpisodesSection: añadir', () => {
       videoUrl: 'https://v.example.com/t2e3.mp4',
       subtitlesUrl: 'https://subs.example/t2e3.vtt',
     });
+  });
+
+  it('imagen del episodio: opcional, con su ayuda; una http:// se rechaza con su mensaje y una válida se envía recortada', async () => {
+    const created = makeEpisode({ id: 99, seasonNumber: 2, episodeNumber: 3, title: 'Con imagen' });
+    routeFetch(fetchMock, {
+      [`POST ${EPISODES_ROUTE}`]: () => jsonResponse(created, 201),
+      [DETAIL_ROUTE]: () => jsonResponse(detail([season(1, [1, 2, 3]), { ...season(2, [1, 2]), episodes: [...season(2, [1, 2]).episodes, created] }])),
+    });
+    const user = setupUser();
+    renderSection(detail());
+
+    await user.click(addButton());
+    const form = dialog('Añadir episodio');
+    const image = field(form, 'Imagen del episodio (opcional)');
+    expect(image).toHaveAccessibleDescription(/16:9.*Si lo dejas vacío, se usa la imagen de fondo de la serie/);
+    // Incidencia QA-V16-2: también el caso de una serie sin imagen de fondo, en los dos sitios.
+    expect(image).toHaveAccessibleDescription(
+      expect.stringContaining('si la serie no la tiene, la lista muestra un recuadro de color y el reproductor, la portada.'),
+    );
+    await user.type(field(form, 'Título'), 'Con imagen');
+    await user.type(field(form, 'Duración (minutos)'), '40');
+    await user.type(image, 'http://img.example/t2e3.jpg');
+    await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
+
+    expect(image).toHaveFocus();
+    expect(image).toHaveAccessibleDescription(
+      expect.stringContaining(
+        'La URL de la imagen del episodio debe empezar por https:// o ser una portada propia (/covers/archivo)',
+      ),
+    );
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+
+    await fill(user, image, ' https://img.example/t2e3.jpg ');
+    await user.click(within(form).getByRole('button', { name: 'Añadir episodio' }));
+
+    expect(await screen.findByText('Se ha añadido el episodio T2:E3 «Con imagen».')).toBeInTheDocument();
+    expect(sentBody('POST', EPISODES_ROUTE)).toMatchObject({ imageUrl: 'https://img.example/t2e3.jpg' });
+  });
+
+  it('editar un episodio con imagen la carga en su campo y el PUT la conserva', async () => {
+    const original = makeEpisode({ id: 102, seasonNumber: 1, episodeNumber: 2, imageUrl: '/covers/t1e2.webp' });
+    const series = detail([{ seasonNumber: 1, episodes: [makeEpisode({ seasonNumber: 1, episodeNumber: 1 }), original] }]);
+    routeFetch(fetchMock, {
+      [`PUT ${EPISODES_ROUTE}/102`]: () => jsonResponse({ ...original, title: 'Otro título' }),
+      [DETAIL_ROUTE]: () => jsonResponse(series),
+    });
+    const user = setupUser();
+    renderSection(series);
+
+    await user.click(within(section()).getByRole('button', { name: 'Editar episodio T1:E2 Episodio 2' }));
+    const form = dialog('Editar episodio T1:E2');
+    expect(field(form, 'Imagen del episodio (opcional)')).toHaveValue('/covers/t1e2.webp');
+    await fill(user, field(form, 'Título'), 'Otro título');
+    await user.click(within(form).getByRole('button', { name: 'Guardar cambios' }));
+
+    expect(await screen.findByText('Se han guardado los cambios del episodio T1:E2 «Otro título».')).toBeInTheDocument();
+    expect(sentBody('PUT', `${EPISODES_ROUTE}/102`)).toMatchObject({ imageUrl: '/covers/t1e2.webp' });
   });
 
   it('400 del servidor en los subtítulos: el mensaje junto a su campo y el foco en él', async () => {
@@ -560,6 +618,7 @@ describe('SeriesEpisodesSection: editar', () => {
       duration: 45,
       videoUrl: 'https://video.example/s1e2',
       subtitlesUrl: null,
+      imageUrl: null,
     });
     expect(within(section()).getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual([
       'Temporada 1 · 2 episodios',

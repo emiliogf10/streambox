@@ -3288,6 +3288,18 @@ components:
           example: https://videos.streambox.example/subtitulos/serie-1x01.es.vtt
           maxLength: 500
           minLength: 0
+        imageUrl:
+          type: string
+          description: 'Imagen propia del episodio (miniatura de la lista de episodios y fotograma de espera del reproductor);
+            proporción recomendada 16:9. Opcional: si se omite, es null o va en blanco, el episodio queda sin imagen propia
+            (null en la respuesta) y se usa la portada de la serie. Si se indica, las mismas reglas que la portada de películas
+            y series: URL https:// absoluta, con host y sin credenciales, o una portada propia /covers/<archivo>; solo caracteres
+            ASCII visibles; máximo 500 caracteres. En un PUT, omitirlo la borra. Errores, uno solo y por este orden: «La URL
+            de la imagen del episodio no puede superar los 500 caracteres» y «La URL de la imagen del episodio debe empezar
+            por https:// o ser una portada propia (/covers/archivo)».'
+          example: https://image.tmdb.org/t/p/w780/serie-1x01.jpg
+          maxLength: 500
+          minLength: 0
       required:
       - duration
       - episodeNumber
@@ -3324,6 +3336,14 @@ components:
           description: URL de los subtítulos en español (archivo WebVTT, https://…/archivo.vtt), o null si no tiene. Solo
             hay subtítulos si hay videoUrl. El reproductor los carga como pista de subtítulos; su servidor debe permitir CORS.
           example: https://videos.streambox.example/subtitulos/serie-1x01.es.vtt
+        imageUrl:
+          type:
+          - string
+          - 'null'
+          description: 'Imagen propia del episodio (proporción recomendada 16:9) para la miniatura de la lista y el fotograma
+            de espera del reproductor: URL https:// o portada propia /covers/<archivo>. Es opcional: null si no tiene, y entonces
+            se usa la portada de la serie.'
+          example: https://image.tmdb.org/t/p/w780/serie-1x01.jpg
     SeriesRequest:
       type: object
       properties:
@@ -3375,6 +3395,18 @@ components:
           example: https://youtu.be/aBcDeFgHiJk
           maxLength: 500
           minLength: 0
+        backdropUrl:
+          type: string
+          description: 'Imagen horizontal de cabecera (banner del inicio y de la página del título); proporción recomendada
+            16:9, por ejemplo 1280×720 o más. Opcional: si se omite, es null o va en blanco, el título queda sin imagen de
+            fondo (null en la respuesta) y el banner usa el póster (imageUrl). Si se indica, las mismas reglas que imageUrl:
+            URL https:// absoluta, con host y sin credenciales, o una portada propia /covers/<archivo>; solo caracteres ASCII
+            visibles; máximo 500 caracteres. En un PUT, omitirlo la borra. Errores, uno solo y por este orden: «La URL de
+            la imagen de fondo no puede superar los 500 caracteres» y «La URL de la imagen de fondo debe empezar por https://
+            o ser una portada propia (/covers/archivo)».'
+          example: https://image.tmdb.org/t/p/w1280/fondo.jpg
+          maxLength: 500
+          minLength: 0
         genreIds:
           type: array
           items:
@@ -3417,6 +3449,14 @@ components:
           format: int32
         imageUrl:
           type: string
+        backdropUrl:
+          type:
+          - string
+          - 'null'
+          description: 'Imagen horizontal de cabecera (proporción recomendada 16:9) para el banner del inicio y de la página
+            del título: URL https:// o portada propia /covers/<archivo>. Es opcional: null si no tiene, y entonces el banner
+            usa el póster (imageUrl).'
+          example: https://image.tmdb.org/t/p/w1280/fondo.jpg
         trailerUrl:
           type:
           - string
@@ -3510,6 +3550,18 @@ components:
           example: https://videos.streambox.example/subtitulos/dune.es.vtt
           maxLength: 500
           minLength: 0
+        backdropUrl:
+          type: string
+          description: 'Imagen horizontal de cabecera (banner del inicio y de la página del título); proporción recomendada
+            16:9, por ejemplo 1280×720 o más. Opcional: si se omite, es null o va en blanco, el título queda sin imagen de
+            fondo (null en la respuesta) y el banner usa el póster (imageUrl). Si se indica, las mismas reglas que imageUrl:
+            URL https:// absoluta, con host y sin credenciales, o una portada propia /covers/<archivo>; solo caracteres ASCII
+            visibles; máximo 500 caracteres. En un PUT, omitirlo la borra. Errores, uno solo y por este orden: «La URL de
+            la imagen de fondo no puede superar los 500 caracteres» y «La URL de la imagen de fondo debe empezar por https://
+            o ser una portada propia (/covers/archivo)».'
+          example: https://image.tmdb.org/t/p/w1280/fondo.jpg
+          maxLength: 500
+          minLength: 0
         genreIds:
           type: array
           items:
@@ -3543,6 +3595,14 @@ components:
           format: int32
         imageUrl:
           type: string
+        backdropUrl:
+          type:
+          - string
+          - 'null'
+          description: 'Imagen horizontal de cabecera (proporción recomendada 16:9) para el banner del inicio y de la página
+            del título: URL https:// o portada propia /covers/<archivo>. Es opcional: null si no tiene, y entonces el banner
+            usa el póster (imageUrl).'
+          example: https://image.tmdb.org/t/p/w1280/fondo.jpg
         videoUrl:
           type:
           - string
@@ -3916,6 +3976,14 @@ components:
           format: int32
         imageUrl:
           type: string
+        backdropUrl:
+          type:
+          - string
+          - 'null'
+          description: 'Imagen horizontal de cabecera (proporción recomendada 16:9) para el banner del inicio y de la página
+            del título: URL https:// o portada propia /covers/<archivo>. Es opcional: null si no tiene, y entonces el banner
+            usa el póster (imageUrl).'
+          example: https://image.tmdb.org/t/p/w1280/fondo.jpg
         trailerUrl:
           type:
           - string

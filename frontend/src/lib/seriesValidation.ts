@@ -17,6 +17,7 @@
  * servidor**, y sus `validationErrors` también se pintan junto a cada campo.
  */
 import {
+  BACKDROP_PREVIEW_MESSAGES,
   MOVIE_DESCRIPTION_MAX,
   MOVIE_TITLE_MAX,
   MOVIE_YEAR_MAX,
@@ -26,6 +27,7 @@ import {
   hasDisallowedMultilineControlCharacters,
   optionalUrl,
   parseWholeNumber,
+  validateBackdropUrl,
   validateImageUrl,
 } from './movieValidation';
 import type { SeriesRequest } from './types';
@@ -58,6 +60,30 @@ export const SERIES_MESSAGES = {
   genresSize: `Una serie puede tener como máximo ${SERIES_MAX_GENRES} géneros`,
 } as const;
 
+/**
+ * Ayuda del campo «Imagen de fondo» de una serie: como la de una película
+ * (`MOVIE_BACKDROP_HINT`, también en que con ella el banner de tableta y
+ * escritorio deja de enseñar la portada), y además es la miniatura de los
+ * episodios sin imagen propia (solo en temporadas donde algún episodio la
+ * tiene: ver `EpisodeList`).
+ */
+export const SERIES_BACKDROP_HINT =
+  'Opcional. Imagen apaisada (16:9, de 1280 px de ancho o más) para el fondo del banner en tableta y escritorio, el reproductor y las miniaturas de los episodios que no tengan la suya. Con ella, en tableta y escritorio el banner no muestra la portada. Si la dejas vacía, el banner y el reproductor usan la portada; en móvil, el banner siempre usa la portada.';
+
+/**
+ * Textos de la vista previa de la imagen de fondo de una serie: los de una
+ * película (`BACKDROP_PREVIEW_MESSAGES`) salvo el de vacía, que añade lo que
+ * solo pasa en una serie (incidencia QA-V16-2): sin fondo, los episodios sin
+ * imagen propia se quedan sin miniatura. En una temporada donde ningún
+ * episodio tiene imagen no hay miniaturas para nadie; si alguno la tiene, los
+ * demás llevan el recuadro de color de `MoviePoster` (ver `EpisodeList`).
+ */
+export const SERIES_BACKDROP_PREVIEW_MESSAGES = {
+  ...BACKDROP_PREVIEW_MESSAGES,
+  empty:
+    'Sin imagen de fondo: el banner y el reproductor usan la portada. Tampoco hay miniatura para los episodios sin imagen propia: si otros de su temporada la tienen, se ve un recuadro de color.',
+} as const;
+
 /** Campos del formulario de serie tal como se escriben (los años, como texto). */
 export interface SeriesFormValues {
   title: string;
@@ -67,6 +93,8 @@ export interface SeriesFormValues {
   /** Texto del campo; vacío = sigue en emisión (`endYear: null`). */
   endYear: string;
   imageUrl: string;
+  /** Opcional: imagen horizontal del banner; vacío = sin ella (`null`). */
+  backdropUrl: string;
   /** Opcional: enlace de YouTube; vacío = sin tráiler (`null`). */
   trailerUrl: string;
   genreIds: number[];
@@ -82,6 +110,7 @@ export const EMPTY_SERIES_FORM: SeriesFormValues = {
   releaseYear: '',
   endYear: '',
   imageUrl: '',
+  backdropUrl: '',
   trailerUrl: '',
   genreIds: [],
 };
@@ -147,6 +176,10 @@ export function validateSeriesForm(values: SeriesFormValues): SeriesFormErrors {
   const imageError = validateSeriesImageUrl(values.imageUrl.trim());
   if (imageError) errors.imageUrl = imageError;
 
+  // La misma regla y los mismos mensajes que la imagen de fondo de una película (los dos DTO la comparten).
+  const backdropError = validateBackdropUrl(values.backdropUrl.trim());
+  if (backdropError) errors.backdropUrl = backdropError;
+
   // Mismas reglas y mensajes que el tráiler de una película (`@YouTubeUrl` en los dos DTO).
   const trailerError = validateTrailerUrl(values.trailerUrl.trim());
   if (trailerError) errors.trailerUrl = trailerError;
@@ -160,8 +193,8 @@ export function validateSeriesForm(values: SeriesFormValues): SeriesFormErrors {
 /**
  * Convierte el formulario (ya validado) en el cuerpo de la petición: recorta
  * los textos, pasa los años a número, un año de fin vacío a `null` ("en
- * emisión"; el servidor distingue `null` de un año) y un tráiler vacío a
- * `null` ("sin tráiler"; si lo hay, lo normaliza el servidor).
+ * emisión"; el servidor distingue `null` de un año), y una imagen de fondo o
+ * un tráiler vacíos a `null` ("no tiene"; el tráiler lo normaliza el servidor).
  */
 export function toSeriesRequest(values: SeriesFormValues): SeriesRequest {
   const endYear = values.endYear.trim();
@@ -171,6 +204,8 @@ export function toSeriesRequest(values: SeriesFormValues): SeriesRequest {
     releaseYear: Number(values.releaseYear.trim()),
     endYear: endYear ? Number(endYear) : null,
     imageUrl: values.imageUrl.trim(),
+    // Siempre presente, también vacía (`null`): en un `PUT`, omitirla borraría la que hubiera.
+    backdropUrl: optionalUrl(values.backdropUrl),
     trailerUrl: optionalUrl(values.trailerUrl),
     genreIds: [...values.genreIds],
   };

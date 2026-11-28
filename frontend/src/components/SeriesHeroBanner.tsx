@@ -31,6 +31,7 @@ export function SeriesHeroBanner({ series }: { series: Series }) {
     <FeaturedBanner
       title={series.title}
       imageUrl={series.imageUrl}
+      backdropUrl={series.backdropUrl}
       meta={<SeriesMetaTags series={series} badge="Novedad" />}
       description={series.description}
       actions={

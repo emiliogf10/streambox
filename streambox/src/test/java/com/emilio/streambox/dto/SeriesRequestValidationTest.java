@@ -100,7 +100,7 @@ class SeriesRequestValidationTest {
     void unIdDeGeneroNuloSeRechaza() {
         Set<Long> genreIds = new HashSet<>();
         genreIds.add(null);
-        SeriesRequest request = new SeriesRequest("T", "D", 2000, null, "https://e.com/i.jpg", null, genreIds);
+        SeriesRequest request = new SeriesRequest("T", "D", 2000, null, "https://e.com/i.jpg", null, null, genreIds);
 
         assertTrue(errors(request).containsValue("Los identificadores de género no pueden ser nulos"));
     }
@@ -123,7 +123,7 @@ class SeriesRequestValidationTest {
 
     @Test
     void unEpisodioConDescripcionNulaEsValido() {
-        EpisodeRequest request = new EpisodeRequest(1, 1, "Piloto", null, 45, "https://e.com/v.mp4", null);
+        EpisodeRequest request = new EpisodeRequest(1, 1, "Piloto", null, 45, "https://e.com/v.mp4", null, null);
 
         assertTrue(validator.validate(request).isEmpty());
     }
@@ -131,19 +131,19 @@ class SeriesRequestValidationTest {
     @ParameterizedTest(name = "temporada {0}, episodio {1}, duración {2}")
     @CsvSource({ "1, 1, 1", "100, 1000, 600" })
     void losLimitesDelEpisodioSonInclusivos(int season, int number, int duration) {
-        EpisodeRequest request = new EpisodeRequest(season, number, "Piloto", null, duration, "https://e.com/v.mp4", null);
+        EpisodeRequest request = new EpisodeRequest(season, number, "Piloto", null, duration, "https://e.com/v.mp4", null, null);
 
         assertTrue(validator.validate(request).isEmpty());
     }
 
     private static SeriesRequest series(Integer releaseYear, Integer endYear) {
-        return new SeriesRequest("Fargo", "Sinopsis", releaseYear, endYear, "https://e.com/i.jpg", null, Set.of(1L));
+        return new SeriesRequest("Fargo", "Sinopsis", releaseYear, endYear, "https://e.com/i.jpg", null, null, Set.of(1L));
     }
 
     /** Serie válida con {@code count} ids de género distintos (1..count). */
     private static SeriesRequest withGenres(int count) {
         Set<Long> genreIds = LongStream.rangeClosed(1, count).boxed().collect(Collectors.toSet());
-        return new SeriesRequest("Fargo", "Sinopsis", 2014, null, "https://e.com/i.jpg", null, genreIds);
+        return new SeriesRequest("Fargo", "Sinopsis", 2014, null, "https://e.com/i.jpg", null, null, genreIds);
     }
 
     private static Map<String, String> errors(SeriesRequest request) {

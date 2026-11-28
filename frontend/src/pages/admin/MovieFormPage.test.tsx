@@ -78,6 +78,7 @@ const field = {
   video: () => screen.getByLabelText('URL del vídeo (opcional)'),
   trailer: () => screen.getByLabelText('Tráiler de YouTube (opcional)'),
   subtitles: () => screen.getByLabelText('URL de los subtítulos (opcional)'),
+  backdrop: () => screen.getByLabelText('Imagen de fondo (horizontal, opcional)'),
 };
 /**
  * `user-event` sin la pausa que mete por defecto entre acción y acción (`delay: null`). Este formulario es
@@ -243,6 +244,8 @@ describe('MovieFormPage: alta', () => {
       duration: 169,
       releaseYear: 2014,
       imageUrl: '/covers/interstellar.webp',
+      // Opcional y vacía, pero presente: un PUT sin el campo borraría la imagen de fondo.
+      backdropUrl: null,
       videoUrl: 'https://videos.example.com/interstellar',
       trailerUrl: 'https://youtu.be/zSWdZVtXT7E',
       subtitlesUrl: null,
@@ -679,6 +682,120 @@ describe('MovieFormPage: edición', () => {
     await user.click(screen.getByRole('button', { name: 'Reintentar' }));
 
     expect(await screen.findByRole('heading', { name: 'Editar «Interstellar»' })).toBeInTheDocument();
+  });
+});
+
+describe('MovieFormPage: imagen de fondo', () => {
+  const withBackdrop = { ...interstellar, backdropUrl: '/covers/interstellar-fondo.webp' };
+
+  it('la edición carga la imagen de fondo y el PUT la vuelve a enviar (si faltara, el servidor la borraría)', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/movies/7': () => jsonResponse(withBackdrop),
+      'PUT /api/movies/7': () => jsonResponse(withBackdrop),
+    });
+    const user = setupUser();
+    renderForm('/admin/peliculas/7/editar');
+    await screen.findByRole('heading', { name: 'Editar «Interstellar»' });
+    await within(genresGroup()).findAllByRole('checkbox');
+
+    expect(field.backdrop()).toHaveValue('/covers/interstellar-fondo.webp');
+    expect(field.backdrop()).toHaveAttribute('aria-invalid', 'false');
+    // La ayuda dice la proporción y qué pasa si se deja vacía.
+    expect(field.backdrop()).toHaveAccessibleDescription(expect.stringContaining('16:9'));
+    expect(field.backdrop()).toHaveAccessibleDescription(expect.stringContaining('Si la dejas vacía'));
+    // Incidencia QA-V16-2: el administrador debe saber que con ella el banner grande pierde la portada.
+    expect(field.backdrop()).toHaveAccessibleDescription(
+      expect.stringContaining('Con ella, en tableta y escritorio el banner no muestra la portada.'),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    expect(await screen.findByText('Listado de películas')).toBeInTheDocument();
+    expect(sentBody('PUT', '/api/movies/7')).toMatchObject({ backdropUrl: '/covers/interstellar-fondo.webp' });
+  });
+
+  it('vaciarla la quita: el PUT la envía como null', async () => {
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/movies/7': () => jsonResponse(withBackdrop),
+      'PUT /api/movies/7': () => jsonResponse(interstellar),
+    });
+    const user = setupUser();
+    renderForm('/admin/peliculas/7/editar');
+    await screen.findByRole('heading', { name: 'Editar «Interstellar»' });
+    await within(genresGroup()).findAllByRole('checkbox');
+
+    await user.clear(field.backdrop());
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    expect(await screen.findByText('Listado de películas')).toBeInTheDocument();
+    expect(sentBody('PUT', '/api/movies/7')).toMatchObject({ backdropUrl: null });
+  });
+
+  it('una imagen de fondo http:// se marca con el mensaje del contrato, con el foco, y no se envía', async () => {
+    routeFetch(fetchMock, { ...GENRES_ROUTE, 'GET /api/movies/7': () => jsonResponse(interstellar) });
+    const user = setupUser();
+    renderForm('/admin/peliculas/7/editar');
+    await screen.findByRole('heading', { name: 'Editar «Interstellar»' });
+    await within(genresGroup()).findAllByRole('checkbox');
+
+    await fill(user, field.backdrop(), 'http://img.example.com/fondo.jpg');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    expect(field.backdrop()).toHaveAccessibleDescription(
+      expect.stringContaining(
+        'La URL de la imagen de fondo debe empezar por https:// o ser una portada propia (/covers/archivo)',
+      ),
+    );
+    expect(field.backdrop()).toHaveFocus();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+  });
+
+  it('400 del servidor en la imagen de fondo: su mensaje junto al campo', async () => {
+    const message = 'La URL de la imagen de fondo no puede superar los 500 caracteres';
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/movies/7': () => jsonResponse(interstellar),
+      'PUT /api/movies/7': () => errorResponse(400, 'VALIDATION_ERROR', 'Datos no válidos', { validationErrors: { backdropUrl: message } }),
+    });
+    const user = setupUser();
+    renderForm('/admin/peliculas/7/editar');
+    await screen.findByRole('heading', { name: 'Editar «Interstellar»' });
+    await within(genresGroup()).findAllByRole('checkbox');
+
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+
+    await waitFor(() => expect(field.backdrop()).toHaveAccessibleDescription(expect.stringContaining(message)));
+    expect(field.backdrop()).toHaveFocus();
+  });
+});
+
+describe('MovieFormPage: vista previa de la imagen de fondo', () => {
+  const PREVIEW_DEBOUNCE_MS = 400;
+  beforeEach(() => installManualTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('vacía dice qué se usa en su lugar; válida, la carga en 16:9 tras el retraso; inválida, no la carga', async () => {
+    routeFetch(fetchMock, GENRES_ROUTE);
+    const user = setupUser();
+    renderForm('/admin/peliculas/nueva');
+    expect(screen.getByText('Sin imagen de fondo: el banner y el reproductor usan la portada.')).toBeInTheDocument();
+
+    await fill(user, field.backdrop(), '/covers/fondo.webp');
+    passTime(PREVIEW_DEBOUNCE_MS - 1);
+    expect(screen.queryByRole('img', { name: 'Vista previa de la imagen de fondo' })?.tagName).not.toBe('IMG');
+    passTime(1);
+    const image = screen.getByRole('img', { name: 'Vista previa de la imagen de fondo' });
+    expect(image).toHaveAttribute('src', '/covers/fondo.webp');
+    expect(image).toHaveAttribute('width', '1280');
+    expect(image).toHaveAttribute('height', '720');
+    expect(screen.getByText(/Así se verá a 16:9/)).toBeInTheDocument();
+
+    await fill(user, field.backdrop(), 'javascript:alert(1)');
+    passTime(PREVIEW_DEBOUNCE_MS);
+    expect(screen.getByRole('img', { name: 'Vista previa de la imagen de fondo' }).tagName).toBe('DIV');
+    expect(screen.getByText('La URL aún no es válida, así que no se carga.')).toBeInTheDocument();
   });
 });
 

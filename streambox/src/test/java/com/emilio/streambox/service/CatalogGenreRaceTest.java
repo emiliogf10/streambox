@@ -137,12 +137,12 @@ class CatalogGenreRaceTest {
 
     private static MovieRequest movieRequest() {
         return new MovieRequest("Duna", "Sinopsis", 155, 2021, "https://cdn.example.com/duna.jpg",
-                null, null, null, Set.of(GENRE_ID));
+                null, null, null, null, Set.of(GENRE_ID));
     }
 
     private static SeriesRequest seriesRequest() {
         return new SeriesRequest("Fundación", "Sinopsis", 2021, null, "https://cdn.example.com/f.jpg",
-                null, Set.of(GENRE_ID));
+                null, null, Set.of(GENRE_ID));
     }
 
     /** Clave foránea con el formato de PostgreSQL ({@code 23503} y el nombre limpio). */

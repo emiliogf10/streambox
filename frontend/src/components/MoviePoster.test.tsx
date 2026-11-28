@@ -7,7 +7,7 @@
  * cuando ya está escrito junto a la imagen.
  */
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { posterFallbackGradient } from '../lib/posterFallback';
 import { MoviePoster } from './MoviePoster';
 
@@ -120,5 +120,26 @@ describe('MoviePoster: como fondo decorativo (backdrop)', () => {
     expect(fallback).toHaveAttribute('aria-hidden', 'true');
     expect(fallback).not.toHaveAttribute('role');
     expect(fallback).toHaveClass(posterFallbackGradient('Matrix').split(' ')[1]);
+  });
+});
+
+describe('MoviePoster: imagen horizontal y aviso de error', () => {
+  it('con wide declara las dimensiones de una imagen 16:9 (no las de una portada 2:3)', () => {
+    render(<MoviePoster title="Sintel" src="/covers/sintel-fondo.webp" alt="Fondo de Sintel" wide />);
+
+    const img = screen.getByRole('img', { name: 'Fondo de Sintel' });
+    expect(img).toHaveAttribute('width', '1280');
+    expect(img).toHaveAttribute('height', '720');
+  });
+
+  it('onLoadError recibe la URL que ha fallado, una sola vez, además de pintar el respaldo', () => {
+    const onLoadError = vi.fn();
+    render(<MoviePoster title="Sintel" src="https://img.example/rota.webp" alt="Cartel" onLoadError={onLoadError} />);
+
+    fireEvent.error(screen.getByRole('img', { name: 'Cartel' }));
+
+    expect(onLoadError).toHaveBeenCalledTimes(1);
+    expect(onLoadError).toHaveBeenCalledWith('https://img.example/rota.webp');
+    expect(document.querySelector('img')).toBeNull();
   });
 });

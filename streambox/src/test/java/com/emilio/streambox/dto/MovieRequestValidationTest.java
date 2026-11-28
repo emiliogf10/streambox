@@ -252,7 +252,7 @@ class MovieRequestValidationTest {
     @Test
     void unIdDeGeneroNuloSeRechaza() {
         Set<Long> genreIds = new HashSet<>(Arrays.asList(1L, null));
-        MovieRequest request = new MovieRequest("Dune", "Sinopsis", 155, 2021, VALID_IMAGE, VALID_VIDEO, null, null, genreIds);
+        MovieRequest request = new MovieRequest("Dune", "Sinopsis", 155, 2021, VALID_IMAGE, VALID_VIDEO, null, null, null, genreIds);
 
         List<String> messages = validator.validate(request).stream().map(ConstraintViolation::getMessage).toList();
 
@@ -271,7 +271,7 @@ class MovieRequestValidationTest {
      */
     @Test
     void cadaCampoObligatorioTieneUnUnicoMensajeEnEspanol() {
-        MovieRequest empty = new MovieRequest(null, null, null, null, null, null, null, null, null);
+        MovieRequest empty = new MovieRequest(null, null, null, null, null, null, null, null, null, null);
 
         assertEquals(List.of("El título es obligatorio"), messagesFor(empty, "title"));
         assertEquals(List.of("La sinopsis es obligatoria"), messagesFor(empty, "description"));
@@ -300,7 +300,7 @@ class MovieRequestValidationTest {
     // ------------------------------------------------------------------
 
     private static MovieRequest movie(int duration, int releaseYear) {
-        return new MovieRequest("Dune", "Sinopsis", duration, releaseYear, VALID_IMAGE, VALID_VIDEO, null, null, Set.of(1L));
+        return new MovieRequest("Dune", "Sinopsis", duration, releaseYear, VALID_IMAGE, VALID_VIDEO, null, null, null, Set.of(1L));
     }
 
     private static MovieRequest request(String imageUrl, String videoUrl) {
@@ -308,13 +308,13 @@ class MovieRequestValidationTest {
     }
 
     private static MovieRequest request(String imageUrl, String videoUrl, String trailerUrl) {
-        return new MovieRequest("Dune", "Sinopsis", 155, 2021, imageUrl, videoUrl, trailerUrl, null, Set.of(1L));
+        return new MovieRequest("Dune", "Sinopsis", 155, 2021, imageUrl, videoUrl, trailerUrl, null, null, Set.of(1L));
     }
 
     /** Petición válida con {@code count} ids de género distintos (1..count). */
     private static MovieRequest withGenres(int count) {
         Set<Long> genreIds = LongStream.rangeClosed(1, count).boxed().collect(Collectors.toSet());
-        return new MovieRequest("Dune", "Sinopsis", 155, 2021, VALID_IMAGE, VALID_VIDEO, null, null, genreIds);
+        return new MovieRequest("Dune", "Sinopsis", 155, 2021, VALID_IMAGE, VALID_VIDEO, null, null, null, genreIds);
     }
 
     /** Enlace de YouTube válido (forma {@code watch} con un parámetro de relleno) de la longitud indicada. */

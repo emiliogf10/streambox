@@ -18,6 +18,7 @@ function valid(overrides: Partial<SeriesFormValues> = {}): SeriesFormValues {
     releaseYear: '2017',
     endYear: '2020',
     imageUrl: '/covers/dark.webp',
+    backdropUrl: '',
     trailerUrl: '',
     genreIds: [1],
     ...overrides,
@@ -161,9 +162,21 @@ describe('toSeriesRequest', () => {
       releaseYear: 2017,
       endYear: 2020,
       imageUrl: '/covers/dark.webp',
+      backdropUrl: null,
       trailerUrl: null,
       genreIds: [3, 1],
     });
+  });
+
+  it('la imagen de fondo: opcional, con las reglas y mensajes de la de una película, y siempre en el cuerpo', () => {
+    expect(validateSeriesForm(valid({ backdropUrl: '/covers/dark-fondo.webp' }))).toEqual({});
+    expect(validateSeriesForm(valid({ backdropUrl: 'http://img.example/dark.jpg' }))).toEqual({
+      backdropUrl: 'La URL de la imagen de fondo debe empezar por https:// o ser una portada propia (/covers/archivo)',
+    });
+    expect(toSeriesRequest(valid({ backdropUrl: ' https://img.example/dark.jpg ' })).backdropUrl).toBe(
+      'https://img.example/dark.jpg',
+    );
+    expect(toSeriesRequest(valid({ backdropUrl: '  ' }))).toHaveProperty('backdropUrl', null);
   });
 
   it('un año de fin vacío se envía como null (sigue en emisión)', () => {

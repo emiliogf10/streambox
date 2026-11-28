@@ -18,7 +18,7 @@ export const MOVIE_DESCRIPTION_MAX = 1000;
 export const MOVIE_YEAR_MIN = 1888;
 export const MOVIE_YEAR_MAX = 2100;
 /**
- * Longitud máxima de `imageUrl`, `videoUrl` y `subtitlesUrl` (columnas
+ * Longitud máxima de `imageUrl`, `backdropUrl`, `videoUrl` y `subtitlesUrl` (columnas
  * `VARCHAR(500)`; la del tráiler, en `youtube.ts`).
  */
 export const URL_MAX = 500;
@@ -41,6 +41,14 @@ export const GENRE_NAME_MAX = 50;
 export const IMAGE_URL_FORMAT_MESSAGE =
   'La URL de la imagen debe empezar por https:// o ser una portada propia (/covers/archivo)';
 export const IMAGE_URL_SIZE_MESSAGE = `La URL de la imagen no puede superar los ${URL_MAX} caracteres`;
+/**
+ * Imagen de fondo (`backdropUrl` de `MovieRequest` y `SeriesRequest`) que no es
+ * `https://` ni una portada propia: la regla de la portada, con su propio texto.
+ */
+export const BACKDROP_URL_FORMAT_MESSAGE =
+  'La URL de la imagen de fondo debe empezar por https:// o ser una portada propia (/covers/archivo)';
+/** Imagen de fondo demasiado larga (`backdropUrl`, columna `VARCHAR(500)`). */
+export const BACKDROP_URL_SIZE_MESSAGE = `La URL de la imagen de fondo no puede superar los ${URL_MAX} caracteres`;
 export const VIDEO_URL_FORMAT_MESSAGE = 'La URL del vídeo debe empezar por https://';
 export const VIDEO_URL_SIZE_MESSAGE = `La URL del vídeo no puede superar los ${URL_MAX} caracteres`;
 /** Subtítulos demasiado largos (`SUBTITLES_URL_SIZE_MESSAGE` del backend; películas y episodios). */
@@ -123,6 +131,8 @@ export interface MovieFormValues {
   /** Texto del campo; se convierte a número al enviar. */
   releaseYear: string;
   imageUrl: string;
+  /** Opcional: imagen horizontal del banner; vacío = sin ella (`null`). */
+  backdropUrl: string;
   /** Opcional: vacío (o solo espacios) = sin vídeo (`null`). */
   videoUrl: string;
   /** Opcional: enlace de YouTube; vacío = sin tráiler (`null`). */
@@ -142,6 +152,7 @@ export const EMPTY_MOVIE_FORM: MovieFormValues = {
   duration: '',
   releaseYear: '',
   imageUrl: '',
+  backdropUrl: '',
   videoUrl: '',
   trailerUrl: '',
   subtitlesUrl: '',
@@ -204,11 +215,64 @@ export function isLocalCover(value: string): boolean {
  */
 export function validateImageUrl(value: string): string | undefined {
   if (!value) return 'La URL de la portada es obligatoria';
-  if (value.length > URL_MAX) return IMAGE_URL_SIZE_MESSAGE;
-  if (!isPrintableAscii(value)) return IMAGE_URL_FORMAT_MESSAGE;
-  if (isLocalCover(value) || isAbsoluteHttpsUrl(value)) return undefined;
-  return IMAGE_URL_FORMAT_MESSAGE;
+  return validateCoverLikeUrl(value, IMAGE_URL_SIZE_MESSAGE, IMAGE_URL_FORMAT_MESSAGE);
 }
+
+/**
+ * Regla común de TODAS las imágenes (portada, imagen de fondo, imagen del
+ * episodio; `@HttpsUrl(allowLocalCovers = true)` en el backend) para un texto
+ * que no está vacío: demasiado largo → `sizeMessage`; ni portada propia ni
+ * `https://` válida → `formatMessage`. Cada campo pone sus textos, pero la
+ * regla es una sola: si cambia, cambia para las tres.
+ *
+ * @param value URL ya recortada y no vacía
+ * @param sizeMessage mensaje si pasa de {@link URL_MAX} caracteres
+ * @param formatMessage mensaje si no es una portada propia ni una `https://` válida
+ * @returns el mensaje que toque, o `undefined` si es válida
+ */
+export function validateCoverLikeUrl(value: string, sizeMessage: string, formatMessage: string): string | undefined {
+  if (value.length > URL_MAX) return sizeMessage;
+  if (!isPrintableAscii(value)) return formatMessage;
+  if (isLocalCover(value) || isAbsoluteHttpsUrl(value)) return undefined;
+  return formatMessage;
+}
+
+/**
+ * Valida la imagen de fondo (horizontal) de una película o una serie: las
+ * reglas de la portada ({@link validateCoverLikeUrl}) con sus propios
+ * mensajes, pero **opcional**: vacía = sin imagen de fondo (el banner usa la
+ * portada desenfocada), igual que el servidor, que guarda `null`.
+ *
+ * @param value URL ya recortada (`trim`)
+ * @returns el mensaje de error, o `undefined` si es válida o está vacía
+ */
+export function validateBackdropUrl(value: string): string | undefined {
+  if (!value) return undefined;
+  return validateCoverLikeUrl(value, BACKDROP_URL_SIZE_MESSAGE, BACKDROP_URL_FORMAT_MESSAGE);
+}
+
+/**
+ * Ayuda del campo «Imagen de fondo» de una película. Dice la proporción que se
+ * ve bien, dónde se usa de verdad (el banner solo desde tableta: en móvil sigue
+ * con la portada, ver `FeaturedBanner`; y el `poster` del reproductor), que con
+ * ella el banner de tableta y escritorio ya NO enseña la portada (el
+ * administrador que la añade pierde la portada en ese banner, y debe saberlo:
+ * incidencia QA-V16-2) y qué pasa si se deja vacía. La de las series, en
+ * `seriesValidation.ts`.
+ */
+export const MOVIE_BACKDROP_HINT =
+  'Opcional. Imagen apaisada (16:9, de 1280 px de ancho o más) para el fondo del banner en tableta y escritorio y para el reproductor mientras carga. Con ella, en tableta y escritorio el banner no muestra la portada. Si la dejas vacía, los dos usan la portada; en móvil, el banner siempre usa la portada.';
+
+/**
+ * Textos de la vista previa de la imagen de fondo de una película. La de una
+ * serie cambia el texto de vacía (`SERIES_BACKDROP_PREVIEW_MESSAGES`, en
+ * `seriesValidation.ts`), porque allí el fondo es también la miniatura de los
+ * episodios sin imagen propia.
+ */
+export const BACKDROP_PREVIEW_MESSAGES = {
+  empty: 'Sin imagen de fondo: el banner y el reproductor usan la portada.',
+  valid: 'Así se verá a 16:9. En el banner se recorta para llenar el ancho (en pantallas anchas, por arriba y por abajo).',
+} as const;
 
 /**
  * Valida la URL del vídeo (de una película o de un episodio): como la de la
@@ -321,6 +385,18 @@ export function getPreviewImageUrl(raw: string): string | null {
 }
 
 /**
+ * Como {@link getPreviewImageUrl}, para una imagen OPCIONAL con la regla de la
+ * portada (imagen de fondo, imagen del episodio): la URL si se puede cargar, o
+ * `null` si está vacía o el servidor la rechazaría.
+ *
+ * @param raw texto del campo, tal cual
+ */
+export function getPreviewOptionalImageUrl(raw: string): string | null {
+  const value = raw.trim();
+  return value && validateBackdropUrl(value) === undefined ? value : null;
+}
+
+/**
  * Convierte un texto de solo dígitos a número; `null` si no es un entero que quepa en un `Integer`.
  * Exportada para que la validación de series (`seriesValidation.ts`) lea los años igual.
  */
@@ -380,6 +456,9 @@ export function validateMovieForm(values: MovieFormValues): MovieFormErrors {
   const imageError = validateImageUrl(values.imageUrl.trim());
   if (imageError) errors.imageUrl = imageError;
 
+  const backdropError = validateBackdropUrl(values.backdropUrl.trim());
+  if (backdropError) errors.backdropUrl = backdropError;
+
   const videoError = validateVideoUrl(values.videoUrl.trim());
   if (videoError) errors.videoUrl = videoError;
 
@@ -404,8 +483,8 @@ export function optionalUrl(raw: string): string | null {
 
 /**
  * Convierte el formulario (ya validado) en el cuerpo de la petición: recorta
- * los textos de los extremos, pasa los números a `number` y el vídeo, el
- * tráiler y los subtítulos vacíos a `null` (el servidor haría lo mismo con una cadena vacía;
+ * los textos de los extremos, pasa los números a `number` y la imagen de
+ * fondo, el vídeo, el tráiler y los subtítulos vacíos a `null` (el servidor haría lo mismo con una cadena vacía;
  * mandarlo ya así deja claro en la petición que «no tiene»). El tráiler se
  * envía tal como se escribió: lo normaliza el servidor.
  *
@@ -420,6 +499,8 @@ export function toMovieRequest(values: MovieFormValues): MovieRequest {
     duration: Number(values.duration.trim()),
     releaseYear: Number(values.releaseYear.trim()),
     imageUrl: values.imageUrl.trim(),
+    // Siempre presente, también vacía (`null`): en un `PUT`, omitirla borraría la que hubiera.
+    backdropUrl: optionalUrl(values.backdropUrl),
     videoUrl: optionalUrl(values.videoUrl),
     trailerUrl: optionalUrl(values.trailerUrl),
     subtitlesUrl: optionalUrl(values.subtitlesUrl),

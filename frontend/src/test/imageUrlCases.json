@@ -1,0 +1,265 @@
+{
+  "descripcion": "Contrato de las URL de imagen con la regla de la portada (@HttpsUrl(allowLocalCovers = true)): la portada (imageUrl) de películas y series, la imagen de fondo (backdropUrl) de películas y series y la imagen del episodio (imageUrl de EpisodeRequest). Lo lee frontend/src/lib/imageUrl.parity.test.ts (y está pensado para que el backend lo lea igual). «esperado»: «valida», «formato» (el mensaje «... debe empezar por https:// o ser una portada propia (/covers/archivo)» de cada campo) o «longitud» (más de 500 caracteres: «... no puede superar los 500 caracteres»). Solo URL no vacías y ya recortadas: vacía es obligatoria en la portada y «sin imagen» (null) en las otras dos, y eso se prueba aparte. Todos los campos deben dar exactamente «esperado» en todos los casos.",
+  "casos": [
+    {
+      "nota": "https normal",
+      "url": "https://image.tmdb.org/t/p/w1280/fondo.jpg",
+      "esperado": "valida"
+    },
+    {
+      "nota": "solo host",
+      "url": "https://example.com",
+      "esperado": "valida"
+    },
+    {
+      "nota": "con puerto, consulta y fragmento",
+      "url": "https://example.com:8443/a/b.webp?w=1280#x",
+      "esperado": "valida"
+    },
+    {
+      "nota": "host IPv6",
+      "url": "https://[::1]/fondo.webp",
+      "esperado": "valida"
+    },
+    {
+      "nota": "portada propia",
+      "url": "/covers/big-buck-bunny-fondo.webp",
+      "esperado": "valida"
+    },
+    {
+      "nota": "portada propia con guion bajo y dígitos",
+      "url": "/covers/cover_matrix_1790887046226.jpg",
+      "esperado": "valida"
+    },
+    {
+      "nota": "portada propia corta con mayúsculas",
+      "url": "/covers/A-b.c_d",
+      "esperado": "valida"
+    },
+    {
+      "nota": "500 caracteres https: justo en el límite",
+      "url": "https://cdn.example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webp",
+      "esperado": "valida"
+    },
+    {
+      "nota": "500 caracteres portada propia: justo en el límite",
+      "url": "/covers/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.webp",
+      "esperado": "valida"
+    },
+    {
+      "nota": "501 caracteres https",
+      "url": "https://cdn.example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.webpp",
+      "esperado": "longitud"
+    },
+    {
+      "nota": "501 caracteres con mal formato: solo la longitud",
+      "url": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "esperado": "longitud"
+    },
+    {
+      "nota": "http sin cifrar",
+      "url": "http://example.com/a.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "ftp",
+      "url": "ftp://example.com/a.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "javascript",
+      "url": "javascript:alert(1)",
+      "esperado": "formato"
+    },
+    {
+      "nota": "data",
+      "url": "data:image/png;base64,AAAA",
+      "esperado": "formato"
+    },
+    {
+      "nota": "HTTPS en mayúsculas",
+      "url": "HTTPS://example.com/a.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "relativa al protocolo",
+      "url": "//example.com/a.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "sin host",
+      "url": "https://",
+      "esperado": "formato"
+    },
+    {
+      "nota": "sin host y con ruta",
+      "url": "https:///ruta/a.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "con credenciales",
+      "url": "https://usuario:clave@example.com/a.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "con usuario",
+      "url": "https://usuario@example.com/a.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "suplantación con @",
+      "url": "https://banco.com@malo.example/a.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "con espacio interior",
+      "url": "https://example.com/mi fondo.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "con espacio de ancho cero",
+      "url": "https://example.com/a​.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "con letra no ASCII",
+      "url": "https://example.com/fondoñ.jpg",
+      "esperado": "formato"
+    },
+    {
+      "nota": "portada fuera de la carpeta",
+      "url": "/covers/../x",
+      "esperado": "formato"
+    },
+    {
+      "nota": "portada que es ..",
+      "url": "/covers/..",
+      "esperado": "formato"
+    },
+    {
+      "nota": "portada oculta",
+      "url": "/covers/.secreto.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "portada en subcarpeta",
+      "url": "/covers/sub/x.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "portada con parámetros",
+      "url": "/covers/x.webp?v=2",
+      "esperado": "formato"
+    },
+    {
+      "nota": "portada con fragmento",
+      "url": "/covers/x.webp#a",
+      "esperado": "formato"
+    },
+    {
+      "nota": "portada codificada",
+      "url": "/covers/%2e%2e",
+      "esperado": "formato"
+    },
+    {
+      "nota": "portada sin archivo",
+      "url": "/covers/",
+      "esperado": "formato"
+    },
+    {
+      "nota": "Covers en mayúsculas",
+      "url": "/Covers/x.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "otra carpeta local",
+      "url": "/images/x.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "ruta relativa",
+      "url": "covers/x.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada con doble barra",
+      "url": "/covers//x.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada con espacio interior",
+      "url": "/covers/mi fondo.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada con letra no ASCII",
+      "url": "/covers/fondoñ.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada que empieza por guion",
+      "url": "/covers/-fondo.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada que empieza por guion bajo",
+      "url": "/covers/_fondo.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada con espacio codificado",
+      "url": "/covers/x%20y.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada con barra invertida",
+      "url": "/covers/a\\b.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada con barra final",
+      "url": "/covers/x.webp/",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada codificada en mayúsculas",
+      "url": "/covers/%2E%2E",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: COVERS en mayúsculas",
+      "url": "/COVERS/x.webp",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada que es un punto",
+      "url": "/covers/.",
+      "esperado": "formato"
+    },
+    {
+      "nota": "qa: portada de una letra (la más corta; el CHECK exige más de 8 caracteres)",
+      "url": "/covers/x",
+      "esperado": "valida"
+    },
+    {
+      "nota": "qa: portada con dos puntos seguidos dentro del nombre (no sale de la carpeta: no hay barra)",
+      "url": "/covers/a..webp",
+      "esperado": "valida"
+    },
+    {
+      "nota": "qa: https con el host más corto (9 caracteres, el mínimo del CHECK)",
+      "url": "https://a",
+      "esperado": "valida"
+    },
+    {
+      "nota": "qa: https con .. en la ruta (el navegador la normaliza en el mismo host)",
+      "url": "https://example.com/../../x.jpg",
+      "esperado": "valida"
+    },
+    {
+      "nota": "qa: https con barra invertida antes de la arroba",
+      "url": "https://example.com\\@evil.com/a.jpg",
+      "esperado": "formato"
+    }
+  ]
+}

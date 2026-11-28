@@ -21,7 +21,7 @@ class MovieMapperTest {
 
     private static MovieRequest request(String title) {
         return new MovieRequest(title, "Sinopsis", 120, 2001,
-                "https://example.com/i.jpg", "https://example.com/v.mp4", null, null, Set.of(1L));
+                "https://example.com/i.jpg", "https://example.com/v.mp4", null, null, null, Set.of(1L));
     }
 
     private static Genre genre(Long id, String name) {
@@ -53,7 +53,7 @@ class MovieMapperTest {
     @Test
     void elTrailerSeGuardaNormalizadoYSaleEnLaRespuesta() {
         Movie movie = MovieMapper.toEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
-                "https://example.com/i.jpg", null, "https://youtu.be/aB3_-eFgHiJ?si=x", null, Set.of(1L)));
+                "https://example.com/i.jpg", null, "https://youtu.be/aB3_-eFgHiJ?si=x", null, null, Set.of(1L)));
 
         assertEquals("https://www.youtube.com/watch?v=aB3_-eFgHiJ", movie.getTrailerUrl());
         assertEquals("https://www.youtube.com/watch?v=aB3_-eFgHiJ", MovieMapper.toResponse(movie).trailerUrl());
@@ -64,7 +64,7 @@ class MovieMapperTest {
     @Test
     void unVideoOUnTrailerEnBlancoSeGuardanComoNull() {
         Movie blank = MovieMapper.toEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
-                "https://example.com/i.jpg", " \t ", "", null, Set.of(1L)));
+                "https://example.com/i.jpg", " \t ", "", null, null, Set.of(1L)));
 
         assertNull(blank.getVideoUrl());
         assertNull(blank.getTrailerUrl());
@@ -78,10 +78,31 @@ class MovieMapperTest {
         movie.setTrailerUrl("https://www.youtube.com/watch?v=aB3_-eFgHiJ");
 
         MovieMapper.updateEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
-                "https://example.com/i.jpg", null, null, null, Set.of(1L)), movie);
+                "https://example.com/i.jpg", null, null, null, null, Set.of(1L)), movie);
 
         assertNull(movie.getVideoUrl());
         assertNull(movie.getTrailerUrl());
+    }
+
+    /**
+     * Imagen de fondo ({@code V16}): se copia y sale en la respuesta; en
+     * blanco es {@code null} (un texto en blanco violaría
+     * {@code ck_movies_backdrop_url}) y un {@code PUT} sin ella la borra.
+     */
+    @Test
+    void laImagenDeFondoSeCopiaEnBlancoEsNullYUnPutSinEllaLaBorra() {
+        Movie movie = MovieMapper.toEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
+                "https://example.com/i.jpg", null, null, null, "/covers/dune-fondo.webp", Set.of(1L)));
+        assertEquals("/covers/dune-fondo.webp", movie.getBackdropUrl());
+        assertEquals("/covers/dune-fondo.webp", MovieMapper.toResponse(movie).backdropUrl());
+        assertEquals("https://example.com/i.jpg", MovieMapper.toResponse(movie).imageUrl());
+
+        Movie blank = MovieMapper.toEntity(new MovieRequest("Dune", "Sinopsis", 120, 2001,
+                "https://example.com/i.jpg", null, null, null, " \t ", Set.of(1L)));
+        assertNull(blank.getBackdropUrl());
+
+        MovieMapper.updateEntity(request("Dune"), movie);
+        assertNull(movie.getBackdropUrl());
     }
 
     @Test

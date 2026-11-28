@@ -15,10 +15,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * </p>
  *
  * <p>
- * {@code videoUrl}, {@code trailerUrl} y {@code subtitlesUrl} pueden ser
- * {@code null} (y salen en el JSON como {@code null}, no se omiten): una
- * película puede no tener vídeo del contenido, tráiler, subtítulos o ninguno
- * (los subtítulos solo existen si hay vídeo). En OpenAPI 3.1 eso se documenta
+ * {@code backdropUrl}, {@code videoUrl}, {@code trailerUrl} y
+ * {@code subtitlesUrl} pueden ser {@code null} (y salen en el JSON como
+ * {@code null}, no se omiten): una película puede no tener imagen de fondo,
+ * vídeo del contenido, tráiler, subtítulos o ninguno (los subtítulos solo
+ * existen si hay vídeo). En OpenAPI 3.1 eso se documenta
  * con el tipo {@code ["string", "null"]}.
  * </p>
  *
@@ -28,6 +29,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param duration    duración en minutos
  * @param releaseYear año de estreno
  * @param imageUrl    URL de la portada
+ * @param backdropUrl URL de la imagen horizontal de cabecera, o {@code null}
+ *                    si no tiene (el banner usa entonces {@code imageUrl})
  * @param videoUrl    URL del vídeo de la película, o {@code null} si no tiene
  * @param trailerUrl  tráiler de YouTube normalizado
  *                    ({@code https://www.youtube.com/watch?v=<id>}), o
@@ -44,6 +47,9 @@ public record MovieResponse(
         Integer duration,
         Integer releaseYear,
         String imageUrl,
+        @Schema(types = { "string", "null" }, description = MovieResponse.BACKDROP_URL_DESCRIPTION,
+                example = "https://image.tmdb.org/t/p/w1280/fondo.jpg")
+        String backdropUrl,
         @Schema(types = { "string", "null" },
                 description = "URL del vídeo de la película, o null si no tiene vídeo del contenido.")
         String videoUrl,
@@ -63,6 +69,15 @@ public record MovieResponse(
     public static final String TRAILER_URL_DESCRIPTION = "Tráiler en YouTube, siempre en la forma "
             + "normalizada https://www.youtube.com/watch?v=<id> (id de 11 caracteres de letras, números, "
             + "guion o guion bajo), o null si no tiene.";
+
+    /**
+     * Texto OpenAPI del {@code backdropUrl} de las respuestas, compartido con
+     * {@link SeriesResponse} y {@link SeriesDetailResponse}.
+     */
+    public static final String BACKDROP_URL_DESCRIPTION = "Imagen horizontal de cabecera (proporción "
+            + "recomendada 16:9) para el banner del inicio y de la página del título: URL https:// o portada "
+            + "propia /covers/<archivo>. Es opcional: null si no tiene, y entonces el banner usa el póster "
+            + "(imageUrl).";
 
     /**
      * Texto OpenAPI del {@code subtitlesUrl} de las respuestas, compartido con

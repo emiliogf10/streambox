@@ -17,9 +17,12 @@ import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
 import { ApiError, apiFetch, getErrorMessage, isAbortError } from '../../lib/api';
 import { moviePath } from '../../lib/catalog';
 import {
+  BACKDROP_PREVIEW_MESSAGES,
   EMPTY_MOVIE_FORM,
+  MOVIE_BACKDROP_HINT,
   MOVIE_DESCRIPTION_MAX,
   toMovieRequest,
+  validateBackdropUrl,
   validateImageUrl,
   SUBTITLES_HINT,
   validateMovieForm,
@@ -34,6 +37,7 @@ import { ADMIN_MOVIES_PATH, getReturnTo } from './adminPaths';
 import { CoverPreview } from './CoverPreview';
 import { focusFirstInvalidField, hasFieldErrors, splitValidationErrors } from './formErrors';
 import { GenreCheckboxes } from './GenreCheckboxes';
+import { WideImagePreview } from './WideImagePreview';
 
 /** Orden de los campos en pantalla: el foco va al primero con error. */
 const FIELD_ORDER: (keyof MovieFormValues)[] = [
@@ -42,6 +46,7 @@ const FIELD_ORDER: (keyof MovieFormValues)[] = [
   'duration',
   'releaseYear',
   'imageUrl',
+  'backdropUrl',
   'videoUrl',
   'subtitlesUrl',
   'trailerUrl',
@@ -55,13 +60,14 @@ const FIELD_IDS: Record<keyof MovieFormValues, string> = {
   duration: 'movie-duration',
   releaseYear: 'movie-year',
   imageUrl: 'movie-image-url',
+  backdropUrl: 'movie-backdrop-url',
   videoUrl: 'movie-video-url',
   subtitlesUrl: 'movie-subtitles-url',
   trailerUrl: 'movie-trailer-url',
   genreIds: 'movie-genres',
 };
 
-/** Pasa una película de la API a los valores del formulario (los números, como texto; sin vídeo, tráiler o subtítulos, vacío). */
+/** Pasa una película de la API a los valores del formulario (los números, como texto; sin imagen de fondo, vídeo, tráiler o subtítulos, vacío). */
 function toFormValues(movie: Movie): MovieFormValues {
   return {
     title: movie.title,
@@ -69,6 +75,7 @@ function toFormValues(movie: Movie): MovieFormValues {
     duration: String(movie.duration),
     releaseYear: String(movie.releaseYear),
     imageUrl: movie.imageUrl,
+    backdropUrl: movie.backdropUrl ?? '',
     videoUrl: movie.videoUrl ?? '',
     trailerUrl: movie.trailerUrl ?? '',
     subtitlesUrl: movie.subtitlesUrl ?? '',
@@ -80,16 +87,18 @@ function toFormValues(movie: Movie): MovieFormValues {
  * Errores de URL de una película recién cargada.
  *
  * Las películas antiguas pueden tener URL que hoy no se admiten (p. ej.
- * `http://`). El vídeo, el tráiler y los subtítulos son opcionales: vacíos no son un error. Se marcan nada más abrir la edición, y no al pulsar «Guardar»,
+ * `http://`). La imagen de fondo, el vídeo, el tráiler y los subtítulos son opcionales: vacíos no son un error. Se marcan nada más abrir la edición, y no al pulsar «Guardar»,
  * para que el administrador vea desde el principio qué tiene que corregir.
  */
 function legacyUrlErrors(values: MovieFormValues): MovieFormErrors {
   const errors: MovieFormErrors = {};
   const image = validateImageUrl(values.imageUrl.trim());
+  const backdrop = validateBackdropUrl(values.backdropUrl.trim());
   const video = validateVideoUrl(values.videoUrl.trim());
   const trailer = validateTrailerUrl(values.trailerUrl.trim());
   const subtitles = validateSubtitlesUrl(values.subtitlesUrl.trim(), values.videoUrl.trim());
   if (image) errors.imageUrl = image;
+  if (backdrop) errors.backdropUrl = backdrop;
   if (video) errors.videoUrl = video;
   if (trailer) errors.trailerUrl = trailer;
   if (subtitles) errors.subtitlesUrl = subtitles;
@@ -154,6 +163,9 @@ interface LoadResult {
  *   formas y mensajes que el servidor, que lo guarda normalizado); los
  *   subtítulos, un `.vtt` por https y solo con vídeo (`validateSubtitlesUrl`).
  * - **Vista previa de la portada**: ver {@link CoverPreview}.
+ * - **Imagen de fondo, opcional**: con su vista previa apaisada debajo
+ *   ({@link WideImagePreview}). Se envía siempre (`null` si está vacía): el
+ *   `PUT` sustituye la película entera y, si faltara, la borraría.
  * - **Géneros**: casillas cargadas de `GET /api/genres`. Si no hay ninguno, se
  *   explica que hay que crear uno antes y se enlaza a la pestaña Géneros.
  */
@@ -375,6 +387,25 @@ function MovieEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string })
             error={errors.imageUrl}
             value={values.imageUrl}
             onChange={(event) => setField('imageUrl', event.target.value)}
+          />
+          <FormField
+            id={FIELD_IDS.backdropUrl}
+            label="Imagen de fondo (horizontal, opcional)"
+            type="url"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="https://… o /covers/archivo-fondo.webp"
+            hint={MOVIE_BACKDROP_HINT}
+            error={errors.backdropUrl}
+            value={values.backdropUrl}
+            onChange={(event) => setField('backdropUrl', event.target.value)}
+          />
+          <WideImagePreview
+            label="la imagen de fondo"
+            title={values.title.trim() || 'Nueva película'}
+            imageUrl={values.backdropUrl}
+            emptyMessage={BACKDROP_PREVIEW_MESSAGES.empty}
+            validMessage={BACKDROP_PREVIEW_MESSAGES.valid}
           />
           {/* Vídeo y tráiler son opcionales y distintos: el vídeo es la película («Ver ahora»); el tráiler, su avance. */}
           <FormField

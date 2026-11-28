@@ -58,9 +58,9 @@ class SeriesMapperTest {
     @Test
     void unaSinopsisDeEpisodioEnBlancoSeGuardaComoNull() {
         Episode blank = EpisodeMapper.toEntity(
-                new EpisodeRequest(1, 1, "Piloto", "  \t ", 45, "https://e.com/v.mp4", null), series());
+                new EpisodeRequest(1, 1, "Piloto", "  \t ", 45, "https://e.com/v.mp4", null, null), series());
         Episode kept = EpisodeMapper.toEntity(
-                new EpisodeRequest(1, 1, "Piloto", " Texto ", 45, "https://e.com/v.mp4", null), series());
+                new EpisodeRequest(1, 1, "Piloto", " Texto ", 45, "https://e.com/v.mp4", null, null), series());
 
         assertNull(blank.getDescription());
         assertEquals(" Texto ", kept.getDescription());
@@ -69,8 +69,8 @@ class SeriesMapperTest {
     /** El vídeo del episodio es opcional desde la V6: en blanco se guarda como {@code null}. */
     @Test
     void unVideoDeEpisodioEnBlancoSeGuardaComoNull() {
-        Episode blank = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, "   ", null), series());
-        Episode none = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, null, null), series());
+        Episode blank = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, "   ", null, null), series());
+        Episode none = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, null, null, null), series());
 
         assertNull(blank.getVideoUrl());
         assertNull(none.getVideoUrl());
@@ -81,7 +81,7 @@ class SeriesMapperTest {
     @Test
     void elTrailerDeLaSerieSeGuardaNormalizadoYSaleEnResumenYDetalle() {
         Series series = SeriesMapper.toEntity(new SeriesRequest("Serie", "Sinopsis", 2020, null,
-                "https://e.com/i.jpg", "https://www.youtube-nocookie.com/embed/aB3_-eFgHiJ", Set.of(1L)));
+                "https://e.com/i.jpg", "https://www.youtube-nocookie.com/embed/aB3_-eFgHiJ", null, Set.of(1L)));
         String normalized = "https://www.youtube.com/watch?v=aB3_-eFgHiJ";
 
         assertEquals(normalized, series.getTrailerUrl());
@@ -89,8 +89,54 @@ class SeriesMapperTest {
         assertEquals(normalized, SeriesMapper.toDetailResponse(series, List.of()).trailerUrl());
 
         SeriesMapper.updateEntity(new SeriesRequest("Serie", "Sinopsis", 2020, null,
-                "https://e.com/i.jpg", "  ", Set.of(1L)), series);
+                "https://e.com/i.jpg", "  ", null, Set.of(1L)), series);
         assertNull(series.getTrailerUrl());
+    }
+
+    /**
+     * Imagen de fondo de la serie ({@code V16}): sale en el resumen y en el
+     * detalle; en blanco es {@code null} y un {@code PUT} sin ella la borra.
+     */
+    @Test
+    void laImagenDeFondoDeLaSerieSaleEnResumenYDetalleYUnPutSinEllaLaBorra() {
+        Series series = SeriesMapper.toEntity(new SeriesRequest("Serie", "Sinopsis", 2020, null,
+                "https://e.com/i.jpg", null, "https://e.com/fondo.jpg", Set.of(1L)));
+
+        assertEquals("https://e.com/fondo.jpg", series.getBackdropUrl());
+        assertEquals("https://e.com/fondo.jpg", SeriesMapper.toResponse(series, 0, 0).backdropUrl());
+        assertEquals("https://e.com/fondo.jpg", SeriesMapper.toDetailResponse(series, List.of()).backdropUrl());
+
+        SeriesMapper.updateEntity(new SeriesRequest("Serie", "Sinopsis", 2020, null,
+                "https://e.com/i.jpg", null, "   ", Set.of(1L)), series);
+        assertNull(series.getBackdropUrl());
+
+        series.setBackdropUrl("https://e.com/fondo.jpg");
+        SeriesMapper.updateEntity(new SeriesRequest("Serie", "Sinopsis", 2020, null,
+                "https://e.com/i.jpg", null, null, Set.of(1L)), series);
+        assertNull(series.getBackdropUrl());
+    }
+
+    /**
+     * Imagen propia del episodio ({@code V16}): se copia y sale en la
+     * respuesta (también dentro del detalle de la serie); en blanco es
+     * {@code null} y un {@code PUT} sin ella la borra.
+     */
+    @Test
+    void laImagenDelEpisodioSeCopiaEnBlancoEsNullYUnPutSinEllaLaBorra() {
+        Episode episode = EpisodeMapper.toEntity(
+                new EpisodeRequest(1, 1, "Piloto", null, 45, null, null, "/covers/piloto.webp"), series());
+
+        assertEquals("/covers/piloto.webp", episode.getImageUrl());
+        assertEquals("/covers/piloto.webp", EpisodeMapper.toResponse(episode).imageUrl());
+        assertEquals("/covers/piloto.webp", SeriesMapper.toDetailResponse(series(), List.of(episode))
+                .seasons().get(0).episodes().get(0).imageUrl());
+
+        Episode blank = EpisodeMapper.toEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, null, null, "\t"),
+                series());
+        assertNull(blank.getImageUrl());
+
+        EpisodeMapper.updateEntity(new EpisodeRequest(1, 1, "Piloto", null, 45, null, null, null), episode);
+        assertNull(episode.getImageUrl());
     }
 
     private static List<Integer> numbers(SeasonResponse season) {

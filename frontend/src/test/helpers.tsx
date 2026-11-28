@@ -147,6 +147,7 @@ export function makeMovie(overrides: Partial<Movie> = {}): Movie {
     duration: 108,
     releaseYear: 2020,
     imageUrl: `https://img.example/${id}.webp`,
+    backdropUrl: null,
     videoUrl: `https://video.example/${id}`,
     trailerUrl: null,
     subtitlesUrl: null,
@@ -166,6 +167,7 @@ export function makeSeries(overrides: Partial<Series> = {}): Series {
     releaseYear: 2019,
     endYear: 2022,
     imageUrl: `https://img.example/series-${id}.webp`,
+    backdropUrl: null,
     createdAt: '2026-01-01T10:00:00Z',
     genres: [],
     seasonCount: 2,
@@ -188,6 +190,7 @@ export function makeEpisode(overrides: Partial<Episode> = {}): Episode {
     duration: 45,
     videoUrl: `https://video.example/s${seasonNumber}e${episodeNumber}`,
     subtitlesUrl: null,
+    imageUrl: null,
     ...overrides,
   };
 }

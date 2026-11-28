@@ -16,6 +16,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -67,9 +68,11 @@ import jakarta.validation.ValidatorFactory;
  * propia en modo autocommit. Qué se comprueba: los datos de cada película y
  * sus géneros, que todos pasan la validación de la API ({@link MovieRequest},
  * para poder editarlos desde el panel), que el vídeo es un archivo directo
- * para el reproductor integrado, que cada cartel existe en
+ * para el reproductor integrado, que cada cartel y cada fondo existen en
  * {@code frontend/public/covers/}, que repetirlo no duplica nada, que no toca
- * lo que ya existía y que un fallo a mitad no deja nada guardado.
+ * lo que ya existía (salvo la única excepción documentada: el fondo de las
+ * películas del script que se crearon antes de la V16) y que un fallo a mitad
+ * no deja nada guardado.
  * </p>
  */
 public interface DemoCatalogScriptContract {
@@ -107,11 +110,12 @@ public interface DemoCatalogScriptContract {
      * @param imageUrl     cartel
      * @param videoUrl     vídeo directo
      * @param subtitlesUrl subtítulos, o {@code null}
+     * @param backdropUrl  imagen de fondo del banner (V16)
      * @param site         web de la película en blender.org (va en la atribución de la sinopsis)
      * @param genres       nombres de sus géneros
      */
     record ExpectedMovie(String title, int year, int duration, String imageUrl, String videoUrl,
-            String subtitlesUrl, String site, Set<String> genres) {
+            String subtitlesUrl, String backdropUrl, String site, Set<String> genres) {
     }
 
     /** Las tres películas del script, por año. */
@@ -119,18 +123,19 @@ public interface DemoCatalogScriptContract {
             new ExpectedMovie("Big Buck Bunny", 2008, 11,
                     COVER_PREFIX + "big-buck-bunny.webp",
                     VIDEO_PREFIX + "c/c0/Big_Buck_Bunny_4K.webm/Big_Buck_Bunny_4K.webm.480p.vp9.webm",
-                    null, "peach.blender.org", Set.of("Animación", "Comedia")),
+                    null, COVER_PREFIX + "big-buck-bunny-fondo.webp",
+                    "peach.blender.org", Set.of("Animación", "Comedia")),
             new ExpectedMovie("Sintel", 2010, 15,
                     COVER_PREFIX + "sintel.webp",
                     VIDEO_PREFIX + "f/f1/Sintel_movie_4K.webm/Sintel_movie_4K.webm.480p.vp9.webm",
-                    SUBTITLES_PREFIX + "sintel.es.vtt", "durian.blender.org",
-                    Set.of("Animación", "Fantasía", "Aventura")),
+                    SUBTITLES_PREFIX + "sintel.es.vtt", COVER_PREFIX + "sintel-fondo.webp",
+                    "durian.blender.org", Set.of("Animación", "Fantasía", "Aventura")),
             new ExpectedMovie("Tears of Steel", 2012, 12,
                     COVER_PREFIX + "tears-of-steel.webp",
                     VIDEO_PREFIX + "1/10/Tears_of_Steel_in_4k_-_Official_Blender_Foundation_release.webm/"
                             + "Tears_of_Steel_in_4k_-_Official_Blender_Foundation_release.webm.480p.vp9.webm",
-                    SUBTITLES_PREFIX + "tears-of-steel.es.vtt", "mango.blender.org",
-                    Set.of("Ciencia ficción", "Acción")));
+                    SUBTITLES_PREFIX + "tears-of-steel.es.vtt", COVER_PREFIX + "tears-of-steel-fondo.webp",
+                    "mango.blender.org", Set.of("Ciencia ficción", "Acción")));
 
     /** Géneros que el script crea en una base sin ninguno. */
     Set<String> CREATED_GENRES = Set.of("Animación", "Comedia", "Fantasía", "Aventura", "Ciencia ficción", "Acción");
@@ -146,8 +151,8 @@ public interface DemoCatalogScriptContract {
     // ------------------------------------------------------------------
 
     /**
-     * En una base vacía crea las tres películas con exactamente sus datos,
-     * sin tráiler y con fecha de alta, y los seis géneros.
+     * En una base vacía crea las tres películas con exactamente sus datos
+     * (fondo incluido), sin tráiler y con fecha de alta, y los seis géneros.
      */
     @Test
     default void creaLasTresPeliculasConSusDatosYSusGeneros() {
@@ -155,7 +160,7 @@ public interface DemoCatalogScriptContract {
 
         List<Map<String, Object>> rows = jdbc().queryForList(
                 "SELECT id, title, description, duration, release_year, image_url, video_url, trailer_url, "
-                        + "subtitles_url, created_at FROM movies ORDER BY release_year");
+                        + "subtitles_url, backdrop_url, created_at FROM movies ORDER BY release_year");
         assertEquals(EXPECTED.size(), rows.size());
         for (int i = 0; i < EXPECTED.size(); i++) {
             ExpectedMovie expected = EXPECTED.get(i);
@@ -166,6 +171,7 @@ public interface DemoCatalogScriptContract {
             assertEquals(expected.imageUrl(), row.get("image_url"));
             assertEquals(expected.videoUrl(), row.get("video_url"));
             assertEquals(expected.subtitlesUrl(), row.get("subtitles_url"));
+            assertEquals(expected.backdropUrl(), row.get("backdrop_url"));
             assertNull(row.get("trailer_url"), "sin tráiler: sería la propia película");
             assertNotNull(row.get("created_at"));
             String description = (String) row.get("description");
@@ -199,6 +205,7 @@ public interface DemoCatalogScriptContract {
                         (String) row.get("video_url"),
                         (String) row.get("trailer_url"),
                         (String) row.get("subtitles_url"),
+                        (String) row.get("backdrop_url"),
                         new HashSet<>(jdbc().queryForList(
                                 "SELECT genre_id FROM movie_genres WHERE movie_id = ?", Long.class, id)));
 
@@ -245,19 +252,139 @@ public interface DemoCatalogScriptContract {
      */
     @Test
     default void cadaCartelEsUnaPortadaLocalQueExisteEnElFrontend() {
-        assertTrue(Files.isDirectory(COVERS_DIR), "No se encuentra " + COVERS_DIR.toAbsolutePath());
         runScript();
 
         List<String> images = jdbc().queryForList("SELECT image_url FROM movies ORDER BY release_year", String.class);
         assertEquals(EXPECTED.size(), images.size());
-        for (String image : images) {
-            assertTrue(image.startsWith(COVER_PREFIX), "el cartel debe ser una portada local: " + image);
-            String fileName = image.substring(COVER_PREFIX.length());
-            // Nada de subcarpetas ni «..»: el nombre debe quedarse dentro de covers/.
-            assertFalse(fileName.contains("/") || fileName.contains("\\") || fileName.contains(".."), image);
-            Path cover = COVERS_DIR.resolve(fileName);
-            assertTrue(Files.isRegularFile(cover), image + " no existe en " + COVERS_DIR.toAbsolutePath());
+        images.forEach(image -> assertLocalCoverExists("el cartel", image));
+    }
+
+    /**
+     * Lo mismo para los fondos ({@code backdrop_url}, V16): cada uno es una
+     * portada local que existe en {@code frontend/public/covers/}, y es
+     * distinto del cartel (si fuera el mismo archivo, el banner enseñaría el
+     * cartel vertical estirado, que es lo que el fondo viene a evitar).
+     */
+    @Test
+    default void cadaFondoEsUnaPortadaLocalQueExisteEnElFrontend() {
+        runScript();
+
+        List<Map<String, Object>> rows = jdbc().queryForList(
+                "SELECT image_url, backdrop_url FROM movies ORDER BY release_year");
+        assertEquals(EXPECTED.size(), rows.size());
+        for (Map<String, Object> row : rows) {
+            String backdrop = (String) row.get("backdrop_url");
+            assertNotNull(backdrop, "cada película del script lleva fondo: " + row);
+            assertLocalCoverExists("el fondo", backdrop);
+            assertFalse(backdrop.equals(row.get("image_url")), "el fondo no puede ser el cartel: " + backdrop);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Fondo de las películas creadas antes de la V16 (paso 4 del script)
+    // ------------------------------------------------------------------
+
+    /**
+     * Quien ejecutó una versión del script anterior a la V16 tiene las tres
+     * películas sin fondo: volver a ejecutarlo se lo pone a cada una, sin
+     * crear filas nuevas (mismos ids) ni cambiar ninguna otra columna. El
+     * título se compara como en el {@code INSERT} (sin mayúsculas ni espacios
+     * en los extremos): « SINTEL » también lo recibe. Y una tercera ejecución
+     * ya no cambia nada.
+     */
+    @Test
+    default void rellenaElFondoDeLasPeliculasDelScriptQueYaExistianSinEl() {
+        runScript();
+        jdbc().update("UPDATE movies SET backdrop_url = NULL");
+        jdbc().update("UPDATE movies SET title = ' SINTEL ' WHERE title = 'Sintel'");
+        List<Map<String, Object>> before = jdbc().queryForList("SELECT * FROM movies ORDER BY release_year");
+        List<Map<String, Object>> linksBefore = jdbc().queryForList(
+                "SELECT movie_id, genre_id FROM movie_genres ORDER BY movie_id, genre_id");
+
+        runScript();
+
+        List<Map<String, Object>> after = jdbc().queryForList("SELECT * FROM movies ORDER BY release_year");
+        assertEquals(EXPECTED.size(), after.size());
+        for (int i = 0; i < EXPECTED.size(); i++) {
+            Map<String, Object> row = after.get(i);
+            assertEquals(EXPECTED.get(i).backdropUrl(), row.get("backdrop_url"));
+            assertEquals(withoutBackdrop(before.get(i)), withoutBackdrop(row),
+                    "solo cambia el fondo de " + row.get("title"));
+        }
+        assertEquals(linksBefore, jdbc().queryForList(
+                "SELECT movie_id, genre_id FROM movie_genres ORDER BY movie_id, genre_id"));
+
+        runScript();
+
+        assertEquals(after, jdbc().queryForList("SELECT * FROM movies ORDER BY release_year"));
+    }
+
+    /**
+     * Un fondo ya puesto (a mano desde el panel) nunca se pisa: el paso 4 solo
+     * actúa sobre {@code backdrop_url} nulo. Las otras dos películas, que
+     * siguen sin fondo, sí reciben el suyo.
+     */
+    @Test
+    default void noPisaUnFondoQueYaTenia() {
+        runScript();
+        jdbc().update("UPDATE movies SET backdrop_url = NULL");
+        jdbc().update("UPDATE movies SET backdrop_url = 'https://example.com/mi-fondo.jpg' WHERE title = 'Sintel'");
+
+        runScript();
+
+        assertEquals("https://example.com/mi-fondo.jpg",
+                jdbc().queryForObject("SELECT backdrop_url FROM movies WHERE title = 'Sintel'", String.class));
+        assertEquals(EXPECTED.get(0).backdropUrl(), jdbc().queryForObject(
+                "SELECT backdrop_url FROM movies WHERE title = 'Big Buck Bunny'", String.class));
+        assertEquals(EXPECTED.get(2).backdropUrl(), jdbc().queryForObject(
+                "SELECT backdrop_url FROM movies WHERE title = 'Tears of Steel'", String.class));
+    }
+
+    /**
+     * Una película con el mismo título, cartel y vídeo pero <b>otro año</b> no
+     * es la del script: no recibe fondo (y el script crea aparte la suya, con
+     * el fondo puesto por el {@code INSERT}).
+     */
+    @Test
+    default void noPoneFondoAOtraPeliculaConElMismoTituloYOtroAnio() {
+        ExpectedMovie sintel = EXPECTED.get(1);
+        jdbc().update("INSERT INTO movies (title, description, duration, release_year, image_url, video_url, created_at) "
+                + "VALUES ('Sintel', 'Otra Sintel', 15, 2011, ?, ?, CURRENT_TIMESTAMP)",
+                sintel.imageUrl(), sintel.videoUrl());
+        long other = jdbc().queryForObject("SELECT id FROM movies", Long.class);
+        Map<String, Object> otherBefore = jdbc().queryForMap("SELECT * FROM movies WHERE id = ?", other);
+
+        runScript();
+
+        assertEquals(otherBefore, jdbc().queryForMap("SELECT * FROM movies WHERE id = ?", other));
+        assertEquals(sintel.backdropUrl(), jdbc().queryForObject(
+                "SELECT backdrop_url FROM movies WHERE title = 'Sintel' AND release_year = 2010", String.class));
+        assertEquals(4, count("movies"));
+    }
+
+    /**
+     * Si el autor cambió el cartel de una película del script, el paso 4 no le
+     * pone fondo: con fondo, el banner de escritorio deja de enseñar el
+     * cartel, así que un fondo del script taparía la imagen que eligió. Con
+     * otro vídeo tampoco (no es una película de este script, el mismo criterio
+     * que la asignación de géneros). Ninguna de las dos filas cambia.
+     */
+    @Test
+    default void noPoneFondoSiCambiasteElCartelOElVideo() {
+        ExpectedMovie bunny = EXPECTED.get(0);
+        ExpectedMovie tears = EXPECTED.get(2);
+        jdbc().update("INSERT INTO movies (title, description, duration, release_year, image_url, video_url, created_at) "
+                + "VALUES (?, 'Mi cartel', ?, ?, 'https://example.com/mi-cartel.jpg', ?, CURRENT_TIMESTAMP)",
+                bunny.title(), bunny.duration(), bunny.year(), bunny.videoUrl());
+        jdbc().update("INSERT INTO movies (title, description, duration, release_year, image_url, video_url, created_at) "
+                + "VALUES (?, 'Mi vídeo', ?, ?, ?, 'https://example.com/tears.mp4', CURRENT_TIMESTAMP)",
+                tears.title(), tears.duration(), tears.year(), tears.imageUrl());
+        List<Map<String, Object>> before = jdbc().queryForList("SELECT * FROM movies ORDER BY id");
+
+        runScript();
+
+        assertEquals(before, jdbc().queryForList(
+                "SELECT * FROM movies WHERE title <> 'Sintel' ORDER BY id"));
     }
 
     // ------------------------------------------------------------------
@@ -384,6 +511,43 @@ public interface DemoCatalogScriptContract {
         } catch (SQLException e) {
             throw new IllegalStateException("No se pudo usar la conexión del script", e);
         }
+    }
+
+    /**
+     * Comprueba que una ruta es una portada local ({@code /covers/<archivo>},
+     * sin subcarpetas ni {@code ..}) y que el archivo existe en
+     * {@code frontend/public/covers/}.
+     *
+     * @param what qué imagen es, para el mensaje («el cartel», «el fondo»)
+     * @param url  la ruta guardada en la base
+     */
+    default void assertLocalCoverExists(String what, String url) {
+        assertTrue(Files.isDirectory(COVERS_DIR), "No se encuentra " + COVERS_DIR.toAbsolutePath());
+        assertTrue(url.startsWith(COVER_PREFIX), what + " debe ser una portada local: " + url);
+        String fileName = url.substring(COVER_PREFIX.length());
+        // Nada de subcarpetas ni «..»: el nombre debe quedarse dentro de covers/.
+        assertFalse(fileName.contains("/") || fileName.contains("\\") || fileName.contains(".."), url);
+        Path cover = COVERS_DIR.resolve(fileName);
+        assertTrue(Files.isRegularFile(cover), url + " no existe en " + COVERS_DIR.toAbsolutePath());
+    }
+
+    /**
+     * Copia de una fila sin la columna {@code backdrop_url}, para comprobar
+     * que el paso 4 no cambia nada más. Las claves pasan a minúsculas: H2 las
+     * devuelve en mayúsculas y PostgreSQL en minúsculas.
+     *
+     * @param row fila leída con {@link JdbcTemplate#queryForList(String)}
+     * @return la fila sin el fondo
+     */
+    default Map<String, Object> withoutBackdrop(Map<String, Object> row) {
+        Map<String, Object> copy = new HashMap<>();
+        row.forEach((column, value) -> {
+            String key = column.toLowerCase(Locale.ROOT);
+            if (!key.equals("backdrop_url")) {
+                copy.put(key, value);
+            }
+        });
+        return copy;
     }
 
     /**

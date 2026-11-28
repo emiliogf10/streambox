@@ -70,6 +70,7 @@ export function HeroBanner({ movie }: Props) {
     <FeaturedBanner
       title={movie.title}
       imageUrl={movie.imageUrl}
+      backdropUrl={movie.backdropUrl}
       meta={<MovieMetaTags movie={movie} badge="Estreno reciente" />}
       description={movie.description}
       actionsNote={nothingToWatch && <NothingToWatchNote adminText={ADMIN_NOTHING_TO_WATCH} />}

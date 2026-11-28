@@ -93,13 +93,15 @@ class PostgresSeriesSchemaIntegrationTest extends PostgresIntegrationTestSupport
      * {@code series.end_year} ("en emisión"), {@code episodes.description}
      * (sinopsis opcional) y, desde la {@code V6}, {@code series.trailer_url} y
      * {@code episodes.video_url} (tráiler y vídeo opcionales) y, desde la
-     * {@code V15}, {@code episodes.subtitles_url}.
+     * {@code V15}, {@code episodes.subtitles_url} y, desde la {@code V16},
+     * {@code series.backdrop_url} y {@code episodes.image_url}.
      */
     @Test
     void lasLongitudesYLaObligatoriedadDeLasColumnasSonLasDeLasEntidades() {
         Map<String, Integer> expectedLengths = Map.of(
                 "series.title", 150, "series.description", 1000, "series.image_url", 500,
                 "episodes.title", 150, "episodes.description", 1000, "episodes.video_url", 500, "episodes.subtitles_url", 500,
+                "episodes.image_url", 500, "series.backdrop_url", 500,
                 "series.trailer_url", 500);
 
         List<Map<String, Object>> columns = jdbc.queryForList(
@@ -118,7 +120,7 @@ class PostgresSeriesSchemaIntegrationTest extends PostgresIntegrationTestSupport
                 .map(c -> c.get("table_name") + "." + c.get("column_name"))
                 .toList());
         assertEquals(Set.of("series.end_year", "episodes.description", "series.trailer_url", "episodes.video_url",
-                "episodes.subtitles_url"),
+                "episodes.subtitles_url", "series.backdrop_url", "episodes.image_url"),
                 nullable);
     }
 

@@ -68,6 +68,26 @@ export const BANNER_POSTER_SIZE_CLASS = 'md:w-48 lg:w-56';
 export const DETAIL_POSTER_SIZE_CLASS = 'md:w-52 lg:w-64 xl:w-72';
 
 /**
+ * Alto mínimo del banner de la portada y de `/series` cuando, desde `md`, tiene
+ * imagen de fondo nítida y por eso NO lleva póster: el alto que tendría el
+ * póster de {@link BANNER_POSTER_SIZE_CLASS} (2:3: `w-48` → 18rem, `w-56` →
+ * 21rem). Así el banner mide lo mismo que su esqueleto, que no sabe si habrá
+ * imagen de fondo, y las filas de debajo no saltan al llegar los datos. Si
+ * cambia el ancho del póster, hay que cambiar esto (lo vigila un test).
+ *
+ * Va en la columna de texto (que ocupa el sitio del póster y no tiene relleno),
+ * NUNCA en la rejilla: con `border-box`, el `min-height` de la rejilla incluiría
+ * su relleno vertical y el banner quedaría más bajo que con póster.
+ */
+export const BANNER_BACKDROP_MIN_HEIGHT_CLASS = 'md:min-h-72 lg:min-h-84';
+
+/**
+ * Lo mismo para la página de un título ({@link DETAIL_POSTER_SIZE_CLASS}:
+ * `w-52` → 19,5rem, `w-64` → 24rem, `w-72` → 27rem).
+ */
+export const DETAIL_BACKDROP_MIN_HEIGHT_CLASS = 'md:min-h-78 lg:min-h-96 xl:min-h-108';
+
+/**
  * Cuerpo de la página de una serie bajo el banner: en móvil y tableta, una
  * columna (episodios y después la ficha); desde `lg`, los episodios a la
  * izquierda y la ficha en una columna lateral estrecha. Así, en escritorio, la

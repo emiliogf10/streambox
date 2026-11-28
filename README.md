@@ -148,7 +148,7 @@ La base de todos los endpoints es `/api`.
 | `GET` | `/api/movies/{id}` | `USER`, `ADMIN` | Detalle completo de una película y sus géneros |
 | `GET` | `/api/movies/{id}/similar` | `USER`, `ADMIN` | Películas similares (más géneros en común, luego año más cercano), como lista; `limit` 1–24, por defecto 12 |
 | `GET` | `/api/movies/search` | `USER`, `ADMIN` | Búsqueda filtrada (`title`, `genreId`, `releaseYear`) paginada, con `sort` y `direction` como el catálogo |
-| `POST` | `/api/movies` | `ADMIN` | Alta de nueva película con asignación de géneros (`imageUrl`: `https://` o `/covers/archivo`; `videoUrl` **opcional**, `https://`; `trailerUrl` **opcional**, solo YouTube, se guarda como `https://www.youtube.com/watch?v=<id>`; máximo 500 caracteres; vacío = sin valor y un `PUT` sin el campo lo borra) |
+| `POST` | `/api/movies` | `ADMIN` | Alta de nueva película con asignación de géneros (`imageUrl`: `https://` o `/covers/archivo`; `videoUrl` **opcional**, `https://`; `trailerUrl` **opcional**, solo YouTube, se guarda como `https://www.youtube.com/watch?v=<id>`; `backdropUrl` **opcional**, imagen horizontal 16:9 para el banner, `https://` o `/covers/archivo`; máximo 500 caracteres; vacío = sin valor y un `PUT` sin el campo lo borra) |
 | `PUT` | `/api/movies/{id}` | `ADMIN` | Modificación de datos y géneros de una película |
 | `DELETE` | `/api/movies/{id}` | `ADMIN` | Eliminación de película (desvincula automáticamente de favoritos) |
 
@@ -166,9 +166,9 @@ La base de todos los endpoints es `/api`.
 | `GET` | `/api/series` | `USER`, `ADMIN` | Catálogo paginado de series **con episodios** (`page`, `size`, `sort` = `title`/`releaseYear`/`createdAt`/`id`, `direction`) |
 | `GET` | `/api/series/search` | `USER`, `ADMIN` | Búsqueda por `title`, `genreId` y `releaseYear`, paginada |
 | `GET` | `/api/series/{id}` | `USER`, `ADMIN` | Detalle con temporadas y episodios ordenados (404 si no existe o no tiene episodios) |
-| `POST` | `/api/series` | `ADMIN` | Alta de una serie (título, sinopsis, años, portada `https://` o `/covers/...`, géneros y `trailerUrl` opcional de YouTube) |
+| `POST` | `/api/series` | `ADMIN` | Alta de una serie (título, sinopsis, años, portada `https://` o `/covers/...`, `backdropUrl` opcional —imagen horizontal del banner, mismas reglas que la portada—, géneros y `trailerUrl` opcional de YouTube) |
 | `PUT` / `DELETE` | `/api/series/{id}` | `ADMIN` | Edición / borrado (el borrado arrastra episodios y listas de favoritos) |
-| `POST` | `/api/series/{id}/episodes` | `ADMIN` | Alta de un episodio (`videoUrl` opcional; 409 `EPISODE_ALREADY_EXISTS` si la temporada y el número ya existen) |
+| `POST` | `/api/series/{id}/episodes` | `ADMIN` | Alta de un episodio (`videoUrl` opcional; `imageUrl` opcional, imagen propia 16:9 con las reglas de la portada; sin ella se usa la de la serie; 409 `EPISODE_ALREADY_EXISTS` si la temporada y el número ya existen) |
 | `PUT` / `DELETE` | `/api/series/{id}/episodes/{episodeId}` | `ADMIN` | Edición / borrado de un episodio |
 | `GET` | `/api/admin/series`, `/api/admin/series/{id}` | `ADMIN` | Vistas de gestión: incluyen las series aún sin episodios |
 | `GET` | `/api/admin/genres` | `ADMIN` | Géneros con cuántas películas y series los usan (también las series sin episodios): el panel desactiva «Borrar» si alguno los usa |

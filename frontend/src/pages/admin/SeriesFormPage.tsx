@@ -15,8 +15,11 @@ import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { useGenres } from '../../hooks/useGenres';
 import { useInvalidateCatalog } from '../../hooks/useInvalidateCatalog';
 import { ApiError, apiFetch, getErrorMessage, isAbortError } from '../../lib/api';
+import { validateBackdropUrl } from '../../lib/movieValidation';
 import {
   EMPTY_SERIES_FORM,
+  SERIES_BACKDROP_HINT,
+  SERIES_BACKDROP_PREVIEW_MESSAGES,
   SERIES_DESCRIPTION_MAX,
   toSeriesRequest,
   validateSeriesForm,
@@ -32,6 +35,7 @@ import { CoverPreview } from './CoverPreview';
 import { focusFirstInvalidField, hasFieldErrors, splitValidationErrors } from './formErrors';
 import { GenreCheckboxes } from './GenreCheckboxes';
 import { SeriesEpisodesSection } from './SeriesEpisodesSection';
+import { WideImagePreview } from './WideImagePreview';
 
 /** Orden de los campos en pantalla: el foco va al primero con error. */
 const FIELD_ORDER: (keyof SeriesFormValues)[] = [
@@ -40,6 +44,7 @@ const FIELD_ORDER: (keyof SeriesFormValues)[] = [
   'releaseYear',
   'endYear',
   'imageUrl',
+  'backdropUrl',
   'trailerUrl',
   'genreIds',
 ];
@@ -51,6 +56,7 @@ const FIELD_IDS: Record<keyof SeriesFormValues, string> = {
   releaseYear: 'series-release-year',
   endYear: 'series-end-year',
   imageUrl: 'series-image-url',
+  backdropUrl: 'series-backdrop-url',
   trailerUrl: 'series-trailer-url',
   genreIds: 'series-genres',
 };
@@ -58,7 +64,7 @@ const FIELD_IDS: Record<keyof SeriesFormValues, string> = {
 /** Aviso tras crear una serie: nace vacía y, sin episodios, nadie más la ve. */
 const SERIES_CREATED_MESSAGE = 'Serie creada. Añade episodios para que sea visible.';
 
-/** Pasa una serie de la API a los valores del formulario (los años, como texto; sin año de fin o sin tráiler, vacío). */
+/** Pasa una serie de la API a los valores del formulario (los años, como texto; sin año de fin, imagen de fondo o tráiler, vacío). */
 function toFormValues(series: SeriesDetail): SeriesFormValues {
   return {
     title: series.title,
@@ -66,22 +72,26 @@ function toFormValues(series: SeriesDetail): SeriesFormValues {
     releaseYear: String(series.releaseYear),
     endYear: series.endYear === null ? '' : String(series.endYear),
     imageUrl: series.imageUrl,
+    // `??`: un servidor anterior a la V16 no envía el campo (llegaría `undefined`).
+    backdropUrl: series.backdropUrl ?? '',
     trailerUrl: series.trailerUrl ?? '',
     genreIds: series.genres.map((genre) => genre.id),
   };
 }
 
 /**
- * Errores de URL (portada y tráiler) de una serie recién cargada. Por
+ * Errores de URL (portada, imagen de fondo y tráiler) de una serie recién cargada. Por
  * coherencia con películas (donde hay datos antiguos con `http://`): si la URL
  * guardada ya no cumple las reglas, se marca al abrir la edición y no al pulsar
- * «Guardar». El tráiler es opcional: vacío no es un error.
+ * «Guardar». La imagen de fondo y el tráiler son opcionales: vacíos no son un error.
  */
 function storedUrlErrors(values: SeriesFormValues): SeriesFormErrors {
   const errors: SeriesFormErrors = {};
   const image = validateSeriesImageUrl(values.imageUrl.trim());
+  const backdrop = validateBackdropUrl(values.backdropUrl.trim());
   const trailer = validateTrailerUrl(values.trailerUrl.trim());
   if (image) errors.imageUrl = image;
+  if (backdrop) errors.backdropUrl = backdrop;
   if (trailer) errors.trailerUrl = trailer;
   return errors;
 }
@@ -373,6 +383,25 @@ function SeriesEditor({ mode, returnTo }: { mode: EditorMode; returnTo: string }
               error={errors.imageUrl}
               value={values.imageUrl}
               onChange={(event) => setField('imageUrl', event.target.value)}
+            />
+            <FormField
+              id={FIELD_IDS.backdropUrl}
+              label="Imagen de fondo (horizontal, opcional)"
+              type="url"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="https://… o /covers/archivo-fondo.webp"
+              hint={SERIES_BACKDROP_HINT}
+              error={errors.backdropUrl}
+              value={values.backdropUrl}
+              onChange={(event) => setField('backdropUrl', event.target.value)}
+            />
+            <WideImagePreview
+              label="la imagen de fondo"
+              title={values.title.trim() || 'Nueva serie'}
+              imageUrl={values.backdropUrl}
+              emptyMessage={SERIES_BACKDROP_PREVIEW_MESSAGES.empty}
+              validMessage={SERIES_BACKDROP_PREVIEW_MESSAGES.valid}
             />
             <FormField
               id={FIELD_IDS.trailerUrl}

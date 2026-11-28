@@ -23,12 +23,24 @@ interface MoviePosterProps {
   /** Reduce el hueco de reserva a un icono (miniaturas donde no cabe el título). */
   compact?: boolean;
   /**
-   * Uso como FONDO decorativo (banner de la portada y de las páginas de cada título, desenfocado detrás
-   * del póster nítido): si no hay imagen, el hueco es solo el degradado, sin
+   * Uso como FONDO decorativo (banner de la portada y de las páginas de cada título: la portada
+   * desenfocada detrás del póster nítido, o la imagen de fondo nítida): si no hay imagen, el hueco es solo el degradado, sin
    * icono ni título (ya los muestra el póster de delante), y siempre oculto a
    * los lectores de pantalla.
    */
   backdrop?: boolean;
+  /**
+   * La imagen es HORIZONTAL (16:9: imagen de fondo de un título, miniatura de
+   * un episodio) y no una portada 2:3: solo cambian el `width`/`height` que se
+   * declaran en la `<img>`, para que digan la proporción real.
+   */
+  wide?: boolean;
+  /**
+   * Avisa de que la imagen ha fallado (además de pintar el respaldo). Lo usa
+   * el banner: si falla la imagen de fondo nítida, vuelve a la composición de
+   * siempre con la portada en lugar de quedarse con un fondo liso.
+   */
+  onLoadError?: (src: string) => void;
   /** Clases del contenedor: tamaño/proporción (`aspect-2/3 w-full`, `size-full`...) y bordes. */
   className?: string;
   /** Clases de la `<img>` (p. ej. el zoom al pasar el ratón por una tarjeta). */
@@ -41,7 +53,8 @@ interface MoviePosterProps {
  * solo recibe título y URL, así que ya servía igual para las series sin cambios.
  *
  * - **Sin saltos de diseño**: el contenedor tiene tamaño propio (lo da quien lo
- *   usa) y la `<img>` lleva `width`/`height` (las portadas son 2:3), de modo
+ *   usa) y la `<img>` lleva `width`/`height` (las portadas son 2:3; las
+ *   imágenes horizontales, 16:9, con {@link MoviePosterProps.wide}), de modo
  *   que el navegador reserva el hueco antes de descargar nada.
  * - **Carga perezosa** (`loading="lazy"`, `decoding="async"`) salvo la imagen
  *   principal ({@link MoviePosterProps.priority}).
@@ -63,6 +76,8 @@ export function MoviePoster({
   priority = false,
   compact = false,
   backdrop = false,
+  wide = false,
+  onLoadError,
   className = '',
   imgClassName = '',
 }: MoviePosterProps) {
@@ -96,14 +111,17 @@ export function MoviePoster({
         <img
           src={src}
           alt={labelled ? alt : ''}
-          width={600}
-          height={900}
+          width={wide ? 1280 : 600}
+          height={wide ? 720 : 900}
           loading={priority ? 'eager' : 'lazy'}
           decoding="async"
           // La imagen es de un tercero: sin esto su host recibiría el Referer (la URL de la app) de cada visitante.
           referrerPolicy="no-referrer"
           fetchPriority={priority ? 'high' : undefined}
-          onError={() => setFailedSrc(src ?? null)}
+          onError={() => {
+            setFailedSrc(src);
+            onLoadError?.(src);
+          }}
           className={`size-full object-cover ${imgClassName}`}
         />
       )}

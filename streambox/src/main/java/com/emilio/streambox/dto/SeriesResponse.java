@@ -22,6 +22,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param releaseYear  año de estreno
  * @param endYear      año de finalización, o {@code null} si sigue en emisión
  * @param imageUrl     URL de la portada
+ * @param backdropUrl  URL de la imagen horizontal de cabecera, o {@code null}
+ *                     si no tiene (el banner usa entonces {@code imageUrl})
  * @param trailerUrl   tráiler de YouTube normalizado, o {@code null} si no tiene
  * @param createdAt    instante en el que se registró la serie
  * @param genres       géneros de la serie, ordenados por nombre
@@ -35,6 +37,9 @@ public record SeriesResponse(
         Integer releaseYear,
         Integer endYear,
         String imageUrl,
+        @Schema(types = { "string", "null" }, description = MovieResponse.BACKDROP_URL_DESCRIPTION,
+                example = "https://image.tmdb.org/t/p/w1280/fondo.jpg")
+        String backdropUrl,
         @Schema(types = { "string", "null" }, description = MovieResponse.TRAILER_URL_DESCRIPTION,
                 example = "https://www.youtube.com/watch?v=aBcDeFgHiJk")
         String trailerUrl,

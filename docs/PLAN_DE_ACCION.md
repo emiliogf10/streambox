@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **4575** con Docker (2026-11-24, tras la V15) | Sin omitidos ni fallos. Tras la revisión de `qa` (+89 de paridad, sin SQL nuevo): **4446 sin Docker** (397 de PostgreSQL omitidos), 0 fallos (2026-11-25). Tras el catálogo de demostración: **4460 sin Docker** (404 omitidos), 0 fallos |
-| Frontend (Vitest) | **2258** | |
-| E2E (Playwright) | **272** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
+| Backend (JUnit) | **4575** con Docker (2026-11-24, tras la V15) | Sin omitidos ni fallos. Tras la revisión de `qa` (+89 de paridad, sin SQL nuevo): **4446 sin Docker** (397 de PostgreSQL omitidos), 0 fallos (2026-11-25). Tras el catálogo de demostración: **4460 sin Docker** (404 omitidos), 0 fallos. Tras la V16 (imágenes de fondo y de episodio, 2026-11-28): **4828 sin Docker** (410 omitidos), 0 fallos; los de PostgreSQL de la V16 aún no se han ejecutado |
+| Frontend (Vitest) | **2477** | |
+| E2E (Playwright) | **274** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -66,7 +66,7 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 | :--- | :--- | :--- |
 | Revisión visual humana | Media | [2.3](#23-revisión-visual-humana-del-frontend) |
 | CORS y cabeceras por perfil (S12) | Media | [2.5](#25-seguridad) |
-| Siguientes pasos de series (`backdropUrl`, imagen por episodio) | Media | [2.9](#29-funcionalidades-nuevas) |
+| Docker: ejecutar los tests de PostgreSQL de la V16 y del script de demostración | Media | [2.4](#24-acciones-tuyas-datos-y-decisiones) |
 
 ### 2.2 Tarea 29: lo que queda (solo HSTS)
 
@@ -89,6 +89,12 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 - [ ] Las pantallas más nuevas: panel de administración, series, películas, perfil y «Comprobando tu sesión...».
 
 ### 2.4 Acciones tuyas (datos y decisiones)
+
+- **Imágenes de fondo y de episodio (V16, 2026-11-28)** — *Media · BAJA*.
+  1. **Con Docker en marcha:** `.\mvnw.cmd test "-Dtest=Postgres*"` (los tests de PostgreSQL de la V16 y del script de demostración no se han podido ejecutar: Docker estaba caído).
+  2. Al arrancar tu app, Flyway aplica la V16 a Supabase (solo añade tres columnas nulas con su `CHECK`). Después, si ya habías ejecutado `docs/catalogo-demostracion.sql`, **vuelve a ejecutarlo**: rellena el fondo de las tres películas de demostración (solo si está vacío y la fila sigue siendo la del script).
+  3. A mano (revisión humana): si el fondo nítido convence a 1280 y 1920 px (el fotograma de Sintel es difuso a la derecha; el encuadre es `object-cover` centrado), el contraste sobre fondos muy claros y lo largas que quedan las ayudas del panel a 375 px. Capturas en `Pruebas/streambox-capturas/v16-fondos/`.
+  4. Decisiones: (a) volver a ejecutar el script repone un fondo que hayas quitado a mano a una de las tres películas (documentado en su cabecera); (b) si el fondo falla, el banner vuelve al póster y el texto se desplaza a la derecha (el alto no cambia).
 
 - **Catálogo de demostración (2026-11-25)** — *Media · BAJA*. Para que el reproductor, los subtítulos, «Seguir viendo» y el historial se vean en tu app (ver [`docs/demo/README.md`](demo/README.md)):
   1. Commit y **push** de `docs/demo/subtitulos/` (jsDelivr solo sirve los `.vtt` cuando están en GitHub).
@@ -280,7 +286,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - `public/favicon.svg` es el logo por defecto de Vite (decisión de diseño).
   - La prop `alt` de `MoviePoster` no se usa en producción (siempre `alt=""`), pero está documentada y probada (4 tests).
   - `oxlint -W suspicious` avisa de `exhaustive-effect-dependencies` en `FavoritesContext`, `useCatalog`, `MovieRow` y `SearchBar` (revisar las dependencias de esos efectos).
-  - Los pósters son de 600 px y pueden verse suaves en el banner a 1280 px. Una imagen horizontal (`backdropUrl`) en la API permitiría un banner con fotograma real.
+  - ✅ ~~Los pósters son de 600 px y pueden verse suaves en el banner a 1280 px~~ — **hecho el 2026-11-28** con `backdropUrl` (V16; ver el [historial](#4-historial-de-trabajos)).
 - **Responsive: orden de tabulación en móvil** — *Opcional · BAJA*. El buscador baja a una segunda fila, pero el orden de `Tab` sigue el de escritorio (buscador antes que el menú de usuario). Aceptado.
 
 ### 2.9 Funcionalidades nuevas
@@ -329,10 +335,10 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
   - **A mano:** probar con vídeos reales en `.mp4` (su servidor debe admitir `Range`; si no, el vídeo empieza en 0 y no aparece «Sigues por»), los controles nativos en Safari de iPhone y el aviso largo del pie («…esta vez no se guardará por dónde vas») a 375 px.
   - Opcional (`security`): un `limit_req` genérico en nginx para las rutas autenticadas (el guardado del progreso no tiene límite propio, como los «me gusta»; punto 11 de seguridad).
 - **Series: siguientes pasos** (fuera de la primera versión, 2026-10-05) — *Media · MEDIA–ALTA*
-  - **Imagen propia por episodio** (hoy usa la de la serie): columna nueva en `episodes` con su migración y `@HttpsUrl`.
+  - ✅ ~~**Imagen propia por episodio**~~ — **hecho el 2026-11-28** (V16; ver el [historial](#4-historial-de-trabajos)).
   - ✅ ~~**Progreso de visionado / «Seguir viendo»**~~ — **hecho el 2026-11-22** (ver «Reproductor integrado» arriba).
   - **Episodios favoritos** sueltos.
-  - **Tráileres**, y una imagen horizontal `backdropUrl` para el banner.
+  - ✅ ~~**Tráileres**, y una imagen horizontal `backdropUrl` para el banner~~ — tráileres hechos el 2026-10-16 y `backdropUrl` el 2026-11-28.
   - **Valoraciones**: me gusta o estrellas, y nota media.
 - ✅ ~~**Editar perfil**~~ — **hecho el 2026-10-09** (ver el [historial](#4-historial-de-trabajos)): cambiar nombre, cambiar contraseña y cerrar sesión en todos los dispositivos. El email no se puede cambiar (decisión del autor).
 - ✅ ~~**Icono de perfil personalizable**~~ — **opción 1 hecha el 2026-10-17** (ver el [historial](#4-historial-de-trabajos)); la opción 2 (subir foto) sigue pendiente. Diseño original: *Media · MEDIA* (`database` + `backend` + `security` + `frontend`). Petición del autor (2026-10-16). Hoy el avatar es un círculo con la inicial del nombre (`avatarInitial` en `lib/profile.ts`), en `/perfil` y en el menú de usuario. Dos caminos, de menos a más:
@@ -498,6 +504,16 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-28 · Imagen horizontal del banner (`backdropUrl`) e imagen por episodio (V16)
+
+- **Por qué:** el banner del inicio y de las páginas de título ampliaba el póster vertical de 600 px, borroso a 1280 px o más; y los episodios no tenían imagen propia. Petición del autor: las dos cosas en la misma migración.
+- **`database`:** `V16__backdrop_and_episode_image.sql` (`movies.backdrop_url`, `series.backdrop_url`, `episodes.image_url`, `VARCHAR(500)` nulas, sin relleno; `CHECK` `https://` o `/covers/` comparando el prefijo con `SUBSTRING`, no con `LIKE`), entidades y tests de esquema (H2 y PostgreSQL); `docs/catalogo-demostracion.sql` con los fondos y un `UPDATE` que solo los rellena si están vacíos y la fila sigue siendo la del script.
+- **`backend`:** `backdropUrl` en `MovieRequest`/`Response` y `SeriesRequest`/`Response`/`DetailResponse` (sale también en búsquedas, recomendaciones, favoritos y «me gusta», que comparten DTO: aceptado), `imageUrl` en `EpisodeRequest`/`Response`; `@HttpsUrl(allowLocalCovers = true)`, máx. 500, en blanco = `null`, un `PUT` sin el campo lo borra; mensajes como contrato; `docs/api/openapi.yaml` regenerado (formato idéntico byte a byte).
+- **`frontend`:** `FeaturedBanner` con fondo nítido desde `md` y **sin póster lateral** (no se monta, para no descargarlo: `hooks/useMediaQuery.ts`); en móvil como antes y el fondo ni se descarga; si falla, vuelve a la composición de siempre; velos con AA calculado en el peor caso; el alto mínimo en la columna de texto (en la rejilla salía ~6rem más bajo y la página saltaba, visto en el navegador). `EpisodeList` con miniaturas 16:9 si algún episodio de la temporada tiene imagen. `poster` del reproductor con una lista de candidatas comprobadas (`lib/titleImages.ts` + `hooks/useFirstLoadableImage.ts`). Panel: campos nuevos con vista previa apaisada (`WideImagePreview`, que avisa si la imagen no carga). Fondos de la demostración en `public/covers/*-fondo.webp` (CC BY 3.0, créditos en `docs/demo/README.md`).
+- **`qa`:** sin bloqueantes. Añadió `ImageUrlContractPersistenceIntegrationTest` (todo `frontend/src/test/imageUrlCases.json` por la API real y con *commit*: nada que la API acepte choca con los `CHECK`), 16 casos límite de `/covers/` en el catálogo común y tests del banner. **QA-V16-1** (el reproductor quedaba en negro con un fondo roto) y **QA-V16-2** (ayudas del panel que no decían que, con fondo, el banner de escritorio no muestra la portada) corregidas por `frontend` con tests que fallaban antes.
+- **Tests:** backend **4828 sin Docker** (410 omitidos), 0 fallos; Vitest **2477**; E2E **274**; `build` y `lint` limpios.
+- **Pendiente (en 2.4):** los tests de PostgreSQL con Docker; volver a ejecutar el script de demostración en Supabase tras arrancar con la V16; revisión visual humana.
 
 ### 2026-11-25 · Catálogo de demostración con películas libres de Blender
 

@@ -56,6 +56,7 @@ const MOVIE: MovieFormValues = {
   duration: '155',
   releaseYear: '2021',
   imageUrl: 'https://cdn.example.com/dune.jpg',
+  backdropUrl: '',
   videoUrl: '',
   trailerUrl: '',
   subtitlesUrl: '',
@@ -71,6 +72,7 @@ const EPISODE: EpisodeFormValues = {
   duration: '45',
   videoUrl: '',
   subtitlesUrl: '',
+  imageUrl: '',
 };
 
 describe('subtítulos: paridad con el servidor (contrato compartido)', () => {

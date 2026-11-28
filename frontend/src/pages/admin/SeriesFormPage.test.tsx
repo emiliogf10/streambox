@@ -71,6 +71,7 @@ const field = {
   endYear: () => screen.getByLabelText('Año de fin (opcional)'),
   image: () => screen.getByLabelText('URL de la portada'),
   trailer: () => screen.getByLabelText('Tráiler de YouTube (opcional)'),
+  backdrop: () => screen.getByLabelText('Imagen de fondo (horizontal, opcional)'),
 };
 /** user-event sin pausas entre acciones (formulario grande; ver `MovieFormPage.test.tsx`). */
 const setupUser = () => userEvent.setup({ delay: null });
@@ -118,6 +119,27 @@ describe('SeriesFormPage: alta', () => {
     expect(checkboxes.map((box) => box.closest('label')?.textContent)).toEqual(['Acción', 'Ciencia ficción', 'Drama']);
     // Ni rastro de la sección de episodios: no existe hasta que se crea la serie.
     expect(screen.queryByRole('heading', { name: 'Episodios' })).not.toBeInTheDocument();
+  });
+
+  /**
+   * Incidencia QA-V16-2: la ayuda y la vista previa de la imagen de fondo deben
+   * contarle al administrador todo lo que cambia: que con ella el banner de
+   * tableta y escritorio deja de enseñar la portada, y que sin ella los
+   * episodios sin imagen propia se quedan sin miniatura.
+   */
+  it('imagen de fondo: la ayuda dice que tapa la portada del banner y la vista previa vacía, lo de los episodios', async () => {
+    routeFetch(fetchMock, GENRES_ROUTE);
+    renderForm('/admin/series/nueva');
+
+    expect(field.backdrop()).toHaveAccessibleDescription(
+      expect.stringContaining('Con ella, en tableta y escritorio el banner no muestra la portada.'),
+    );
+    expect(
+      screen.getByText(
+        'Sin imagen de fondo: el banner y el reproductor usan la portada. Tampoco hay miniatura para los episodios sin imagen propia: si otros de su temporada la tienen, se ve un recuadro de color.',
+      ),
+    ).toBeInTheDocument();
+    await within(genresGroup()).findAllByRole('checkbox');
   });
 
   it('no deja enviar hasta que cargan los géneros, y lo explica', async () => {
@@ -255,6 +277,7 @@ describe('SeriesFormPage: alta', () => {
       releaseYear: 2022,
       endYear: null,
       imageUrl: 'https://img.example.com/severance.webp',
+      backdropUrl: null,
       trailerUrl: null,
       genreIds: [2],
     });
@@ -408,6 +431,36 @@ describe('SeriesFormPage: edición', () => {
 
     expect(await screen.findByText('Se han guardado los cambios de «Dark».')).toBeInTheDocument();
     expect(sentBody('PUT', '/api/series/4')).toMatchObject({ trailerUrl: null });
+  });
+
+  it('la imagen de fondo: la edición la muestra, el PUT la conserva y una http:// se rechaza con su mensaje', async () => {
+    const withBackdrop = { ...dark, backdropUrl: 'https://img.example.com/dark-fondo.jpg' };
+    routeFetch(fetchMock, {
+      ...GENRES_ROUTE,
+      'GET /api/admin/series/4': () => jsonResponse(withBackdrop),
+      'PUT /api/series/4': () => jsonResponse(withBackdrop),
+    });
+    const user = setupUser();
+    renderForm('/admin/series/4/editar');
+    await screen.findByRole('heading', { name: 'Editar «Dark»' });
+    await within(genresGroup()).findAllByRole('checkbox');
+    expect(field.backdrop()).toHaveValue('https://img.example.com/dark-fondo.jpg');
+    // La ayuda de una serie dice también que es la miniatura de los episodios sin imagen propia.
+    expect(field.backdrop()).toHaveAccessibleDescription(expect.stringContaining('episodios que no tengan la suya'));
+
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    expect(await screen.findByText('Se han guardado los cambios de «Dark».')).toBeInTheDocument();
+    expect(sentBody('PUT', '/api/series/4')).toMatchObject({ backdropUrl: 'https://img.example.com/dark-fondo.jpg' });
+
+    await user.clear(field.backdrop());
+    await user.type(field.backdrop(), 'http://img.example.com/dark-fondo.jpg');
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    expect(field.backdrop()).toHaveAccessibleDescription(
+      expect.stringContaining(
+        'La URL de la imagen de fondo debe empezar por https:// o ser una portada propia (/covers/archivo)',
+      ),
+    );
+    expect(field.backdrop()).toHaveFocus();
   });
 
   it('guarda con PUT (año de fin vaciado = null) y se queda en la página con el título nuevo', async () => {

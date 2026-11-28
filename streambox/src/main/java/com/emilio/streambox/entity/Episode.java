@@ -34,7 +34,8 @@ import lombok.Setter;
  * </p>
  *
  * <p>
- * De momento el episodio no tiene imagen propia: se muestra la de la serie.
+ * Desde la {@code V16} el episodio puede tener imagen propia
+ * ({@link #imageUrl}); si no la tiene, se muestra la de la serie.
  * </p>
  */
 @Entity
@@ -131,6 +132,23 @@ public class Episode {
      */
     @Column(name = "subtitles_url", length = 500)
     private String subtitlesUrl;
+
+    /**
+     * URL de la imagen propia del episodio (miniatura de la lista de
+     * episodios y fotograma de espera del reproductor), o {@code null} si no
+     * tiene.
+     *
+     * <p>
+     * Opcional desde la migración {@code V16}; sin ella se usa la portada de
+     * la serie ({@link Series#getImageUrl()}), como antes. La base de datos
+     * solo exige con un {@code CHECK} ({@code ck_episodes_image_url}) que
+     * empiece por {@code https://} o {@code /covers/} y tenga algo detrás; el
+     * formato completo lo valida la API con
+     * {@code @HttpsUrl(allowLocalCovers = true)}.
+     * </p>
+     */
+    @Column(name = "image_url", length = 500)
+    private String imageUrl;
 
     /**
      * Instante en el que se creó el registro (lo asigna Hibernate al insertar).
