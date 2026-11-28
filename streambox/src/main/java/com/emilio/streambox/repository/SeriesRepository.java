@@ -186,16 +186,124 @@ public interface SeriesRepository
     @Query(value = "DELETE FROM user_favorite_series WHERE user_id = :userId", nativeQuery = true)
     int clearFavorites(@Param("userId") Long userId);
 
+    // ------------------------------------------------------------------
+    // «Series similares» (gemela de MovieRepository.findSimilarMovieIds)
+    // ------------------------------------------------------------------
+
+    /**
+     * Devuelve los ids de las series <strong>similares</strong> a una dada, ya
+     * ordenados por relevancia.
+     *
+     * <p>
+     * <strong>Criterio</strong> (el mismo que
+     * {@link MovieRepository#findSimilarMovieIds(Long, int)}, para que las dos
+     * filas «similares» se comporten igual):
+     * </p>
+     * <ol>
+     *   <li>más géneros en común primero;</li>
+     *   <li>a igualdad, el año de estreno más cercano al de la serie de origen
+     *       ({@code ABS} de la diferencia, da igual si es anterior o
+     *       posterior);</li>
+     *   <li>después, la añadida al catálogo más recientemente
+     *       ({@code created_at} descendente);</li>
+     *   <li>y por último {@code id} ascendente, para que el orden sea total y
+     *       estable entre llamadas (y la paginación por límite, determinista).</li>
+     * </ol>
+     *
+     * <p>
+     * <strong>Cómo se calcula:</strong> un <em>auto-join</em> de
+     * {@code series_genres}. Las filas de la serie de origen se leen por su
+     * clave primaria {@code (series_id, genre_id)} y, por cada uno de sus
+     * géneros, las candidatas que lo tienen por {@code genre_id} (índice
+     * {@code idx_series_genres_genre_id}). Cada fila del join es un género
+     * compartido, así que {@code COUNT(*)} por serie es exactamente el número de
+     * géneros en común: la clave primaria impide contar un género dos veces. Las
+     * series sin ningún género en común ni siquiera aparecen en el join.
+     * </p>
+     *
+     * <p>
+     * <strong>Solo series visibles:</strong> una candidata sin episodios no
+     * sale nunca, aunque comparta todos los géneros: para los usuarios es
+     * indistinguible de una serie inexistente, y recomendarla llevaría a un 404.
+     * Se filtra con un {@code EXISTS} sobre {@code episodes} que se resuelve con
+     * el índice único {@code uk_episodes_series_season_episode}, que empieza por
+     * {@code series_id} (basta encontrar una entrada; no se recorren los
+     * episodios). La propia serie se excluye en la condición del join
+     * ({@code candidata.series_id <> origen.series_id}).
+     * </p>
+     *
+     * <p>
+     * <strong>Serie de origen sin episodios:</strong> esta consulta
+     * <em>no</em> comprueba la visibilidad del origen: si tiene géneros,
+     * devuelve sus candidatas visibles igual que si tuviera episodios. Decidir
+     * que una serie oculta responde 404 (como si no existiera) es cosa del
+     * servicio, antes de llamar aquí; así esta consulta sirve también si algún
+     * día el panel de administración quiere mostrar las similares de una serie
+     * que aún está vacía. Un origen inexistente o sin géneros da una lista
+     * vacía.
+     * </p>
+     *
+     * <p>
+     * <strong>Por qué SQL nativo:</strong> igual que en películas, es una
+     * agregación sobre la tabla de unión que en JPQL obligaría a pasar por la
+     * entidad {@code Genre} y a repetir la serie de origen en subconsultas; en
+     * SQL se lee tal cual y su plan ({@code EXPLAIN}) es el que se ha revisado.
+     * Solo usa SQL estándar ({@code GROUP BY}, {@code ABS}, {@code EXISTS},
+     * {@code FETCH FIRST ... ROWS ONLY}), así que funciona igual en PostgreSQL y
+     * en H2. Las columnas de {@code series} del {@code ORDER BY} se repiten en
+     * el {@code GROUP BY} porque H2 no deduce que dependen del {@code id}.
+     * </p>
+     *
+     * <p>
+     * <strong>Nulos:</strong> {@code series.release_year} y
+     * {@code series.created_at} son {@code NOT NULL} desde la {@code V3} (la
+     * tabla nació con Flyway, así que no hay bases heredadas sin esa
+     * restricción): {@code ABS} nunca recibe un nulo ni hace falta decidir dónde
+     * ordenarlos. {@code end_year} sí admite nulos, pero no participa en el
+     * criterio.
+     * </p>
+     *
+     * <p>
+     * Devuelve solo ids (no entidades) para que el límite se aplique en la base
+     * de datos sin interferir con la carga de géneros; las series se cargan
+     * después con {@link #findAllWithGenresByIdIn(Collection)}, que no conserva
+     * el orden: hay que reconstruirlo a partir de esta lista.
+     * </p>
+     *
+     * @param seriesId identificador de la serie de referencia (si no existe o
+     *                 no tiene géneros, el resultado es vacío; si no tiene
+     *                 episodios, ver arriba)
+     * @param limit    número máximo de ids devueltos (lo valida el servicio)
+     * @return ids de las series similares con episodios, en orden de relevancia
+     */
+    @Query(value = "SELECT candidata.series_id"
+            + " FROM series_genres origen"
+            + " JOIN series_genres candidata"
+            + "   ON candidata.genre_id = origen.genre_id"
+            + "  AND candidata.series_id <> origen.series_id"
+            + " JOIN series serie_origen ON serie_origen.id = origen.series_id"
+            + " JOIN series s ON s.id = candidata.series_id"
+            + " WHERE origen.series_id = :seriesId"
+            + "   AND EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = candidata.series_id)"
+            + " GROUP BY candidata.series_id, s.release_year, s.created_at, serie_origen.release_year"
+            + " ORDER BY COUNT(*) DESC,"
+            + "   ABS(s.release_year - serie_origen.release_year) ASC,"
+            + "   s.created_at DESC,"
+            + "   candidata.series_id ASC"
+            + " FETCH FIRST :limit ROWS ONLY", nativeQuery = true)
+    List<Long> findSimilarSeriesIds(@Param("seriesId") Long seriesId, @Param("limit") int limit);
+
     /**
      * Carga varias series por id <strong>con sus géneros</strong> en una sola
      * consulta.
      *
      * <p>
      * Es la gemela de {@link MovieRepository#findAllWithGenresByIdIn(Collection)}
-     * para completar {@link #findRecommendedSeriesIds(Long, int)}: la lista de
-     * ids ya viene limitada, así que el {@code JOIN FETCH} de la colección es
-     * seguro. No filtra las series sin episodios (los ids recomendados ya
-     * salen solo de series con episodios) y <strong>no conserva el orden de
+     * para completar {@link #findRecommendedSeriesIds(Long, int)} y
+     * {@link #findSimilarSeriesIds(Long, int)}: la lista de ids ya viene
+     * limitada, así que el {@code JOIN FETCH} de la colección es seguro. No
+     * filtra las series sin episodios (los ids de esas dos consultas ya salen
+     * solo de series con episodios) y <strong>no conserva el orden de
      * {@code ids}</strong>: hay que reconstruirlo.
      * </p>
      *

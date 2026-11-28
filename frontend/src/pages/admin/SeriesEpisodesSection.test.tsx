@@ -20,11 +20,14 @@ import {
   errorResponse,
   jsonResponse,
   makeEpisode,
+  makeSeries,
   makeSeriesDetail,
   noContentResponse,
   renderWithProviders,
   routeFetch,
 } from '../../test/helpers';
+import { queryKeys } from '../../lib/queryKeys';
+import { createTestQueryClient } from '../../test/queryClient';
 import { SeriesEpisodesSection } from './SeriesEpisodesSection';
 import { expectButtonAvailable, expectButtonUnavailable } from '../../test/buttonState';
 
@@ -696,6 +699,39 @@ describe('SeriesEpisodesSection: borrar', () => {
       await screen.findByText('Se ha borrado el episodio T1:E1 «Episodio 1». La serie ya no tiene episodios: vuelve a estar oculta.'),
     ).toBeInTheDocument();
     expect(within(section()).getByText(/los usuarios no la ven/)).toBeInTheDocument();
+  });
+
+  /**
+   * Revisión QA de «Series similares»: borrar el último episodio oculta la serie,
+   * así que no debe seguir saliendo en la fila de similares de NINGUNA serie (la
+   * de otra serie que la recomendaba, en la caché, debe volver a pedirse), y su
+   * propia fila tampoco vale ya. Se prueba con el borrado real del panel (no
+   * llamando a `keysAffectedBy`): si `SeriesEpisodesSection` dejara de invalidar
+   * la raíz `series`, o la clave de similares saliera de ella, esto fallaría.
+   * Las películas similares no dependen de los episodios: no se tocan.
+   */
+  it('borrar el último deja anticuadas las «Series similares» en caché (las de esta serie y las de otras), no las de películas', async () => {
+    routeFetch(fetchMock, {
+      [`DELETE ${EPISODES_ROUTE}/101`]: () => noContentResponse(),
+      [DETAIL_ROUTE]: () => jsonResponse(detail([])),
+    });
+    const queryClient = createTestQueryClient();
+    const ownSimilar = queryKeys.series.similar(SERIES_ID, 12);
+    const otherSimilar = queryKeys.series.similar(12, 12);
+    const movieSimilar = queryKeys.movies.similar(4, 12);
+    queryClient.setQueryData(ownSimilar, [makeSeries({ id: 12 })]);
+    queryClient.setQueryData(otherSimilar, [makeSeries({ id: SERIES_ID })]);
+    queryClient.setQueryData(movieSimilar, []);
+    const user = setupUser();
+    renderWithProviders(<Harness initial={detail([season(1, [1])])} />, { session: true, queryClient });
+
+    await user.click(within(section()).getByRole('button', { name: 'Borrar episodio T1:E1 Episodio 1' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Sí, borrar episodio' }));
+    await screen.findByText(/vuelve a estar oculta\.$/);
+
+    await waitFor(() => expect(queryClient.getQueryState(otherSimilar)?.isInvalidated).toBe(true));
+    expect(queryClient.getQueryState(ownSimilar)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(movieSimilar)?.isInvalidated).toBe(false);
   });
 
   it('404 = ya estaba borrado: se informa sin tono de error y se refresca', async () => {

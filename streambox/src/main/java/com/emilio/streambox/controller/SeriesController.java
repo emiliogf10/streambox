@@ -1,5 +1,6 @@
 package com.emilio.streambox.controller;
 
+import java.util.List;
 import java.util.Set;
 
 import org.springframework.data.domain.Pageable;
@@ -20,7 +21,9 @@ import com.emilio.streambox.dto.MovieRequest;
 import com.emilio.streambox.dto.SeriesDetailResponse;
 import com.emilio.streambox.dto.SeriesPageResponse;
 import com.emilio.streambox.dto.SeriesRequest;
+import com.emilio.streambox.dto.SeriesResponse;
 import com.emilio.streambox.exception.InvalidParameterException;
+import com.emilio.streambox.service.MovieService;
 import com.emilio.streambox.service.SeriesService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -173,6 +176,49 @@ public class SeriesController {
     public SeriesDetailResponse getSeriesById(@PathVariable Long id) {
 
         return seriesService.getSeriesById(id);
+    }
+
+    /**
+     * Obtiene las series similares a una dada («Series similares» de la página
+     * de detalle). Gemelo de {@code GET /api/movies/{id}/similar}: mismo límite,
+     * mismos mensajes y mismo criterio de orden.
+     *
+     * <p>
+     * Devuelve una lista (no una página): es una fila de recomendaciones de
+     * tamaño acotado. El orden lo decide el servidor (ver
+     * {@link SeriesService#getSimilarSeries(Long, int)}), por eso no acepta
+     * {@code sort}. El método se llama distinto que el de películas porque
+     * springdoc usa el nombre como {@code operationId}.
+     * </p>
+     *
+     * @param id    identificador de la serie de referencia
+     * @param limit número máximo de series (1 a 24, por defecto 12)
+     * @return series similares, de la más a la menos parecida, con sus recuentos
+     */
+    @GetMapping("/{id}/similar")
+    @Operation(summary = "Obtiene series similares", description = "Devuelve, ya ordenadas de la más a la "
+            + "menos parecida, las series con episodios que comparten al menos un género con la indicada (sin "
+            + "incluirla), con sus recuentos de temporadas y episodios: primero las que comparten más géneros; "
+            + "a igualdad, la de año de estreno más cercano; después la añadida más recientemente y, por "
+            + "último, el id. Las series sin episodios no aparecen nunca. Si la serie existe pero no comparte "
+            + "géneros con ninguna serie con episodios, devuelve una lista vacía. Una serie sin episodios "
+            + "responde 404, igual que una inexistente.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Series similares obtenidas correctamente "
+                    + "(puede ser una lista vacía)"),
+            @ApiResponse(responseCode = "400", description = "El límite no es un número entero entre 1 y 24, "
+                    + "o el id no es un número entero válido"),
+            @ApiResponse(responseCode = "401", description = "El usuario no está autenticado"),
+            @ApiResponse(responseCode = "404", description = "La serie no existe o no tiene episodios")
+    })
+    public List<SeriesResponse> getSimilarSeries(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "" + MovieService.DEFAULT_SIMILAR_LIMIT)
+            @Parameter(description = "Número máximo de series: de 1 a 24 (por defecto, 12)")
+            @Min(value = MovieService.MIN_SIMILAR_LIMIT, message = "El límite mínimo es 1")
+            @Max(value = MovieService.MAX_SIMILAR_LIMIT, message = "El límite máximo es 24") int limit) {
+
+        return seriesService.getSimilarSeries(id, limit);
     }
 
     /**

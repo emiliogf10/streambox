@@ -147,6 +147,7 @@ La base de todos los endpoints es `/api`.
 | `GET` | `/api/movies` | `USER`, `ADMIN` | Catálogo paginado (`page`, `size`, `sort`, `direction=asc\|desc`; por defecto `title` ascendente) |
 | `GET` | `/api/movies/{id}` | `USER`, `ADMIN` | Detalle completo de una película y sus géneros |
 | `GET` | `/api/movies/{id}/similar` | `USER`, `ADMIN` | Películas similares (más géneros en común, luego año más cercano), como lista; `limit` 1–24, por defecto 12 |
+| `GET` | `/api/series/{id}/similar` | `USER`, `ADMIN` | Series similares, con el mismo criterio; solo series con episodios (una serie sin episodios da el mismo 404 que una inexistente); `limit` 1–24, por defecto 12 |
 | `GET` | `/api/movies/search` | `USER`, `ADMIN` | Búsqueda filtrada (`title`, `genreId`, `releaseYear`) paginada, con `sort` y `direction` como el catálogo |
 | `POST` | `/api/movies` | `ADMIN` | Alta de nueva película con asignación de géneros (`imageUrl`: `https://` o `/covers/archivo`; `videoUrl` **opcional**, `https://`; `trailerUrl` **opcional**, solo YouTube, se guarda como `https://www.youtube.com/watch?v=<id>`; `backdropUrl` **opcional**, imagen horizontal 16:9 para el banner, `https://` o `/covers/archivo`; máximo 500 caracteres; vacío = sin valor y un `PUT` sin el campo lo borra) |
 | `PUT` | `/api/movies/{id}` | `ADMIN` | Modificación de datos y géneros de una película |

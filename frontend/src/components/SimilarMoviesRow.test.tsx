@@ -1,5 +1,5 @@
 /**
- * Tests de la fila «Películas similares» (`SimilarMoviesRow` + `useSimilarMovies`)
+ * Tests de la fila «Películas similares» (`SimilarTitlesRow` + `useSimilarTitles` con `kind="movies"`; la de series, en `SimilarSeriesRow.test.tsx`)
  * montada en su sitio real, la página de una película (`/peliculas/:id`), con
  * `fetch` simulado.
  *

@@ -37,9 +37,9 @@
 
 | Suite | Tests | Notas |
 | :--- | ---: | :--- |
-| Backend (JUnit) | **4575** con Docker (2026-11-24, tras la V15) | Sin omitidos ni fallos. Tras la revisión de `qa` (+89 de paridad, sin SQL nuevo): **4446 sin Docker** (397 de PostgreSQL omitidos), 0 fallos (2026-11-25). Tras el catálogo de demostración: **4460 sin Docker** (404 omitidos), 0 fallos. Tras la V16 (imágenes de fondo y de episodio, 2026-11-28): **4828 sin Docker** (410 omitidos), 0 fallos; los de PostgreSQL de la V16 aún no se han ejecutado |
-| Frontend (Vitest) | **2477** | |
-| E2E (Playwright) | **274** | Más 24 de capturas que solo corren a petición. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
+| Backend (JUnit) | **5129** con Docker (2026-11-28, tras «Series similares») | Sin omitidos ni fallos. Antes: 4575 con Docker (2026-11-24, tras la V15). Tras la revisión de `qa` (+89 de paridad, sin SQL nuevo): **4446 sin Docker** (397 de PostgreSQL omitidos), 0 fallos (2026-11-25). Tras el catálogo de demostración: **4460 sin Docker** (404 omitidos), 0 fallos. Tras la V16 (imágenes de fondo y de episodio, 2026-11-28): **4828 sin Docker** (410 omitidos), 0 fallos; los de PostgreSQL de la V16 pasaron después con Docker |
+| Frontend (Vitest) | **2494** | |
+| E2E (Playwright) | **276** | Más 24 de capturas que solo corren a petición. La batería tarda ~10 min. Desde el 2026-11-16 también pasan todos en el contenedor de Claude (ver [2.10](#210-tests-herramientas-y-notas-informativas)) |
 
 Todos en verde en la máquina del autor.
 
@@ -66,7 +66,7 @@ Acordado con el autor el 2026-10-14. **Requisito transversal: la app tiene que v
 | :--- | :--- | :--- |
 | Revisión visual humana | Media | [2.3](#23-revisión-visual-humana-del-frontend) |
 | CORS y cabeceras por perfil (S12) | Media | [2.5](#25-seguridad) |
-| Docker: ejecutar los tests de PostgreSQL de la V16 y del script de demostración | Media | [2.4](#24-acciones-tuyas-datos-y-decisiones) |
+| Carrera del listado de series (una serie que pierde su último episodio puede salir con 0 episodios) | Baja | [2.7](#27-base-de-datos) |
 
 ### 2.2 Tarea 29: lo que queda (solo HSTS)
 
@@ -91,7 +91,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 ### 2.4 Acciones tuyas (datos y decisiones)
 
 - **Imágenes de fondo y de episodio (V16, 2026-11-28)** — *Media · BAJA*.
-  1. **Con Docker en marcha:** `.\mvnw.cmd test "-Dtest=Postgres*"` (los tests de PostgreSQL de la V16 y del script de demostración no se han podido ejecutar: Docker estaba caído).
+  1. ✅ ~~Tests de PostgreSQL de la V16 y del script con Docker~~ — **pasaron el 2026-11-28** (`Postgres*`: 642/0).
   2. Al arrancar tu app, Flyway aplica la V16 a Supabase (solo añade tres columnas nulas con su `CHECK`). Después, si ya habías ejecutado `docs/catalogo-demostracion.sql`, **vuelve a ejecutarlo**: rellena el fondo de las tres películas de demostración (solo si está vacío y la fila sigue siendo la del script).
   3. A mano (revisión humana): si el fondo nítido convence a 1280 y 1920 px (el fotograma de Sintel es difuso a la derecha; el encuadre es `object-cover` centrado), el contraste sobre fondos muy claros y lo largas que quedan las ayudas del panel a 375 px. Capturas en `Pruebas/streambox-capturas/v16-fondos/`.
   4. Decisiones: (a) volver a ejecutar el script repone un fondo que hayas quitado a mano a una de las tres películas (documentado en su cabecera); (b) si el fondo falla, el banner vuelve al póster y el texto se desplaza a la derecha (el alto no cambia).
@@ -235,6 +235,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 ### 2.7 Base de datos
 
 - ✅ ~~**Índice por título, búsqueda sin acentos y tolerante a erratas**~~ — **hecho el 2026-10-14** con `unaccent` + `pg_trgm` e índice GIN (ADR 0013; ver el historial).
+- **Carrera en el listado de series** — *Baja · BAJA* (`database`/`backend`; QA-SS-1, 2026-11-28). `SeriesService.getSeries` pide la página y después los recuentos de episodios en otra consulta: si el panel borra el último episodio de una serie entre las dos, sale con 0 episodios y su tarjeta lleva a un 404. En las listas (similares, recomendaciones, favoritos, «me gusta») ya se descarta (`SeriesEpisodeCounts.toVisibleResponses` o `containsKey`), pero en una página filtrar dejaría `size`/`totalElements` incoherentes. Opciones: página y recuentos en una sola consulta, o aceptarla (ventana de milisegundos) y documentarla.
 - **Unicidad de película** — *Opcional · BAJA*. Valorar `UNIQUE (title, release_year)` (evitaría `AmbiguousTitleException`); antes hay que revisar los datos existentes.
 - **Géneros: unicidad sin mayúsculas en la BD** — *Opcional · MEDIA*. Solo la garantiza el servicio (`existsByNameIgnoreCase`); la `UNIQUE` distingue mayúsculas. Un índice único sobre `lower(name)` lo impondría en la BD, pero es específico de PostgreSQL (H2 no admite índices sobre expresiones).
 - **Favoritos: sin fecha de alta** — *Opcional · MEDIA*. La tabla de unión no guarda cuándo se añadió cada película, así que no se puede ordenar por «añadidas recientemente». Requeriría una entidad `Favorite` con `added_at` y una migración nueva.
@@ -291,7 +292,7 @@ Un agente ya revisó capturas a 375, 768 y 1280 px (a 768 px la barra con «Pel�
 
 ### 2.9 Funcionalidades nuevas
 
-- ✅ ~~**«Películas similares» en cada película**~~ — **hecho el 2026-10-15** (`GET /api/movies/{id}/similar`, ver el [historial](#4-historial-de-trabajos)). Queda opcional: **lo mismo para series** (`series_genres`, misma consulta) y, si el catálogo creciera mucho, precalcular o cachear (el coste crece con las películas que comparten género, no con `limit`).
+- ✅ ~~**«Películas similares» en cada película**~~ — **hecho el 2026-10-15** (`GET /api/movies/{id}/similar`, ver el [historial](#4-historial-de-trabajos)). ✅ **Lo mismo para series, hecho el 2026-11-28** («Series similares», ver el [historial](#4-historial-de-trabajos)). Queda opcional: si el catálogo creciera mucho, precalcular o cachear (el coste crece con las películas que comparten género, no con `limit`).
 - ✅ ~~**«Me gusta» y recomendaciones personalizadas**~~ — **hecho el 2026-10-18** (películas y series, sección «Te gusta» en `/perfil`, cascada al borrar un título). Pendiente relacionado: límite de peticiones por usuario en rutas autenticadas (ya en el punto 11 de seguridad: `limit_req` en nginx o un contador por id del token) y paginar las listas de «me gusta» si el catálogo crece. Menores (`frontend`): (1) si al pulsar «Reintentar» en las recomendaciones el servidor responde `basedOnLikes: false`, el contenedor que tenía el foco se vacía (`empty:hidden`) y el foco cae en `<body>`: llevarlo a un destino estable (p. ej. el `<main>`); (2) `vite build` avisa de un *chunk* de más de 500 kB: partir el panel de administración con `React.lazy` (solo lo descargan los ADMIN). Diseño original: *Media · MEDIA-ALTA* (`database` + `backend` + `security` + `frontend`). Decisiones del autor (2026-10-14):
   - **Un corazón** (sí/no), no estrellas ni pulgares.
   - **Distinto de «Mi lista»:** «Mi lista» = *quiero verla*; «me gusta» = *la vi y me gustó*. La interfaz debe dejar clara la diferencia (iconos y textos distintos).
@@ -504,6 +505,15 @@ Hecha con el equipo de agentes (`qa`, `database`, `backend`, `frontend`).
 ## 4. Historial de trabajos
 
 Trabajos fuera de las tareas numeradas, **del más reciente al más antiguo**.
+
+### 2026-11-28 · «Series similares» en `/series/:id`
+
+- **Por qué:** las páginas de película y de serie debían estar a la par; solo las películas tenían fila de similares.
+- **`database`:** `SeriesRepository.findSimilarSeriesIds` (mismo *auto-join* y orden que películas, más `EXISTS` sobre `episodes`: las series sin episodios nunca se recomiendan) y `SimilarSeriesQueryContract` (14 casos, H2 y PostgreSQL). `EXPLAIN` en PostgreSQL con 80 000 episodios: ~10 ms, el `EXISTS` usa `uk_episodes_series_season_episode` como *semi join*; sin índice nuevo. De paso, con Docker de vuelta, pasaron los tests de PostgreSQL de la V16 (`Postgres*` 642/0).
+- **`backend`:** `GET /api/series/{id}/similar?limit=` (`SeriesController.getSimilarSeries` → `SeriesService.getSimilarSeries`), con los mismos límites que películas (constantes de `MovieService`) y el **mismo 404** que el detalle para una serie sin episodios (`existsBySeriesId`); `SimilarSeriesIntegrationTest` (21) y `SeriesServiceSimilarTest`; `docs/api/openapi.yaml` regenerado (+58 líneas).
+- **`frontend`:** una sola fila para los dos tipos, `components/SimilarTitlesRow.tsx` + `hooks/useSimilarTitles.ts` (sustituyen a `SimilarMoviesRow`/`useSimilarMovies`; los tests de películas pasan sin tocarlos), al pie de `/series/:id` bajo la rejilla de episodios y ficha; clave `['series', 'similar', id, { limit }]`; E2E nuevo en `e2e/series.spec.ts` («Series similares»).
+- **`qa`:** sin bloqueantes; E2E y navegador a 375–1920 px; `SimilarSeriesQaIntegrationTest` (22: 404 indistinguible por `GET` y `HEAD` con las mismas cabeceras, límites repetidos, subrutas, cambios del panel, último episodio) y un test de caché del panel. **QA-SS-1** (una carrera entre los ids y los recuentos podía colar una serie que se acababa de quedar sin episodios) corregida por `backend` con `SeriesEpisodeCounts.toVisibleResponses` y un test que fallaba antes; queda la misma carrera en el listado paginado (en [2.7](#27-base-de-datos)).
+- **Tests:** backend **5129 con Docker**, 0 fallos, 0 omitidos; Vitest **2494**; E2E **276** (+24 omitidos); `build` y `lint` limpios.
 
 ### 2026-11-28 · Imagen horizontal del banner (`backdropUrl`) e imagen por episodio (V16)
 

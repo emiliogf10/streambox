@@ -22,6 +22,7 @@ import { LikeButton } from '../components/LikeButton';
 import { NothingToWatchNote } from '../components/NothingToWatchNote';
 import { SeasonPicker } from '../components/SeasonPicker';
 import { SeriesMetaTags } from '../components/SeriesMetaTags';
+import { SimilarTitlesRow } from '../components/SimilarTitlesRow';
 import { TrailerButton } from '../components/TrailerButton';
 import { WatchButton } from '../components/WatchButton';
 import { useAuth } from '../context/AuthContext';
@@ -152,6 +153,13 @@ export function SeriesDetailPage() {
  *   {@link FactSheet ficha}; desde `lg`, la ficha va en una
  *   columna lateral, y en móvil y tableta, debajo de los episodios (que son lo
  *   que se viene a buscar).
+ * - **Al pie, «Series similares»** ({@link SimilarTitlesRow}, gemela de
+ *   «Películas similares»): debajo de la rejilla, a lo ancho del contenedor
+ *   centrado. Se pide en cuanto la serie está aquí: esta vista solo se pinta
+ *   con el detalle que ha dado el servidor (`useSeriesDetail` no usa copias
+ *   provisionales de los listados, que no traen temporadas ni episodios), así
+ *   que la serie ya está confirmada. Sin similares no se pinta; un fallo suyo
+ *   queda dentro de la fila.
  * - **Temporada**: sale de `?temporada=` y se valida con `resolveSeasonNumber`
  *   (si falta, no es un número o no existe → la primera). El selector
  *   ({@link SeasonPicker}) solo aparece con dos o más temporadas.
@@ -239,6 +247,15 @@ function SeriesDetailView({ series }: { series: SeriesDetail }) {
         </section>
 
         <FactSheet facts={seriesFacts(series)} className={SERIES_FACTS_CLASS} listClassName={SERIES_FACTS_LIST_CLASS} />
+      </div>
+      {/* Fuera de la rejilla de episodios y ficha, a lo ancho del mismo contenedor centrado (sin relleno propio:
+          la fila ya lleva el suyo y sus tarjetas se alinean con los episodios). `empty:hidden`: sin similares la
+          fila no pinta nada y su margen no debe dejar un hueco al pie. `key`: la ruta /series/:id reutiliza este
+          componente al pasar de una serie a otra ya vista; sin la clave, React conservaría el mismo <ul> con el
+          desplazamiento horizontal de la serie anterior.
+          tabIndex -1: si «Reintentar» de la fila falla y desaparece, el foco se queda aquí (`useRetryFocus`), no en <body>. */}
+      <div tabIndex={-1} className={`${DETAIL_CONTAINER_CLASS} focus-ring mt-10 rounded-xl empty:hidden md:mt-12`}>
+        <SimilarTitlesRow key={series.id} kind="series" id={series.id} enabled />
       </div>
     </div>
   );

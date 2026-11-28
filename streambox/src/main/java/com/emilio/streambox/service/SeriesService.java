@@ -4,7 +4,9 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -21,6 +23,7 @@ import com.emilio.streambox.dto.SeriesResponse;
 import com.emilio.streambox.entity.Genre;
 import com.emilio.streambox.entity.Series;
 import com.emilio.streambox.exception.GenreNotFoundException;
+import com.emilio.streambox.exception.InvalidParameterException;
 import com.emilio.streambox.exception.SeriesNotFoundException;
 import com.emilio.streambox.mapper.SeriesMapper;
 import com.emilio.streambox.repository.EpisodeRepository;
@@ -163,6 +166,89 @@ public class SeriesService {
                 .orElseThrow(() -> new SeriesNotFoundException(SERIES_NOT_FOUND));
 
         return SeriesMapper.toDetailResponse(series, episodeRepository.findAllBySeriesIdOrdered(id));
+    }
+
+    /**
+     * Devuelve las series <strong>similares</strong> a una serie visible, de la
+     * más parecida a la menos parecida (criterio en
+     * {@link SeriesRepository#findSimilarSeriesIds(Long, int)}: géneros en
+     * común, cercanía del año de estreno, más reciente y, por último, id). Es la
+     * gemela de {@link MovieService#getSimilarMovies(Long, int)} y comparte sus
+     * límites ({@link MovieService#MIN_SIMILAR_LIMIT} a
+     * {@link MovieService#MAX_SIMILAR_LIMIT}): las dos filas «similares» deben
+     * aceptar lo mismo, y con constantes propias podrían divergir sin querer.
+     *
+     * <p>
+     * <strong>Pasos</strong> (los mismos que en películas, más los recuentos):
+     * </p>
+     * <ol>
+     * <li><b>Visibilidad del origen.</b> La consulta de ids no la mira (a
+     * propósito, ver su Javadoc), así que se comprueba aquí con
+     * {@code episodeRepository.existsBySeriesId}: si tiene algún episodio, la
+     * serie existe (clave foránea), y una sola consulta sin cargar la serie ni
+     * sus géneros responde a las dos preguntas, como en favoritos y «me gusta».
+     * Una serie inexistente y una sin episodios lanzan la misma excepción con el
+     * mismo mensaje que {@link #getSeriesById(Long)}: mismo 404 y mismo cuerpo,
+     * así que esta ruta no revela qué series vacías existen.</li>
+     * <li><b>Ids ordenados y limitados</b> en la base de datos (solo candidatas
+     * con episodios). No se puede limitar a la vez que se hace {@code JOIN FETCH}
+     * de los géneros: Hibernate limitaría en memoria.</li>
+     * <li><b>Carga con géneros</b> en una consulta ({@code IN}); como no
+     * conserva el orden, se reconstruye recorriendo la lista de ids. Una serie
+     * borrada entre los dos pasos simplemente no aparece.</li>
+     * <li><b>Recuentos</b> de temporadas y episodios de todas a la vez
+     * ({@link SeriesEpisodeCounts}), como en los listados: sin N+1. Las que
+     * ya no aparecen en ellos (se quedaron sin episodios entre consultas) se
+     * descartan, así que la lista puede ser más corta que el límite.</li>
+     * </ol>
+     *
+     * <p>
+     * Coste fijo: cuatro sentencias SQL con resultados y dos sin ninguna
+     * similar (no se lanzan ni la carga ni los recuentos con una lista vacía),
+     * sea cual sea el límite. El mapeo a DTO, aquí dentro
+     * ({@code open-in-view=false}).
+     * </p>
+     *
+     * @param id    identificador de la serie de referencia
+     * @param limit número máximo de series ({@value MovieService#MIN_SIMILAR_LIMIT}
+     *              a {@value MovieService#MAX_SIMILAR_LIMIT}; el controlador ya lo
+     *              valida)
+     * @return series similares visibles y ordenadas, sin la propia, con sus
+     *         recuentos; vacía si no comparte géneros con ninguna serie visible
+     * @throws SeriesNotFoundException   si la serie no existe o no tiene episodios
+     * @throws InvalidParameterException si el límite está fuera de rango
+     */
+    @Transactional(readOnly = true)
+    public List<SeriesResponse> getSimilarSeries(Long id, int limit) {
+
+        // Defensa en profundidad, como en películas: el límite llega tal cual a
+        // un FETCH FIRST y el servicio puede tener otros llamantes.
+        if (limit < MovieService.MIN_SIMILAR_LIMIT || limit > MovieService.MAX_SIMILAR_LIMIT) {
+            throw new InvalidParameterException("limit", "El límite debe estar entre "
+                    + MovieService.MIN_SIMILAR_LIMIT + " y " + MovieService.MAX_SIMILAR_LIMIT);
+        }
+
+        if (!episodeRepository.existsBySeriesId(id)) {
+            throw new SeriesNotFoundException(SERIES_NOT_FOUND);
+        }
+
+        List<Long> ids = seriesRepository.findSimilarSeriesIds(id, limit);
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, Series> byId = seriesRepository.findAllWithGenresByIdIn(ids).stream()
+                .collect(Collectors.toMap(Series::getId, Function.identity()));
+        List<Series> ordered = ids.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .toList();
+
+        // Solo las que siguen con episodios: una candidata vaciada desde el
+        // panel tras elegir los ids no debe salir (QA-SS-1, ver toVisibleResponses).
+        Map<Long, SeriesEpisodeStats> stats =
+                SeriesEpisodeCounts.load(episodeRepository, SeriesEpisodeCounts.ids(ordered));
+        return SeriesEpisodeCounts.toVisibleResponses(ordered, stats);
     }
 
     // ------------------------------------------------------------------

@@ -77,6 +77,46 @@ final class SeriesEpisodeCounts {
     }
 
     /**
+     * Convierte en DTO solo las series que siguen siendo <em>visibles</em>
+     * (con algún episodio) según los recuentos, conservando el orden.
+     *
+     * <p>
+     * <b>Por qué hace falta.</b> Las listas públicas eligen primero qué series
+     * mostrar (una consulta que ya exige episodios) y después cargan series y
+     * recuentos en consultas aparte. En PostgreSQL (READ COMMITTED) cada
+     * sentencia ve lo confirmado hasta ese momento, aunque estén en la misma
+     * transacción: si el panel borra el último episodio de una candidata entre
+     * medias, esa serie ya está oculta pero seguiría en la lista con 0
+     * temporadas y 0 episodios, y su tarjeta llevaría a un 404 (QA-SS-1).
+     * </p>
+     *
+     * <p>
+     * <b>Criterio: estar en el mapa.</b> {@link EpisodeRepository#countBySeriesIds}
+     * agrupa los episodios por serie, así que solo devuelve filas de series
+     * con al menos uno: «no aparece» y «tiene 0 episodios» son lo mismo, y es
+     * exactamente la regla de visibilidad del catálogo. Mirar el recuento (la
+     * consulta más reciente) es mirar el estado más actual sin ninguna
+     * consulta extra. La lista puede quedar más corta de lo pedido.
+     * </p>
+     *
+     * <p>
+     * Solo para listas. En una página no vale: quitar elementos dejaría
+     * {@code size} y {@code totalElements} incoherentes.
+     * </p>
+     *
+     * @param series series ya ordenadas
+     * @param stats  recuentos obtenidos con {@link #load} (después de cargar las series)
+     * @return DTOs de las series con episodios, en el mismo orden
+     */
+    static List<SeriesResponse> toVisibleResponses(List<Series> series, Map<Long, SeriesEpisodeStats> stats) {
+
+        return series.stream()
+                .filter(s -> stats.containsKey(s.getId()))
+                .map(s -> toResponse(s, stats))
+                .toList();
+    }
+
+    /**
      * Ids de una lista de series, en el mismo orden.
      *
      * @param series series de la página o lista

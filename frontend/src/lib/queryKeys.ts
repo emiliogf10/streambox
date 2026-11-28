@@ -61,6 +61,16 @@ export const queryKeys = {
     detail: (id: number) => ['series', 'detail', id] as const,
     /** Listado del panel (`/admin/series`, que incluye las series sin episodios). */
     admin: (query: string, page: number) => ['series', 'admin', { query, page }] as const,
+    /**
+     * «Series similares» a una serie (`GET /api/series/{id}/similar?limit=N`,
+     * fila al pie de `/series/:id`), gemela de `movies.similar`. Cuelga de la
+     * raíz `series` porque depende de las series, de sus episodios Y de sus
+     * géneros: editar una serie (sus géneros deciden el parecido), borrarla,
+     * quitarle el último episodio (deja de ser visible y no debe seguir saliendo
+     * como similar) o renombrar un género invalidan `['series']` y, con ello,
+     * esta fila. El `limit` va en la clave: con otro tamaño sería otra respuesta.
+     */
+    similar: (id: number, limit: number) => ['series', 'similar', id, { limit }] as const,
   },
   /**
    * Géneros del catálogo. `all` es a la vez la raíz y la lista completa

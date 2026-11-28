@@ -251,6 +251,66 @@ test.describe('Series', () => {
 });
 
 /**
+ * Fila «Series similares» al pie de `/series/:id`, contra el backend real
+ * (`GET /api/series/{id}/similar?limit=12`), gemela de «Películas similares»
+ * de `movies.spec.ts`. Las cuatro series sembradas con episodios comparten
+ * «Drama» y ninguna otra pareja comparte un segundo género, así que las
+ * similares de cualquiera son EXACTAMENTE las otras tres, empatadas a un género:
+ * se compara el conjunto de títulos y no el orden (el contrato solo fija «más
+ * géneros en común primero»). La serie sin episodios también es de Drama: si
+ * se colara, se notaría.
+ */
+test.describe('Series similares', () => {
+  test.beforeEach(async ({ user, signIn }) => {
+    await signIn(user);
+  });
+
+  /** Títulos de la fila «Series similares» de la página abierta. */
+  async function similarTitles(page: Page): Promise<string[]> {
+    const row = page.getByRole('region', { name: 'Series similares' });
+    await expect(row).toBeVisible();
+    // El título es el primer párrafo de cada tarjeta (el segundo es «2019–2022 · 2 temporadas»).
+    return row.getByRole('link').evaluateAll((cards) => cards.map((card) => card.querySelector('p')?.textContent ?? ''));
+  }
+
+  test('las de la serie del banner son las otras tres con episodios (sin ella ni la serie sin episodios), tras la ficha', async ({
+    page,
+  }) => {
+    await openHeroSeries(page);
+    const expected = VISIBLE_SERIES.filter((series) => series !== SERIES_HERO).map((series) => series.title);
+    expect(expected).toHaveLength(3);
+
+    expect((await similarTitles(page)).sort()).toEqual([...expected].sort());
+    await expect(seriesCard(page.getByRole('region', { name: 'Series similares' }), EMPTY_SERIES.title)).toHaveCount(0);
+    const headings = await page.getByRole('heading', { level: 2 }).allTextContents();
+    expect(headings.indexOf('Series similares')).toBeGreaterThan(headings.indexOf('Ficha'));
+    expect(headings.indexOf('Series similares')).toBeGreaterThan(headings.indexOf('Episodios'));
+  });
+
+  test('pulsar una similar abre su página arriba, con el foco en el contenido, y la fila pasa a ser la suya', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await openHeroSeries(page);
+    const row = page.getByRole('region', { name: 'Series similares' });
+    const card = seriesCard(row, 'Estación Polar');
+    await card.scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+
+    await card.click();
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Estación Polar' })).toBeVisible();
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await expect(page.getByRole('main')).toBeFocused();
+    // Ya son las de Estación Polar: está la del banner (comparte Drama) y no Estación Polar.
+    await expect(seriesCard(row, SERIES_HERO.title)).toBeVisible();
+    await expect(seriesCard(row, 'Estación Polar')).toHaveCount(0);
+    // A 375 px la fila se desplaza por dentro: la página no tiene scroll horizontal.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+});
+
+/**
  * Filtros de `/series` (los mismos que `/peliculas`: `useCatalogFilters`), con
  * el servidor de verdad: `GET /api/series/search` con `genreId`, `releaseYear`,
  * `sort` y `direction`. Los recuentos salen de `SERIES` (`support/catalog.ts`)

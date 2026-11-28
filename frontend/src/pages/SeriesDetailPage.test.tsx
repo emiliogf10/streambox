@@ -36,6 +36,9 @@ const fetchMock = vi.fn<typeof fetch>();
 
 const FAVORITES = { 'GET /api/users/me/favorites': () => jsonResponse([]) };
 const DETAIL = 'GET /api/series/7';
+/** Las similares de la serie 7: por defecto ninguna (la fila no se pinta y no estorba a los demás tests; ver `SimilarSeriesRow.test.tsx`). */
+const SIMILAR = 'GET /api/series/7/similar?limit=12';
+const NO_SIMILAR = { [SIMILAR]: () => jsonResponse([]) };
 const AS_ADMIN = { [CURRENT_USER]: () => jsonResponse(makeUser({ role: 'ADMIN' })) };
 /** Tráiler con la forma normalizada que devuelve la API. */
 const TRAILER = 'https://www.youtube.com/watch?v=zSWdZVtXT7E';
@@ -84,7 +87,7 @@ function renderDetail(
   detail: () => Response | Promise<Response> = () => jsonResponse(series),
   extra: Parameters<typeof routeFetch>[1] = {},
 ) {
-  routeFetch(fetchMock, { ...FAVORITES, [DETAIL]: detail, ...extra });
+  routeFetch(fetchMock, { ...FAVORITES, ...NO_SIMILAR, [DETAIL]: detail, ...extra });
   const user = userEvent.setup();
   renderWithProviders(
     <FavoritesProvider>
@@ -332,6 +335,7 @@ describe('SeriesDetailPage: «Editar» según el rol', () => {
   it('«Editar» pasa esta página como vuelta: el formulario ofrece «Volver a la serie» y lleva de nuevo aquí', async () => {
     routeFetch(fetchMock, {
       ...FAVORITES,
+      ...NO_SIMILAR,
       ...AS_ADMIN,
       [DETAIL]: () => jsonResponse(series),
       'GET /api/admin/series/7': () => jsonResponse(series),

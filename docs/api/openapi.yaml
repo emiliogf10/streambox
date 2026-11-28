@@ -2680,6 +2680,64 @@ paths:
       security:
       - cookieAuth: []
       - bearerAuth: []
+  /api/series/{id}/similar:
+    get:
+      tags:
+      - series-controller
+      summary: Obtiene series similares
+      description: 'Devuelve, ya ordenadas de la más a la menos parecida, las series con episodios que comparten al menos
+        un género con la indicada (sin incluirla), con sus recuentos de temporadas y episodios: primero las que comparten
+        más géneros; a igualdad, la de año de estreno más cercano; después la añadida más recientemente y, por último, el
+        id. Las series sin episodios no aparecen nunca. Si la serie existe pero no comparte géneros con ninguna serie con
+        episodios, devuelve una lista vacía. Una serie sin episodios responde 404, igual que una inexistente.'
+      operationId: getSimilarSeries
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: limit
+        in: query
+        description: 'Número máximo de series: de 1 a 24 (por defecto, 12)'
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 12
+          maximum: 24
+          minimum: 1
+      responses:
+        '200':
+          description: Series similares obtenidas correctamente (puede ser una lista vacía)
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SeriesResponse'
+        '400':
+          description: El límite no es un número entero entre 1 y 24, o el id no es un número entero válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: El usuario no está autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: La serie no existe o no tiene episodios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - cookieAuth: []
+      - bearerAuth: []
   /api/series/search:
     get:
       tags:

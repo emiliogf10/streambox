@@ -26,6 +26,7 @@ const ENTRIES: Record<string, QueryKey> = {
   filtrosSeries: queryKeys.paged('/series/search', { ...params, releaseYear: 2016 }),
   detalleSerie: queryKeys.series.detail(3),
   panelSeries: queryKeys.series.admin('dark', 2),
+  similaresSeries: queryKeys.series.similar(3, 12),
   generos: queryKeys.genres.all,
   generosConPeliculas: queryKeys.genres.withTitles('movies'),
   generosConSeries: queryKeys.genres.withTitles('series'),
@@ -77,12 +78,13 @@ describe('keysAffectedBy', () => {
     ]);
   });
 
-  it('una serie o un episodio cambian los listados de series (con y sin filtros), su detalle, el panel, los géneros con series, los recuentos del panel, los datos personales y el progreso (un episodio que pierde el vídeo sale de «Seguir viendo»)', async () => {
+  it('una serie o un episodio cambian los listados de series (con y sin filtros), su detalle, el panel, sus similares (una serie sin episodios deja de salir), los géneros con series, los recuentos del panel, los datos personales y el progreso (un episodio que pierde el vídeo sale de «Seguir viendo»)', async () => {
     expect(await invalidatedBy('series')).toEqual([
       'series',
       'filtrosSeries',
       'detalleSerie',
       'panelSeries',
+      'similaresSeries',
       'generosConSeries',
       'panelGeneros',
       'miLista',
@@ -110,6 +112,7 @@ describe('keysAffectedBy', () => {
       'filtrosSeries',
       'detalleSerie',
       'panelSeries',
+      'similaresSeries',
       'generosConPeliculas',
       'generosConSeries',
       'miLista',

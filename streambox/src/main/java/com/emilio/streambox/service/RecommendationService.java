@@ -145,7 +145,9 @@ public class RecommendationService {
     /**
      * Carga las series y sus recuentos (dos consultas) y las devuelve en el
      * orden de {@code ids}, sin las que no tienen episodios: no aparecen en los
-     * recuentos, así que filtrarlas no cuesta ninguna consulta más.
+     * recuentos, así que filtrarlas no cuesta ninguna consulta más (y cubre
+     * también la que se vacíe desde el panel entre consultas, ver
+     * {@link SeriesEpisodeCounts#toVisibleResponses}).
      */
     private List<SeriesResponse> loadSeries(List<Long> ids) {
 
@@ -156,11 +158,10 @@ public class RecommendationService {
                 .collect(Collectors.toMap(Series::getId, Function.identity()));
         Map<Long, SeriesEpisodeStats> stats = SeriesEpisodeCounts.load(episodeRepository, ids);
 
-        return ids.stream()
+        List<Series> ordered = ids.stream()
                 .map(byId::get)
                 .filter(Objects::nonNull)
-                .filter(series -> stats.containsKey(series.getId()))
-                .map(series -> SeriesEpisodeCounts.toResponse(series, stats))
                 .toList();
+        return SeriesEpisodeCounts.toVisibleResponses(ordered, stats);
     }
 }
